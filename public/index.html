@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f0f17" />
+    <title></title>
+    <link rel="icon" href="icon.png" />
+    <link rel="apple-touch-icon" href="icon.png" />
+    <link rel="stylesheet" href="styles.css?v=6.2.5" />
+    <style>
+      /* Hide until branding is applied (server JSON or last localStorage). */
+      #hero:not([data-ready]),
+      #header-title:not([data-ready]),
+      #subtitle:not([data-ready]) {
+        visibility: hidden;
+      }
+    </style>
+    <script>
+      window.__PQ_BRAND__ = __PQ_BRAND_JSON__;
+    </script>
+  </head>
+  <body>
+    <header class="header">
+      <img id="hero" class="hero" alt="Event banner" />
+      <h1 id="header-title">
+        <span id="event-name"></span><span id="app-version" class="version-tag" title="Running version"></span>
+      </h1>
+      <p id="subtitle" class="subtitle" hidden></p>
+    </header>
+    <script>
+      (function () {
+        var KEY = "pq.branding";
+        var b = window.__PQ_BRAND__;
+        if (!b || typeof b !== "object") {
+          try {
+            b = JSON.parse(localStorage.getItem(KEY) || "null");
+          } catch (e) {
+            b = null;
+          }
+        }
+        if (!b || typeof b !== "object") b = {};
+        var nameEl = document.getElementById("event-name");
+        var verEl = document.getElementById("app-version");
+        var titleEl = document.getElementById("header-title");
+        var subEl = document.getElementById("subtitle");
+        var heroEl = document.getElementById("hero");
+        if (nameEl && b.eventName) {
+          nameEl.textContent = b.eventName;
+          document.title = b.eventName;
+        }
+        if (verEl) {
+          var showVer = !!b.showVersion;
+          if (showVer && b.version) verEl.textContent = "v" + b.version;
+          else verEl.textContent = "";
+          verEl.hidden = !showVer;
+        }
+        if (titleEl) titleEl.setAttribute("data-ready", "1");
+        if (subEl) {
+          var sub = b.subtitle == null ? "" : String(b.subtitle);
+          subEl.textContent = sub;
+          subEl.hidden = !sub.trim();
+          subEl.setAttribute("data-ready", "1");
+        }
+        if (heroEl) {
+          var key = b.heroBanner || "default";
+          heroEl.dataset.bannerKey = key;
+          heroEl.src = "/banner?b=" + encodeURIComponent(key);
+          heroEl.setAttribute("data-ready", "1");
+        }
+        try {
+          localStorage.setItem(
+            KEY,
+            JSON.stringify({
+              eventName: b.eventName || "",
+              subtitle: b.subtitle == null ? "" : b.subtitle,
+              heroBanner: b.heroBanner || null,
+              version: b.version || "",
+              showVersion: !!b.showVersion,
+            })
+          );
+        } catch (e) {}
+      })();
+    </script>
+
+    <main class="container">
+      <!-- MAIN VIEW - the guest-facing party screen. -->
+      <div id="view-main" class="view">
+        <!-- SEARCH - tap the heading to change name/alias. -->
+        <button id="guest-name" type="button" class="section-label guest-name" title="Tap to change your name" aria-label="Search — tap to change your name">Search</button>
+        <div class="search-bar">
+          <div class="search-input-wrap">
+            <input
+              id="search"
+              type="search"
+              inputmode="search"
+              autocomplete="off"
+              placeholder="Search for a song or artist..."
+              aria-label="Search for a song or artist"
+            />
+            <button id="search-clear" type="button" class="search-clear" aria-label="Clear search" hidden>&times;</button>
+          </div>
+        </div>
+
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+        <p id="requests-paused-banner" class="requests-paused-banner" hidden>
+          Requests are paused — ask the host when you can add songs again.
+        </p>
+
+        <ul id="results" class="results"></ul>
+
+        <!-- NOW PLAYING - album art + track info, always visible (never collapses).
+             Tap the card to open a full-screen view with lyrics. -->
+        <section id="nowplaying-section" class="nowplaying">
+          <h2 class="section-label">Now Playing</h2>
+          <div class="np-card" id="np-card" role="button" tabindex="0" aria-label="Open full-screen Now Playing" title="Tap for full-screen + lyrics">
+            <img id="np-art" class="np-art" alt="" />
+            <div class="np-meta">
+              <div id="np-title" class="np-title"></div>
+              <div id="np-artist" class="np-artist"></div>
+              <div id="np-album" class="np-album"></div>
+              <div id="np-empty" class="np-empty" hidden></div>
+            </div>
+            <div class="np-pills" id="np-pills" hidden>
+              <span id="np-state" class="np-pill np-state" hidden></span>
+              <span id="np-origin" class="np-pill np-origin" hidden></span>
+            </div>
+          </div>
+          <div id="np-reactions" class="np-reactions" hidden>
+            <button type="button" class="np-react-btn" data-react="up" title="Thumbs up" aria-label="Thumbs up">
+              <span class="np-react-emoji" aria-hidden="true">&#128077;</span>
+              <span class="np-react-count" data-count="up">0</span>
+            </button>
+            <button type="button" class="np-react-btn" data-react="down" title="Thumbs down" aria-label="Thumbs down">
+              <span class="np-react-emoji" aria-hidden="true">&#128078;</span>
+              <span class="np-react-count" data-count="down">0</span>
+            </button>
+            <button type="button" class="np-react-btn" data-react="heart" title="Love" aria-label="React with love">
+              <span class="np-react-emoji" aria-hidden="true">&#10084;&#65039;</span>
+              <span class="np-react-count" data-count="heart">0</span>
+            </button>
+            <button type="button" class="np-react-btn" data-react="fire" title="Fire" aria-label="React with fire">
+              <span class="np-react-emoji" aria-hidden="true">&#128293;</span>
+              <span class="np-react-count" data-count="fire">0</span>
+            </button>
+            <button type="button" class="np-react-btn" data-react="laugh" title="Funny" aria-label="React with laugh">
+              <span class="np-react-emoji" aria-hidden="true">&#128514;</span>
+              <span class="np-react-count" data-count="laugh">0</span>
+            </button>
+            <button type="button" class="np-react-btn" data-react="vomit" title="Nope" aria-label="React with vomit">
+              <span class="np-react-emoji" aria-hidden="true">&#129326;</span>
+              <span class="np-react-count" data-count="vomit">0</span>
+            </button>
+            <button type="button" class="np-react-btn" data-react="party" title="Party" aria-label="React with party">
+              <span class="np-react-emoji" aria-hidden="true">&#127881;</span>
+              <span class="np-react-count" data-count="party">0</span>
+            </button>
+            <button type="button" class="np-react-btn" data-react="mic" title="Karaoke — save for the mic list" aria-label="Save for karaoke">
+              <span class="np-react-emoji" aria-hidden="true">&#127908;</span>
+              <span class="np-react-count" data-count="mic">0</span>
+            </button>
+          </div>
+        </section>
+
+        <section id="queue-section" class="queue-section">
+          <h2 class="section-label section-toggle" id="queue-toggle" role="button" tabindex="0" aria-expanded="true" title="Collapse / expand">
+            <span>Up next <span id="queue-count" class="queue-count"></span></span>
+            <span class="chevron" aria-hidden="true">&#9662;</span>
+          </h2>
+          <div class="queue-box">
+            <div class="queue-toolbar" id="queue-toolbar" hidden>
+              <button id="queue-edit-toggle" type="button" class="pill-btn" aria-pressed="false" title="Turn on to delete or drag-reorder songs">Edit</button>
+              <span id="queue-edit-hint" class="queue-edit-hint" hidden>Drag to reorder &middot; tap &times; to remove</span>
+            </div>
+            <ul id="queue" class="results"></ul>
+            <p id="queue-empty" class="np-empty" hidden>The queue is empty.</p>
+          </div>
+        </section>
+
+        <!-- CONTROLS - transport + Add Random. Collapsible; collapsed by default. -->
+        <section id="controls-section" class="controls-panel collapsed">
+          <h2 class="section-label section-toggle" id="controls-toggle" role="button" tabindex="0" aria-expanded="false" title="Collapse / expand">
+            <span>Controls</span>
+            <span class="chevron" aria-hidden="true">&#9662;</span>
+          </h2>
+          <div class="controls" id="controls-body" aria-label="Playback controls">
+            <p class="settings-intro">Sonos playback controls</p>
+            <div class="transport-grid">
+              <button id="prev-btn" type="button" class="pill-btn info vol-btn" aria-label="Previous track" title="Previous track">&#9198;&#65039;</button>
+              <button id="next-btn" type="button" class="pill-btn info vol-btn" aria-label="Skip to next track" title="Skip track (remembers it + cools down the artist)">&#9197;&#65039;</button>
+            </div>
+            <div class="control-grid">
+              <button id="shuffle-btn" type="button" class="pill-btn info vol-btn" aria-label="Shuffle queue" aria-pressed="false" title="Shuffle">&#128256;</button>
+              <button id="np-toggle" type="button" class="pill-btn success vol-btn" aria-label="Play or pause" title="Play / Pause">&#9654;&#65039;</button>
+              <button id="mute-btn" type="button" class="pill-btn warning vol-btn" aria-label="Mute" title="Mute / Unmute">&#128264;</button>
+              <button id="group-all-btn" type="button" class="pill-btn accent vol-btn" aria-label="Group all speakers and set volume to 15" title="Group all speakers · volume 15">&#128279;</button>
+              <button id="vol-down-10-btn" type="button" class="pill-btn info vol-btn vol-btn-10" aria-label="Volume down 10" title="Volume −10">&minus;10</button>
+              <button id="vol-down-btn" type="button" class="pill-btn info vol-btn" aria-label="Volume down" title="Volume −1">&#128265;</button>
+              <button id="vol-up-btn" type="button" class="pill-btn info vol-btn" aria-label="Volume up" title="Volume +1">&#128266;</button>
+              <button id="vol-up-10-btn" type="button" class="pill-btn info vol-btn vol-btn-10" aria-label="Volume up 10" title="Volume +10">+10</button>
+            </div>
+            <button id="clearQueue" type="button" class="pill-btn danger clear-full" title="Clear the entire queue">Clear Queue</button>
+            <div id="controls-random" class="controls-block" hidden>
+              <div class="controls-divider" aria-hidden="true"></div>
+              <p class="settings-intro">Add random songs</p>
+              <div class="random-grid">
+                <button type="button" class="pill-btn accent random-btn" data-count="2" title="Add 2 random songs">&#127922; 2</button>
+                <button type="button" class="pill-btn accent random-btn" data-count="5" title="Add 5 random songs">&#127922; 5</button>
+                <button type="button" class="pill-btn accent random-btn" data-count="7" title="Add 7 random songs">&#127922; 7</button>
+                <button type="button" class="pill-btn accent random-btn" data-count="10" title="Add 10 random songs">&#127922; 10</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="suggestion-section" class="controls-panel collapsed">
+          <h2 class="section-label section-toggle" id="suggestion-toggle" role="button" tabindex="0" aria-expanded="false" title="Collapse / expand">
+            <span>Suggestion Box</span>
+            <span class="chevron" aria-hidden="true">&#9662;</span>
+          </h2>
+          <div class="controls" aria-label="Suggestion Box">
+            <p class="settings-intro">Got an idea for PartyQueue? Leave a note for the host — your name is attached.</p>
+            <textarea
+              id="suggestion-text"
+              class="setting-input suggestion-input"
+              rows="3"
+              maxlength="280"
+              placeholder="e.g. More 90s hip-hop, darker theme, …"
+            ></textarea>
+            <div class="suggestion-submit-row">
+              <span id="suggestion-count" class="suggestion-count" aria-live="polite">0 / 280</span>
+              <button id="suggestion-submit" type="button" class="pill-btn success">Send suggestion</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="toolbar-section" class="controls-panel collapsed">
+          <h2 class="section-label section-toggle" id="toolbar-toggle" role="button" tabindex="0" aria-expanded="false" title="Collapse / expand">
+            <span>Tools</span>
+            <span class="chevron" aria-hidden="true">&#9662;</span>
+          </h2>
+          <div class="controls" aria-label="Tools">
+            <div class="toolbar-grid toolbar-grid-5">
+              <button id="toolbar-sonos" type="button" class="pill-btn" title="Open Sonos Group">Sonos Group</button>
+              <button id="toolbar-mood" type="button" class="pill-btn" title="Open Music Mix">Music Mix</button>
+              <button id="toolbar-booth" type="button" class="pill-btn" title="Open DJ Booth">DJ Booth</button>
+              <button id="toolbar-stats" type="button" class="pill-btn" title="Open Stats">Stats</button>
+              <button id="toolbar-join" type="button" class="pill-btn" title="Open Join Code QR">Join Code</button>
+            </div>
+          </div>
+        </section>
+
+
+      </div>
+
+      <!-- JOIN CODE VIEW — QR anyone in the app can open for others to scan -->
+      <div id="view-join" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Join Code</h2>
+          <button id="join-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="controls join-panel" aria-label="Join Code">
+          <p class="settings-intro">Scan this QR on the same Wi‑Fi to open PartyQueue and join the queue.</p>
+          <div id="join-qr" class="join-qr" aria-hidden="true"></div>
+          <p id="join-url" class="join-url"></p>
+          <p id="join-error" class="np-empty" hidden></p>
+          <div class="settings-actions">
+            <button id="join-refresh" type="button" class="pill-btn">Refresh</button>
+            <button id="join-copy" type="button" class="pill-btn success">Copy link</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- SONOS GROUP VIEW -->
+      <div id="view-sonos" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Sonos Group</h2>
+          <button id="sonos-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="controls" aria-label="Sonos group">
+          <p id="group-intro" class="settings-intro">Songs go to this group&apos;s queue. Pick a group below, or Edit groups to join / leave speakers.</p>
+          <div id="group-picker" class="group-picker">
+            <div id="group-chips" class="genre-chips group-chips" role="radiogroup" aria-label="Target Sonos group"></div>
+            <p id="group-empty" class="np-empty group-note" hidden>No Sonos groups found.</p>
+          </div>
+          <div id="group-edit" class="group-edit" hidden>
+            <p id="group-edit-anchor" class="settings-intro group-edit-anchor"></p>
+            <p class="settings-intro">In this group — tap to leave</p>
+            <div id="group-members" class="genre-chips group-chips" role="group" aria-label="Speakers in target group"></div>
+            <p class="settings-intro">Available — tap to join</p>
+            <div id="group-available" class="genre-chips group-chips" role="group" aria-label="Speakers available to join"></div>
+            <p id="group-edit-empty" class="np-empty group-note" hidden>No Sonos speakers found.</p>
+          </div>
+          <div class="group-actions">
+            <button id="group-edit-toggle" type="button" class="pill-btn" aria-pressed="false" title="Join or leave speakers in the target group">Edit groups</button>
+            <button id="group-ungroup-all" type="button" class="pill-btn danger" hidden title="Make every speaker its own group">Ungroup all</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MUSIC MIX HUB — Mood / Genres / Playlists (Spotify-gated via #random-bar) -->
+      <div id="view-mood" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Music Mix</h2>
+          <button id="mood-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <!-- Queue behavior toggles — always available; playlist hub is Spotify-gated. -->
+        <div class="controls music-mix-toggles" aria-label="Queue behavior">
+          <p class="settings-intro">How Random and Never-Ending behave tonight</p>
+          <div class="options-list">
+            <label class="autofill" title="Automatically add random songs when the queue runs low">
+              <input type="checkbox" id="autofill-toggle" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Never-Ending Queue</span>
+                <span class="autofill-hint" id="autofill-hint">Auto-adds songs when the queue runs low</span>
+              </span>
+            </label>
+            <label class="autofill" title="Mix similar songs from outside your playlists into each Random batch">
+              <input type="checkbox" id="set-discover-enabled" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Discover</span>
+                <span class="autofill-hint">Mixes Last.fm-similar songs into each Random batch</span>
+              </span>
+            </label>
+            <label class="autofill" title="Hide explicit tracks from search, Random, Never-Ending, and Discover">
+              <input type="checkbox" id="filter-explicit-toggle" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Filter explicit songs</span>
+                <span class="autofill-hint">Hides explicit tracks from search, Random &amp; Discover</span>
+              </span>
+            </label>
+            <label class="autofill" title="Block guests from adding songs until you turn this off">
+              <input type="checkbox" id="requests-paused-toggle" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Pause requests</span>
+                <span class="autofill-hint">Guests can’t add songs (Random &amp; Never-Ending still work)</span>
+              </span>
+            </label>
+            <label class="autofill" title="Kids mood, filter explicit, and subtle DJ — restores when unlocked">
+              <input type="checkbox" id="kids-lock-toggle" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Kids lock</span>
+                <span class="autofill-hint">Kids mood + calmer DJ; unlock restores your previous mix</span>
+              </span>
+            </label>
+          </div>
+        </div>
+        <div class="controls-divider" aria-hidden="true"></div>
+        <!-- #random-bar is only a Spotify-connected flag for JS. -->
+        <div id="random-bar" hidden></div>
+        <div id="music-mix-hub" class="settings-box settings-hub" hidden>
+          <p class="settings-intro">What feeds the pool — moods, genres, and playlists.</p>
+          <div class="settings-hub-grid" role="navigation" aria-label="Music Mix sections">
+            <button type="button" class="settings-hub-card" data-mix-panel="mood-presets">
+              <span class="settings-hub-title">Mood</span>
+              <span class="settings-hub-stat" id="mix-stat-mood">—</span>
+              <span class="settings-hub-desc">Presets that pick a genre mix</span>
+            </button>
+            <button type="button" class="settings-hub-card" data-mix-panel="genres">
+              <span class="settings-hub-title">Genres</span>
+              <span class="settings-hub-stat" id="mix-stat-genres">—</span>
+              <span class="settings-hub-desc">Fine-tune which genres are eligible</span>
+            </button>
+            <button type="button" class="settings-hub-card settings-hub-card-full" data-mix-panel="playlists">
+              <span class="settings-hub-title">Playlists</span>
+              <span class="settings-hub-stat" id="mix-stat-playlists">—</span>
+              <span class="settings-hub-desc">Which Spotify playlists feed the pool</span>
+            </button>
+          </div>
+        </div>
+        <p id="mood-need-spotify" class="np-empty">Connect Spotify in Settings to pick moods, genres, and playlists.</p>
+      </div>
+
+      <div id="view-mood-presets" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Mood</h2>
+          <button id="mood-presets-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="controls" aria-label="Mood">
+          <p class="settings-intro">Select a mood to include specific genres</p>
+          <div id="genre-presets" class="genre-chips genre-presets" role="group" aria-label="Mood">
+            <button type="button" class="genre-chip genre-preset" data-preset="all" title="All genres">All</button>
+            <button type="button" class="genre-chip genre-preset" data-preset="party" title="Party mix (no kids, classical, soundtrack, oldies, or other)">Party</button>
+            <button type="button" class="genre-chip genre-preset" data-preset="chill" title="Laid-back mix">Chill</button>
+            <button type="button" class="genre-chip genre-preset" data-preset="country" title="Country and Folk">Country</button>
+            <button type="button" class="genre-chip genre-preset" data-preset="heavy" title="Rock and Metal">Heavy</button>
+            <button type="button" class="genre-chip genre-preset" data-preset="rap" title="Hip-Hop / Rap">Rap</button>
+            <button type="button" class="genre-chip genre-preset" data-preset="kids" title="Kids and Soundtrack / Score">Kids</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-genres" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Genres</h2>
+          <button id="genres-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="controls" aria-label="Genres">
+          <div class="genre-head">
+            <p class="settings-intro genre-head-intro">Pick which genres feed Random and the Never-Ending Queue</p>
+            <button id="genre-toggle-all" type="button" class="pill-btn genre-allbtn" title="Check or uncheck all genres">Uncheck All</button>
+          </div>
+          <div id="genre-chips" class="genre-chips"></div>
+          <p id="pool-size-hint" class="pool-size-hint" hidden></p>
+        </div>
+      </div>
+
+      <!-- DJ BOOTH VIEW — host destinations (same hub card format as Settings) -->
+      <div id="view-booth" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">DJ Booth</h2>
+          <button id="booth-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-hub">
+          <p class="settings-intro">Host tools. Queue behavior is under Music Mix; DJ Voice is under Settings → DJ. Stats are on the toolbar.</p>
+          <div class="settings-hub-grid" role="navigation" aria-label="Host tools">
+            <button type="button" class="settings-hub-card" id="open-settings">
+              <span class="settings-hub-title">Settings</span>
+              <span class="settings-hub-desc">Look, Queue, DJ, Users, Connections</span>
+            </button>
+            <button type="button" class="settings-hub-card" id="open-memory">
+              <span class="settings-hub-title">Memory</span>
+              <span class="settings-hub-stat" id="booth-stat-memory">—</span>
+              <span class="settings-hub-desc">Songs the DJ remembers and skips</span>
+            </button>
+            <button type="button" class="settings-hub-card" id="open-suggestions">
+              <span class="settings-hub-title">Suggestions</span>
+              <span class="settings-hub-stat" id="booth-stat-suggestions">—</span>
+              <span class="settings-hub-desc">Guest idea inbox</span>
+            </button>
+            <div
+              class="settings-hub-card settings-hub-card-static"
+              role="status"
+              aria-label="Sonos media URL"
+            >
+              <span class="settings-hub-title">Sonos media URL</span>
+              <span class="settings-hub-stat booth-media-url" id="booth-stat-media-url">—</span>
+              <span class="settings-hub-desc">Sonos must reach this host for DJ silence handoff.</span>
+              <button type="button" class="pill-btn" id="booth-media-url-copy">Copy</button>
+            </div>
+            <button type="button" class="settings-hub-card" id="open-reset">
+              <span class="settings-hub-title">Reset</span>
+              <span class="settings-hub-desc">Stats, DJ shout memory, song memory, suggestions</span>
+            </button>
+            <button type="button" class="settings-hub-card" id="restart-app">
+              <span class="settings-hub-title">Restart</span>
+              <span class="settings-hub-desc">Restarts PartyQueue — playback may pause briefly</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- SETTINGS HUB - pick a panel (PIN is only on DJ Booth). -->
+      <div id="view-settings" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Settings</h2>
+          <button id="settings-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-hub">
+          <p class="settings-intro">Pick a section. Party-night knobs live in Queue, DJ, and Users; credentials stay under Connections.</p>
+          <div class="settings-hub-grid" role="navigation" aria-label="Settings sections">
+            <button type="button" class="settings-hub-card" data-settings-panel="settings-look">
+              <span class="settings-hub-title">Look</span>
+              <span class="settings-hub-desc">Banner, header name, subtitle</span>
+            </button>
+            <button type="button" class="settings-hub-card" data-settings-panel="settings-queue">
+              <span class="settings-hub-title">Queue</span>
+              <span class="settings-hub-desc">Memory, Discover, Never-Ending, Strict fill</span>
+            </button>
+            <button type="button" class="settings-hub-card" data-settings-panel="settings-dj">
+              <span class="settings-hub-title">DJ</span>
+              <span class="settings-hub-desc">Voice, shout-outs, banner, character</span>
+            </button>
+            <button type="button" class="settings-hub-card" data-settings-panel="settings-users">
+              <span class="settings-hub-title">Users</span>
+              <span class="settings-hub-desc">People, notes, and birthdays</span>
+            </button>
+            <button type="button" class="settings-hub-card" data-settings-panel="settings-connections">
+              <span class="settings-hub-title">Connections</span>
+              <span class="settings-hub-desc">Spotify, Last.fm, Home Assistant, cache</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-settings-look" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Look</h2>
+          <button id="settings-look-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-panel">
+          <p class="settings-intro">Party branding — banner and header text.</p>
+          <label class="autofill" title="Show or hide the build tag next to the title">
+            <input type="checkbox" id="set-show-version" class="autofill-input" />
+            <span class="autofill-switch" aria-hidden="true"></span>
+            <span class="autofill-text">
+              <span class="autofill-label">Show version number</span>
+              <span class="autofill-hint">Displays the build tag (e.g. v3.10.0) next to the title</span>
+            </span>
+          </label>
+
+          <div class="controls-divider" aria-hidden="true"></div>
+
+          <p class="section-label settings-banner-label">Banner</p>
+          <p class="settings-intro">Upload a header image (PNG, JPG, WEBP or GIF, 8&nbsp;MB max).</p>
+          <div class="banner-actions">
+            <button id="banner-upload-btn" type="button" class="pill-btn success">Upload banner</button>
+            <input id="banner-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+          </div>
+          <div id="banner-gallery" class="banner-gallery"></div>
+
+          <div class="controls-divider" aria-hidden="true"></div>
+
+          <p class="section-label settings-banner-label">Text</p>
+          <p class="settings-intro">Name shown in the header and the tagline beneath it.</p>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-event-name">Header</label>
+            <input type="text" id="set-event-name" class="setting-input" maxlength="60" placeholder="PartyQueue" />
+          </div>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-subtitle">Subtitle</label>
+            <input type="text" id="set-subtitle" class="setting-input" maxlength="120" placeholder="Tagline (optional)" />
+          </div>
+          <div class="settings-actions">
+            <button id="look-text-save" type="button" class="pill-btn success">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-settings-queue" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Queue</h2>
+          <button id="settings-queue-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-panel">
+          <p class="settings-intro">Tune how Random and Never-Ending choose songs and avoid repeats.</p>
+          <div class="setting-row">
+            <label class="setting-label" for="set-song-memory">Song memory</label>
+            <input type="number" id="set-song-memory" class="setting-input" min="1" max="10000" step="1" inputmode="numeric" />
+            <span class="setting-hint">newest songs Random won&apos;t replay (history keeps up to 1500)</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="set-artist-window">Artist window</label>
+            <input type="number" id="set-artist-window" class="setting-input" min="1" max="1000" step="1" inputmode="numeric" />
+            <span class="setting-hint">recent songs the artist limit looks at</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="set-artist-cap">Artist limit</label>
+            <input type="number" id="set-artist-cap" class="setting-input" min="1" max="100" step="1" inputmode="numeric" />
+            <span class="setting-hint">max plays per artist within that window</span>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="set-similar-count">Discover</label>
+            <input type="number" id="set-similar-count" class="setting-input" min="0" max="50" step="1" inputmode="numeric" />
+            <span class="setting-hint">target for each batch (default 2; small Random fills up to this)</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="set-endless-count">Never-Ending Queue</label>
+            <input type="number" id="set-endless-count" class="setting-input" min="1" max="100" step="1" inputmode="numeric" />
+            <span class="setting-hint">songs added each Never-Ending refill (default 5)</span>
+          </div>
+
+          <label class="autofill" title="Prefer a short batch over re-adding songs already in memory">
+            <input type="checkbox" id="set-strict-fill" class="autofill-input" />
+            <span class="autofill-switch" aria-hidden="true"></span>
+            <span class="autofill-text">
+              <span class="autofill-label">Strict fill</span>
+              <span class="autofill-hint">Never re-add remembered songs just to fill a short batch</span>
+            </span>
+          </label>
+
+          <div class="settings-actions settings-actions-sticky">
+            <button id="settings-save" type="button" class="pill-btn success">Save</button>
+            <button id="settings-reset" type="button" class="pill-btn">Defaults</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-settings-dj" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">DJ</h2>
+          <button id="settings-dj-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-hub">
+          <p class="settings-intro">Party-night switches stay up top. Open a section to tune the rest. Guest notes live under Users.</p>
+          <div class="options-list">
+            <label class="autofill" title="Announce a short DJ intro before each new set via Home Assistant">
+              <input type="checkbox" id="dj-voice-toggle" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">DJ Voice</span>
+                <span class="autofill-hint">Announces each new set on Sonos (needs Home Assistant)</span>
+              </span>
+            </label>
+            <label class="autofill" title="Announce searched songs and shout out the requestor">
+              <input type="checkbox" id="set-dj-shout-enabled" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Enable shout-outs</span>
+                <span class="autofill-hint">DJ announces the song + requestor on Sonos</span>
+              </span>
+            </label>
+          </div>
+          <div class="controls-divider" aria-hidden="true"></div>
+          <div class="settings-hub-grid" role="navigation" aria-label="DJ sections">
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-banner">
+              <span class="settings-hub-title">Banner</span>
+              <span class="settings-hub-stat" id="dj-stat-banner">—</span>
+              <span class="settings-hub-desc">DJ icon shown on Now Playing</span>
+            </button>
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-name">
+              <span class="settings-hub-title">Name</span>
+              <span class="settings-hub-stat" id="dj-stat-name">—</span>
+              <span class="settings-hub-desc">Name used in announcements</span>
+            </button>
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-voice">
+              <span class="settings-hub-title">Voice &amp; character</span>
+              <span class="settings-hub-stat" id="dj-stat-voice">—</span>
+              <span class="settings-hub-desc">TTS, intensity, intros, length</span>
+            </button>
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-volume">
+              <span class="settings-hub-title">Volume &amp; silence</span>
+              <span class="settings-hub-stat" id="dj-stat-volume">—</span>
+              <span class="settings-hub-desc">Announce boost and quiet pad</span>
+            </button>
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-shouts">
+              <span class="settings-hub-title">Shout-out timing</span>
+              <span class="settings-hub-stat" id="dj-stat-shouts">—</span>
+              <span class="settings-hub-desc">Percent or every N searched adds</span>
+            </button>
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-lastcall">
+              <span class="settings-hub-title">Last call</span>
+              <span class="settings-hub-stat" id="dj-stat-lastcall">—</span>
+              <span class="settings-hub-desc">End of night song + party summary</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-settings-dj-banner" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Banner</h2>
+          <button id="settings-dj-banner-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-panel">
+          <p class="settings-intro">Upload an icon (PNG, JPG, WEBP, GIF or SVG, 2&nbsp;MB max). Keeps the newest five.</p>
+          <div class="banner-actions">
+            <button id="dj-icon-upload-btn" type="button" class="pill-btn success">Upload icon</button>
+            <input id="dj-icon-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" hidden />
+          </div>
+          <div id="dj-icon-gallery" class="banner-gallery"></div>
+          <div class="settings-actions settings-actions-sticky">
+            <button type="button" class="pill-btn dj-voice-reset-btn">Defaults</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-settings-dj-name" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Name</h2>
+          <button id="settings-dj-name-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-panel">
+          <p class="settings-intro">Name used in announcements and on Now Playing.</p>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-dj-name">Name</label>
+            <input type="text" id="set-dj-name" class="setting-input" maxlength="40" placeholder="Party DJ" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="settings-actions settings-actions-sticky">
+            <button type="button" class="pill-btn success dj-voice-save-btn">Save</button>
+            <button type="button" class="pill-btn dj-voice-reset-btn">Defaults</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-settings-dj-voice" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Voice &amp; character</h2>
+          <button id="settings-dj-voice-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-panel">
+          <p class="settings-intro">Tune announcement voice, character, intros, and length.</p>
+          <div class="setting-row">
+            <label class="setting-label" for="set-dj-intensity">Intensity</label>
+            <select id="set-dj-intensity" class="setting-input">
+              <option value="subtle">Subtle — quieter personality</option>
+              <option value="classic">Classic — balanced host personality</option>
+              <option value="extra">Extra — bigger personality</option>
+            </select>
+            <span class="setting-hint">how much character shows up in announcements</span>
+          </div>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-dj-catchphrase">Catchphrase</label>
+            <input type="text" id="set-dj-catchphrase" class="setting-input" maxlength="80" placeholder="optional favorite line" autocomplete="off" spellcheck="true" />
+          </div>
+          <p class="settings-intro settings-field-note">Used sparingly as a booth aside (skipped for Kids mood).</p>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-dj-ban-list">Ban list</label>
+            <input type="text" id="set-dj-ban-list" class="setting-input" maxlength="240" placeholder="party people, crank it up" autocomplete="off" spellcheck="true" />
+          </div>
+          <p class="settings-intro settings-field-note">Comma-separated phrases the DJ should never say.</p>
+          <div class="setting-row setting-row-tts">
+            <label class="setting-label" for="set-dj-tts-provider">TTS</label>
+            <select id="set-dj-tts-provider" class="setting-input">
+              <option value="elevenlabs_ha">ElevenLabs (Home Assistant)</option>
+              <option value="openai_ha">OpenAI (Home Assistant)</option>
+            </select>
+            <span class="setting-hint">voice engine for DJ announcements</span>
+          </div>
+          <div class="setting-row setting-row-voice" id="dj-tts-voice-openai-row">
+            <label class="setting-label" for="set-dj-tts-voice">Voice</label>
+            <select id="set-dj-tts-voice" class="setting-input">
+              <option value="onyx">Onyx — deep, authoritative</option>
+              <option value="alloy">Alloy — neutral, balanced</option>
+              <option value="ash">Ash — clear, articulate</option>
+              <option value="coral">Coral — warm, friendly</option>
+              <option value="echo">Echo — resonant, clear</option>
+              <option value="fable">Fable — expressive, storyteller</option>
+              <option value="nova">Nova — energetic, bright</option>
+              <option value="sage">Sage — calm, measured</option>
+              <option value="shimmer">Shimmer — light, cheerful</option>
+            </select>
+            <button id="dj-voice-test" type="button" class="pill-btn">Test</button>
+            <span class="setting-hint">OpenAI TTS voice</span>
+          </div>
+          <div class="setting-row setting-row-voice" id="dj-tts-voice-elevenlabs-row" hidden>
+            <label class="setting-label" for="set-dj-tts-voice-elevenlabs">Voice ID</label>
+            <input type="text" id="set-dj-tts-voice-elevenlabs" class="setting-input" maxlength="64" placeholder="CeNX9CMwmxDxUF5Q2Inm" autocomplete="off" spellcheck="false" />
+            <button id="dj-voice-test-elevenlabs" type="button" class="pill-btn">Test</button>
+            <span class="setting-hint">ElevenLabs voice ID from VoiceLab / HA</span>
+          </div>
+          <audio id="dj-voice-preview-player" class="dj-voice-preview-player" controls preload="none" hidden></audio>
+          <div class="setting-row">
+            <label class="setting-label" for="set-dj-tts-speed">Speed</label>
+            <select id="set-dj-tts-speed" class="setting-input">
+              <option value="0.85">0.85×</option>
+              <option value="0.9">0.9×</option>
+              <option value="0.95">0.95×</option>
+              <option value="1">1×</option>
+              <option value="1.05">1.05×</option>
+              <option value="1.1">1.1×</option>
+              <option value="1.15">1.15×</option>
+              <option value="1.25">1.25×</option>
+            </select>
+            <span class="setting-hint">how fast the DJ talks (Test uses this too)</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="set-dj-intro-percent">Name intro</label>
+            <input type="number" id="set-dj-intro-percent" class="setting-input" min="0" max="100" step="1" inputmode="numeric" />
+            <span class="setting-hint">% of announcements that open with the DJ name</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="set-dj-max-words">Max length</label>
+            <input type="number" id="set-dj-max-words" class="setting-input" min="28" max="120" step="1" inputmode="numeric" />
+            <span class="setting-hint">words (soft trim; default 55 — DJ X short drops)</span>
+          </div>
+          <div class="settings-actions settings-actions-sticky">
+            <button type="button" class="pill-btn success dj-voice-save-btn">Save</button>
+            <button type="button" class="pill-btn dj-voice-reset-btn">Defaults</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-settings-dj-volume" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Volume &amp; silence</h2>
+          <button id="settings-dj-volume-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-panel">
+          <p class="settings-intro">How loud the DJ sits over the music, and the quiet pad before the song resumes.</p>
+          <div class="setting-row">
+            <label class="setting-label" for="set-dj-vol-low">Vol low %</label>
+            <input type="number" id="set-dj-vol-low" class="setting-input" min="0" max="100" step="1" inputmode="numeric" />
+            <span class="setting-hint">boost % of room to 100 when music ≤30 (default 20)</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="set-dj-vol-mid">Vol mid %</label>
+            <input type="number" id="set-dj-vol-mid" class="setting-input" min="0" max="100" step="1" inputmode="numeric" />
+            <span class="setting-hint">when music 31–60 (default 8)</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="set-dj-vol-high">Vol high %</label>
+            <input type="number" id="set-dj-vol-high" class="setting-input" min="0" max="100" step="1" inputmode="numeric" />
+            <span class="setting-hint">when music ≥61 (default 4)</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="set-dj-silence">Silence</label>
+            <select id="set-dj-silence" class="setting-input">
+              <option value="0.5">0.5 s</option>
+              <option value="1">1 s</option>
+              <option value="1.5">1.5 s</option>
+              <option value="2">2 s</option>
+              <option value="2.5">2.5 s</option>
+              <option value="3">3 s</option>
+              <option value="3.5">3.5 s</option>
+              <option value="4">4 s</option>
+              <option value="4.5">4.5 s</option>
+              <option value="5">5 s</option>
+            </select>
+            <span class="setting-hint">quiet pad after the DJ while volume returns to music</span>
+          </div>
+          <div class="settings-actions settings-actions-sticky">
+            <button type="button" class="pill-btn success dj-voice-save-btn">Save</button>
+            <button type="button" class="pill-btn dj-voice-reset-btn">Defaults</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-settings-dj-shouts" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Shout-out timing</h2>
+          <button id="settings-dj-shouts-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-panel">
+          <p class="settings-intro">How often shout-outs fire after the first request of the night. Needs shout-outs and DJ Voice on.</p>
+          <div class="setting-row">
+            <label class="setting-label" for="set-dj-shout-mode">When</label>
+            <select id="set-dj-shout-mode" class="setting-input">
+              <option value="every">Every N searches</option>
+              <option value="percent">Percent of the time</option>
+            </select>
+            <span class="setting-hint">how often shout-outs fire after the first</span>
+          </div>
+          <div class="setting-row" id="dj-shout-percent-row">
+            <label class="setting-label" for="set-dj-shout-percent">Chance %</label>
+            <input type="number" id="set-dj-shout-percent" class="setting-input" min="0" max="100" step="1" inputmode="numeric" />
+            <span class="setting-hint">% of searched adds that get a shout</span>
+          </div>
+          <div class="setting-row" id="dj-shout-every-row" hidden>
+            <label class="setting-label" for="set-dj-shout-every">Every N</label>
+            <input type="number" id="set-dj-shout-every" class="setting-input" min="1" max="50" step="1" inputmode="numeric" />
+            <span class="setting-hint">shout on every Nth searched add</span>
+          </div>
+          <div class="settings-actions settings-actions-sticky">
+            <button type="button" class="pill-btn success dj-voice-save-btn">Save</button>
+            <button type="button" class="pill-btn dj-voice-reset-btn">Defaults</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-settings-dj-lastcall" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Last call</h2>
+          <button id="settings-dj-lastcall-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-panel">
+          <p class="settings-intro">Hand-adding this song turns off Never-Ending and signals last call. Default is Closing Time by Semisonic.</p>
+          <p class="section-label settings-banner-label">End of night song</p>
+          <p id="end-of-night-label" class="setting-hint">Closing Time — Semisonic</p>
+          <div class="setting-row-text">
+            <label class="setting-label" for="end-of-night-search">Search</label>
+            <input type="search" id="end-of-night-search" class="setting-input" maxlength="120" placeholder="Find a Spotify track" autocomplete="off" spellcheck="false" />
+          </div>
+          <div id="end-of-night-results" class="end-of-night-results" hidden></div>
+          <div class="settings-actions">
+            <button id="end-of-night-reset" type="button" class="pill-btn warning">Reset to Closing Time</button>
+          </div>
+          <div class="controls-divider" aria-hidden="true"></div>
+          <div class="options-list">
+            <label class="autofill" title="DJ speaks a short recap before the last song (needs DJ Voice)">
+              <input type="checkbox" id="set-dj-party-recap-enabled" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Party Summary</span>
+                <span class="autofill-hint">DJ speaks a short recap before the last song (needs DJ Voice)</span>
+              </span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-settings-users" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Users</h2>
+          <button id="settings-users-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-hub">
+          <p class="settings-intro">Guest notes and birthdays for DJ shout-outs. Tap a person to edit.</p>
+          <div id="guest-hub-grid" class="settings-hub-grid" role="navigation" aria-label="Users"></div>
+        </div>
+      </div>
+
+      <div id="view-settings-user-edit" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title" id="settings-user-edit-title">User</h2>
+          <button id="settings-user-edit-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-panel">
+          <p class="settings-intro" id="settings-user-edit-intro">Add short notes for the DJ. Set a birthday for a happy-birthday line on the day.</p>
+          <div class="setting-row-text">
+            <label class="setting-label" for="guest-name-input">Name</label>
+            <input type="text" id="guest-name-input" class="setting-input" maxlength="40" placeholder="Display name" autocomplete="off" spellcheck="false" />
+          </div>
+          <div id="guest-list" class="guest-list"></div>
+          <div class="setting-row-text">
+            <label class="setting-label" for="guest-notes-input">Add note</label>
+            <input type="text" id="guest-notes-input" class="setting-input" maxlength="120" placeholder="One short idea for the DJ" autocomplete="off" spellcheck="true" />
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="guest-bday-month">Birthday</label>
+            <select id="guest-bday-month" class="setting-input" aria-label="Birthday month">
+              <option value="">Month</option>
+              <option value="1">Jan</option>
+              <option value="2">Feb</option>
+              <option value="3">Mar</option>
+              <option value="4">Apr</option>
+              <option value="5">May</option>
+              <option value="6">Jun</option>
+              <option value="7">Jul</option>
+              <option value="8">Aug</option>
+              <option value="9">Sep</option>
+              <option value="10">Oct</option>
+              <option value="11">Nov</option>
+              <option value="12">Dec</option>
+            </select>
+            <input type="number" id="guest-bday-day" class="setting-input" min="1" max="31" step="1" inputmode="numeric" placeholder="Day" aria-label="Birthday day" />
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="guest-bday-role">Call them</label>
+            <select id="guest-bday-role" class="setting-input">
+              <option value="star">Birthday star</option>
+              <option value="boy">Birthday boy</option>
+              <option value="girl">Birthday girl</option>
+            </select>
+            <span class="setting-hint">used on their birthday</span>
+          </div>
+          <div class="settings-actions settings-actions-sticky">
+            <button id="guest-save" type="button" class="pill-btn success">Add note</button>
+            <button id="guest-rename" type="button" class="pill-btn" title="Save a new name for this user" hidden>Rename</button>
+            <button id="guest-bday-save" type="button" class="pill-btn">Save birthday</button>
+            <button id="guest-bday-forget" type="button" class="pill-btn warning" title="Forget tonight&apos;s birthday and first-request shout for this guest so you can test again">Reset birthday shout</button>
+            <button id="guest-remove" type="button" class="pill-btn warning" title="Delete this user and all their notes">Remove user</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-settings-connections" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Connections</h2>
+          <button id="settings-connections-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-panel">
+          <p class="settings-intro">API credentials and cache. Set once; rarely touched on party night.</p>
+
+          <p class="section-label settings-banner-label">Host PIN</p>
+          <p class="settings-intro">Locks DJ Booth and host APIs. Stored hashed on this server — not in the share zip.</p>
+          <p id="host-pin-status" class="setting-hint">Checking&hellip;</p>
+          <div class="setting-row-text" id="host-pin-current-row" hidden>
+            <label class="setting-label" for="host-pin-current">Current PIN</label>
+            <input type="password" id="host-pin-current" class="setting-input" maxlength="32" inputmode="numeric" autocomplete="current-password" placeholder="Current PIN" />
+          </div>
+          <div class="setting-row-text">
+            <label class="setting-label" for="host-pin-new">New PIN</label>
+            <input type="password" id="host-pin-new" class="setting-input" maxlength="32" inputmode="numeric" autocomplete="new-password" placeholder="4–32 characters" />
+          </div>
+          <div class="setting-row-text">
+            <label class="setting-label" for="host-pin-confirm">Confirm PIN</label>
+            <input type="password" id="host-pin-confirm" class="setting-input" maxlength="32" inputmode="numeric" autocomplete="new-password" placeholder="Confirm new PIN" />
+          </div>
+          <div class="settings-actions">
+            <button id="host-pin-save" type="button" class="pill-btn success">Save PIN</button>
+            <button id="host-pin-clear" type="button" class="pill-btn warning" hidden>Remove PIN</button>
+          </div>
+
+          <div class="controls-divider" aria-hidden="true"></div>
+
+          <p class="section-label settings-banner-label">Sonos</p>
+          <p class="settings-intro">Pin a speaker IP when auto-discovery fails (common across VLANs or with a VPN). Room name picks which group&apos;s queue to use.</p>
+          <div class="spotify-status-row">
+            <span id="sonos-conn-status" class="status-pill status-unknown">Checking&hellip;</span>
+          </div>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-sonos-host">Speaker IP</label>
+            <input type="text" id="set-sonos-host" class="setting-input" maxlength="64" placeholder="e.g. 192.168.1.50" autocomplete="off" spellcheck="false" />
+          </div>
+          <p class="setting-hint setting-hint-under-field">Leave blank to use network discovery. Prefer a DHCP reservation for that speaker.</p>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-sonos-room">Room name</label>
+            <input type="text" id="set-sonos-room" class="setting-input" maxlength="80" placeholder="e.g. Kitchen" autocomplete="off" spellcheck="false" />
+          </div>
+          <p class="setting-hint setting-hint-under-field">Optional. Must match a Sonos room name. Blank = first group coordinator.</p>
+          <div class="settings-actions">
+            <button id="sonos-conn-save" type="button" class="pill-btn success">Save</button>
+            <button id="sonos-conn-test" type="button" class="pill-btn">Test connection</button>
+            <button id="sonos-conn-clear" type="button" class="pill-btn warning">Clear</button>
+          </div>
+
+          <div class="controls-divider" aria-hidden="true"></div>
+
+          <p class="section-label settings-banner-label">Spotify Credentials</p>
+          <p class="settings-intro">Developer app credentials for search and playlists. Spotify <strong>Premium</strong> required; guests never log in.</p>
+          <ol class="settings-help-list">
+            <li>Open the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">Spotify Developer Dashboard</a> and sign in.</li>
+            <li><strong>Create app</strong> (name can be anything). Under <strong>Redirect URIs</strong>, add the exact URI below (e.g. <code>http://127.0.0.1:8080/auth/callback</code>), then Save.</li>
+            <li>Copy <strong>Client ID</strong> and <strong>Client Secret</strong> into the fields here → Save → Test.</li>
+          </ol>
+          <p class="setting-hint settings-help-more">Need the secret again? Dashboard → your app → <strong>Settings</strong>. Docs: <a href="https://developer.spotify.com/documentation/web-api/concepts/apps" target="_blank" rel="noopener noreferrer">Spotify apps</a>.</p>
+          <div class="spotify-status-row">
+            <span id="spotify-app-status" class="status-pill status-unknown">Checking&hellip;</span>
+            <span id="spotify-status" class="status-pill status-unknown">Checking&hellip;</span>
+          </div>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-spotify-client-id">Client ID</label>
+            <input type="text" id="set-spotify-client-id" class="setting-input" maxlength="128" placeholder="Spotify Client ID" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-spotify-client-secret">Client Secret</label>
+            <input type="password" id="set-spotify-client-secret" class="setting-input" maxlength="128" placeholder="Paste Client Secret" autocomplete="off" spellcheck="false" />
+          </div>
+          <p id="spotify-secret-hint" class="setting-hint setting-hint-under-field">Dots mean a client secret is already saved.</p>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-spotify-redirect">Redirect URI</label>
+            <input type="url" id="set-spotify-redirect" class="setting-input" maxlength="300" placeholder="http://127.0.0.1:8080/auth/callback" autocomplete="off" spellcheck="false" />
+          </div>
+          <p class="setting-hint setting-hint-under-field">Must match a Redirect URI registered on your Spotify app <em>exactly</em> (used for Connect Spotify / playlists).</p>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-spotify-market">Market</label>
+            <input type="text" id="set-spotify-market" class="setting-input" maxlength="2" placeholder="US" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="settings-actions">
+            <button id="spotify-app-save" type="button" class="pill-btn success">Save</button>
+            <button id="spotify-app-test" type="button" class="pill-btn">Test connection</button>
+            <button id="spotify-app-clear" type="button" class="pill-btn warning">Clear</button>
+          </div>
+
+          <div class="controls-divider" aria-hidden="true"></div>
+
+          <p class="section-label settings-banner-label">Spotify Cache</p>
+          <p class="settings-intro">Re-warm after changing playlists.</p>
+          <div class="setting-row-cache">
+            <label class="setting-label" for="cache-warmed">Cache warmed</label>
+            <input type="text" id="cache-warmed" class="setting-input setting-input-readonly" readonly tabindex="-1" value="Never" />
+            <button id="cache-refresh-btn" type="button" class="pill-btn warning">Re-warm cache</button>
+          </div>
+          <p id="cache-status" class="setting-hint cache-status-line"></p>
+
+          <div class="controls-divider" aria-hidden="true"></div>
+
+          <p class="section-label settings-banner-label">Last.fm</p>
+          <p class="settings-intro">API key for genre tagging and Discover. Get a free key at <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener noreferrer">last.fm/api/account/create</a>.</p>
+          <div class="spotify-status-row">
+            <span id="lastfm-status" class="status-pill status-unknown">Checking&hellip;</span>
+            <span id="tagging-pill" class="status-pill status-unknown tagging-pill" title="Genre tagging needs a Last.fm API key">Tagging</span>
+          </div>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-lastfm-key">API key</label>
+            <input type="password" id="set-lastfm-key" class="setting-input" maxlength="128" placeholder="Paste Last.fm API key" autocomplete="off" spellcheck="false" />
+          </div>
+          <p id="lastfm-key-hint" class="setting-hint setting-hint-under-field">Dots mean an API key is already saved.</p>
+          <div class="settings-actions">
+            <button id="lastfm-save" type="button" class="pill-btn success">Save</button>
+            <button id="lastfm-test" type="button" class="pill-btn">Test connection</button>
+            <button id="lastfm-clear" type="button" class="pill-btn warning">Clear</button>
+          </div>
+
+          <div class="controls-divider" aria-hidden="true"></div>
+
+          <p class="section-label settings-banner-label">Home Assistant</p>
+          <p class="settings-intro">Long-lived access token for DJ Voice announcements on Sonos.</p>
+          <div class="spotify-status-row">
+            <span id="ha-status" class="status-pill status-unknown">Checking&hellip;</span>
+          </div>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-ha-url">URL</label>
+            <input type="url" id="set-ha-url" class="setting-input" maxlength="300" placeholder="http://homeassistant.local:8123" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-ha-token">Token</label>
+            <input type="password" id="set-ha-token" class="setting-input" maxlength="500" placeholder="Paste long-lived token" autocomplete="off" spellcheck="false" />
+          </div>
+          <p id="ha-token-hint" class="setting-hint setting-hint-under-field">Dots mean a token is already saved.</p>
+          <div class="settings-actions">
+            <button id="ha-save" type="button" class="pill-btn success">Save</button>
+            <button id="ha-test" type="button" class="pill-btn">Test connection</button>
+            <button id="ha-clear" type="button" class="pill-btn warning">Clear</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-settings-reset" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Reset</h2>
+          <button id="settings-reset-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-hub">
+          <p class="settings-intro">Destructive clears — each one asks for confirmation first.</p>
+          <div class="settings-hub-grid" role="group" aria-label="Reset actions">
+            <button type="button" class="settings-hub-card" id="settings-clear-stats" title="Clear Stats top lists and the dedication wall">
+              <span class="settings-hub-title">Reset stats</span>
+              <span class="settings-hub-desc">Top songs, artists, requesters, and dedications</span>
+            </button>
+            <button type="button" class="settings-hub-card" id="settings-clear-dj-memory" title="Clear first-request, birthday, and used shout-blurb memory">
+              <span class="settings-hub-title">Reset DJ shout memory</span>
+              <span class="settings-hub-desc">First-request, birthday, and used shout blurbs</span>
+            </button>
+            <button type="button" class="settings-hub-card" id="settings-clear-history" title="Clear played/skipped song memory and artist skip cooldowns">
+              <span class="settings-hub-title">Reset song memory</span>
+              <span class="settings-hub-desc">Played and skipped songs Random uses to avoid repeats</span>
+            </button>
+            <button type="button" class="settings-hub-card" id="settings-clear-suggestions" title="Clear the guest suggestion inbox">
+              <span class="settings-hub-title">Reset suggestions</span>
+              <span class="settings-hub-desc">Guest idea inbox (open and done)</span>
+            </button>
+            <button type="button" class="settings-hub-card" id="settings-clear-reactions" title="Clear Now Playing mood reactions">
+              <span class="settings-hub-title">Reset reactions</span>
+              <span class="settings-hub-desc">Now Playing mood reactions</span>
+            </button>
+            <button type="button" class="settings-hub-card" id="settings-clear-karaoke" title="Clear Karaoke mic tags">
+              <span class="settings-hub-title">Reset Karaoke list</span>
+              <span class="settings-hub-desc">Songs tagged with the mic</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- STATS VIEW — from the main toolbar -->
+      <div id="view-stats" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Stats</h2>
+          <button id="stats-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="stats-box" id="stats-box">
+          <p class="settings-intro">Top guest requests for tonight or all time.</p>
+          <div class="stats-window" role="group" aria-label="Stats timeframe">
+            <button type="button" class="stats-win-btn active" data-window="tonight">Tonight</button>
+            <button type="button" class="stats-win-btn" data-window="allTime">All-time</button>
+          </div>
+          <div id="stats-body">
+            <div class="stats-cards" id="stats-cards"></div>
+            <p class="setting-group-label">Top requested songs</p>
+            <ul id="stats-songs" class="stats-list"></ul>
+            <p class="setting-group-label">Top requested artists</p>
+            <ul id="stats-artists" class="stats-list"></ul>
+            <p class="setting-group-label">Top requesters</p>
+            <ul id="stats-requesters" class="stats-list"></ul>
+            <div id="stats-dedications-wrap" hidden>
+              <p class="setting-group-label" id="stats-dedications-label">Tonight's dedications</p>
+              <ul id="stats-dedications" class="stats-list"></ul>
+            </div>
+            <div id="stats-top-liked-wrap" hidden>
+              <p class="setting-group-label">Top Liked</p>
+              <p class="settings-intro">&#128077; &#10084;&#65039; &#128293; — songs guests loved.</p>
+              <ul id="stats-top-liked" class="stats-list"></ul>
+            </div>
+            <div id="stats-party-music-wrap" hidden>
+              <p class="setting-group-label">Party Music</p>
+              <p class="settings-intro">&#127881; — songs that got the party reaction.</p>
+              <ul id="stats-party-music" class="stats-list"></ul>
+            </div>
+            <div id="stats-most-hated-wrap" hidden>
+              <p class="setting-group-label">Most Hated</p>
+              <p class="settings-intro">&#128078; &#129326; — songs guests turned down.</p>
+              <ul id="stats-most-hated" class="stats-list"></ul>
+            </div>
+            <div id="stats-karaoke-wrap" hidden>
+              <p class="setting-group-label">Karaoke List</p>
+              <p class="settings-intro">Songs tagged with &#127908; on Now Playing — your sing list (kept until you reset the Karaoke list).</p>
+              <ul id="stats-karaoke" class="stats-list"></ul>
+            </div>
+            <div id="stats-reacted-wrap" hidden>
+              <p class="setting-group-label">Song reactions</p>
+              <p class="settings-intro">Who reacted on Now Playing (kept until you reset reactions).</p>
+              <ul id="stats-reacted" class="stats-list"></ul>
+            </div>
+          </div>
+          <p id="stats-empty" class="np-empty" hidden>No requests yet &mdash; search and add a song to get the party started.</p>
+        </div>
+      </div>
+
+      <!-- PLAYLISTS VIEW - under Music Mix; which playlists feed Random / Never-Ending. -->
+      <div id="view-playlists" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Playlists</h2>
+          <button id="playlists-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <p class="settings-intro">Choose which Spotify playlists feed Random and Never-Ending.</p>
+
+        <section id="playlists-section" class="playlists-section">
+          <div id="playlist-connect" class="connect-box" hidden>
+            <p class="np-empty">Connect your Spotify account to add your playlists to the queue.</p>
+            <button id="connect-spotify" type="button" class="pill-btn success">Connect Spotify</button>
+          </div>
+          <div class="playlist-box" id="playlist-box" hidden>
+            <div class="playlist-toolbar">
+              <button id="toggle-all-playlists" type="button" class="pill-btn">Uncheck All</button>
+              <span id="selected-count" class="playlist-selcount"></span>
+            </div>
+            <ul id="playlists" class="results"></ul>
+            <p id="playlists-empty" class="np-empty" hidden>No playlists found.</p>
+          </div>
+        </section>
+      </div>
+
+      <!-- MEMORY VIEW - songs the DJ remembers and skips until they age out. -->
+      <div id="view-memory" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Memory <span id="memory-count" class="queue-count"></span></h2>
+          <button id="memory-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+
+        <div class="memory-box" id="memory-box">
+          <p class="settings-intro" id="memory-intro" hidden>Songs the DJ remembers &mdash; newest first. Badges show Requested, Random, Discover, and/or Skipped when known. Random only avoids the newest Song memory window.</p>
+          <ul id="memory-list" class="results"></ul>
+          <p id="memory-empty" class="np-empty" hidden>Nothing remembered yet.</p>
+        </div>
+      </div>
+
+      <!-- SUGGESTIONS VIEW - guest idea inbox for the host. -->
+      <div id="view-suggestions" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Suggestions <span id="suggestions-count" class="queue-count"></span></h2>
+          <button id="suggestions-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+
+        <div class="memory-box" id="suggestions-box">
+          <p class="settings-intro" id="suggestions-intro">Guest ideas for PartyQueue. Check one off when you&apos;ve implemented it.</p>
+          <div class="suggestions-toolbar">
+            <div class="stats-window suggestions-filter" role="group" aria-label="Suggestion filter">
+              <button type="button" class="stats-win-btn active" data-sug-filter="open">Open</button>
+              <button type="button" class="stats-win-btn" data-sug-filter="done">Done</button>
+              <button type="button" class="stats-win-btn" data-sug-filter="all">All</button>
+            </div>
+            <button id="suggestions-clear-all" type="button" class="pill-btn warning" title="Delete all guest suggestions">Clear all</button>
+          </div>
+          <ul id="suggestions-list" class="results"></ul>
+          <p id="suggestions-empty" class="np-empty" hidden>No suggestions yet.</p>
+        </div>
+      </div>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="assertive"></div>
+
+    <div id="dedication-overlay" class="modal-overlay" hidden>
+      <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="dedication-title">
+        <p id="dedication-title" class="modal-message">Dedicate this song</p>
+        <p class="modal-hint">Optional — who should this go out to?</p>
+        <input
+          id="dedication-input"
+          class="setting-input modal-input"
+          type="text"
+          maxlength="60"
+          autocomplete="off"
+          placeholder="e.g. Sarah"
+          aria-label="Dedication"
+        />
+        <p id="dedication-error" class="modal-error" hidden></p>
+        <div class="modal-actions">
+          <button id="dedication-cancel" type="button" class="pill-btn">Skip</button>
+          <button id="dedication-save" type="button" class="pill-btn success">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="modal-overlay" class="modal-overlay" hidden>
+      <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="modal-message">
+        <p id="modal-message" class="modal-message"></p>
+        <div class="modal-actions">
+          <button id="modal-cancel" type="button" class="pill-btn">Cancel</button>
+          <button id="modal-confirm" type="button" class="pill-btn danger">Yes</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Full-screen Now Playing + lyrics (tap the Now Playing card). -->
+    <div id="np-overlay" class="np-overlay" hidden>
+      <div class="np-overlay-sheet" role="dialog" aria-modal="true" aria-labelledby="np-fs-title">
+        <button id="np-overlay-close" type="button" class="np-overlay-close" aria-label="Close">&times;</button>
+        <div class="np-overlay-hero">
+          <img id="np-fs-art" class="np-fs-art" alt="" />
+          <div class="np-overlay-meta">
+            <div id="np-fs-title" class="np-fs-title"></div>
+            <div id="np-fs-artist" class="np-fs-artist"></div>
+            <div id="np-fs-album" class="np-fs-album"></div>
+          </div>
+        </div>
+        <div id="np-fs-lyrics" class="np-fs-lyrics" aria-live="polite">
+          <p class="np-fs-lyrics-status">Loading lyrics&hellip;</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="pin-overlay" class="modal-overlay" hidden>
+      <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="pin-title">
+        <p id="pin-title" class="modal-message">Locked</p>
+        <input id="pin-input" class="setting-input modal-input" type="password" inputmode="numeric" autocomplete="off" placeholder="Enter PIN" aria-label="PIN" />
+        <p id="pin-error" class="modal-error" hidden></p>
+        <div class="modal-actions">
+          <button id="pin-cancel" type="button" class="pill-btn">Cancel</button>
+          <button id="pin-unlock" type="button" class="pill-btn success">Unlock</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="pin-setup-overlay" class="modal-overlay" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pin-setup-title">
+        <p id="pin-setup-title" class="modal-message">Protect the DJ Booth?</p>
+        <p class="modal-hint">Optional host PIN locks Settings, credentials, and resets — guests can still search and run Controls. Skip anytime; set later under DJ Booth → Settings → Connections. Next up after this: paste your Spotify Developer app credentials there if you haven&apos;t yet.</p>
+        <input id="pin-setup-input" class="setting-input modal-input" type="password" inputmode="numeric" autocomplete="new-password" placeholder="New PIN (4–32 characters)" aria-label="New host PIN" />
+        <input id="pin-setup-confirm" class="setting-input modal-input" type="password" inputmode="numeric" autocomplete="new-password" placeholder="Confirm PIN" aria-label="Confirm host PIN" />
+        <p id="pin-setup-error" class="modal-error" hidden></p>
+        <div class="modal-actions">
+          <button id="pin-setup-skip" type="button" class="pill-btn">Skip for now</button>
+          <button id="pin-setup-save" type="button" class="pill-btn success">Set PIN</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="name-overlay" class="modal-overlay" hidden>
+      <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="name-title">
+        <p id="name-title" class="modal-message">Who&rsquo;s requesting?</p>
+        <p class="modal-hint">Use your real name for the DJ &amp; stats. Optional alias shows on Up next.</p>
+        <label class="setting-label" for="name-input">Your name</label>
+        <input id="name-input" class="setting-input modal-input name-modal-input" type="text" maxlength="24" autocomplete="name" placeholder="Real name (e.g. Mark)" aria-label="Your real name" />
+        <label class="setting-label" for="alias-input">Call me (optional)</label>
+        <input id="alias-input" class="setting-input modal-input name-modal-input" type="text" maxlength="24" autocomplete="nickname" placeholder="Alias on the queue" aria-label="Optional alias" />
+        <p id="name-user-hint" class="modal-hint" hidden>Shouts and Party Stats follow Your name — match a Users profile when you have one.</p>
+        <p id="name-error" class="modal-error" hidden></p>
+        <div class="modal-actions">
+          <button id="name-cancel" type="button" class="pill-btn" hidden>Cancel</button>
+          <button id="name-save" type="button" class="pill-btn success">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Party recap before Closing Time — shown to every phone once. -->
+    <div id="recap-overlay" class="modal-overlay" hidden>
+      <div class="modal recap-modal" role="dialog" aria-modal="true" aria-labelledby="recap-title">
+        <p id="recap-title" class="modal-message">&#127867; Party Recap</p>
+        <p id="recap-hint" class="modal-hint">Last call — end of night song is next</p>
+        <div id="recap-body" class="recap-body"></div>
+        <div class="modal-actions">
+          <button id="recap-dismiss" type="button" class="pill-btn success">Cheers</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="vendor/sortable.min.js"></script>
+    <script src="app.js?v=6.2.5"></script>
+  </body>
+</html>

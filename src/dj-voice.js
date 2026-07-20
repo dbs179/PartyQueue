@@ -1,0 +1,3260 @@
+// Phase 1 DJ voice: generate a short set summary via Home Assistant OpenAI TTS,
+// save the MP3 locally, insert it into the Sonos queue, then let the queue play
+// music tracks after it (no snapshot/restore hijack).
+
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { getHaCredentials, isHaConfigured } from "./home-assistant.js";
+import {
+  getSonosTargetRoom,
+  getDjVoiceSettings,
+  getDiscoverySettings,
+  getBrandingSettings,
+  BRANDING_DEFAULTS,
+  loadSettings,
+  DJ_VOICE_DEFAULTS,
+  DJ_SILENCE_OPTIONS,
+  DJ_VOLUME_TIER,
+  normalizeDjSilenceSec,
+  normalizeDjTtsVoice,
+  normalizeDjTtsProvider,
+  normalizeDjTtsSpeed,
+  djTtsEngineForProvider,
+  normalizeDjCharacterIntensity,
+  normalizeDjCatchphrase,
+  parseDjBanList,
+  djSilenceLabel,
+} from "./settings.js";
+import { GENRE_BUCKETS, bucketsForArtistSync } from "./genres.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TTS_DIR = path.join(__dirname, "..", "data", "tts");
+
+const TTS_BYTES_PER_SEC = 16000;
+
+function ttsSettings() {
+  return getDjVoiceSettings();
+}
+
+function ttsProvider() {
+  return normalizeDjTtsProvider(ttsSettings().djTtsProvider);
+}
+
+function ttsEngine() {
+  return ttsSettings().djTtsEngine || djTtsEngineForProvider(ttsProvider());
+}
+
+function ttsVoice() {
+  const s = ttsSettings();
+  return normalizeDjTtsVoice(s.djTtsVoice, s.djTtsProvider);
+}
+
+function ttsSpeed() {
+  return normalizeDjTtsSpeed(ttsSettings().djTtsSpeed);
+}
+const TTS_MAX_FILES = 40;
+// Fallback when settings can't be read; live values come from Settings.
+const ANNOUNCE_VOLUME_FALLBACK = 25;
+
+function volumeBumpTiers() {
+  const s = getDjVoiceSettings();
+  return {
+    lowPct: s.djVolumeBumpLowPct,
+    midPct: s.djVolumeBumpMidPct,
+    highPct: s.djVolumeBumpHighPct,
+  };
+}
+const OPENAI_AGENT_ID = "conversation.openai_conversation";
+
+// Pending refill announce metadata (TTS already inserted into the queue).
+let pending = null;
+let scriptVariant = 0;
+// Session announce ordinal — drives occasional character bits (Phase 3).
+let announceOrdinal = 0;
+// Phase 4: short session memory so openers/outros/shapes don't repeat back-to-back.
+const RECENT_SHAPE_WINDOW = 3;
+const recentAnnounceMemory = {
+  openerShapes: [],
+  bodyShapes: [],
+  beatFoci: [],
+  outros: [],
+  openerLines: [],
+};
+
+export const DJ_OPENER_SHAPES = {
+  name_intro: {
+    id: "name_intro",
+    label: "name intro",
+    instruction:
+      "Begin with exactly one of the five DJ name intros, then give the track count.",
+  },
+  cold_open: {
+    id: "cold_open",
+    label: "cold open",
+    instruction:
+      "Do not open with the DJ name. Lead with the track count or a short energy hook.",
+  },
+  artist_tease: {
+    id: "artist_tease",
+    label: "artist tease",
+    instruction:
+      "Open by teasing the FIRST sample track's artist only (that song plays first after this announce), then give the track count. Do not open with the DJ name. Never say \"starting with\" / \"kicking off with\" for any other artist.",
+  },
+  discovery_tease: {
+    id: "discovery_tease",
+    label: "discovery tease",
+    instruction:
+      "Open by teasing that a discovery / wildcard is in this block, then give the track count. Do not open with the DJ name.",
+  },
+};
+
+export const DJ_BODY_SHAPES = {
+  energy_first: {
+    id: "energy_first",
+    label: "energy first",
+    instruction:
+      "Lead the body with one vivid vibe/energy sentence, then optionally one artist.",
+  },
+  artist_first: {
+    id: "artist_first",
+    label: "artist first",
+    instruction:
+      "Lead the body with the FIRST sample track's artist or song title (that track plays first after this announce), then a short vibe sentence. If you say \"starting with\" / \"kicking off with\", it must be that first track only.",
+  },
+  crowd_call: {
+    id: "crowd_call",
+    label: "crowd call",
+    instruction:
+      "Lead the body with a short crowd/room call matching the mood pack, then vibe; at most one artist.",
+  },
+};
+
+// Spotify DJ X-style ingredient rotation: keep intros fresh by mixing
+// count / vibe / tagline instead of stacking all three every time.
+export const DJ_BEAT_FOCI = {
+  count_vibe: {
+    id: "count_vibe",
+    label: "count + vibe",
+    includeCount: true,
+    includeVibe: true,
+    includeOutro: false,
+    instruction:
+      "Include the track count and one vivid vibe sentence. Skip the tagline — end clean after the vibe (no stacked closers).",
+  },
+  count_tag: {
+    id: "count_tag",
+    label: "count + tag",
+    includeCount: true,
+    includeVibe: false,
+    includeOutro: true,
+    instruction:
+      "Include the track count and one short tagline/outro. Skip the vibe sentence entirely.",
+  },
+  vibe_tag: {
+    id: "vibe_tag",
+    label: "vibe + tag",
+    includeCount: false,
+    includeVibe: true,
+    includeOutro: true,
+    instruction:
+      "Include one vivid vibe sentence and a short tagline. Do NOT say the track count.",
+  },
+  count_vibe_tag: {
+    id: "count_vibe_tag",
+    label: "count + vibe + tag",
+    includeCount: true,
+    includeVibe: true,
+    includeOutro: true,
+    instruction:
+      "Full stack once in a while: track count, one short vibe, and one tagline. Keep it tight — still under the word budget.",
+  },
+};
+
+function rememberRecent(list, value, window = RECENT_SHAPE_WINDOW) {
+  if (value == null || value === "") return;
+  list.unshift(String(value));
+  while (list.length > window) list.pop();
+}
+
+export function pickAvoidingRecent(bank, recent = [], salt = 0) {
+  const items = Array.isArray(bank) ? bank.filter((x) => x != null && x !== "") : [];
+  if (!items.length) return "";
+  const blocked = new Set((Array.isArray(recent) ? recent : []).map(String));
+  const fresh = items.filter((x) => !blocked.has(String(x)));
+  const pool = fresh.length ? fresh : items;
+  return pick(pool, salt);
+}
+
+export function getRecentAnnounceMemory() {
+  return {
+    openerShapes: [...recentAnnounceMemory.openerShapes],
+    bodyShapes: [...recentAnnounceMemory.bodyShapes],
+    beatFoci: [...recentAnnounceMemory.beatFoci],
+    outros: [...recentAnnounceMemory.outros],
+    openerLines: [...recentAnnounceMemory.openerLines],
+  };
+}
+
+export function recordAnnounceShape({
+  openerShape = null,
+  bodyShape = null,
+  beatFocus = null,
+  outro = null,
+  openerLine = null,
+} = {}) {
+  rememberRecent(recentAnnounceMemory.openerShapes, openerShape);
+  rememberRecent(recentAnnounceMemory.bodyShapes, bodyShape);
+  rememberRecent(recentAnnounceMemory.beatFoci, beatFocus);
+  rememberRecent(recentAnnounceMemory.outros, outro);
+  rememberRecent(recentAnnounceMemory.openerLines, openerLine);
+}
+
+/** Test helper — reset session announce counter + shape memory. */
+export function resetDjAnnounceOrdinal(value = 0) {
+  announceOrdinal = Math.max(0, Math.floor(Number(value) || 0));
+  recentAnnounceMemory.openerShapes.length = 0;
+  recentAnnounceMemory.bodyShapes.length = 0;
+  recentAnnounceMemory.beatFoci.length = 0;
+  recentAnnounceMemory.outros.length = 0;
+  recentAnnounceMemory.openerLines.length = 0;
+}
+
+// Resolve opener/body shapes + outro with anti-repeat. Coordinates nameIntro
+// with opener shape (name_intro â†” forced intro). Beat focus rotates count /
+// vibe / tagline like Spotify DJ X so announces stay short and fresh.
+export function resolveAnnounceShape({
+  nameIntroForced = null,
+  nameIntroPercent = DJ_VOICE_DEFAULTS.djNameIntroPercent,
+  discoveryEnabled = false,
+  similarAdded = 0,
+  hasArtist = false,
+  salt = 0,
+  mood = "all",
+  recent = null,
+  openerShape: forcedOpener = null,
+  bodyShape: forcedBody = null,
+  outro: forcedOutro = null,
+  beatFocus: forcedBeat = null,
+  includeCount: forcedIncludeCount = null,
+  includeVibe: forcedIncludeVibe = null,
+  includeOutro: forcedIncludeOutro = null,
+} = {}) {
+  const mem = recent || recentAnnounceMemory;
+  const pack = getDjMoodVoicePack(mood);
+
+  let openerIds = [];
+  if (forcedOpener && DJ_OPENER_SHAPES[forcedOpener]) {
+    openerIds = [forcedOpener];
+  } else if (nameIntroForced === true) {
+    openerIds = ["name_intro"];
+  } else {
+    if (nameIntroForced !== false) {
+      const pct = Math.max(0, Math.min(100, Number(nameIntroPercent) || 0));
+      // Deterministic eligibility from salt so templates/tests stay stable.
+      if (Math.abs(salt) % 100 < pct) openerIds.push("name_intro");
+    }
+    openerIds.push("cold_open");
+    if (hasArtist) openerIds.push("artist_tease");
+    if (discoveryEnabled && Number(similarAdded) > 0) {
+      openerIds.push("discovery_tease");
+    }
+  }
+  const openerShape = pickAvoidingRecent(
+    openerIds,
+    mem.openerShapes,
+    salt + 2
+  );
+  const nameIntro = openerShape === "name_intro";
+
+  let bodyIds = ["energy_first", "crowd_call"];
+  if (hasArtist) bodyIds.push("artist_first");
+  if (forcedBody && DJ_BODY_SHAPES[forcedBody]) bodyIds = [forcedBody];
+  const bodyShape = pickAvoidingRecent(bodyIds, mem.bodyShapes, salt + 5);
+
+  // Explicit fixture shapes (tests / overrides) keep the full stack so
+  // forced openers/outros still behave as callers expect.
+  const guidedFixture =
+    !forcedBeat &&
+    forcedIncludeCount == null &&
+    forcedIncludeVibe == null &&
+    forcedIncludeOutro == null &&
+    !!(forcedOpener || forcedBody || forcedOutro);
+
+  let beatIds = ["count_vibe", "count_tag", "vibe_tag"];
+  // Occasional full stack (~20%) so variety still includes the classic shape.
+  if (Math.abs(salt) % 5 === 0) beatIds.push("count_vibe_tag");
+  if (guidedFixture) beatIds = ["count_vibe_tag"];
+  if (forcedBeat && DJ_BEAT_FOCI[forcedBeat]) beatIds = [forcedBeat];
+  const beatFocus = pickAvoidingRecent(beatIds, mem.beatFoci, salt + 11);
+  const beat = DJ_BEAT_FOCI[beatFocus] || DJ_BEAT_FOCI.count_vibe;
+
+  const includeCount =
+    forcedIncludeCount != null ? !!forcedIncludeCount : beat.includeCount;
+  const includeVibe =
+    forcedIncludeVibe != null ? !!forcedIncludeVibe : beat.includeVibe;
+  let includeOutro =
+    forcedIncludeOutro != null ? !!forcedIncludeOutro : beat.includeOutro;
+  if (forcedOutro != null && String(forcedOutro).trim()) includeOutro = true;
+
+  const outroBank = pack.outros || ["Here we go."];
+  const outro = !includeOutro
+    ? ""
+    : forcedOutro != null && String(forcedOutro).trim()
+      ? String(forcedOutro).trim()
+      : pickAvoidingRecent(outroBank, mem.outros, salt + 3);
+
+  return {
+    openerShape,
+    bodyShape,
+    beatFocus,
+    includeCount,
+    includeVibe,
+    includeOutro,
+    outro,
+    nameIntro,
+    opener: DJ_OPENER_SHAPES[openerShape] || DJ_OPENER_SHAPES.cold_open,
+    body: DJ_BODY_SHAPES[bodyShape] || DJ_BODY_SHAPES.energy_first,
+    beat: beat,
+  };
+}
+
+// Phase 3: character bible. Mood packs set energy; this sets who is speaking
+// and what they never sound like. "{event}" is filled from branding.eventName.
+export const DJ_CHARACTER_BIBLE = {
+  identity:
+    "You are a recurring host for {event} — a real DJ in the room, not a playlist narrator and not Spotify Wrapped.",
+  quirks: [
+    "Talk like you know this crowd personally and you're glad they're here.",
+    "Prefer one vivid vibe image over listing genres or auditing the set.",
+    "Treat discoveries like a tip from a friend in the booth, not a stats callout.",
+    "Keep a light wink at your DJ name when it fits — never preachy, never a lecture.",
+    "Sound like you're hosting the room, not reading a tracklist report.",
+  ],
+  hostingRules: [
+    "Sound like Spotify DJ X: short, confident drops — not a full radio break.",
+    "Rotate flavor: usually only two of track count, vibe line, and tagline — not all three every time.",
+    "Mention at most one or two artists (or one song) — only when it adds heat.",
+    "Never list enabled genres like a report card.",
+    "Never sound like Spotify Wrapped, a year-in-review, or a playlist audit.",
+    "Do not apologize for the mix or grade the songs.",
+    "One short vibe sentence beats a genre encyclopedia.",
+  ],
+  // Short asides — used occasionally, not every announce.
+  recurringBits: [
+    {
+      line: "Don't make me come out from behind these speakers.",
+      familySafe: false,
+    },
+    {
+      line: "If you know, you know — and if you don't, you're about to.",
+      familySafe: true,
+    },
+    {
+      line: "This booth has opinions tonight.",
+      familySafe: true,
+    },
+    {
+      line: "Somebody's about to remember why they cleared the furniture.",
+      familySafe: false,
+    },
+    {
+      line: "Consider this your friendly warning from the ones and twos.",
+      familySafe: true,
+    },
+    {
+      line: "I didn't come to {event} to whisper.",
+      familySafe: false,
+    },
+    {
+      line: "Keep your drinks steady — this stretch has ideas.",
+      familySafe: false,
+    },
+    {
+      line: "Smile if you feel it. Dance if you mean it.",
+      familySafe: true,
+    },
+  ],
+};
+
+export const DJ_INTENSITY_PROFILES = {
+  subtle: {
+    id: "subtle",
+    label: "Subtle",
+    prompt:
+      "Keep personality light — confident host, fewer boasts, skip most running jokes. Prefer clean energy over big character asides.",
+    bitEveryN: 8,
+    bitSaltMod: 10, // ~10% via salt
+    preferCatchphrase: false,
+  },
+  classic: {
+    id: "classic",
+    label: "Classic",
+    prompt:
+      "Balanced host — warm booth energy with occasional asides. Personality present but not overcooked.",
+    bitEveryN: 4,
+    bitSaltMod: 5, // ~20%
+    preferCatchphrase: true,
+  },
+  extra: {
+    id: "extra",
+    label: "Extra",
+    prompt:
+      "Bigger personality — lean into quirks, crowd calls, and booth asides more often. Still tasteful; never cartoon or preachy.",
+    bitEveryN: 2,
+    bitSaltMod: 3, // ~33%
+    preferCatchphrase: true,
+  },
+};
+
+export function getDjIntensityProfile(intensity = "classic") {
+  const id = normalizeDjCharacterIntensity(intensity);
+  return DJ_INTENSITY_PROFILES[id] || DJ_INTENSITY_PROFILES.classic;
+}
+
+// Bit frequency scales with character intensity (Phase 6).
+export function shouldIncludeCharacterBit(
+  ordinal = 0,
+  salt = 0,
+  intensity = "classic"
+) {
+  const profile = getDjIntensityProfile(intensity);
+  const n = Math.max(0, Math.floor(Number(ordinal) || 0));
+  if (n > 0 && n % profile.bitEveryN === 0) return true;
+  return Math.abs(Number(salt) || 0) % profile.bitSaltMod === 0;
+}
+
+export function pickDjCharacterBit({
+  mood = "all",
+  salt = 0,
+  includeBit = true,
+  catchphrase = "",
+  intensity = "classic",
+} = {}) {
+  if (!includeBit) return null;
+  const kids = String(mood || "").toLowerCase() === "kids";
+  const phrase = normalizeDjCatchphrase(catchphrase, "");
+  const profile = getDjIntensityProfile(intensity);
+  // Favorite catchphrase can stand in for a recurring bit (not on Kids).
+  if (
+    phrase &&
+    !kids &&
+    profile.preferCatchphrase &&
+    Math.abs(Number(salt) || 0) % 3 === 0
+  ) {
+    return phrase;
+  }
+  const bank = DJ_CHARACTER_BIBLE.recurringBits.filter((b) =>
+    kids ? b.familySafe : true
+  );
+  if (!bank.length) return null;
+  return fillEventName(
+    pick(
+      bank.map((b) => b.line),
+      salt + 11
+    )
+  );
+}
+
+export function resolveCharacterMoment({
+  mood = "all",
+  salt = 0,
+  ordinal = null,
+  forceBit = null,
+  intensity = "classic",
+  catchphrase = "",
+} = {}) {
+  const include =
+    forceBit != null
+      ? !!forceBit
+      : shouldIncludeCharacterBit(
+          ordinal != null ? ordinal : announceOrdinal,
+          salt,
+          intensity
+        );
+  return {
+    include,
+    bit: pickDjCharacterBit({
+      mood,
+      salt,
+      includeBit: include,
+      catchphrase,
+      intensity,
+    }),
+  };
+}
+
+// Strip banned phrases (case-insensitive) from spoken copy.
+export function applyDjBanList(text, banList = "") {
+  let t = String(text || "");
+  const phrases = parseDjBanList(banList);
+  for (const phrase of phrases) {
+    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    t = t.replace(new RegExp(escaped, "gi"), "").replace(/\s+/g, " ").trim();
+  }
+  // Clean leftover punctuation clumps after removals.
+  t = t
+    .replace(/\s+([,.!?])/g, "$1")
+    .replace(/([,.!?]){2,}/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  return t;
+}
+
+export function resolveDjCharacterKnobs(summary = {}, dj = null) {
+  const settings = dj || getDjVoiceSettings();
+  return {
+    intensity: normalizeDjCharacterIntensity(
+      summary.djCharacterIntensity ?? settings.djCharacterIntensity
+    ),
+    catchphrase: normalizeDjCatchphrase(
+      summary.djCatchphrase ?? settings.djCatchphrase,
+      ""
+    ),
+    banList: String(summary.djBanList ?? settings.djBanList ?? ""),
+  };
+}
+
+export function roomToSonosEntity(room) {
+  if (!room || typeof room !== "string") return null;
+  const slug = room
+    .trim()
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
+  if (!slug) return null;
+  return `media_player.sonos_${slug}`;
+}
+
+export function resolveAnnounceEntity(room = getSonosTargetRoom()) {
+  return roomToSonosEntity(room);
+}
+
+// Spoken count for TTS (avoids "twenty five tracks" robot cadence from digits).
+function spokenCount(n) {
+  const words = {
+    1: "one",
+    2: "two",
+    3: "three",
+    4: "four",
+    5: "five",
+    10: "ten",
+    15: "fifteen",
+    20: "twenty",
+    25: "twenty-five",
+    50: "fifty",
+    75: "seventy-five",
+    100: "a hundred",
+  };
+  if (words[n]) return words[n];
+  if (n > 20 && n < 30) return `twenty-${words[n - 20] || n - 20}`;
+  return String(n);
+}
+
+function speakArtist(name) {
+  return String(name || "")
+    .replace(/\bAC\/DC\b/gi, "A C D C")
+    .replace(/\bU2\b/g, "U Two")
+    .replace(/\bR\.?E\.?M\.?\b/gi, "R E M")
+    .trim();
+}
+
+function pick(arr, salt = 0) {
+  if (!arr.length) return "";
+  return arr[Math.abs(salt) % arr.length];
+}
+
+function uniqueArtists(highlights, limit = 2) {
+  const uniq = [];
+  for (const h of Array.isArray(highlights) ? highlights : []) {
+    const a = speakArtist(h?.artist);
+    if (!a || uniq.includes(a)) continue;
+    uniq.push(a);
+    if (uniq.length >= limit) break;
+  }
+  return uniq;
+}
+
+function discoveryHighlights(highlights) {
+  return (Array.isArray(highlights) ? highlights : []).filter((h) => h?.discovered);
+}
+
+// Mood presets mirror the Controls UI chips (kept here so DJ scripts can
+// name the active vibe without importing browser code).
+export const DJ_MOOD_PRESETS = {
+  party: [
+    "rock",
+    "metal",
+    "country",
+    "hiphop",
+    "electronic",
+    "pop",
+    "punk",
+    "soul",
+    "folk",
+  ],
+  chill: ["folk", "soul", "jazz", "blues", "pop", "electronic", "oldies", "other"],
+  country: ["country", "folk"],
+  heavy: ["rock", "metal"],
+  rap: ["hiphop"],
+  kids: ["kids", "soundtrack"],
+  all: null,
+};
+
+const DJ_MOOD_LABELS = {
+  party: "Party",
+  chill: "Chill",
+  country: "Country",
+  heavy: "Heavy",
+  rap: "Rap",
+  kids: "Kids",
+  all: "All genres",
+  custom: "Custom mix",
+};
+
+// Phase 2: per-mood voice packs for LLM + template fallback.
+// Keep lines short and speakable — these are DJ cues, not essays.
+export const DJ_MOOD_VOICE_PACKS = {
+  party: {
+    tone: "hype MC energy — playful boasts, crowd calls, celebration without sounding like a sports arena PA",
+    energyWords: [
+      "floor-ready",
+      "crowd energy",
+      "sing-along heat",
+      "celebration mode",
+      "hands-up vibes",
+    ],
+    openersStart: [
+      "All right, {event} — I've got {count} coming up.",
+      "{event}, let's move: {count} on deck.",
+      "Alright — {count} tracks built to keep this room loud.",
+      "{Count} headed your way. Stay on your feet.",
+    ],
+    openersRefill: [
+      "Next up on {event} — {count} more.",
+      "We're keeping the floor warm with {count} more.",
+      "Alright, another {count} coming through.",
+      "{Count} more for the celebration.",
+    ],
+    vibeLines: [
+      "{energy} built for the floor",
+      "a party mix with real crowd energy",
+      "celebration heat with just enough edge",
+      "the kind of stretch that makes people actually dance",
+    ],
+    crowdCalls: [
+      "{event} — this one's for the floor.",
+      "Alright room — stay on your feet.",
+      "Celebration mode: this stretch is yours.",
+    ],
+    discoveryLines: [
+      " Keep an ear out for {artist} — a discovery built for the floor.",
+      " There's a little wildcard in this set with real crowd energy.",
+      " Plus a discovery cut worth hearing before the night gets louder.",
+    ],
+    artistTeaseOpeners: [
+      "{artist} is coming up — {count} built for the floor.",
+      "Keep an ear out for {artist}. {Count} on deck.",
+      "{artist} in the mix. {Count} headed your way.",
+    ],
+    discoveryTeaseOpeners: [
+      "There's a discovery in this block — {count} total.",
+      "Wildcard energy incoming. {Count} on deck, including {artist}.",
+      "One you might not know yet is riding along. {Count} coming up.",
+    ],
+    outros: [
+      "Let's go.",
+      "Turn it up.",
+      "Here we go.",
+      "Let's get into it.",
+      "Make some noise.",
+      "Stay loud.",
+    ],
+    avoid: [
+      "listing genres like a report card",
+      "soft lounge host energy",
+      "whispery chill delivery",
+      "kids-show cheerfulness",
+    ],
+  },
+  heavy: {
+    tone: "louder swagger — confident, a little dangerous, volume-first without cartoon metal-dude parody",
+    energyWords: [
+      "turned up",
+      "guitars and grit",
+      "no soft landing",
+      "volume first",
+      "heavy hitters",
+    ],
+    openersStart: [
+      "{event} — {count} coming in hot.",
+      "Alright. {Count} with some real weight behind them.",
+      "{Count} on deck. Keep it loud.",
+      "Coming up, {count} that don't ask permission.",
+    ],
+    openersRefill: [
+      "Next block: {count} more, still heavy.",
+      "We're not backing off — {count} more.",
+      "Another {count}. Stay in it.",
+      "{Count} more with teeth.",
+    ],
+    vibeLines: [
+      "{energy} turned up loud",
+      "guitars and grit with no soft landing",
+      "a heavier stretch that earns the volume bump",
+      "loud, lean, and built to hit",
+    ],
+    crowdCalls: [
+      "{event} — no soft landing on this one.",
+      "Alright. Stay in it.",
+      "Volume first. This stretch means it.",
+    ],
+    discoveryLines: [
+      " Keep an ear out for {artist} — a heavier discovery with teeth.",
+      " There's a wildcard in here that hits harder than it looks.",
+      " Plus a discovery cut that earns the volume bump.",
+    ],
+    artistTeaseOpeners: [
+      "{artist} is coming up — {count} with weight behind them.",
+      "Keep an ear out for {artist}. {Count} on deck. Keep it loud.",
+      "{artist} in the mix. {Count} that don't ask permission.",
+    ],
+    discoveryTeaseOpeners: [
+      "There's a discovery coming in hot — {count} total.",
+      "Wildcard with teeth. {Count} on deck, including {artist}.",
+      "One you might not know yet is about to hit. {Count} coming up.",
+    ],
+    outros: [
+      "Crank it up.",
+      "Turn it to eleven.",
+      "Stay loud.",
+      "Let it hit.",
+      "Don't blink.",
+      "Let's go.",
+    ],
+    avoid: [
+      "cute or gentle phrasing",
+      "chill / easy-pace language",
+      "soft landings and cozy vibes",
+      "kids-safe silliness",
+    ],
+  },
+  chill: {
+    tone: "warmer and cooler — confident host, lower intensity, no shouting or crank-it-up language",
+    energyWords: [
+      "easy pace",
+      "cooler stretch",
+      "smooth glide",
+      "late-night ease",
+      "laid-back pocket",
+    ],
+    openersStart: [
+      "{event} — easing into {count}.",
+      "Alright. {Count} coming up at an easier pace.",
+      "Coming up, {count} for a cooler stretch.",
+      "{Count} on deck. Settle in.",
+    ],
+    openersRefill: [
+      "Next up — {count} more, still easy.",
+      "Keeping it cool with {count} more.",
+      "Another {count} at this pace.",
+      "{Count} more. Stay with it.",
+    ],
+    vibeLines: [
+      "{energy} at an easy pace",
+      "a cooler stretch that still keeps {event} moving",
+      "smooth energy without losing the room",
+      "laid-back heat, not a nap",
+    ],
+    crowdCalls: [
+      "{event} — settle in for this cooler stretch.",
+      "Alright. Easy pace, still moving.",
+      "Stay with it — no rush on this one.",
+    ],
+    discoveryLines: [
+      " Keep an ear out for {artist} — a cooler discovery worth the listen.",
+      " There's a little wildcard gliding through this set.",
+      " Plus a discovery cut that fits the easy pace.",
+    ],
+    artistTeaseOpeners: [
+      "{artist} is coming up — {count} at an easier pace.",
+      "Keep an ear out for {artist}. {Count} on deck. Settle in.",
+      "{artist} in the mix. {Count} for a cooler stretch.",
+    ],
+    discoveryTeaseOpeners: [
+      "There's a discovery easing in — {count} total.",
+      "A quieter wildcard is riding along. {Count} on deck, including {artist}.",
+      "One you might not know yet fits this pace. {Count} coming up.",
+    ],
+    outros: [
+      "Ease into it.",
+      "Let it ride.",
+      "Enjoy this one.",
+      "Stay with it.",
+      "Here we go.",
+      "Let it roll.",
+    ],
+    avoid: [
+      "crank it up / turn it to eleven",
+      "crowd-roar hype MC energy",
+      "aggressive swagger",
+      "shouting or sports-arena calls",
+    ],
+  },
+  country: {
+    tone: "warmer storytelling — night-drive heart, boots-on-the-ground, friendly without becoming a parody twang act",
+    energyWords: [
+      "night-drive heart",
+      "boots-on-the-ground",
+      "front-porch energy",
+      "highway glow",
+      "story-first warmth",
+    ],
+    openersStart: [
+      "{event} — I've got {count} with some heart in them.",
+      "Alright. {Count} coming up for the long road.",
+      "Coming up, {count} with that night-drive feel.",
+      "{Count} on deck. Settle in.",
+    ],
+    openersRefill: [
+      "Next stretch — {count} more down the road.",
+      "Keeping the wheels turning with {count} more.",
+      "Another {count} with some story in them.",
+      "{Count} more. Stay with us.",
+    ],
+    vibeLines: [
+      "{energy} with night-drive heart",
+      "boots-on-the-ground country and folk energy",
+      "warm storytelling with a little dust on the boots",
+      "highway glow and honest choruses",
+    ],
+    crowdCalls: [
+      "{event} — this stretch has some heart in it.",
+      "Alright. Ride with us for a minute.",
+      "Stay with us — long-road energy coming through.",
+    ],
+    discoveryLines: [
+      " Keep an ear out for {artist} — a discovery with night-drive heart.",
+      " There's a little wildcard with some story in it.",
+      " Plus a discovery cut worth hearing down the road.",
+    ],
+    artistTeaseOpeners: [
+      "{artist} is coming up — {count} with some heart in them.",
+      "Keep an ear out for {artist}. {Count} for the long road.",
+      "{artist} in the mix. {Count} with that night-drive feel.",
+    ],
+    discoveryTeaseOpeners: [
+      "There's a discovery down the road — {count} total.",
+      "A story-first wildcard is riding along. {Count} on deck, including {artist}.",
+      "One you might not know yet has some heart. {Count} coming up.",
+    ],
+    outros: [
+      "Let it roll.",
+      "Enjoy this one.",
+      "Here we go.",
+      "Ride with it.",
+      "Stay with us.",
+      "Let's get into it.",
+    ],
+    avoid: [
+      "metal / crank-it-up swagger",
+      "fake exaggerated twang or yokel jokes",
+      "rap-booth slang",
+      "kids-show cheer",
+    ],
+  },
+  rap: {
+    tone: "tighter rhythm — booth confidence, pocket and punch; tasteful, never caricature slang or forced AAVE",
+    energyWords: [
+      "pocket and punch",
+      "on deck",
+      "in the booth",
+      "heat in the mix",
+      "tight cadence",
+    ],
+    openersStart: [
+      "{event} — {count} on deck.",
+      "Alright. {Count} coming through the booth.",
+      "Coming up, {count} with pocket.",
+      "{Count} locked in. Stay with it.",
+    ],
+    openersRefill: [
+      "Next up — {count} more in the pocket.",
+      "Keeping the booth warm with {count} more.",
+      "Another {count}. Stay locked.",
+      "{Count} more coming through.",
+    ],
+    vibeLines: [
+      "{energy} with pocket and punch",
+      "hip-hop heat coming through the booth",
+      "tight cadence and real presence",
+      "a run with bounce and bite",
+    ],
+    crowdCalls: [
+      "{event} — lock in for this one.",
+      "Alright. Stay with the booth.",
+      "This stretch has pocket. Stay with it.",
+    ],
+    discoveryLines: [
+      " Keep an ear out for {artist} — a discovery with pocket and punch.",
+      " There's a wildcard coming through the booth.",
+      " Plus a discovery cut with real presence.",
+    ],
+    artistTeaseOpeners: [
+      "{artist} is coming up — {count} with pocket.",
+      "Keep an ear out for {artist}. {Count} locked in.",
+      "{artist} in the mix. {Count} coming through the booth.",
+    ],
+    discoveryTeaseOpeners: [
+      "There's a discovery in the booth — {count} total.",
+      "Wildcard energy locked in. {Count} on deck, including {artist}.",
+      "One you might not know yet is riding along. {Count} coming up.",
+    ],
+    outros: [
+      "Let's get into it.",
+      "Stay with it.",
+      "Here we go.",
+      "Lock in.",
+      "Let it ride.",
+      "Let's go.",
+    ],
+    avoid: [
+      "forced slang or caricature",
+      "country storytelling clichÃ©s",
+      "kids-show silliness",
+      "generic rock-radio hype alone",
+    ],
+  },
+  kids: {
+    tone: "gentler and silly — family-safe, smile-first, never edgy, never volume-bragging",
+    energyWords: [
+      "smile-first",
+      "family-friendly",
+      "playful bounce",
+      "fun and light",
+      "giggle energy",
+    ],
+    openersStart: [
+      "Hey {event} — I've got {count} fun ones coming up.",
+      "Alright friends — {count} on the way.",
+      "Coming up, {count} smile-first tracks.",
+      "{Count} ready. Let's have some fun.",
+    ],
+    openersRefill: [
+      "Next up — {count} more fun ones.",
+      "Keeping the smiles going with {count} more.",
+      "Another {count}. Stay silly.",
+      "{Count} more for the fun.",
+    ],
+    vibeLines: [
+      "{energy} kept fun and family-friendly",
+      "a lighter, smile-first stretch",
+      "playful bounce without the edge",
+      "easy fun for the whole room",
+    ],
+    crowdCalls: [
+      "Hey {event} — this one's for smiles.",
+      "Alright friends — stay silly with us.",
+      "Fun first. This stretch is for everybody.",
+    ],
+    discoveryLines: [
+      " Keep an ear out for {artist} — a fun little discovery.",
+      " There's a playful wildcard in this set.",
+      " Plus a smile-first discovery worth hearing.",
+    ],
+    artistTeaseOpeners: [
+      "{artist} is coming up — {count} fun ones.",
+      "Keep an ear out for {artist}. {Count} on the way.",
+      "{artist} in the mix. {Count} smile-first tracks.",
+    ],
+    discoveryTeaseOpeners: [
+      "There's a fun discovery in this block — {count} total.",
+      "A playful wildcard is riding along. {Count} on deck, including {artist}.",
+      "One you might not know yet is coming up. {Count} for the fun.",
+    ],
+    outros: [
+      "Let's have fun.",
+      "Here we go.",
+      "Enjoy this one.",
+      "Stay smiling.",
+      "Let's get into it.",
+      "Ready?",
+    ],
+    avoid: [
+      "crank it up / stay loud / turn it to eleven",
+      "edgy or irreverent adult jokes",
+      "aggressive swagger",
+      "alcohol / party-hard language",
+    ],
+  },
+  all: {
+    tone: "flexible {event} host — match the set's energy signature; default to friendly confidence, not one fixed genre persona",
+    energyWords: [
+      "mixed energy",
+      "crowd-pleasers",
+      "{event} heat",
+      "room-ready",
+      "wide-open mix",
+    ],
+    openersStart: [
+      "All right, {event} — I've got {count} coming up.",
+      "Coming up, {count} tracks headed your way.",
+      "{Count} on deck.",
+      "Alright — {count} songs in this block.",
+      "{event}, settle in: {count} tracks coming up.",
+    ],
+    openersRefill: [
+      "Next up on {event} — {count} more.",
+      "Alright, another {count} coming through.",
+      "We're keeping it going with {count} more tracks.",
+      "{Count} more for the floor.",
+    ],
+    vibeLines: [
+      "{energy} with party volume behind it",
+      "loud guitars, big choruses, and the kind of rock everybody somehow knows by the second verse",
+      "familiar favorites with just enough edge to keep {event} moving",
+      "a run of crowd-pleasers with some serious volume behind them",
+      "the kind of set that makes people put their drinks down and actually dance",
+    ],
+    crowdCalls: [
+      "{event} — this one's for the room.",
+      "Alright. Stay with us.",
+      "This stretch is for everybody in the room.",
+    ],
+    discoveryLines: [
+      " Keep an ear out for {artist} — a discovery that punches above its weight.",
+      " There's a little wildcard in this set that deserves your attention.",
+      " Plus a discovery cut worth hearing once before it disappears into the night.",
+    ],
+    artistTeaseOpeners: [
+      "{artist} is coming up — {count} in this block.",
+      "Keep an ear out for {artist}. {Count} on deck.",
+      "{artist} is in the mix. {Count} headed your way.",
+    ],
+    discoveryTeaseOpeners: [
+      "There's a discovery in this block — {count} total.",
+      "Wildcard energy incoming. {Count} on deck, including {artist}.",
+      "One you might not know yet is riding along. {Count} coming up.",
+    ],
+    outros: [
+      "Let's rock.",
+      "Let's go.",
+      "Turn it up.",
+      "Enjoy this one.",
+      "Here we go.",
+      "Let's get into it.",
+      "Stay loud.",
+      "This one's for you.",
+      "Let it roll.",
+    ],
+    avoid: [
+      "listing every genre enabled",
+      "sounding like Spotify Wrapped",
+      "auditing the playlist",
+    ],
+  },
+  custom: {
+    tone: "host matching tonight's custom genre picks — use the energy signature; stay conversational, not encyclopedic",
+    energyWords: [
+      "custom mix",
+      "tonight's picks",
+      "shaped for this room",
+      "hand-picked heat",
+      "this room's vibe",
+    ],
+    openersStart: [
+      "{event} — {count} shaped for tonight's picks.",
+      "Alright. {Count} matching what you dialed in.",
+      "Coming up, {count} for this room.",
+      "{Count} on deck, custom-built.",
+    ],
+    openersRefill: [
+      "Next up — {count} more from tonight's mix.",
+      "Keeping your picks rolling with {count} more.",
+      "Another {count} in this custom stretch.",
+      "{Count} more for this room.",
+    ],
+    vibeLines: [
+      "{energy} matching tonight's picks",
+      "a custom mix shaped for this room",
+      "hand-picked energy for {event}",
+      "tonight's dialed-in vibe, loud enough to matter",
+    ],
+    crowdCalls: [
+      "{event} — shaped for tonight's picks.",
+      "Alright. This one's dialed in for the room.",
+      "Your mix, your room — stay with it.",
+    ],
+    discoveryLines: [
+      " Keep an ear out for {artist} — a discovery matching tonight's picks.",
+      " There's a little wildcard shaped for this room.",
+      " Plus a discovery cut from outside the usual dial.",
+    ],
+    artistTeaseOpeners: [
+      "{artist} is coming up — {count} shaped for tonight's picks.",
+      "Keep an ear out for {artist}. {Count} matching what you dialed in.",
+      "{artist} in the mix. {Count} for this room.",
+    ],
+    discoveryTeaseOpeners: [
+      "There's a discovery in tonight's mix — {count} total.",
+      "A custom-built wildcard is riding along. {Count} on deck, including {artist}.",
+      "One you might not know yet made the cut. {Count} coming up.",
+    ],
+    outros: [
+      "Let's get into it.",
+      "Here we go.",
+      "Enjoy this one.",
+      "Let's go.",
+      "Let it roll.",
+      "Stay with it.",
+    ],
+    avoid: [
+      "reading the enabled-genre list aloud",
+      "generic rock hype when the mix isn't rock",
+      "apologizing for the custom selection",
+    ],
+  },
+};
+
+export function getDjMoodVoicePack(mood = "all") {
+  const key = String(mood || "all").toLowerCase();
+  return DJ_MOOD_VOICE_PACKS[key] || DJ_MOOD_VOICE_PACKS.all;
+}
+
+/** Event / night name from branding (defaults to PartyQueue). */
+export function eventDisplayName() {
+  try {
+    return (
+      getBrandingSettings().eventName ||
+      BRANDING_DEFAULTS.eventName ||
+      "tonight"
+    );
+  } catch {
+    return BRANDING_DEFAULTS.eventName || "tonight";
+  }
+}
+
+function fillEventName(template, eventName = eventDisplayName()) {
+  return String(template || "").replaceAll("{event}", eventName);
+}
+
+function fillCountTemplate(template, howMany) {
+  const count = String(howMany);
+  const Count = count.charAt(0).toUpperCase() + count.slice(1);
+  return fillEventName(
+    String(template || "")
+      .replaceAll("{count}", count)
+      .replaceAll("{Count}", Count)
+  );
+}
+
+function fillEnergyTemplate(template, energySignature) {
+  return fillEventName(
+    String(template || "").replaceAll(
+      "{energy}",
+      energySignature || "mixed energy"
+    )
+  );
+}
+
+// Fill pack line placeholders used by template fallback (Phase 5).
+function fillPackTemplate(template, { howMany = "", artist = "" } = {}) {
+  const count = String(howMany);
+  const Count = count ? count.charAt(0).toUpperCase() + count.slice(1) : "";
+  return fillEventName(
+    String(template || "")
+      .replaceAll("{count}", count)
+      .replaceAll("{Count}", Count)
+      .replaceAll("{artist}", artist || "one discovery track")
+  );
+}
+
+const DEFAULT_CROWD_CALLS = [
+  "{event} — this one's for the room.",
+  "Alright. Stay with us.",
+  "This stretch is for everybody in the room.",
+];
+
+const DEFAULT_DISCOVERY_LINES = [
+  " Keep an ear out for {artist} — a discovery that punches above its weight.",
+  " There's a little wildcard in this set that deserves your attention.",
+  " Plus a discovery cut worth hearing once before it disappears into the night.",
+];
+
+const DEFAULT_ARTIST_TEASE = [
+  "{artist} is coming up — {count} in this block.",
+  "Keep an ear out for {artist}. {Count} on deck.",
+  "{artist} is in the mix. {Count} headed your way.",
+];
+
+const DEFAULT_ARTIST_TEASE_NO_COUNT = [
+  "{artist} is coming up.",
+  "Keep an ear out for {artist}.",
+  "{artist} is in the mix.",
+];
+
+const DEFAULT_DISCOVERY_TEASE = [
+  "There's a discovery in this block — {count} total.",
+  "Wildcard energy incoming. {Count} on deck, including {artist}.",
+  "One you might not know yet is riding along. {Count} coming up.",
+];
+
+const DEFAULT_DISCOVERY_TEASE_NO_COUNT = [
+  "There's a discovery riding along.",
+  "Wildcard energy incoming, including {artist}.",
+  "One you might not know yet is in this stretch.",
+];
+
+const DEFAULT_COLD_OPEN_NO_COUNT = [
+  "Alright — stay with this stretch.",
+  "Keeping the room moving.",
+  "This one's for right now.",
+  "Lock in with us.",
+];
+
+const GENRE_LABEL_BY_ID = Object.fromEntries(
+  GENRE_BUCKETS.map((b) => [b.id, b.label])
+);
+
+function sameIdSet(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+    return false;
+  }
+  const set = new Set(a);
+  return b.every((id) => set.has(id));
+}
+
+function enabledGenresFromSettings() {
+  const raw = loadSettings()?.genres;
+  if (!Array.isArray(raw) || !raw.length) return null;
+  return raw.map((g) => String(g)).filter(Boolean);
+}
+
+function bucketsFromHighlights(highlights) {
+  const counts = new Map();
+  for (const h of Array.isArray(highlights) ? highlights : []) {
+    let buckets = bucketsForArtistSync(h?.artist);
+    if (!buckets.length) buckets = ["other"];
+    for (const b of buckets) {
+      counts.set(b, (counts.get(b) || 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([id, n]) => ({ id, count: n, label: GENRE_LABEL_BY_ID[id] || id }));
+}
+
+function energySignatureFromBuckets(bucketCounts) {
+  if (!bucketCounts.length) return "mixed energy";
+  const top = bucketCounts.slice(0, 3).map((b) => b.label);
+  if (top.length === 1) return `mostly ${top[0]}`;
+  if (top.length === 2) return `${top[0]} with a bit of ${top[1]}`;
+  return `${top[0]}, ${top[1]}, and ${top[2]}`;
+}
+
+// Resolve host mood/genre selection + a short energy read of the upcoming block.
+// Pure enough to unit-test; genres null/empty = all genres enabled.
+export function resolveDjMoodContext({
+  genres = null,
+  highlights = [],
+} = {}) {
+  const allIds = GENRE_BUCKETS.map((b) => b.id);
+  let enabled =
+    Array.isArray(genres) && genres.length
+      ? genres.map((g) => String(g)).filter((id) => GENRE_LABEL_BY_ID[id])
+      : null;
+  if (enabled && !enabled.length) enabled = null;
+
+  let mood = "all";
+  if (enabled) {
+    mood = "custom";
+    for (const [name, ids] of Object.entries(DJ_MOOD_PRESETS)) {
+      if (!ids) continue;
+      if (sameIdSet(enabled, ids)) {
+        mood = name;
+        break;
+      }
+    }
+    if (sameIdSet(enabled, allIds)) mood = "all";
+  }
+
+  const bucketCounts = bucketsFromHighlights(highlights);
+  const genreLabels = (enabled || allIds).map(
+    (id) => GENRE_LABEL_BY_ID[id] || id
+  );
+
+  return {
+    mood,
+    moodLabel: DJ_MOOD_LABELS[mood] || "Custom mix",
+    genres: enabled,
+    genreLabels,
+    energyBuckets: bucketCounts.slice(0, 5),
+    energySignature: energySignatureFromBuckets(bucketCounts),
+  };
+}
+
+function moodLine(artists, salt, moodContext = null) {
+  if (artists.some((a) => /christmas|holiday|santa|noel/i.test(a))) {
+    return "a festive detour that still knows how to throw down";
+  }
+  const pack = getDjMoodVoicePack(moodContext?.mood || "all");
+  const energy = moodContext?.energySignature || "mixed energy";
+  const bank = (pack.vibeLines || []).map((line) =>
+    fillEnergyTemplate(line, energy)
+  );
+  if (bank.length) return pick(bank, salt);
+  return fillEventName(`${energy} for {event}`);
+}
+
+// Five fixed phrasings with the configured DJ name substituted in.
+export function nameIntrosFor(djName) {
+  const name = String(djName || DJ_VOICE_DEFAULTS.djName).trim() || DJ_VOICE_DEFAULTS.djName;
+  return [
+    `It's your boy ${name}.`,
+    `${name} back at you.`,
+    `${name} in the building.`,
+    `This is ${name}.`,
+    `${name} on the ones and twos.`,
+  ];
+}
+
+function formatVoicePackForPrompt(pack) {
+  const event = eventDisplayName();
+  const bullets = (arr, n = 6) =>
+    (arr || [])
+      .slice(0, n)
+      .map((s) => `  - ${fillEventName(s, event)}`)
+      .join("\n");
+  return `Mood voice pack (draw from this; paraphrase, do not copy every line):
+- Tone: ${fillEventName(pack.tone, event)}
+- Energy words to lean on:
+${bullets(pack.energyWords)}
+- Example outro styles (pick one short closer in this spirit):
+${bullets(pack.outros)}
+- Avoid:
+${bullets(pack.avoid)}`;
+}
+
+/** @returns {"catchphrase"|"bible"|"none"} */
+export function characterBitKind(characterMoment = null, catchphrase = "") {
+  if (!characterMoment?.include || !characterMoment?.bit) return "none";
+  const phrase = normalizeDjCatchphrase(catchphrase, "");
+  const bit = String(characterMoment.bit || "").trim();
+  if (phrase && bit === phrase) return "catchphrase";
+  return "bible";
+}
+
+export function formatCharacterBibleForPrompt(
+  characterMoment = null,
+  characterKnobs = null
+) {
+  const event = eventDisplayName();
+  const bullets = (arr) =>
+    (arr || []).map((s) => `  - ${fillEventName(s, event)}`).join("\n");
+  const intensity = getDjIntensityProfile(characterKnobs?.intensity);
+  const catchphrase = normalizeDjCatchphrase(characterKnobs?.catchphrase, "");
+  const banned = parseDjBanList(characterKnobs?.banList);
+  const kind = characterBitKind(characterMoment, catchphrase);
+  let bitLine =
+    "Character moment for THIS announce: none — do not force a running joke or booth aside.";
+  if (kind === "catchphrase") {
+    bitLine = `Character moment for THIS announce: include this exact catchphrase once (do not paraphrase it): "${catchphrase}" — weave it in naturally.`;
+  } else if (kind === "bible") {
+    const bit = fillEventName(characterMoment.bit, event);
+    bitLine = `Character moment for THIS announce: weave in this aside once, naturally (paraphrase OK): "${bit}"`;
+  }
+  // Soft reminder only when the catchphrase is not already the forced bit.
+  const catchLine =
+    catchphrase && kind !== "catchphrase"
+      ? `Favorite catchphrase (use sparingly, at most once, only when it fits): "${catchphrase}"`
+      : catchphrase
+        ? "Favorite catchphrase: already assigned as this announce's character moment (exact wording above)."
+        : "Favorite catchphrase: none configured.";
+  const banLine = banned.length
+    ? `Never say these phrases (ban-list):\n${banned.map((p) => `  - ${p}`).join("\n")}`
+    : "Ban-list: none.";
+  return `Character bible (${fillEventName(DJ_CHARACTER_BIBLE.identity, event)}):
+Intensity: ${intensity.label} — ${intensity.prompt}
+Quirks:
+${bullets(DJ_CHARACTER_BIBLE.quirks)}
+Hosting rules:
+${bullets(DJ_CHARACTER_BIBLE.hostingRules)}
+${catchLine}
+${banLine}
+${bitLine}`;
+}
+
+function formatAnnounceShapeForPrompt(announceShape, djName) {
+  if (!announceShape) return "";
+  const name = String(djName || DJ_VOICE_DEFAULTS.djName).trim() || DJ_VOICE_DEFAULTS.djName;
+  const intros = nameIntrosFor(name);
+  const beat = announceShape.beat || DJ_BEAT_FOCI[announceShape.beatFocus] || null;
+  const beatLine = beat
+    ? `- Flavor beat (${beat.label || announceShape.beatFocus}): ${beat.instruction}`
+    : "";
+  const closer =
+    announceShape.includeOutro === false
+      ? "Do NOT end with a tagline/outro — finish after the count and/or vibe."
+      : announceShape.outro
+        ? `Close with a short transition in this spirit (paraphrase OK, do not stack outros): "${announceShape.outro}"`
+        : "Close with exactly one short mood-matched transition phrase.";
+  const countLine =
+    announceShape.includeCount === false
+      ? "- Track count: omit — do not say how many tracks are coming."
+      : "- Track count: include once, naturally.";
+  const vibeLine =
+    announceShape.includeVibe === false
+      ? "- Vibe sentence: omit — no energy/mood description this time."
+      : "- Vibe: one vivid sentence only — do NOT list genres.";
+  return `Delivery shape for THIS announce (follow structure; paraphrase wording):
+${beatLine}
+- Opener shape (${announceShape.opener?.label || announceShape.openerShape}): ${announceShape.opener?.instruction || ""}
+- Body shape (${announceShape.body?.label || announceShape.bodyShape}): ${announceShape.body?.instruction || ""}
+${countLine}
+${vibeLine}
+- ${closer}
+- Name intro: ${
+    announceShape.nameIntro
+      ? `yes — begin with exactly one of: "${intros[0]}" / "${intros[1]}" / "${intros[2]}" / "${intros[3]}" / "${intros[4]}"`
+      : `no — do not open with "${name}"`
+  }`;
+}
+
+function buildDjSystemPrompt(
+  djName,
+  maxWords,
+  moodContext = null,
+  characterMoment = null,
+  announceShape = null,
+  characterKnobs = null
+) {
+  const name = String(djName || DJ_VOICE_DEFAULTS.djName).trim() || DJ_VOICE_DEFAULTS.djName;
+  const softMax = Math.max(
+    28,
+    Math.min(120, Number(maxWords) || DJ_VOICE_DEFAULTS.djAnnounceMaxWords)
+  );
+  const softMin = Math.min(22, Math.max(14, softMax - 25));
+  const pack = getDjMoodVoicePack(moodContext?.mood || "all");
+  const event = eventDisplayName();
+  const packBlock = formatVoicePackForPrompt(pack);
+  const bibleBlock = formatCharacterBibleForPrompt(characterMoment, characterKnobs);
+  const shapeBlock = formatAnnounceShapeForPrompt(announceShape, name);
+  const moodLabel = moodContext?.moodLabel || "All genres";
+  return `You are ${name}, the host and DJ for ${event}.
+
+${bibleBlock}
+
+Your job is to introduce upcoming blocks of music like Spotify's DJ X: short, confident, fun drops that keep the party moving. Never deliver a full radio break.
+
+Active mood: ${moodLabel}
+${packBlock}
+
+${shapeBlock}
+
+For each music block:
+- Follow the flavor beat above — usually only two of: track count, vibe line, tagline. Do not stack all three unless the beat says so.
+- Match the mood voice pack and delivery shape above.
+- When a vibe line is included, keep it to one vivid sentence — do NOT list genres like a report card.
+- Mention at most one artist or song, and only when it adds excitement. Never read the playlist.
+- If the block contains a lesser-known, unexpected, newer, or discovery-type song AND discoveries are enabled for this block, call it out in one short clause. If discoveries are not enabled, do not mention discoveries, wildcards, or "songs you might not know."
+- Vary the wording so consecutive announces do not sound the same.
+- Use at most one short transition phrase when the beat includes a tagline; otherwise end clean.
+
+Tone:
+- Follow the character bible and mood voice pack
+- Confident but not cheesy
+- Slightly irreverent and playful when the pack allows it (never for Kids)
+- Appropriate for a ${event} gathering
+- Conversational, like a DJ who knows the music and knows the crowd
+- Never overly formal
+- Never preachy
+- Do not force in-jokes the room won't get
+
+Length:
+Keep each announcement between approximately ${softMin} and ${softMax} words. Prefer the short end. Never exceed ${softMax} words.
+
+When I provide a playlist block, write only the spoken DJ announcement. Do not provide notes, explanations, headings, quotes, or analysis.
+Prefer "${event}" or no crowd nickname over generic phrases like "party people."`;
+}
+
+function buildTemplateOpener({
+  announceShape,
+  event,
+  howMany,
+  artists,
+  discArtist,
+  pack,
+  salt,
+  intros,
+  recentOpenerLines = [],
+}) {
+  const shape = announceShape?.openerShape || "cold_open";
+  const includeCount = announceShape?.includeCount !== false;
+  if (shape === "name_intro") {
+    const nameLine = pick(intros, salt + 5);
+    if (!includeCount) {
+      return { intro: `${nameLine} `, opener: "", openerKey: nameLine };
+    }
+    const countBank =
+      event === "session_refill"
+        ? pack.openersRefill
+        : pack.openersStart;
+    const countLine = fillCountTemplate(
+      pickAvoidingRecent(countBank || ["{Count} coming up."], recentOpenerLines, salt),
+      howMany
+    );
+    return { intro: `${nameLine} `, opener: countLine, openerKey: `${nameLine}|${countLine}` };
+  }
+  if (shape === "artist_tease" && artists[0]) {
+    const templates = includeCount
+      ? pack.artistTeaseOpeners?.length
+        ? pack.artistTeaseOpeners
+        : DEFAULT_ARTIST_TEASE
+      : DEFAULT_ARTIST_TEASE_NO_COUNT;
+    const bank = templates.map((t) =>
+      fillPackTemplate(t, { howMany, artist: artists[0] })
+    );
+    const opener = pickAvoidingRecent(bank, recentOpenerLines, salt);
+    return { intro: "", opener, openerKey: opener };
+  }
+  if (shape === "discovery_tease") {
+    const templates = includeCount
+      ? pack.discoveryTeaseOpeners?.length
+        ? pack.discoveryTeaseOpeners
+        : DEFAULT_DISCOVERY_TEASE
+      : DEFAULT_DISCOVERY_TEASE_NO_COUNT;
+    const bank = templates.map((t) =>
+      fillPackTemplate(t, { howMany, artist: discArtist })
+    );
+    const opener = pickAvoidingRecent(bank, recentOpenerLines, salt);
+    return { intro: "", opener, openerKey: opener };
+  }
+  // cold_open
+  if (!includeCount) {
+    const opener = pickAvoidingRecent(
+      DEFAULT_COLD_OPEN_NO_COUNT,
+      recentOpenerLines,
+      salt
+    );
+    return { intro: "", opener, openerKey: opener };
+  }
+  const openerBank =
+    event === "session_refill" ? pack.openersRefill : pack.openersStart;
+  const opener = fillCountTemplate(
+    pickAvoidingRecent(openerBank || ["{Count} coming up."], recentOpenerLines, salt),
+    howMany
+  );
+  return { intro: "", opener, openerKey: opener };
+}
+
+function buildTemplateBody({
+  announceShape,
+  mood,
+  artists,
+  discoverLine,
+  bitLine,
+  pack,
+  salt = 0,
+}) {
+  const shape = announceShape?.bodyShape || "energy_first";
+  const includeVibe = announceShape?.includeVibe !== false;
+  const artist = artists[0] || "";
+  const artistLine = artist ? ` ${artist} is in the mix.` : "";
+  const vibeLine = includeVibe ? ` We're talking ${mood}.` : "";
+  if (shape === "artist_first" && artist) {
+    return `${artistLine}${vibeLine}${discoverLine}${bitLine}`;
+  }
+  if (shape === "crowd_call") {
+    const calls = pack?.crowdCalls?.length ? pack.crowdCalls : DEFAULT_CROWD_CALLS;
+    const call = fillEventName(pick(calls, salt + 7));
+    return ` ${call}${vibeLine}${artistLine}${discoverLine}${bitLine}`;
+  }
+  // energy_first
+  return `${vibeLine}${artistLine}${discoverLine}${bitLine}`;
+}
+
+// Template fallback when the LLM is unavailable. Varies structure; only
+// mentions discoveries when discovery is enabled and similarAdded > 0.
+export function buildSetScript({
+  event = "session_start",
+  count = 0,
+  highlights = [],
+  similarAdded = 0,
+  discoveryEnabled = false,
+  nameIntro = null,
+  djName = null,
+  moodContext = null,
+  characterMoment = null,
+  announceOrdinal: ordinalOverride = null,
+  announceShape = null,
+  recordMemory = false,
+  characterKnobs = null,
+  djCharacterIntensity = null,
+  djCatchphrase = null,
+  djBanList = null,
+  beatFocus = null,
+  includeCount = null,
+  includeVibe = null,
+  includeOutro = null,
+} = {}) {
+  const knobs =
+    characterKnobs ||
+    resolveDjCharacterKnobs({
+      djCharacterIntensity,
+      djCatchphrase,
+      djBanList,
+    });
+  const name =
+    String(djName || getDjVoiceSettings().djName || DJ_VOICE_DEFAULTS.djName).trim() ||
+    DJ_VOICE_DEFAULTS.djName;
+  const intros = nameIntrosFor(name);
+  const n = Math.max(0, Math.floor(Number(count) || 0));
+  const howMany = spokenCount(n || 25);
+  const artists = uniqueArtists(highlights, 2);
+  const salt = (scriptVariant++ + n + artists.join("").length) % 97;
+  const pack = getDjMoodVoicePack(moodContext?.mood || "all");
+  let shape =
+    announceShape ||
+    resolveAnnounceShape({
+      nameIntroForced: nameIntro,
+      discoveryEnabled,
+      similarAdded,
+      hasArtist: artists.length > 0,
+      salt,
+      mood: moodContext?.mood || "all",
+      beatFocus,
+      includeCount,
+      includeVibe,
+      includeOutro,
+    });
+  // Subtle: drop crowd-call body shape — keep energy/artist first.
+  if (
+    knobs.intensity === "subtle" &&
+    shape.bodyShape === "crowd_call" &&
+    !announceShape
+  ) {
+    shape = {
+      ...shape,
+      bodyShape: "energy_first",
+      body: DJ_BODY_SHAPES.energy_first,
+    };
+  }
+  const mood = moodLine(artists, salt, moodContext);
+  // Bits only when writeSetScript (or tests) supply a moment / ordinal.
+  const moment =
+    characterMoment != null
+      ? characterMoment
+      : ordinalOverride != null
+        ? resolveCharacterMoment({
+            mood: moodContext?.mood || "all",
+            salt,
+            ordinal: ordinalOverride,
+            intensity: knobs.intensity,
+            catchphrase: knobs.catchphrase,
+          })
+        : { include: false, bit: null };
+  const bitLine = moment?.bit ? ` ${moment.bit}` : "";
+  const mentionDiscoveries = !!discoveryEnabled && Number(similarAdded) > 0;
+  const disc = discoveryHighlights(highlights);
+  const discArtist = speakArtist(disc[0]?.artist) || "one discovery track";
+  // Skip a second discovery sentence when the opener already teased it.
+  // Discovery lines come from the mood pack so Chill/Kids don't sound like Party.
+  const discoverLine =
+    mentionDiscoveries && shape.openerShape !== "discovery_tease"
+      ? fillPackTemplate(
+          pick(
+            pack.discoveryLines?.length
+              ? pack.discoveryLines
+              : DEFAULT_DISCOVERY_LINES,
+            salt + 1
+          ),
+          { artist: discArtist }
+        )
+      : "";
+
+  const { intro, opener, openerKey } = buildTemplateOpener({
+    announceShape: shape,
+    event,
+    howMany,
+    artists,
+    discArtist,
+    pack,
+    salt,
+    intros,
+    recentOpenerLines: recentAnnounceMemory.openerLines,
+  });
+  // Avoid double artist mention when opener already teased them.
+  const bodyArtists =
+    shape.openerShape === "artist_tease" && shape.bodyShape !== "artist_first"
+      ? []
+      : artists;
+  const body = buildTemplateBody({
+    announceShape: shape,
+    mood,
+    artists: bodyArtists,
+    discoverLine,
+    bitLine,
+    pack,
+    salt,
+  });
+  let line = `${intro}${opener}${body}${
+    shape.includeOutro !== false && shape.outro ? ` ${shape.outro}` : ""
+  }`
+    .replace(/\s+/g, " ")
+    .trim();
+  line = applyDjBanList(line, knobs.banList);
+  if (recordMemory) {
+    recordAnnounceShape({
+      openerShape: shape.openerShape,
+      bodyShape: shape.bodyShape,
+      beatFocus: shape.beatFocus,
+      outro: shape.outro,
+      openerLine: openerKey,
+    });
+  }
+  return line;
+}
+
+export function cleanSpokenScript(text, maxWords = null, banList = null) {
+  let t = String(text || "").trim();
+  t = t.replace(/^["'`]+|["'`]+$/g, "");
+  t = t.replace(/^Announcement:\s*/i, "");
+  t = t.replace(/\s+/g, " ").trim();
+  if (banList != null) t = applyDjBanList(t, banList);
+  const limit =
+    maxWords != null
+      ? Math.max(28, Math.min(120, Math.floor(Number(maxWords) || 0) || DJ_VOICE_DEFAULTS.djAnnounceMaxWords))
+      : getDjVoiceSettings().djAnnounceMaxWords;
+  // Soft length guard for TTS.
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length > limit) t = words.slice(0, limit).join(" ");
+  return t;
+}
+
+function buildLlmPrompt(summary) {
+  const {
+    event = "session_start",
+    count = 0,
+    highlights = [],
+    similarAdded = 0,
+    discoveryEnabled = false,
+    djName = DJ_VOICE_DEFAULTS.djName,
+    djAnnounceMaxWords = DJ_VOICE_DEFAULTS.djAnnounceMaxWords,
+    moodContext = null,
+    characterMoment = null,
+    announceShape = null,
+    characterKnobs = null,
+  } = summary;
+  const name = String(djName || DJ_VOICE_DEFAULTS.djName).trim() || DJ_VOICE_DEFAULTS.djName;
+  const highlightList = Array.isArray(highlights) ? highlights : [];
+  const lead = highlightList[0] || null;
+  const leadArtist = String(lead?.artist || "").trim();
+  const leadTitle = String(lead?.name || "").trim();
+  const leadLine =
+    leadArtist || leadTitle
+      ? `${leadArtist || "Unknown"} — ${leadTitle || "Unknown"}`
+      : "(unknown)";
+  // Feed a short sample for context — the prompt forbids reading it as a list.
+  const tracks = highlightList
+    .slice(0, 4)
+    .map((h, i) => {
+      const flag =
+        discoveryEnabled && h?.discovered ? " [discovery]" : "";
+      return `${i + 1}. ${h?.artist || "Unknown"} — ${h?.name || "Unknown"}${flag}`;
+    })
+    .join("\n");
+  const mood = moodContext || {
+    moodLabel: "All genres",
+    genreLabels: [],
+    energySignature: "mixed energy",
+  };
+  const genreLine = mood.genreLabels?.length
+    ? mood.genreLabels.join(", ")
+    : "all genres";
+
+  return `${buildDjSystemPrompt(
+    name,
+    djAnnounceMaxWords,
+    moodContext,
+    characterMoment,
+    announceShape,
+    characterKnobs
+  )}
+
+Playlist block:
+- Event: ${event === "session_refill" ? "refill / next set while the party is already going" : "fresh set start"}
+- Selected mood: ${mood.moodLabel}
+- Enabled genres (context only — do not read aloud as a list): ${genreLine}
+- Set energy signature: ${mood.energySignature}
+- Track count: ${count}
+- Discoveries enabled: ${discoveryEnabled ? "yes" : "no"}
+- Discovery tracks in this block: ${discoveryEnabled ? similarAdded : 0}
+- First song after this announce (plays immediately after the DJ clip): ${leadLine}
+- HARD RULE: If you say "starting with", "kicking off with", "leading off with", or similar, you MUST name that first song's artist (and optionally title). Never claim a later sample track is first.
+- Sample tracks in play order (context only — mention at most 1—2 artists, never recite):
+${tracks || "(no track titles available)"}
+
+Write only the spoken announcement now. Keep it DJ X short. Follow the flavor beat, delivery shape, character bible, intensity, and mood voice pack.`;
+}
+
+async function generateScriptWithLlm(summary) {
+  const prompt = buildLlmPrompt(summary);
+  return generateDjSpeechFromPrompt(prompt, {
+    maxWords: summary.djAnnounceMaxWords,
+    banList: summary.characterKnobs?.banList,
+  });
+}
+
+/**
+ * Ask Home Assistant's OpenAI conversation agent for a short spoken DJ line.
+ * @param {string} prompt
+ * @param {{ maxWords?: number, banList?: string|string[] }} [opts]
+ */
+export async function generateDjSpeechFromPrompt(
+  prompt,
+  { maxWords = null, banList = null } = {}
+) {
+  const { url, token } = getHaCredentials();
+  if (!url || !token) {
+    throw new Error("Home Assistant is not configured.");
+  }
+  const textPrompt = String(prompt || "").trim();
+  if (!textPrompt) throw new Error("Empty DJ prompt.");
+
+  const res = await fetch(
+    `${url}/api/services/conversation/process?return_response`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text: textPrompt,
+        agent_id: OPENAI_AGENT_ID,
+      }),
+    }
+  );
+  const text = await res.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+  if (!res.ok) {
+    throw new Error(
+      json?.message || `OpenAI conversation HTTP ${res.status}`
+    );
+  }
+  const speech =
+    json?.service_response?.response?.speech?.plain?.speech ||
+    json?.response?.speech?.plain?.speech ||
+    "";
+  const cleaned = cleanSpokenScript(speech, maxWords, banList);
+  if (!cleaned || cleaned.length < 12) {
+    throw new Error("LLM returned an empty DJ script.");
+  }
+  return cleaned;
+}
+
+// Prefer LLM-written DJ copy; fall back to varied templates.
+export async function writeSetScript(summary = {}) {
+  const dj = getDjVoiceSettings();
+  const discoveryEnabled =
+    summary.discoveryEnabled != null
+      ? !!summary.discoveryEnabled
+      : !!getDiscoverySettings().discoverEnabled;
+  const similarAdded = discoveryEnabled ? Number(summary.similarAdded) || 0 : 0;
+  const introPercent =
+    summary.nameIntroPercent != null
+      ? Number(summary.nameIntroPercent)
+      : dj.djNameIntroPercent;
+  const highlights = summary.highlights ?? [];
+  const artists = uniqueArtists(highlights, 2);
+  const moodContext =
+    summary.moodContext ||
+    resolveDjMoodContext({
+      genres: summary.genres ?? enabledGenresFromSettings(),
+      highlights,
+    });
+  const characterKnobs =
+    summary.characterKnobs || resolveDjCharacterKnobs(summary, dj);
+  announceOrdinal += 1;
+  const saltHint =
+    (announceOrdinal * 17 +
+      (Array.isArray(highlights) ? highlights.length : 0) +
+      String(moodContext.mood || "").length) %
+    97;
+  const characterMoment =
+    summary.characterMoment ||
+    resolveCharacterMoment({
+      mood: moodContext.mood,
+      salt: saltHint,
+      ordinal: announceOrdinal,
+      forceBit: summary.forceCharacterBit,
+      intensity: characterKnobs.intensity,
+      catchphrase: characterKnobs.catchphrase,
+    });
+  let announceShape =
+    summary.announceShape ||
+    resolveAnnounceShape({
+      nameIntroForced: summary.nameIntro != null ? !!summary.nameIntro : null,
+      nameIntroPercent: introPercent,
+      discoveryEnabled,
+      similarAdded,
+      hasArtist: artists.length > 0,
+      salt: saltHint,
+      mood: moodContext.mood,
+      openerShape: summary.openerShape,
+      bodyShape: summary.bodyShape,
+      outro: summary.outro,
+      beatFocus: summary.beatFocus,
+      includeCount: summary.includeCount,
+      includeVibe: summary.includeVibe,
+      includeOutro: summary.includeOutro,
+    });
+  // Subtle intensity softens crowd-call bodies.
+  if (
+    characterKnobs.intensity === "subtle" &&
+    announceShape.bodyShape === "crowd_call" &&
+    !summary.bodyShape &&
+    !summary.announceShape
+  ) {
+    announceShape = {
+      ...announceShape,
+      bodyShape: "energy_first",
+      body: DJ_BODY_SHAPES.energy_first,
+    };
+  }
+  const payload = {
+    event: summary.event || "session_start",
+    count: summary.count ?? summary.added ?? 0,
+    highlights,
+    similarAdded,
+    discoveryEnabled,
+    nameIntro: announceShape.nameIntro,
+    djName: summary.djName || dj.djName,
+    djAnnounceMaxWords: summary.djAnnounceMaxWords ?? dj.djAnnounceMaxWords,
+    moodContext,
+    characterMoment,
+    announceShape,
+    characterKnobs,
+    announceOrdinal,
+    recordMemory: true,
+  };
+
+  try {
+    const line = await generateScriptWithLlm(payload);
+    recordAnnounceShape({
+      openerShape: announceShape.openerShape,
+      bodyShape: announceShape.bodyShape,
+      beatFocus: announceShape.beatFocus,
+      outro: announceShape.outro,
+      openerLine: announceShape.openerShape,
+    });
+    const bitKind = characterBitKind(
+      characterMoment,
+      characterKnobs.catchphrase
+    );
+    console.log(
+      `[dj-voice] script via OpenAI conversation (nameIntro=${announceShape.nameIntro}, dj=${payload.djName}, mood=${moodContext.mood}, intensity=${characterKnobs.intensity}, opener=${announceShape.openerShape}, body=${announceShape.bodyShape}, beat=${announceShape.beatFocus}, bit=${bitKind})`
+    );
+    return line;
+  } catch (err) {
+    console.error("[dj-voice] LLM script failed, using template:", err.message);
+    return buildSetScript(payload);
+  }
+}
+
+// Pure: music volume â†’ announce volume.
+// Prefer tiered % of remaining headroom (low/mid/high). A numeric second arg
+// is still accepted as a legacy absolute bump (points) for older callers/tests.
+export function announceVolumeFromMusic(volumeLevel, opts) {
+  if (volumeLevel == null || volumeLevel === "") return ANNOUNCE_VOLUME_FALLBACK;
+  const music = Number(volumeLevel);
+  if (!Number.isFinite(music) || music < 0) return ANNOUNCE_VOLUME_FALLBACK;
+  const musicPct = music <= 1 ? Math.round(music * 100) : Math.round(music);
+
+  if (typeof opts === "number") {
+    const bumpN = Number.isFinite(opts) ? Math.floor(opts) : 0;
+    return Math.min(100, Math.max(1, musicPct + bumpN));
+  }
+
+  const tiers = opts && typeof opts === "object" ? opts : volumeBumpTiers();
+  const lowPct = Number.isFinite(Number(tiers.lowPct))
+    ? Math.max(0, Math.min(100, Math.floor(Number(tiers.lowPct))))
+    : DJ_VOICE_DEFAULTS.djVolumeBumpLowPct;
+  const midPct = Number.isFinite(Number(tiers.midPct))
+    ? Math.max(0, Math.min(100, Math.floor(Number(tiers.midPct))))
+    : DJ_VOICE_DEFAULTS.djVolumeBumpMidPct;
+  const highPct = Number.isFinite(Number(tiers.highPct))
+    ? Math.max(0, Math.min(100, Math.floor(Number(tiers.highPct))))
+    : DJ_VOICE_DEFAULTS.djVolumeBumpHighPct;
+
+  const pct =
+    musicPct <= DJ_VOLUME_TIER.lowMax
+      ? lowPct
+      : musicPct <= DJ_VOLUME_TIER.midMax
+        ? midPct
+        : highPct;
+
+  // Boost as a percent of remaining room to 100 (not percent of current level),
+  // so quiet music gets a large absolute jump and loud music only a little.
+  const boost = Math.round(((100 - musicPct) * pct) / 100);
+  return Math.min(100, Math.max(1, musicPct + Math.max(0, boost)));
+}
+
+function isTtsUri(uri) {
+  return /tts_proxy|\/media\/tts\//i.test(String(uri || ""));
+}
+
+// Safety: restore anyway if music never starts after boost
+// (ramp + clip + slack). Hard-cap clock starts at the first boost so a
+// missed/failed TTS URI cannot leave the room stuck loud.
+const VOLUME_HARD_CAP_PAD_MS = 5000;
+const VOLUME_RESTORE_RETRY_MS = 2000;
+// If a mid-set shout would land as the next track and the current song ends
+// before TTS is ready, pause so the playhead can't skip the announce.
+const IMMINENT_ANNOUNCE_PAUSE_SEC = 45;
+let volumeSessionId = 0;
+let volumeSessionMusicVol = null; // original music level while a session is active
+
+function silenceFileName(sec) {
+  return `silence-${djSilenceLabel(sec)}s.mp3`;
+}
+
+/** Lead pad before DJ — boost happens here so music is already over. */
+function silenceRampFileName(sec) {
+  return `silence-ramp-${djSilenceLabel(sec)}s.mp3`;
+}
+
+function silenceBundledName(sec) {
+  return `dj-silence-${djSilenceLabel(sec)}s.mp3`;
+}
+
+function silenceDurationSec() {
+  return normalizeDjSilenceSec(getDjVoiceSettings().djSilenceSec);
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function applyVolume(level, label) {
+  const { setGroupVolume } = await import("./sonos.js");
+  try {
+    await setGroupVolume(level);
+    console.log(`[dj-voice] ${label}`);
+  } catch (err) {
+    console.error(`[dj-voice] ${label} failed:`, err.message);
+  }
+}
+
+async function readLiveGroupVolume() {
+  const { getGroupVolume } = await import("./sonos.js");
+  try {
+    return await getGroupVolume();
+  } catch {
+    return ANNOUNCE_VOLUME_FALLBACK;
+  }
+}
+
+async function captureMusicVolume() {
+  // If a prior session already boosted, reuse its original music level so we
+  // never stack bumps when announces overlap.
+  if (volumeSessionMusicVol != null) return volumeSessionMusicVol;
+  return readLiveGroupVolume();
+}
+
+/** Freeze the pre-ramp music level once per session — restore always uses this. */
+async function freezeMusicVolume(hint = null) {
+  if (volumeSessionMusicVol != null) return volumeSessionMusicVol;
+  let base = hint;
+  if (base == null || !Number.isFinite(Number(base))) {
+    base = await readLiveGroupVolume();
+  }
+  volumeSessionMusicVol = Math.max(0, Math.min(100, Math.round(Number(base))));
+  console.log(
+    `[dj-voice] remembered music volume ${volumeSessionMusicVol} (pre-ramp)`
+  );
+  return volumeSessionMusicVol;
+}
+
+async function boostAnnounceVolume(musicVol, tiers = volumeBumpTiers()) {
+  const { setGroupVolume } = await import("./sonos.js");
+  const level = announceVolumeFromMusic(musicVol, tiers);
+  await setGroupVolume(level);
+  console.log(
+    `[dj-voice] volume ${musicVol} â†’ ${level} for DJ clip (tiers low/mid/high=${tiers.lowPct}/${tiers.midPct}/${tiers.highPct})`
+  );
+  return level;
+}
+
+/**
+ * Restore group volume to the frozen pre-ramp music level.
+ * @returns {Promise<boolean>} true only when set + verify succeed. Freeze is
+ * cleared only on success so a failed restore can't capture the boosted level
+ * as the next session's "music" volume.
+ */
+async function restoreMusicVolume(musicVol, why, sessionId) {
+  if (sessionId != null && sessionId !== volumeSessionId) return false;
+  // Prefer the frozen pre-ramp memory; never restore to a "live" post-boost read.
+  const target =
+    volumeSessionMusicVol != null
+      ? volumeSessionMusicVol
+      : musicVol != null && Number.isFinite(Number(musicVol))
+        ? Math.max(0, Math.min(100, Math.round(Number(musicVol))))
+        : null;
+  if (target == null) return false;
+
+  const { setGroupVolume, getGroupVolume } = await import("./sonos.js");
+  try {
+    await setGroupVolume(target);
+    console.log(`[dj-voice] volume restored to ${target} (${why})`);
+    // Sonos group settle can miss a member — verify and re-assert once.
+    await sleep(400);
+    if (sessionId != null && sessionId !== volumeSessionId) return false;
+    let now = await getGroupVolume();
+    if (now !== target) {
+      console.warn(
+        `[dj-voice] volume verify ${now} â‰  ${target} after ${why}; re-asserting`
+      );
+      await setGroupVolume(target);
+      await sleep(300);
+      if (sessionId != null && sessionId !== volumeSessionId) return false;
+      now = await getGroupVolume();
+      if (now !== target) {
+        console.warn(
+          `[dj-voice] volume still ${now} after re-assert (${why}); keeping freeze`
+        );
+        return false;
+      }
+    }
+  } catch (err) {
+    console.error(
+      `[dj-voice] volume restore to ${target} (${why}) failed:`,
+      err.message
+    );
+    return false;
+  }
+  if (sessionId == null || sessionId === volumeSessionId) {
+    volumeSessionMusicVol = null;
+  }
+  return true;
+}
+
+function isRampSilenceUri(uri) {
+  return /silence-ramp-\d+(?:\.\d+)?s\.mp3/i.test(String(uri || ""));
+}
+
+function isRestoreSilenceUri(uri) {
+  const u = String(uri || "");
+  if (isRampSilenceUri(u)) return false;
+  return /silence-\d+(?:\.\d+)?s\.mp3|dj-silence/i.test(u);
+}
+
+function isSilenceUri(uri) {
+  return isRampSilenceUri(uri) || isRestoreSilenceUri(uri);
+}
+
+function isDjClipUri(uri, publicUrl) {
+  const u = String(uri || "");
+  if (isSilenceUri(u)) return false;
+  const fileToken = publicUrl
+    ? String(publicUrl).split("/").pop() || ""
+    : "";
+  return isTtsUri(u) || (fileToken && u.includes(fileToken));
+}
+
+// Copy every prebuilt silence length into data/tts as both ramp + restore pads.
+function syncSilencePadFiles() {
+  const publicDir = path.join(__dirname, "..", "public");
+  fs.mkdirSync(TTS_DIR, { recursive: true });
+  for (const opt of DJ_SILENCE_OPTIONS) {
+    const bundled = path.join(publicDir, silenceBundledName(opt));
+    if (!fs.existsSync(bundled)) {
+      throw new Error(`Missing ${silenceBundledName(opt)} silence bridge.`);
+    }
+    fs.copyFileSync(bundled, path.join(TTS_DIR, silenceFileName(opt)));
+    fs.copyFileSync(bundled, path.join(TTS_DIR, silenceRampFileName(opt)));
+  }
+}
+
+/** Post-DJ quiet pad — restore music volume before the next song. */
+export function ensureSilenceBridge(durationSec = silenceDurationSec()) {
+  const sec = normalizeDjSilenceSec(durationSec);
+  syncSilencePadFiles();
+  const fileName = silenceFileName(sec);
+  return {
+    fileName,
+    publicUrl: `${getPublicBaseUrl()}/media/tts/${fileName}`,
+    durationSec: sec,
+  };
+}
+
+/** Pre-DJ quiet pad — song is over; boost volume here before TTS. */
+export function ensureSilenceRamp(durationSec = silenceDurationSec()) {
+  const sec = normalizeDjSilenceSec(durationSec);
+  syncSilencePadFiles();
+  const fileName = silenceRampFileName(sec);
+  return {
+    fileName,
+    publicUrl: `${getPublicBaseUrl()}/media/tts/${fileName}`,
+    durationSec: sec,
+  };
+}
+
+async function boostForSession(musicVolHint, sessionId) {
+  if (sessionId !== volumeSessionId) return musicVolHint;
+  // Capture live level once immediately before the ramp, then freeze it for
+  // restore. Never overwrite the memory after boost.
+  const base = await freezeMusicVolume(
+    volumeSessionMusicVol != null ? volumeSessionMusicVol : musicVolHint
+  );
+  await boostAnnounceVolume(base, volumeBumpTiers());
+  return base;
+}
+
+// Watch NP: boost on pre-DJ ramp silence, hold through TTS, restore when
+// music is playing. If Sonos lands on the Spotify track STOPPED, resume it
+// without SwitchToQueue (which can jump back to track 1).
+function runSilenceBridgeWatch({
+  publicUrl,
+  approxDurationSec,
+  silenceSec = silenceDurationSec(),
+  musicVol,
+  sessionId,
+  alreadyBoosted = false,
+} = {}) {
+  (async () => {
+    if (sessionId !== volumeSessionId) return;
+    // Ramp + DJ (+ slack). Cap clock starts at first boost (not DJ URI).
+    const hardCapMs =
+      Math.max(3000, Math.round((approxDurationSec || 8) * 1000)) +
+      Math.round(silenceSec * 1000) +
+      VOLUME_HARD_CAP_PAD_MS;
+    let sawTts = alreadyBoosted;
+    let boosted = alreadyBoosted;
+    let restored = false;
+    let boostedAt = alreadyBoosted ? Date.now() : null;
+    let lastRestoreAttemptAt = 0;
+    let lastPadResumeAt = 0;
+    let padResumeTries = 0;
+
+    console.log(
+      `[dj-voice] watching rampâ†’DJâ†’music (hard cap ${hardCapMs}ms after first boost)`
+    );
+
+    while (sessionId === volumeSessionId) {
+      try {
+        const { getNowPlayingFresh, resumeQueuePlayback } = await import(
+          "./sonos.js"
+        );
+        const np = await getNowPlayingFresh();
+        if (sessionId !== volumeSessionId) return;
+        const uri = String(np?.uri || "");
+        const state = String(np?.state || "").toUpperCase();
+        const onDj = isDjClipUri(uri, publicUrl);
+        const onRamp = isRampSilenceUri(uri);
+        const onRestore = isRestoreSilenceUri(uri);
+        const onAnnouncePad = onDj || onRamp || onRestore;
+        const transportIdle =
+          state === "STOPPED" || state === "PAUSED_PLAYBACK";
+
+        // Empty-queue / fresh-set glitch: Play lands on ramp/TTS then stops.
+        // Resume in place (no SwitchToQueue) so we don't restart the DJ clip.
+        if (
+          onAnnouncePad &&
+          transportIdle &&
+          padResumeTries < 6 &&
+          Date.now() - lastPadResumeAt >= 1500
+        ) {
+          lastPadResumeAt = Date.now();
+          padResumeTries += 1;
+          try {
+            await resumeQueuePlayback();
+            console.log(
+              `[dj-voice] resumed STOPPED announce pad (try ${padResumeTries})`
+            );
+          } catch (err) {
+            console.warn("[dj-voice] announce-pad resume failed:", err.message);
+          }
+        }
+
+        // Song is over; lead silence is playing — ramp here (not under music).
+        if (onRamp && !boosted) {
+          musicVol = await boostForSession(musicVol, sessionId);
+          boosted = true;
+          boostedAt = Date.now();
+          console.log("[dj-voice] boost during pre-DJ ramp silence");
+        }
+
+        if (onDj) {
+          if (!sawTts) sawTts = true;
+          if (!boosted) {
+            musicVol = await boostForSession(musicVol, sessionId);
+            boosted = true;
+            boostedAt = Date.now();
+            console.log("[dj-voice] boost on DJ (missed ramp silence)");
+          }
+        }
+
+        const leftPads = sawTts && boosted && !restored && !onAnnouncePad;
+        // Hard-cap only when we've left announce pads (or never saw TTS).
+        // Restoring while still STOPPED on the ramp was exiting the watch and
+        // leaving the room quiet on silence forever.
+        const hardCapDue =
+          boosted &&
+          !restored &&
+          !onAnnouncePad &&
+          boostedAt != null &&
+          Date.now() - boostedAt >= hardCapMs;
+        const canRetry =
+          Date.now() - lastRestoreAttemptAt >= VOLUME_RESTORE_RETRY_MS;
+
+        // Prefer immediate restore after pads; hard-cap covers missed TTS /
+        // stuck boost. Failed restores keep the freeze and retry.
+        if ((leftPads || hardCapDue) && canRetry) {
+          lastRestoreAttemptAt = Date.now();
+          const why = leftPads ? "left announce pads" : "hard cap";
+          const ok = await restoreMusicVolume(musicVol, why, sessionId);
+          if (ok) {
+            restored = true;
+            if (transportIdle) {
+              try {
+                await resumeQueuePlayback();
+                console.log("[dj-voice] resumed queue after DJâ†’music STOPPED");
+              } catch (err) {
+                console.warn("[dj-voice] music resume failed:", err.message);
+              }
+            }
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("[dj-voice] silence-bridge watch failed:", err.message);
+      }
+      await sleep(200);
+    }
+  })().catch((err) =>
+    console.error("[dj-voice] silence-bridge watch crashed:", err.message)
+  );
+}
+
+/** Pause briefly when an announce would race the end of the current track. */
+async function pauseIfAnnounceImminent(queuePosition) {
+  try {
+    const { getAnnouncePlaybackContext, pause } = await import("./sonos.js");
+    const ctx = await getAnnouncePlaybackContext();
+    if (!ctx?.playingFromQueue || !ctx.isPlaying) return false;
+    const pos = Number(queuePosition) || 0;
+    if (pos < 1) return false;
+    // Insert at/before the next track â†’ playhead can hit it when this song ends.
+    if (pos > ctx.track + 1) return false;
+    if (ctx.remainingSec == null || ctx.remainingSec > IMMINENT_ANNOUNCE_PAUSE_SEC) {
+      return false;
+    }
+    await pause();
+    console.log(
+      `[dj-voice] paused for imminent announce (queue #${pos}, ${Math.round(ctx.remainingSec)}s left on track ${ctx.track})`
+    );
+    return true;
+  } catch (err) {
+    console.warn("[dj-voice] imminent-announce pause skipped:", err.message);
+    return false;
+  }
+}
+
+async function beginVolumeSession({
+  publicUrl,
+  approxDurationSec,
+  silenceSec = silenceDurationSec(),
+  startPlayback,
+} = {}) {
+  // Invalidate any prior session so boosts can't stack. If the prior session
+  // still had the group boosted, restore music level first — otherwise a
+  // mid-set shout enqueued while a fresh-set DJ is speaking leaves volume
+  // stuck loud (old watch exits on sessionId change without restoring).
+  // Keep the freeze until restore succeeds so we never capture the boosted
+  // level as the next session's music baseline.
+  const prevMusic = volumeSessionMusicVol;
+  volumeSessionId += 1;
+  const sessionId = volumeSessionId;
+  if (prevMusic != null) {
+    const ok = await restoreMusicVolume(
+      prevMusic,
+      "superseded announce",
+      sessionId
+    );
+    if (!ok) {
+      volumeSessionMusicVol = prevMusic;
+      console.warn(
+        `[dj-voice] keeping frozen music volume ${prevMusic} after failed supersede restore`
+      );
+    }
+  }
+
+  const tiers = volumeBumpTiers();
+
+  if (startPlayback) {
+    // Fresh/empty: Play from ramp silence; watch boosts there, restores after DJ.
+    // Do not boost while paused on the prior song — wait for the lead pad.
+    const musicVol = await freezeMusicVolume();
+    const announceLevel = announceVolumeFromMusic(musicVol, tiers);
+    if (sessionId !== volumeSessionId) {
+      return {
+        sessionId,
+        musicVol,
+        announceLevel,
+        tiers,
+        cancelled: true,
+        startHold: null,
+      };
+    }
+    return {
+      sessionId,
+      musicVol,
+      announceLevel,
+      tiers,
+      cancelled: false,
+      startHold() {
+        runSilenceBridgeWatch({
+          publicUrl,
+          approxDurationSec,
+          silenceSec,
+          musicVol,
+          sessionId,
+          alreadyBoosted: false,
+        });
+      },
+    };
+  }
+
+  // Deferred (mid-queue shout / refill): watch for ramp silence â†’ boost â†’
+  // DJ â†’ restore silence. Freeze happens at first boost, not at enqueue.
+  runSilenceBridgeWatch({
+    publicUrl,
+    approxDurationSec,
+    silenceSec,
+    musicVol: null,
+    sessionId,
+    alreadyBoosted: false,
+  });
+  return {
+    sessionId,
+    musicVol: null,
+    announceLevel: null,
+    tiers,
+    cancelled: false,
+    startHold: null,
+  };
+}
+
+function pickLanIpv4() {
+  const nets = os.networkInterfaces();
+  const candidates = [];
+  for (const list of Object.values(nets)) {
+    for (const info of list || []) {
+      if (info.family !== "IPv4" || info.internal) continue;
+      // Prefer private LAN ranges Sonos can reach; skip VPN/tunnel-ish nets.
+      if (
+        info.address.startsWith("10.") ||
+        info.address.startsWith("192.168.") ||
+        /^172\.(1[6-9]|2\d|3[0-1])\./.test(info.address)
+      ) {
+        candidates.push(info.address);
+      }
+    }
+  }
+  // Prefer 10.10.x / 192.168 over NordLynx-style 10.5.x when both exist.
+  candidates.sort((a, b) => {
+    const score = (ip) =>
+      ip.startsWith("10.10.") ? 0 : ip.startsWith("192.168.") ? 1 : 2;
+    return score(a) - score(b);
+  });
+  return candidates[0] || null;
+}
+
+function listLanIpv4s() {
+  const nets = os.networkInterfaces();
+  const out = [];
+  for (const list of Object.values(nets)) {
+    for (const info of list || []) {
+      if (info.family !== "IPv4" || info.internal) continue;
+      out.push(info.address);
+    }
+  }
+  return out;
+}
+
+/** True when running inside a Docker/container (Unraid compose uses this). */
+export function isRunningInDocker() {
+  if (process.env.PARTYQUEUE_IN_DOCKER === "1") return true;
+  if (process.env.PARTYQUEUE_IN_DOCKER === "0") return false;
+  try {
+    return fs.existsSync("/.dockerenv");
+  } catch {
+    return false;
+  }
+}
+
+function normalizeBaseUrl(raw) {
+  return String(raw || "")
+    .trim()
+    .replace(/\/$/, "");
+}
+
+/**
+ * Pure resolver for Sonos-reachable public base URL.
+ * - Docker / FORCE: honor PUBLIC_BASE_URL when set.
+ * - Local Windows/dev: only honor PUBLIC_BASE_URL if it points at this host;
+ *   otherwise auto-detect a LAN IP so Unraid's URL in .env doesn't break silence/TTS.
+ * @param {{
+ *   envUrl?: string|null,
+ *   port?: number,
+ *   localIps?: string[],
+ *   preferredIp?: string|null,
+ *   inDocker?: boolean,
+ *   forceEnv?: boolean,
+ * }} [opts]
+ */
+export function resolvePublicBaseUrl({
+  envUrl = "",
+  port = 8088,
+  localIps = [],
+  preferredIp = null,
+  inDocker = false,
+  forceEnv = false,
+} = {}) {
+  const cleaned = normalizeBaseUrl(envUrl);
+  const ips = Array.isArray(localIps) ? localIps.filter(Boolean) : [];
+  const autoIp = preferredIp || ips[0] || null;
+
+  if (cleaned) {
+    if (inDocker || forceEnv) return cleaned;
+    try {
+      const u = new URL(cleaned);
+      const host = String(u.hostname || "").toLowerCase();
+      if (
+        host === "localhost" ||
+        host === "127.0.0.1" ||
+        ips.some((ip) => ip.toLowerCase() === host)
+      ) {
+        return cleaned;
+      }
+    } catch {
+      /* fall through to auto-detect */
+    }
+  }
+
+  if (!autoIp) {
+    throw new Error(
+      "Could not detect a LAN IP for Sonos TTS URLs. Set PUBLIC_BASE_URL=http://<this-host-ip>:8088"
+    );
+  }
+  return `http://${autoIp}:${Number(port) || 8088}`;
+}
+
+export function getPublicBaseUrl() {
+  const fromEnv =
+    process.env.PUBLIC_BASE_URL || process.env.PARTYQUEUE_PUBLIC_URL || "";
+  const port = Number(process.env.PORT) || 8088;
+  const inDocker = isRunningInDocker();
+  const forceEnv =
+    process.env.PUBLIC_BASE_URL_FORCE === "1" ||
+    process.env.PUBLIC_BASE_URL_FORCE === "true";
+  const localIps = listLanIpv4s();
+  const preferredIp = pickLanIpv4();
+  const cleaned = normalizeBaseUrl(fromEnv);
+
+  try {
+    const resolved = resolvePublicBaseUrl({
+      envUrl: cleaned,
+      port,
+      localIps,
+      preferredIp,
+      inDocker,
+      forceEnv,
+    });
+    if (
+      cleaned &&
+      resolved !== cleaned &&
+      !inDocker &&
+      !forceEnv
+    ) {
+      console.warn(
+        `[dj-voice] ignoring PUBLIC_BASE_URL=${cleaned} on local run (not this host); using ${resolved}`
+      );
+    }
+    return resolved;
+  } catch (err) {
+    throw err;
+  }
+}
+
+function pruneTtsFiles() {
+  try {
+    const keep = new Set([
+      ...DJ_SILENCE_OPTIONS.map((sec) => silenceFileName(sec)),
+      ...DJ_SILENCE_OPTIONS.map((sec) => silenceRampFileName(sec)),
+    ]);
+    const files = fs
+      .readdirSync(TTS_DIR)
+      .filter((f) => f.endsWith(".mp3") && !keep.has(f))
+      .map((name) => {
+        const full = path.join(TTS_DIR, name);
+        return { name, full, mtime: fs.statSync(full).mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+    for (const f of files.slice(TTS_MAX_FILES)) {
+      try {
+        fs.unlinkSync(f.full);
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+async function haFetch(pathName, { method = "GET", body } = {}) {
+  const { url, token } = getHaCredentials();
+  if (!url || !token) throw new Error("Home Assistant is not configured.");
+  const res = await fetch(`${url}${pathName}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = { raw: text };
+  }
+  if (!res.ok) {
+    throw new Error(
+      json?.message || json?.error || `Home Assistant HTTP ${res.status}`
+    );
+  }
+  return json;
+}
+
+// Resolve ffmpeg for local tempo. Node's PATH often omits the install dir
+// (e.g. C:\ffmpeg\bin) even when `where ffmpeg` works in an interactive shell.
+function resolveFfmpegBin() {
+  const fromEnv = String(process.env.FFMPEG_PATH || "").trim();
+  if (fromEnv && fs.existsSync(fromEnv)) return fromEnv;
+  const candidates =
+    process.platform === "win32"
+      ? [
+          "C:\\ffmpeg\\bin\\ffmpeg.exe",
+          "C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe",
+          path.join(process.env.LOCALAPPDATA || "", "ffmpeg", "bin", "ffmpeg.exe"),
+        ]
+      : ["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg"];
+  for (const p of candidates) {
+    if (p && fs.existsSync(p)) return p;
+  }
+  return "ffmpeg";
+}
+
+// HA's OpenAI TTS engine rejects `speed` (HTTP 500). Speed is applied locally
+// with ffmpeg atempo after download when it isn't 1Ã—.
+function applyTempoWithFfmpeg(inputPath, outputPath, speed) {
+  return new Promise((resolve, reject) => {
+    const bin = resolveFfmpegBin();
+    const args = [
+      "-y",
+      "-i",
+      inputPath,
+      "-filter:a",
+      `atempo=${speed}`,
+      "-vn",
+      outputPath,
+    ];
+    const child = spawn(bin, args, { stdio: "ignore" });
+    child.on("error", (err) =>
+      reject(new Error(`ffmpeg not available (${err.message})`))
+    );
+    child.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg atempo failed (exit ${code})`));
+    });
+  });
+}
+
+// Generate TTS via Home Assistant (OpenAI or ElevenLabs engine). Prefer the HA
+// proxy URL for the Sonos queue — speakers are on the HA LAN (10.10.20.x) and
+// often cannot reach this PC's 10.10.10.x address. Still save a local copy for
+// debugging/pruning.
+// Optional voice/speed/provider overrides (used by Settings Preview). When
+// speed â‰  1, the local PartyQueue URL is used so Sonos hears the tempo-changed clip.
+export async function saveTtsClip(
+  message,
+  {
+    voice: voiceOverride = null,
+    speed: speedOverride = null,
+    provider: providerOverride = null,
+  } = {}
+) {
+  const text = String(message || "").trim();
+  if (!text) throw new Error("Empty announce message.");
+
+  const provider = normalizeDjTtsProvider(
+    providerOverride != null ? providerOverride : ttsProvider()
+  );
+  const engine = djTtsEngineForProvider(provider);
+  const voice = normalizeDjTtsVoice(
+    voiceOverride != null ? voiceOverride : ttsVoice(),
+    provider
+  );
+  const speed = normalizeDjTtsSpeed(
+    speedOverride != null ? speedOverride : ttsSpeed()
+  );
+  // Only pass voice to HA — speed must be applied locally (HA 500s on speed).
+  const data = await haFetch("/api/tts_get_url", {
+    method: "POST",
+    body: {
+      engine_id: engine,
+      message: text,
+      // Cache so the proxy URL stays valid while we finish enqueueing music.
+      cache: true,
+      options: { voice },
+    },
+  });
+  console.log(
+    `[dj-voice] TTS provider=${provider} engine=${engine} voice=${voice} speed=${speed}`
+  );
+  const mediaUrl = data?.url;
+  if (!mediaUrl) throw new Error("Home Assistant did not return a TTS URL.");
+
+  const { token } = getHaCredentials();
+  const audio = await fetch(mediaUrl, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  let buf = Buffer.from(await audio.arrayBuffer());
+  if (!audio.ok || buf.length < 1000) {
+    const label =
+      provider === "elevenlabs_ha" ? "ElevenLabs" : "OpenAI";
+    throw new Error(
+      `${label} TTS audio empty (${audio.status}, ${buf.length} bytes). Check HA ${label} setup / quota.`
+    );
+  }
+
+  // Confirm Sonos can fetch without a Bearer token (HA tts_proxy is public).
+  // Skip when we'll serve a tempo-changed local file instead.
+  if (speed === 1) {
+    const open = await fetch(mediaUrl);
+    if (!open.ok) {
+      throw new Error(
+        `HA TTS URL is not publicly fetchable (${open.status}). Sonos cannot play it.`
+      );
+    }
+  }
+
+  fs.mkdirSync(TTS_DIR, { recursive: true });
+  const id = crypto.randomBytes(8).toString("hex");
+  const fileName = `${id}.mp3`;
+  const filePath = path.join(TTS_DIR, fileName);
+  fs.writeFileSync(filePath, buf);
+
+  let serveLocal = false;
+  if (speed !== 1) {
+    const spedPath = path.join(TTS_DIR, `${id}-sped.mp3`);
+    try {
+      await applyTempoWithFfmpeg(filePath, spedPath, speed);
+      fs.renameSync(spedPath, filePath);
+      buf = fs.readFileSync(filePath);
+      serveLocal = true;
+      console.log(`[dj-voice] applied local speed ${speed}Ã— via ffmpeg`);
+    } catch (err) {
+      console.error(
+        `[dj-voice] speed ${speed}Ã— failed, using normal rate:`,
+        err.message
+      );
+      try {
+        fs.unlinkSync(spedPath);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  pruneTtsFiles();
+
+  const localUrl = `${getPublicBaseUrl()}/media/tts/${fileName}`;
+  const approxDurationSec = Math.max(
+    2,
+    buf.length / TTS_BYTES_PER_SEC / Math.max(0.25, serveLocal ? speed : 1)
+  );
+  return {
+    fileName,
+    filePath,
+    // HA proxy when possible; local URL when we tempo-shifted the file.
+    publicUrl: serveLocal ? localUrl : mediaUrl,
+    localUrl,
+    // Same-origin path for the browser (Preview button).
+    previewPath: `/media/tts/${fileName}`,
+    provider,
+    engine,
+    voice,
+    speed: serveLocal ? speed : 1,
+    approxDurationSec,
+    bytes: buf.length,
+  };
+}
+
+// Short Settings preview: generate a sample clip for the chosen voice/speed
+// and return a same-origin URL the host browser can play (not Sonos).
+export async function previewTtsVoice(
+  voiceId = null,
+  speedValue = null,
+  providerValue = null
+) {
+  if (!isHaConfigured()) {
+    throw new Error("Home Assistant is not configured.");
+  }
+  const provider = normalizeDjTtsProvider(
+    providerValue != null ? providerValue : getDjVoiceSettings().djTtsProvider
+  );
+  const voice = normalizeDjTtsVoice(
+    voiceId != null ? voiceId : getDjVoiceSettings().djTtsVoice,
+    provider
+  );
+  const speed = normalizeDjTtsSpeed(
+    speedValue != null ? speedValue : getDjVoiceSettings().djTtsSpeed
+  );
+  const name =
+    getDjVoiceSettings().djName || DJ_VOICE_DEFAULTS.djName;
+  const message = `Hey ${eventDisplayName()}. This is ${name} checking in. How's this sound?`;
+  const clip = await saveTtsClip(message, { voice, speed, provider });
+  return {
+    ok: true,
+    provider: clip.provider,
+    engine: clip.engine,
+    voice: clip.voice,
+    speed: clip.speed,
+    url: clip.previewPath,
+    approxDurationSec: clip.approxDurationSec,
+  };
+}
+
+async function enqueueDjClip(publicUrl, { durationSec, position = 1 } = {}) {
+  const { enqueueHttpAudio, pauseQueueTrim } = await import("./sonos.js");
+  const { djName } = getDjVoiceSettings();
+  // Keep maintenance from deleting the clip if the playhead is still on music.
+  pauseQueueTrim(25000);
+  return enqueueHttpAudio(publicUrl, {
+    title: djName || DJ_VOICE_DEFAULTS.djName,
+    artist: "PartyQueue",
+    durationSec,
+    position,
+  });
+}
+
+// Silent MP3 before the DJ clip — volume boost window after music ends.
+async function enqueueSilenceRamp(position) {
+  const { enqueueHttpAudio, pauseQueueTrim } = await import("./sonos.js");
+  const ramp = ensureSilenceRamp();
+  pauseQueueTrim(25000);
+  await enqueueHttpAudio(ramp.publicUrl, {
+    title: "PartyQueue Volume Ramp",
+    artist: "PartyQueue",
+    durationSec: ramp.durationSec,
+    position,
+  });
+  console.log(
+    `[dj-voice] enqueued ${ramp.durationSec}s volume-ramp silence at queue position ${position}`
+  );
+  return ramp;
+}
+
+async function startQueuePlayback(trackNumber = 1) {
+  // SwitchToQueue â†’ SeekTrack(N) â†’ Play. Seek is required after inserting TTS
+  // at the front, otherwise the playhead can stay on the first Spotify track.
+  await new Promise((r) => setTimeout(r, 200));
+  const { play, pauseQueueTrim } = await import("./sonos.js");
+  pauseQueueTrim(25000);
+  await play({ trackNumber });
+}
+
+// Serialize Sonos DJ inserts so empty-queue shouts, random fresh sets, and
+// refill announces can't interleave (double TTS / stuck loud volume).
+let announceChain = Promise.resolve();
+function withAnnounceLock(fn) {
+  const run = announceChain.then(fn, fn);
+  announceChain = run.then(
+    () => {},
+    () => {}
+  );
+  return run;
+}
+
+// Insert TTS into the Sonos queue. Fresh sets use position 1 then Play;
+// refills insert at a boundary position while music keeps playing.
+export async function announceOnSonos(
+  message,
+  {
+    room = getSonosTargetRoom(),
+    startPlayback = false,
+    queuePosition = 1,
+  } = {}
+) {
+  return withAnnounceLock(() =>
+    announceOnSonosUnlocked(message, { room, startPlayback, queuePosition })
+  );
+}
+
+async function announceOnSonosUnlocked(
+  message,
+  {
+    room = getSonosTargetRoom(),
+    startPlayback = false,
+    queuePosition = 1,
+  } = {}
+) {
+  if (!isHaConfigured()) {
+    return { ok: false, error: "Home Assistant is not configured." };
+  }
+  if (!resolveAnnounceEntity(room)) {
+    return { ok: false, error: "No Sonos room selected for announce." };
+  }
+  if (!message || !String(message).trim()) {
+    return { ok: false, error: "Empty announce message." };
+  }
+
+  let didStart = false;
+  let volHold = null;
+  let pausedForImminent = false;
+  try {
+    // Mid-set / refill: if the announce would be next and the song is almost
+    // over, pause so TTS generation can't lose the race to the playhead.
+    if (!startPlayback) {
+      pausedForImminent = await pauseIfAnnounceImminent(queuePosition);
+    }
+    const clip = await saveTtsClip(String(message).trim());
+    console.log(
+      `[dj-voice] saved ${clip.fileName} (${clip.bytes} bytes) â†’ ${clip.publicUrl}`
+    );
+    // Pause before inserting when we're about to Play from the DJ clip.
+    // Avoids Sonos auto-starting a shifted track, then Seek+Play restarting TTS.
+    if (startPlayback) {
+      try {
+        const { pause } = await import("./sonos.js");
+        await pause();
+      } catch {
+        /* best-effort */
+      }
+    }
+    // Queue order: ramp silence â†’ DJ TTS â†’ music.
+    // Volume boosts during the lead silence; restore when music is playing.
+    // (A trailing silence pad before Spotify was leaving the transport STOPPED.)
+    //
+    // Strip any unplayed ramp/TTS pads first so a new shout supersedes one that
+    // hasn't started yet (avoids back-to-back DJ clips). Adjust insert if pads
+    // sat before our planned position.
+    const { removeUpcomingAnnouncePads, pauseQueueTrim } = await import(
+      "./sonos.js"
+    );
+    pauseQueueTrim(25000);
+    let rampPos = Number(queuePosition) || 1;
+    try {
+      const wiped = await removeUpcomingAnnouncePads({
+        beforePosition: rampPos,
+      });
+      if (wiped.removedBefore > 0) {
+        rampPos = Math.max(1, rampPos - wiped.removedBefore);
+        console.log(
+          `[dj-voice] supersede: removed ${wiped.removed} pad(s); insert ${queuePosition} â†’ ${rampPos}`
+        );
+      } else if (wiped.removed > 0) {
+        console.log(
+          `[dj-voice] supersede: removed ${wiped.removed} upcoming announce pad(s)`
+        );
+      }
+    } catch (err) {
+      console.warn("[dj-voice] supersede pad strip failed:", err.message);
+    }
+    const ttsPos = rampPos + 1;
+    const ramp = await enqueueSilenceRamp(rampPos);
+    await enqueueDjClip(clip.publicUrl, {
+      durationSec: clip.approxDurationSec,
+      position: ttsPos,
+    });
+    console.log(`[dj-voice] enqueued TTS at queue position ${ttsPos}`);
+
+    // Fresh sets / empty-queue shouts: Play ramp â†’ boost â†’ DJ â†’ music.
+    const vol = await beginVolumeSession({
+      publicUrl: clip.publicUrl,
+      approxDurationSec: clip.approxDurationSec,
+      silenceSec: ramp.durationSec,
+      startPlayback: !!startPlayback,
+    });
+    volHold = vol.startHold || null;
+    if (startPlayback && !vol.cancelled) {
+      try {
+        await startQueuePlayback(rampPos);
+        didStart = true;
+        // Seek+Play sometimes leaves the ramp STOPPED (empty-queue shout hang).
+        await sleep(400);
+        try {
+          const { getNowPlayingFresh, resumeQueuePlayback } = await import(
+            "./sonos.js"
+          );
+          const np = await getNowPlayingFresh();
+          const st = String(np?.state || "").toUpperCase();
+          if (st === "STOPPED" || st === "PAUSED_PLAYBACK") {
+            await resumeQueuePlayback();
+            console.log(
+              "[dj-voice] post-start resume (transport idle after Play)"
+            );
+          }
+        } catch (err) {
+          console.warn("[dj-voice] post-start resume skipped:", err.message);
+        }
+      } finally {
+        // Arm watch even if Play glitched (recovery Play still needs restore).
+        volHold?.();
+        volHold = null;
+      }
+    } else if (pausedForImminent) {
+      // Resume the current song; ramp+DJ are now ahead of the request.
+      try {
+        const { play } = await import("./sonos.js");
+        await play();
+      } catch (err) {
+        console.warn("[dj-voice] resume after imminent pause failed:", err.message);
+      }
+    }
+    return {
+      ok: true,
+      mode: "queue",
+      publicUrl: clip.publicUrl,
+      position: ttsPos,
+      rampPosition: rampPos,
+      silenceSec: ramp.durationSec,
+      rampSec: ramp.durationSec,
+      started: didStart,
+      volumeBump: vol.announceLevel,
+      volumeTiers: vol.tiers,
+    };
+  } catch (err) {
+    console.error("[dj-voice] announce failed:", err.message);
+    try {
+      volHold?.();
+    } catch {
+      /* ignore */
+    }
+    // Only start as a recovery if we never reached Play — avoids DJ-twice.
+    if (startPlayback && !didStart) {
+      try {
+        // Best-effort recovery Play; prefer position 1 (fresh-set path).
+        await startQueuePlayback(1);
+      } catch {
+        /* ignore */
+      }
+    }
+    return { ok: false, error: err.message || "Announce failed." };
+  }
+}
+
+export function clearPendingAnnounce() {
+  pending = null;
+}
+
+export function getPendingAnnounce() {
+  return pending;
+}
+
+// After a Never-Ending refill: insert TTS after the last song of the current
+// set (current track + remaining upcoming), so it plays before the new batch.
+// Script generation can take several seconds — re-read the live playhead before
+// placing TTS so rapid Next can't leave the announce stranded behind us.
+export async function scheduleRefillAnnounce(
+  summary,
+  { boundaryTrack, upcoming = 0 } = {}
+) {
+  if (!getDjVoiceSettings().djVoiceEnabled || !isHaConfigured()) {
+    pending = null;
+    return null;
+  }
+  const track = Number(boundaryTrack);
+  if (!Number.isFinite(track) || track < 1) {
+    pending = null;
+    return null;
+  }
+  const message = await writeSetScript({
+    event: "session_refill",
+    count: summary?.added ?? summary?.count ?? 0,
+    highlights: summary?.highlights ?? [],
+    similarAdded: summary?.similarAdded ?? 0,
+  });
+  const left = Math.max(0, Math.floor(Number(upcoming) || 0));
+  const planned = track + left + 1;
+
+  let insertAt = planned;
+  let liveTrack = track;
+  try {
+    const { getQueueStatus } = await import("./sonos.js");
+    const live = await getQueueStatus();
+    liveTrack = Number(live?.track) || track;
+    if (live?.playingFromQueue && liveTrack >= 1) {
+      if (liveTrack >= planned) {
+        // Playhead already moved past the old boundary while we wrote TTS.
+        insertAt = liveTrack + 1;
+        console.log(
+          `[dj-voice] refill insert catch-up: planned #${planned} â†’ #${insertAt} (live track ${liveTrack})`
+        );
+      } else {
+        insertAt = planned;
+      }
+    }
+  } catch (err) {
+    console.warn("[dj-voice] refill live position read failed:", err.message);
+  }
+
+  pending = {
+    message,
+    room: getSonosTargetRoom(),
+    boundaryTrack: liveTrack,
+    insertAt,
+    setSize: summary?.added ?? 0,
+    createdAt: Date.now(),
+  };
+  console.log(
+    `[dj-voice] inserting refill announce at queue position ${insertAt} (planned #${planned}, after set ending near track ${track + left})`
+  );
+  console.log(`[dj-voice] script: ${message}`);
+  try {
+    const result = await announceOnSonos(message, {
+      room: pending.room,
+      startPlayback: false,
+      queuePosition: insertAt,
+    });
+    pending.enqueued = !!result?.ok;
+    pending.publicUrl = result?.publicUrl || null;
+    if (!result?.ok) {
+      console.error("[dj-voice] refill enqueue failed:", result?.error);
+      pending = null;
+    }
+    return pending;
+  } catch (err) {
+    console.error("[dj-voice] refill enqueue failed:", err.message);
+    pending = null;
+    return null;
+  }
+}
+
+// Legacy hook from the autofill loop. TTS is already in the queue for refills,
+// so this only clears the pending marker once playback has crossed the boundary.
+export async function checkPendingAnnounce(status) {
+  if (!pending) return null;
+  if (!getDjVoiceSettings().djVoiceEnabled) {
+    pending = null;
+    return null;
+  }
+  const track = Number(status?.track) || 0;
+  if (track <= pending.boundaryTrack) return null;
+  const job = pending;
+  pending = null;
+  console.log(
+    `[dj-voice] crossed refill boundary at track ${track} (TTS was queued at ${job.insertAt})`
+  );
+  return { ok: true, skipped: true, mode: "queue", alreadyEnqueued: true };
+}
+
+// Manual Random when a fresh set starts (playback was idle â†’ we deferred start).
+// Music is already in the queue; insert TTS at position 1 and Play from track 1.
+export async function announceFreshSet(summary) {
+  if (!getDjVoiceSettings().djVoiceEnabled || !isHaConfigured()) {
+    return { ok: false, skipped: true };
+  }
+  if (!summary?.added) return { ok: false, skipped: true };
+  const message = await writeSetScript({
+    event: "session_start",
+    count: summary.added,
+    highlights: summary.highlights ?? [],
+    similarAdded: summary.similarAdded ?? 0,
+  });
+  console.log(
+    `[dj-voice] fresh set announce (${summary.added} songs) â†’ queue insert`
+  );
+  console.log(`[dj-voice] script: ${message}`);
+  return announceOnSonos(message, { startPlayback: true, queuePosition: 1 });
+}
+
+// Mid-queue / leftover-batch announce (Random while music is already playing).
+export async function announceSetBatch(
+  summary,
+  { queuePosition, startPlayback = false, event = "session_refill" } = {}
+) {
+  if (!getDjVoiceSettings().djVoiceEnabled || !isHaConfigured()) {
+    return { ok: false, skipped: true };
+  }
+  if (!summary?.added) return { ok: false, skipped: true };
+  const pos = Number(queuePosition);
+  if (!Number.isFinite(pos) || pos < 1) {
+    return { ok: false, skipped: true, error: "Missing queue position." };
+  }
+  const message = await writeSetScript({
+    event,
+    count: summary.added,
+    highlights: summary.highlights ?? [],
+    similarAdded: summary.similarAdded ?? 0,
+  });
+  console.log(
+    `[dj-voice] set batch announce (${summary.added} songs) â†’ queue #${pos}`
+  );
+  console.log(`[dj-voice] script: ${message}`);
+  return announceOnSonos(message, {
+    startPlayback: !!startPlayback,
+    queuePosition: pos,
+  });
+}
+
+export function isDjVoiceReady() {
+  return (
+    getDjVoiceSettings().djVoiceEnabled &&
+    isHaConfigured() &&
+    !!resolveAnnounceEntity()
+  );
+}
+
+/**
+ * Party recap TTS inserted immediately before Closing Time in the queue.
+ * @param {{ script?: string }} recap
+ * @param {{ queuePosition?: number }} [opts]
+ */
+export async function announcePartyRecap(recap, { queuePosition } = {}) {
+  if (!getDjVoiceSettings().djVoiceEnabled || !isHaConfigured()) {
+    return { ok: false, skipped: true };
+  }
+  const pos = Number(queuePosition);
+  if (!Number.isFinite(pos) || pos < 1) {
+    return { ok: false, skipped: true, error: "Missing queue position." };
+  }
+  const message = String(recap?.script || "").trim();
+  if (!message) {
+    return { ok: false, skipped: true, error: "Empty recap script." };
+  }
+  console.log(`[dj-voice] party recap â†’ queue position ${pos}`);
+  console.log(`[dj-voice] script: ${message}`);
+  return announceOnSonos(message, {
+    startPlayback: false,
+    queuePosition: pos,
+  });
+}
+
+export function getTtsDir() {
+  return TTS_DIR;
+}

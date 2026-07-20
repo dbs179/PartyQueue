@@ -1,0 +1,22 @@
+services:
+  partyqueue:
+    build: .
+    image: partyqueue:latest
+    container_name: partyqueue
+    # Host networking lets the container reach your Sonos system via SSDP
+    # multicast discovery. This is required on most setups (incl. UnRaid).
+    # With host networking the app is served on the host's PORT directly.
+    network_mode: host
+    # Loads all settings (Spotify keys, SONOS_ROOM, PORT, etc.) from the .env
+    # file sitting next to this compose file.
+    env_file:
+      - .env
+    # Persist the Spotify playlist login (refresh token) across rebuilds.
+    # Alternatively, set SPOTIFY_REFRESH_TOKEN in .env and drop this volume.
+    volumes:
+      - ./data:/app/data
+    # Show the app's icon in the UnRaid Docker tab (served by the app itself).
+    # Uses PUBLIC_BASE_URL from .env when set; otherwise localhost (host network).
+    labels:
+      net.unraid.docker.icon: "${PUBLIC_BASE_URL:-http://127.0.0.1:8088}/icon.png"
+    restart: unless-stopped

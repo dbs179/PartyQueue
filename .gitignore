@@ -1,0 +1,9 @@
+node_modules/
+.env
+*.log
+npm-debug.log*
+.DS_Store
+data/
+tmp-*
+tmp/
+.cursor/

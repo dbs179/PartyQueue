@@ -1,0 +1,24 @@
+{
+  "name": "partyqueue",
+  "version": "6.2.5",
+  "description": "A LAN party app for guests to search Spotify and add songs to your Sonos queue, with Random, Never-Ending, Music Mix, and optional DJ Voice.",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "dev": "node --watch --env-file-if-exists=.env src/server.js",
+    "test": "node --test",
+    "smoke:supersede": "node --env-file-if-exists=.env scripts/smoke-announce-supersede.mjs",
+    "smoke:sticky": "node --env-file-if-exists=.env scripts/smoke-volume-sticky.mjs",
+    "package:share": "powershell -ExecutionPolicy Bypass -File scripts/package-share.ps1"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@svrooij/sonos": "^2.5.0",
+    "express": "^4.19.2",
+    "qrcode": "^1.5.4"
+  }
+}
