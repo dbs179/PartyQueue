@@ -7,7 +7,7 @@
     <title></title>
     <link rel="icon" href="icon.png" />
     <link rel="apple-touch-icon" href="icon.png" />
-    <link rel="stylesheet" href="styles.css?v=6.2.6" />
+    <link rel="stylesheet" href="styles.css?v=6.6.0" />
     <style>
       /* Hide until branding is applied (server JSON or last localStorage). */
       #hero:not([data-ready]),
@@ -119,6 +119,15 @@
               <div id="np-title" class="np-title"></div>
               <div id="np-artist" class="np-artist"></div>
               <div id="np-album" class="np-album"></div>
+              <div id="np-progress" class="np-progress" hidden>
+                <div class="np-progress-track" role="progressbar" aria-label="Track progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                  <span id="np-progress-fill" class="np-progress-fill"></span>
+                </div>
+                <div class="np-progress-times" aria-hidden="true">
+                  <span id="np-progress-elapsed">0:00</span>
+                  <span id="np-progress-duration">0:00</span>
+                </div>
+              </div>
               <div id="np-empty" class="np-empty" hidden></div>
             </div>
             <div class="np-pills" id="np-pills" hidden>
@@ -625,6 +634,11 @@
               <span class="settings-hub-stat" id="dj-stat-voice">—</span>
               <span class="settings-hub-desc">TTS, intensity, intros, length</span>
             </button>
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-advanced">
+              <span class="settings-hub-title">Advanced DJ</span>
+              <span class="settings-hub-stat" id="dj-stat-advanced">Core locked</span>
+              <span class="settings-hub-desc">Persona, guidance, pronunciation, prompt</span>
+            </button>
             <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-volume">
               <span class="settings-hub-title">Volume &amp; silence</span>
               <span class="settings-hub-stat" id="dj-stat-volume">—</span>
@@ -765,6 +779,43 @@
             <button type="button" class="pill-btn success dj-voice-save-btn">Save</button>
             <button type="button" class="pill-btn dj-voice-reset-btn">Defaults</button>
           </div>
+        </div>
+      </div>
+
+      <div id="view-settings-dj-advanced" class="view" hidden>
+        <div class="subpage-head">
+          <h2 class="section-label subpage-title">Advanced DJ</h2>
+          <button id="settings-dj-advanced-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+        </div>
+        <div class="settings-box settings-panel">
+          <p class="settings-intro">Customize the DJ without exposing or weakening the locked safety, privacy, length, and output rules.</p>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-dj-persona-notes">Persona notes</label>
+            <textarea id="set-dj-persona-notes" class="setting-input dj-advanced-input" rows="4" maxlength="800" placeholder="Optional details about the DJ's personality, tone, or local style." spellcheck="true"></textarea>
+          </div>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-dj-always-instructions">Always do</label>
+            <textarea id="set-dj-always-instructions" class="setting-input dj-advanced-input" rows="4" maxlength="800" placeholder="Optional habits or content to favor." spellcheck="true"></textarea>
+          </div>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-dj-never-instructions">Never do</label>
+            <textarea id="set-dj-never-instructions" class="setting-input dj-advanced-input" rows="4" maxlength="800" placeholder="Optional style or content to avoid." spellcheck="true"></textarea>
+          </div>
+          <div class="setting-row-text">
+            <label class="setting-label" for="set-dj-pronunciations">Pronunciation dictionary</label>
+            <textarea id="set-dj-pronunciations" class="setting-input dj-advanced-input" rows="6" maxlength="2400" placeholder="Bow Down = Bough Down" spellcheck="false"></textarea>
+          </div>
+          <p class="settings-intro settings-field-note">One case-sensitive mapping per line: written name = TTS-friendly spoken form. Invalid lines are ignored.</p>
+          <div class="settings-actions">
+            <button id="dj-advanced-save" type="button" class="pill-btn success">Save &amp; preview</button>
+            <button id="dj-advanced-preview-refresh" type="button" class="pill-btn">Refresh preview</button>
+            <button id="dj-advanced-reset" type="button" class="pill-btn">Defaults</button>
+          </div>
+          <div class="setting-row-text">
+            <label class="setting-label" for="dj-effective-prompt">Effective prompt preview</label>
+            <textarea id="dj-effective-prompt" class="setting-input dj-prompt-preview" rows="18" readonly spellcheck="false" aria-describedby="dj-effective-prompt-note"></textarea>
+          </div>
+          <p id="dj-effective-prompt-note" class="settings-intro settings-field-note">Read-only representative set prompt using saved settings. Placeholder track names are used; core rules remain code-controlled.</p>
         </div>
       </div>
 
@@ -1269,6 +1320,15 @@
             <div id="np-fs-title" class="np-fs-title"></div>
             <div id="np-fs-artist" class="np-fs-artist"></div>
             <div id="np-fs-album" class="np-fs-album"></div>
+            <div id="np-fs-progress" class="np-progress np-fs-progress" hidden>
+              <div class="np-progress-track" role="progressbar" aria-label="Track progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <span id="np-fs-progress-fill" class="np-progress-fill"></span>
+              </div>
+              <div class="np-progress-times" aria-hidden="true">
+                <span id="np-fs-progress-elapsed">0:00</span>
+                <span id="np-fs-progress-duration">0:00</span>
+              </div>
+            </div>
           </div>
         </div>
         <div id="np-fs-lyrics" class="np-fs-lyrics" aria-live="polite">
@@ -1333,6 +1393,6 @@
     </div>
 
     <script src="vendor/sortable.min.js"></script>
-    <script src="app.js?v=6.5.1"></script>
+    <script src="app.js?v=6.6.0"></script>
   </body>
 </html>

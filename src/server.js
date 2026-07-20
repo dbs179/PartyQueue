@@ -83,6 +83,7 @@ import {
   announcePartyRecap,
   isDjVoiceReady,
   previewTtsVoice,
+  buildDjEffectivePromptPreview,
   getPublicBaseUrl,
 } from "./dj-voice.js";
 import {
@@ -979,6 +980,13 @@ app.post("/api/dj-voice/preview", requireHost, async (req, res) => {
       error: err.message || "Could not preview that voice.",
     });
   }
+});
+
+app.get("/api/dj-voice/prompt-preview", requireHost, (_req, res) => {
+  res.json({
+    prompt: buildDjEffectivePromptPreview(),
+    coreRulesLocked: true,
+  });
 });
 
 // DJ Voice icons: list + active, upload (newest becomes active), select, delete.

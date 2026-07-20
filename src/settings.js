@@ -174,6 +174,12 @@ export const DJ_VOICE_DEFAULTS = {
   djCharacterIntensity: "extra",
   djCatchphrase: "",
   djBanList: "",
+  // Host-only advanced prompt guidance. Core safety/shape rules remain in code.
+  djPersonaNotes: "",
+  djAlwaysInstructions: "",
+  djNeverInstructions: "",
+  // One literal mapping per line: Written name = TTS-friendly pronunciation.
+  djPronunciations: "Bow Down = Bough Down",
   // Mood Pulse / DJ shout-outs on searched adds.
   djShoutEnabled: true,
   djShoutMode: "every", // "percent" | "every"
@@ -237,6 +243,9 @@ const DJ_CHARACTER_INTENSITY_IDS = new Set(
 );
 const DJ_CATCHPHRASE_MAXLEN = 80;
 const DJ_BAN_LIST_MAXLEN = 240;
+const DJ_ADVANCED_INSTRUCTIONS_MAXLEN = 800;
+const DJ_PRONUNCIATIONS_MAXLEN = 2400;
+const DJ_PRONUNCIATIONS_MAX_ENTRIES = 40;
 
 // Allowed silence-bridge lengths; each has a bundled dj-silence-Ns.mp3.
 export const DJ_SILENCE_OPTIONS = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
@@ -440,6 +449,73 @@ export function parseDjBanList(value) {
     .filter((p) => p.length >= 2);
 }
 
+function normalizeDjAdvancedText(value, fallback, maxLength) {
+  if (value == null) return fallback;
+  if (typeof value !== "string") return fallback;
+  return value
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+    .trim()
+    .slice(0, maxLength);
+}
+
+export function normalizeDjPersonaNotes(
+  value,
+  fallback = DJ_VOICE_DEFAULTS.djPersonaNotes
+) {
+  return normalizeDjAdvancedText(
+    value,
+    fallback,
+    DJ_ADVANCED_INSTRUCTIONS_MAXLEN
+  );
+}
+
+export function normalizeDjAlwaysInstructions(
+  value,
+  fallback = DJ_VOICE_DEFAULTS.djAlwaysInstructions
+) {
+  return normalizeDjAdvancedText(
+    value,
+    fallback,
+    DJ_ADVANCED_INSTRUCTIONS_MAXLEN
+  );
+}
+
+export function normalizeDjNeverInstructions(
+  value,
+  fallback = DJ_VOICE_DEFAULTS.djNeverInstructions
+) {
+  return normalizeDjAdvancedText(
+    value,
+    fallback,
+    DJ_ADVANCED_INSTRUCTIONS_MAXLEN
+  );
+}
+
+export function normalizeDjPronunciations(
+  value,
+  fallback = DJ_VOICE_DEFAULTS.djPronunciations
+) {
+  return normalizeDjAdvancedText(value, fallback, DJ_PRONUNCIATIONS_MAXLEN);
+}
+
+export function parseDjPronunciations(value) {
+  const raw = normalizeDjPronunciations(value, "");
+  if (!raw) return [];
+  const entries = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const match = trimmed.match(/^(.{1,120}?)\s*(?:=>|=)\s*(.{1,160})$/);
+    if (!match) continue;
+    const written = match[1].trim();
+    const spoken = match[2].trim();
+    if (written.length < 2 || !spoken || written === spoken) continue;
+    entries.push({ written, spoken });
+    if (entries.length >= DJ_PRONUNCIATIONS_MAX_ENTRIES) break;
+  }
+  return entries.sort((a, b) => b.written.length - a.written.length);
+}
+
 function cleanDjName(value) {
   if (typeof value !== "string") return null;
   return value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, DJ_NAME_MAXLEN);
@@ -572,6 +648,22 @@ export function getDjVoiceSettings() {
       s.djBanList,
       DJ_VOICE_DEFAULTS.djBanList
     ),
+    djPersonaNotes: normalizeDjPersonaNotes(
+      s.djPersonaNotes,
+      DJ_VOICE_DEFAULTS.djPersonaNotes
+    ),
+    djAlwaysInstructions: normalizeDjAlwaysInstructions(
+      s.djAlwaysInstructions,
+      DJ_VOICE_DEFAULTS.djAlwaysInstructions
+    ),
+    djNeverInstructions: normalizeDjNeverInstructions(
+      s.djNeverInstructions,
+      DJ_VOICE_DEFAULTS.djNeverInstructions
+    ),
+    djPronunciations: normalizeDjPronunciations(
+      s.djPronunciations,
+      DJ_VOICE_DEFAULTS.djPronunciations
+    ),
     djShoutEnabled:
       typeof s.djShoutEnabled === "boolean"
         ? s.djShoutEnabled
@@ -702,6 +794,27 @@ export function setDjVoiceSettings(partial = {}) {
   }
   if (partial.djBanList != null) {
     next.djBanList = normalizeDjBanList(partial.djBanList, "");
+  }
+  if (partial.djPersonaNotes != null) {
+    next.djPersonaNotes = normalizeDjPersonaNotes(partial.djPersonaNotes, "");
+  }
+  if (partial.djAlwaysInstructions != null) {
+    next.djAlwaysInstructions = normalizeDjAlwaysInstructions(
+      partial.djAlwaysInstructions,
+      ""
+    );
+  }
+  if (partial.djNeverInstructions != null) {
+    next.djNeverInstructions = normalizeDjNeverInstructions(
+      partial.djNeverInstructions,
+      ""
+    );
+  }
+  if (partial.djPronunciations != null) {
+    next.djPronunciations = normalizeDjPronunciations(
+      partial.djPronunciations,
+      ""
+    );
   }
   if (partial.djShoutEnabled != null) {
     next.djShoutEnabled = !!partial.djShoutEnabled;

@@ -33,13 +33,13 @@ function sanitizeDedication(value) {
   return value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, DEDICATION_MAX);
 }
 
-/** Queue / NP label: "For Sarah · Mark" */
+/** Queue / NP label: "For Sarah from Mark" */
 function dedicationDisplayLabel(dedication, requester) {
   const forWho = sanitizeDedication(dedication || "");
   if (!forWho) return "";
   const by = sanitizeDisplayName(requester || "");
   const core = /^for\s+/i.test(forWho) ? forWho : `For ${forWho}`;
-  return by ? `${core} \u00b7 ${by}` : core;
+  return by ? `${core} from ${by}` : core;
 }
 
 const dedicationOverlay = document.getElementById("dedication-overlay");
@@ -227,6 +227,10 @@ const npArt = document.getElementById("np-art");
 const npTitle = document.getElementById("np-title");
 const npArtist = document.getElementById("np-artist");
 const npAlbum = document.getElementById("np-album");
+const npProgress = document.getElementById("np-progress");
+const npProgressFill = document.getElementById("np-progress-fill");
+const npProgressElapsed = document.getElementById("np-progress-elapsed");
+const npProgressDuration = document.getElementById("np-progress-duration");
 const npEmpty = document.getElementById("np-empty");
 const npState = document.getElementById("np-state");
 const npOrigin = document.getElementById("np-origin");
@@ -238,6 +242,10 @@ const npFsArt = document.getElementById("np-fs-art");
 const npFsTitle = document.getElementById("np-fs-title");
 const npFsArtist = document.getElementById("np-fs-artist");
 const npFsAlbum = document.getElementById("np-fs-album");
+const npFsProgress = document.getElementById("np-fs-progress");
+const npFsProgressFill = document.getElementById("np-fs-progress-fill");
+const npFsProgressElapsed = document.getElementById("np-fs-progress-elapsed");
+const npFsProgressDuration = document.getElementById("np-fs-progress-duration");
 const npFsLyrics = document.getElementById("np-fs-lyrics");
 const shuffleBtn = document.getElementById("shuffle-btn");
 const prevBtn = document.getElementById("prev-btn");
@@ -739,6 +747,20 @@ const djTtsSpeedInput = document.getElementById("set-dj-tts-speed");
 const djIntensityInput = document.getElementById("set-dj-intensity");
 const djCatchphraseInput = document.getElementById("set-dj-catchphrase");
 const djBanListInput = document.getElementById("set-dj-ban-list");
+const djPersonaNotesInput = document.getElementById("set-dj-persona-notes");
+const djAlwaysInstructionsInput = document.getElementById(
+  "set-dj-always-instructions"
+);
+const djNeverInstructionsInput = document.getElementById(
+  "set-dj-never-instructions"
+);
+const djPronunciationsInput = document.getElementById("set-dj-pronunciations");
+const djAdvancedSaveBtn = document.getElementById("dj-advanced-save");
+const djAdvancedResetBtn = document.getElementById("dj-advanced-reset");
+const djAdvancedPreviewRefreshBtn = document.getElementById(
+  "dj-advanced-preview-refresh"
+);
+const djEffectivePromptInput = document.getElementById("dj-effective-prompt");
 const djShoutEnabledInput = document.getElementById("set-dj-shout-enabled");
 const djShoutModeInput = document.getElementById("set-dj-shout-mode");
 const djShoutPercentInput = document.getElementById("set-dj-shout-percent");
@@ -955,6 +977,18 @@ function fillSettings(s) {
   if (s.djBanList != null && djBanListInput) {
     djBanListInput.value = String(s.djBanList);
   }
+  if (s.djPersonaNotes != null && djPersonaNotesInput) {
+    djPersonaNotesInput.value = String(s.djPersonaNotes);
+  }
+  if (s.djAlwaysInstructions != null && djAlwaysInstructionsInput) {
+    djAlwaysInstructionsInput.value = String(s.djAlwaysInstructions);
+  }
+  if (s.djNeverInstructions != null && djNeverInstructionsInput) {
+    djNeverInstructionsInput.value = String(s.djNeverInstructions);
+  }
+  if (s.djPronunciations != null && djPronunciationsInput) {
+    djPronunciationsInput.value = String(s.djPronunciations);
+  }
   if (s.djShoutEnabled != null && djShoutEnabledInput) {
     djShoutEnabledInput.checked = !!s.djShoutEnabled;
   }
@@ -1017,6 +1051,7 @@ function updateDjHubSummaries() {
   const bannerEl = document.getElementById("dj-stat-banner");
   const nameEl = document.getElementById("dj-stat-name");
   const voiceEl = document.getElementById("dj-stat-voice");
+  const advancedEl = document.getElementById("dj-stat-advanced");
   const volumeEl = document.getElementById("dj-stat-volume");
   const shoutsEl = document.getElementById("dj-stat-shouts");
 
@@ -1038,6 +1073,21 @@ function updateDjHubSummaries() {
     const speed = Number(djTtsSpeedInput?.value ?? 1);
     const speedLabel = Number.isFinite(speed) ? `${speed}×` : "1×";
     voiceEl.textContent = `${intensityLabel} · ${provider} · ${speedLabel}`;
+  }
+
+  if (advancedEl) {
+    const customSections = [
+      djPersonaNotesInput?.value,
+      djAlwaysInstructionsInput?.value,
+      djNeverInstructionsInput?.value,
+    ].filter((value) => String(value || "").trim()).length;
+    const pronunciationCount = String(djPronunciationsInput?.value || "")
+      .split(/\r?\n/)
+      .filter((line) => /(?:=>|=)/.test(line)).length;
+    advancedEl.textContent =
+      customSections || pronunciationCount
+        ? `${customSections} guidance · ${pronunciationCount} pronunciations`
+        : "Core locked";
   }
 
   if (volumeEl) {
@@ -1101,8 +1151,10 @@ async function saveSettings(values, { toastMessage = null } = {}) {
     if (!res.ok) throw new Error(data.error || "Could not save settings.");
     fillSettings(data); // reflect the clamped/effective values
     if (toastMessage) showToast(toastMessage);
+    return true;
   } catch (err) {
     showToast(err.message, true);
+    return false;
   } finally {
     if (settingsSaveBtn) settingsSaveBtn.disabled = false;
     if (settingsResetBtn) settingsResetBtn.disabled = false;
@@ -1209,6 +1261,10 @@ function currentDjVoicePayload() {
     djCharacterIntensity: djIntensityInput?.value ?? "classic",
     djCatchphrase: djCatchphraseInput?.value ?? "",
     djBanList: djBanListInput?.value ?? "",
+    djPersonaNotes: djPersonaNotesInput?.value ?? "",
+    djAlwaysInstructions: djAlwaysInstructionsInput?.value ?? "",
+    djNeverInstructions: djNeverInstructionsInput?.value ?? "",
+    djPronunciations: djPronunciationsInput?.value ?? "",
     djShoutEnabled: !!djShoutEnabledInput?.checked,
     djShoutMode: djShoutModeInput?.value || "every",
     djShoutPercent: Number(djShoutPercentInput?.value),
@@ -1274,6 +1330,59 @@ djVoiceSaveBtns.forEach((btn) => {
   });
 });
 
+async function loadDjEffectivePrompt() {
+  if (!djEffectivePromptInput) return;
+  const btn = djAdvancedPreviewRefreshBtn;
+  if (btn) btn.disabled = true;
+  djEffectivePromptInput.value = "Loading effective prompt…";
+  try {
+    const res = await hostFetch("/api/dj-voice/prompt-preview", {
+      cache: "no-store",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not load prompt preview.");
+    djEffectivePromptInput.value = data.prompt || "(No prompt returned.)";
+  } catch (err) {
+    djEffectivePromptInput.value = "";
+    showToast(err.message || "Could not load prompt preview.", true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+if (djAdvancedSaveBtn) {
+  djAdvancedSaveBtn.addEventListener("click", async () => {
+    djAdvancedSaveBtn.disabled = true;
+    try {
+      const saved = await saveSettings(currentDjVoicePayload(), {
+        toastMessage: "Advanced DJ saved",
+      });
+      if (saved) await loadDjEffectivePrompt();
+    } finally {
+      djAdvancedSaveBtn.disabled = false;
+    }
+  });
+}
+
+djAdvancedPreviewRefreshBtn?.addEventListener("click", () => {
+  void loadDjEffectivePrompt();
+});
+
+djAdvancedResetBtn?.addEventListener("click", async () => {
+  const d = settingsDefaults || {};
+  const values = {
+    djPersonaNotes: d.djPersonaNotes ?? "",
+    djAlwaysInstructions: d.djAlwaysInstructions ?? "",
+    djNeverInstructions: d.djNeverInstructions ?? "",
+    djPronunciations: d.djPronunciations ?? "Bow Down = Bough Down",
+  };
+  fillSettings(values);
+  const saved = await saveSettings(values, {
+    toastMessage: "Advanced DJ set to defaults",
+  });
+  if (saved) await loadDjEffectivePrompt();
+});
+
 if (djVoiceTestBtn) {
   djVoiceTestBtn.addEventListener("click", () => runDjVoicePreview(djVoiceTestBtn));
 }
@@ -1300,6 +1409,10 @@ async function resetDjVoiceDefaults() {
     djCharacterIntensity: d.djCharacterIntensity ?? "extra",
     djCatchphrase: d.djCatchphrase ?? "",
     djBanList: d.djBanList ?? "",
+    djPersonaNotes: d.djPersonaNotes ?? "",
+    djAlwaysInstructions: d.djAlwaysInstructions ?? "",
+    djNeverInstructions: d.djNeverInstructions ?? "",
+    djPronunciations: d.djPronunciations ?? "Bow Down = Bough Down",
     djShoutEnabled: d.djShoutEnabled ?? true,
     djShoutMode: d.djShoutMode ?? "every",
     djShoutPercent: d.djShoutPercent ?? 25,
@@ -1335,6 +1448,10 @@ async function resetDjVoiceDefaults() {
       djCharacterIntensity: d.djCharacterIntensity ?? "extra",
       djCatchphrase: d.djCatchphrase ?? "",
       djBanList: d.djBanList ?? "",
+      djPersonaNotes: d.djPersonaNotes ?? "",
+      djAlwaysInstructions: d.djAlwaysInstructions ?? "",
+      djNeverInstructions: d.djNeverInstructions ?? "",
+      djPronunciations: d.djPronunciations ?? "Bow Down = Bough Down",
       djShoutEnabled: d.djShoutEnabled ?? true,
       djShoutMode: d.djShoutMode ?? "every",
       djShoutPercent: d.djShoutPercent ?? 25,
@@ -3338,6 +3455,7 @@ const viewSettingsDj = document.getElementById("view-settings-dj");
 const viewSettingsDjBanner = document.getElementById("view-settings-dj-banner");
 const viewSettingsDjName = document.getElementById("view-settings-dj-name");
 const viewSettingsDjVoice = document.getElementById("view-settings-dj-voice");
+const viewSettingsDjAdvanced = document.getElementById("view-settings-dj-advanced");
 const viewSettingsDjVolume = document.getElementById("view-settings-dj-volume");
 const viewSettingsDjShouts = document.getElementById("view-settings-dj-shouts");
 const viewSettingsDjLastcall = document.getElementById("view-settings-dj-lastcall");
@@ -3366,6 +3484,9 @@ const settingsDjBackBtn = document.getElementById("settings-dj-back");
 const settingsDjBannerBackBtn = document.getElementById("settings-dj-banner-back");
 const settingsDjNameBackBtn = document.getElementById("settings-dj-name-back");
 const settingsDjVoiceBackBtn = document.getElementById("settings-dj-voice-back");
+const settingsDjAdvancedBackBtn = document.getElementById(
+  "settings-dj-advanced-back"
+);
 const settingsDjVolumeBackBtn = document.getElementById("settings-dj-volume-back");
 const settingsDjShoutsBackBtn = document.getElementById("settings-dj-shouts-back");
 const settingsDjLastcallBackBtn = document.getElementById("settings-dj-lastcall-back");
@@ -3401,6 +3522,7 @@ const VIEWS = {
   "settings-dj-banner": viewSettingsDjBanner,
   "settings-dj-name": viewSettingsDjName,
   "settings-dj-voice": viewSettingsDjVoice,
+  "settings-dj-advanced": viewSettingsDjAdvanced,
   "settings-dj-volume": viewSettingsDjVolume,
   "settings-dj-shouts": viewSettingsDjShouts,
   "settings-dj-lastcall": viewSettingsDjLastcall,
@@ -3920,6 +4042,7 @@ function showView(name) {
   if (target === "stats") loadStats();
   if (target === "join") loadJoinCode();
   if (target === "settings-dj") updateDjHubSummaries();
+  if (target === "settings-dj-advanced") void loadDjEffectivePrompt();
   if (isSettingsArea(target)) revealSettings();
   if (target === "memory") loadMemory();
   if (target === "suggestions") loadSuggestions();
@@ -4128,6 +4251,7 @@ settingsDjBackBtn?.addEventListener("click", () => navigate("settings"));
 settingsDjBannerBackBtn?.addEventListener("click", () => navigate("settings-dj"));
 settingsDjNameBackBtn?.addEventListener("click", () => navigate("settings-dj"));
 settingsDjVoiceBackBtn?.addEventListener("click", () => navigate("settings-dj"));
+settingsDjAdvancedBackBtn?.addEventListener("click", () => navigate("settings-dj"));
 settingsDjVolumeBackBtn?.addEventListener("click", () => navigate("settings-dj"));
 settingsDjShoutsBackBtn?.addEventListener("click", () => navigate("settings-dj"));
 settingsDjLastcallBackBtn?.addEventListener("click", () => navigate("settings-dj"));
@@ -4625,6 +4749,7 @@ let npSyncedLines = null;
 let npPositionBase = 0;
 let npPositionAt = 0;
 let npIsPlayingOverlay = false;
+let npProgressClockKey = "";
 let npLyricTick = null;
 let npOverlayHistoryPushed = false;
 
@@ -4687,6 +4812,59 @@ function estimatedPositionSec() {
     pos += (Date.now() - npPositionAt) / 1000;
   }
   return pos;
+}
+
+function formatTrackTime(value) {
+  const total = Math.max(0, Math.floor(Number(value) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = String(total % 60).padStart(2, "0");
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}`
+    : `${minutes}:${seconds}`;
+}
+
+function paintTrackProgress(container, fill, elapsed, total, position, duration) {
+  if (!container || !fill || !elapsed || !total) return;
+  const available = Number.isFinite(duration) && duration > 0;
+  container.hidden = !available;
+  if (!available) return;
+  const current = Math.max(0, Math.min(duration, position));
+  const percent = Math.max(0, Math.min(100, (current / duration) * 100));
+  fill.style.transform = `scaleX(${percent / 100})`;
+  elapsed.textContent = formatTrackTime(current);
+  total.textContent = formatTrackTime(duration);
+  const bar = container.querySelector('[role="progressbar"]');
+  bar?.setAttribute("aria-valuenow", String(Math.round(percent)));
+  bar?.setAttribute(
+    "aria-valuetext",
+    `${formatTrackTime(current)} of ${formatTrackTime(duration)}`
+  );
+}
+
+function updateTrackProgress() {
+  const isAnnouncement =
+    !!lastNowPlaying?.djVoice || !!lastNowPlaying?.djSilence;
+  const duration = isAnnouncement
+    ? Number.NaN
+    : Number(lastNowPlaying?.durationSec);
+  const position = estimatedPositionSec();
+  paintTrackProgress(
+    npProgress,
+    npProgressFill,
+    npProgressElapsed,
+    npProgressDuration,
+    position,
+    duration
+  );
+  paintTrackProgress(
+    npFsProgress,
+    npFsProgressFill,
+    npFsProgressElapsed,
+    npFsProgressDuration,
+    position,
+    duration
+  );
 }
 
 // Advance synced lyrics slightly to offset Sonos reporting, polling, ticker,
@@ -5037,6 +5215,12 @@ function renderNowPlaying(np) {
     maybeAnnounceClosingTime(np.closingTimeAt, np.partyRecap);
   }
   const hasTrack = np && (np.title || np.artist);
+  const progressClockKey = lyricsTrackKey(np);
+  applyPlaybackClock(np, {
+    force: progressClockKey !== npProgressClockKey,
+  });
+  npProgressClockKey = progressClockKey;
+  updateTrackProgress();
   // Show Pause only when the QUEUE itself is playing. If something else is on
   // (SiriusXM, radio, etc.) or nothing is playing, show Play so a tap takes
   // over and starts the queue.
@@ -5132,6 +5316,8 @@ function renderNowPlaying(np) {
   syncNpOverlay(np);
   prefetchUpcomingAlbumArt(lastQueueTracks);
 }
+
+window.setInterval(updateTrackProgress, 250);
 
 npReactions?.addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-react]");

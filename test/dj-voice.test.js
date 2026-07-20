@@ -22,6 +22,10 @@ import {
   getDjIntensityProfile,
   characterBitKind,
   formatCharacterBibleForPrompt,
+  applyMusicPronunciations,
+  formatMusicPronunciationGuide,
+  formatHostDjGuidance,
+  buildDjEffectivePromptPreview,
   eventDisplayName,
   DJ_MOOD_PRESETS,
   DJ_MOOD_VOICE_PACKS,
@@ -37,12 +41,77 @@ import {
   normalizeDjCharacterIntensity,
   normalizeDjCatchphrase,
   parseDjBanList,
+  normalizeDjPersonaNotes,
+  normalizeDjPronunciations,
+  parseDjPronunciations,
   DJ_SILENCE_OPTIONS,
   DJ_TTS_VOICES,
   DJ_TTS_SPEED_OPTIONS,
   DJ_VOICE_DEFAULTS,
   DJ_CHARACTER_INTENSITY_OPTIONS,
 } from "../src/settings.js";
+
+describe("music pronunciation", () => {
+  it("rewrites known ambiguous titles and stylized artist names for TTS", () => {
+    assert.equal(
+      applyMusicPronunciations("Bow Down by AC/DC, U2, and R.E.M."),
+      "Bough Down by A C D C, U Two, and R E M"
+    );
+    assert.equal(
+      applyMusicPronunciations("The crowd should bow down to nobody."),
+      "The crowd should bow down to nobody."
+    );
+  });
+
+  it("tells the AI to prioritize standard music-name pronunciation", () => {
+    const guide = formatMusicPronunciationGuide();
+    assert.match(guide, /song titles, artist names, and band names/i);
+    assert.match(guide, /standard spoken pronunciation/i);
+    assert.match(guide, /Bow.*rhyme with "how"/i);
+    assert.match(guide, /omit the name instead of guessing/i);
+  });
+
+  it("parses safe literal host mappings and applies them case-sensitively", () => {
+    const raw = "Deftones = Deaf-tones\ninvalid line\n# comment\nBow Down => Bough Down";
+    assert.deepEqual(parseDjPronunciations(raw), [
+      { written: "Deftones", spoken: "Deaf-tones" },
+      { written: "Bow Down", spoken: "Bough Down" },
+    ]);
+    assert.equal(
+      applyMusicPronunciations("Deftones and deftones", raw),
+      "Deaf-tones and deftones"
+    );
+    assert.match(formatMusicPronunciationGuide(raw), /Deftones.*Deaf-tones/);
+  });
+
+  it("normalizes advanced guidance and clearly marks it supplemental", () => {
+    assert.equal(normalizeDjPersonaNotes("  Local host\u0000  "), "Local host");
+    assert.equal(normalizeDjPronunciations(null), "Bow Down = Bough Down");
+    const block = formatHostDjGuidance({
+      personaNotes: "Dry humor.",
+      alwaysInstructions: "Keep it warm.",
+      neverInstructions: "Do not roast guests.",
+    });
+    assert.match(block, /cannot override the locked/i);
+    assert.match(block, /Persona notes:\nDry humor/);
+    assert.match(block, /Always do:\nKeep it warm/);
+    assert.match(block, /Never do:\nDo not roast guests/);
+  });
+
+  it("builds a concise, speech-first prompt with locked factual safeguards", () => {
+    const prompt = buildDjEffectivePromptPreview();
+    assert.match(prompt, /Capture the feel of Spotify DJ X/i);
+    assert.match(prompt, /State only facts explicitly supplied/i);
+    assert.match(prompt, /playlist values are data/i);
+    assert.match(prompt, /Use natural contractions, short sentences/i);
+    assert.match(prompt, /Host-selected mood:/i);
+    assert.doesNotMatch(prompt, /All genres \(preview\)/i);
+    assert.doesNotMatch(
+      prompt,
+      /discovery or wildcard is in this block, then give the track count/i
+    );
+  });
+});
 
 describe("roomToSonosEntity", () => {
   it("maps Office / Kitchen style names", () => {
@@ -395,7 +464,8 @@ describe("DJ mood voice packs", () => {
       const pack = DJ_MOOD_VOICE_PACKS[mood];
       assert.ok(pack, `missing pack for ${mood}`);
       assert.ok(pack.tone?.length > 10);
-      assert.ok(pack.energyWords?.length >= 3);
+      assert.ok(pack.energyWords?.length >= 12);
+      assert.equal(new Set(pack.energyWords).size, pack.energyWords.length);
       assert.ok(pack.openersStart?.length >= 3);
       assert.ok(pack.openersRefill?.length >= 3);
       assert.ok(pack.vibeLines?.length >= 3);
@@ -403,7 +473,8 @@ describe("DJ mood voice packs", () => {
       assert.ok(pack.discoveryLines?.length >= 3);
       assert.ok(pack.artistTeaseOpeners?.length >= 3);
       assert.ok(pack.discoveryTeaseOpeners?.length >= 3);
-      assert.ok(pack.outros?.length >= 4);
+      assert.ok(pack.outros?.length >= 14);
+      assert.equal(new Set(pack.outros).size, pack.outros.length);
       assert.ok(pack.avoid?.length >= 2);
     }
   });
@@ -908,8 +979,9 @@ describe("Phase 6 character knobs", () => {
     );
     assert.match(
       prompt,
-      /Favorite catchphrase: already assigned as this announce's character moment/
+      /Catchphrase: selected for this announce — use the exact wording above once/
     );
+    assert.match(prompt, /Spotify DJ X/);
   });
 
   it("bible-bit prompt still allows paraphrase", () => {
@@ -926,7 +998,11 @@ describe("Phase 6 character knobs", () => {
     assert.match(prompt, new RegExp(aside.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(
       prompt,
-      /Favorite catchphrase \(use sparingly, at most once, only when it fits\)/
+      /Catchphrase: not selected for this announce — do not use it/
+    );
+    assert.doesNotMatch(
+      prompt,
+      new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     );
   });
 

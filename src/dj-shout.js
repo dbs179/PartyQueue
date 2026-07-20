@@ -4,6 +4,8 @@ import { getDjVoiceSettings } from "./settings.js";
 import {
   isDjVoiceReady,
   announceOnSonos,
+  formatMusicPronunciationGuide,
+  formatHostDjGuidance,
   generateDjSpeechFromPrompt,
 } from "./dj-voice.js";
 import {
@@ -195,6 +197,7 @@ function buildRequestShoutPrompt({
   djName,
   maxWords,
   banList,
+  djSettings = null,
   priorScripts = [],
   stricter = false,
 }) {
@@ -239,7 +242,17 @@ function buildRequestShoutPrompt({
     ? `\nRETRY: Your previous draft skipped required blurb words. Say the blurbs more literally — listeners should hear the same jokes as written in settings.`
     : "";
 
+  const hostGuidance = formatHostDjGuidance({
+    personaNotes: djSettings?.djPersonaNotes,
+    alwaysInstructions: djSettings?.djAlwaysInstructions,
+    neverInstructions: djSettings?.djNeverInstructions,
+  });
+
   return `You are ${dj}, a lively party DJ on Sonos. Write ONE short spoken shout-out only (no quotes, no stage directions, no bullet lists).
+
+${hostGuidance ? `${hostGuidance}\n\n` : ""}${formatMusicPronunciationGuide(
+    djSettings?.djPronunciations
+  )}
 
 Hard limits:
 - At most ${maxWords} words
@@ -326,6 +339,7 @@ export async function writeRequestShoutScript({
           djName: dj.djName,
           maxWords,
           banList: dj.djBanList,
+          djSettings: dj,
           priorScripts,
         }),
         { maxWords, banList: dj.djBanList }
@@ -348,6 +362,7 @@ export async function writeRequestShoutScript({
             djName: dj.djName,
             maxWords,
             banList: dj.djBanList,
+            djSettings: dj,
             priorScripts,
             stricter: true,
           }),
