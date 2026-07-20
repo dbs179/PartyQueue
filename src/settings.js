@@ -104,9 +104,8 @@ export function getRandomnessSettings() {
 }
 
 // "Songs Like" discovery: whether to mix in Last.fm-similar songs from outside
-// the host's playlists. On large Random batches, Discovery slots are carved out
-// of the count; on small Random (below Discovery), the batch floors to
-// Discovery so playlist picks stay (e.g. Random 2 + Discovery 5 => 2 + 3 = 5).
+// the host's playlists. Discovery slots are carved out of the requested count,
+// while at least half of each batch remains selected-playlist music.
 export const DISCOVERY_DEFAULTS = {
   discoverEnabled: true,
   similarCount: 2,
@@ -159,8 +158,11 @@ export const DJ_VOICE_DEFAULTS = {
   djVolumeBumpLowPct: 20,
   djVolumeBumpMidPct: 8,
   djVolumeBumpHighPct: 4,
-  // Quiet pad after the DJ clip while volume restores (prebuilt mp3s).
+  // Legacy one-pad duration, retained for settings compatibility.
   djSilenceSec: 2,
+  // Pre/post handoff pads. New field intentionally defaults existing installs
+  // to the safer 3-second stepped-ramp window.
+  djHandoffSilenceSec: 3,
   // TTS via Home Assistant: ElevenLabs (expressive) or OpenAI.
   djTtsProvider: "elevenlabs_ha",
   djTtsVoiceOpenAi: "onyx",
@@ -548,6 +550,7 @@ export function getDjVoiceSettings() {
       s.djSilenceSec,
       DJ_VOICE_DEFAULTS.djSilenceSec
     ),
+    djHandoffSilenceSec: DJ_VOICE_DEFAULTS.djHandoffSilenceSec,
     djTtsProvider,
     djTtsEngine: djTtsEngineForProvider(djTtsProvider),
     djTtsVoiceOpenAi,
@@ -652,6 +655,9 @@ export function setDjVoiceSettings(partial = {}) {
       partial.djSilenceSec,
       next.djSilenceSec ?? DJ_VOICE_DEFAULTS.djSilenceSec
     );
+  }
+  if (partial.djHandoffSilenceSec != null) {
+    next.djHandoffSilenceSec = DJ_VOICE_DEFAULTS.djHandoffSilenceSec;
   }
   if (partial.djTtsProvider != null) {
     next.djTtsProvider = normalizeDjTtsProvider(partial.djTtsProvider);

@@ -211,24 +211,24 @@ test("discoveryPlan: large Random carves Discovery out of the batch", () => {
   assert.equal(discoverySlots(25, 5), 5);
 });
 
-test("discoveryPlan: small Random floors total to Discovery", () => {
-  // Random 2 + Discovery 5 => 2 playlist + 3 discoveries = 5
+test("discoveryPlan: small Random keeps at least half from playlists", () => {
+  // Random 2 always means one playlist + one discovery when Discover is on.
   assert.deepEqual(discoveryPlan(2, 5), {
-    playlistWant: 2,
-    similarWant: 3,
-    totalTarget: 5,
+    playlistWant: 1,
+    similarWant: 1,
+    totalTarget: 2,
   });
   assert.deepEqual(discoveryPlan(3, 5), {
-    playlistWant: 3,
-    similarWant: 2,
-    totalTarget: 5,
+    playlistWant: 2,
+    similarWant: 1,
+    totalTarget: 3,
   });
   assert.deepEqual(discoveryPlan(0, 5), {
     playlistWant: 0,
     similarWant: 0,
     totalTarget: 0,
   });
-  assert.equal(discoverySlots(2, 5), 3);
+  assert.equal(discoverySlots(2, 5), 1);
 });
 
 test("sharesMood is true when any genre bucket overlaps", () => {

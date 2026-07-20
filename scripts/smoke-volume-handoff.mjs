@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Live Sonos smoke: silence(ramp) → boost → DJ → music (volume restore)
+ * Live Sonos smoke: pre-silence → boost → DJ → post-silence → restore → music
  * Usage: node scripts/smoke-volume-handoff.mjs [empty|mid|batch|refill|all]
  */
 import fs from "node:fs";
@@ -89,6 +89,8 @@ function sample(label, n, v) {
     silence: !!n?.djSilence,
     uri: String(n?.uri || "").slice(0, 80),
   };
+  row.ramp = row.silence && /silence-ramp-/i.test(row.uri);
+  row.restore = row.silence && !row.ramp;
   LOG.push(row);
   console.log(
     `${row.t} [${label}] vol=${row.vol} dj=${row.dj} sil=${row.silence} state=${row.state} | ${row.title || "-"}`
@@ -117,11 +119,12 @@ function analyze(label, samples, baseline) {
   const sawDj = samples.some((s) => s.dj);
   const sawSilence = samples.some((s) => s.silence);
 
-  // Order: ramp silence → boost → DJ → music
+  // Order: pre-silence → boost → DJ → post-silence → exact baseline → music.
   const idx = (pred) => samples.findIndex(pred);
   const iBoost = idx((s) => s.vol >= boostExpectedMin);
   const iDj = idx((s) => s.dj);
-  const iRamp = idx((s) => s.silence); // pre-DJ ramp
+  const iRamp = idx((s) => s.ramp);
+  const iRestore = samples.findIndex((s, i) => i > iDj && s.restore);
   const iMusic = samples.findIndex(
     (s, i) =>
       i > iDj &&
@@ -132,18 +135,14 @@ function analyze(label, samples, baseline) {
       s.state === "PLAYING"
   );
   const firstMusic = iMusic >= 0 ? samples[iMusic] : null;
-  // Allow a couple polls for restore after music URI appears (async volume I/O).
   const restoredOnMusic =
     iMusic >= 0 &&
+    samples[iMusic].vol === baseline;
+  const restoredDuringSilence =
+    iRestore >= 0 &&
     samples
-      .slice(iMusic, iMusic + 8)
-      .some(
-        (s) =>
-          !s.dj &&
-          !s.silence &&
-          s.state === "PLAYING" &&
-          Math.abs(s.vol - baseline) <= 3
-      );
+      .slice(iRestore, iMusic >= 0 ? iMusic : undefined)
+      .some((s) => s.restore && s.vol === baseline);
   // Boost should land on ramp silence or at DJ start — not deep into a song.
   const boostOnPadOrDj =
     iBoost < 0 ||
@@ -155,9 +154,11 @@ function analyze(label, samples, baseline) {
   const orderOk =
     iRamp >= 0 &&
     iDj >= 0 &&
+    iRestore >= 0 &&
     iMusic >= 0 &&
     iRamp < iDj &&
-    iDj < iMusic &&
+    iDj < iRestore &&
+    iRestore < iMusic &&
     boostOnPadOrDj;
 
   const report = {
@@ -168,14 +169,16 @@ function analyze(label, samples, baseline) {
     sawBoost,
     maxDuringDj,
     restoredOnMusic,
+    restoredDuringSilence,
     firstMusicTitle: firstMusic?.title || null,
     firstMusicVol: firstMusic?.vol ?? null,
     orderOk,
-    indices: { iBoost, iRamp, iDj, iMusic },
+    indices: { iBoost, iRamp, iDj, iRestore, iMusic },
     pass:
       sawDj &&
       sawSilence &&
       sawBoost &&
+      restoredDuringSilence &&
       restoredOnMusic &&
       orderOk,
   };

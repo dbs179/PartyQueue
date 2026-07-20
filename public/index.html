@@ -559,7 +559,7 @@
           <div class="setting-row">
             <label class="setting-label" for="set-similar-count">Discover</label>
             <input type="number" id="set-similar-count" class="setting-input" min="0" max="50" step="1" inputmode="numeric" />
-            <span class="setting-hint">target for each batch (default 2; small Random fills up to this)</span>
+            <span class="setting-hint">maximum per batch; at least half stays from your playlists (default 2)</span>
           </div>
           <div class="setting-row">
             <label class="setting-label" for="set-endless-count">Never-Ending Queue</label>
@@ -793,18 +793,9 @@
           <div class="setting-row">
             <label class="setting-label" for="set-dj-silence">Silence</label>
             <select id="set-dj-silence" class="setting-input">
-              <option value="0.5">0.5 s</option>
-              <option value="1">1 s</option>
-              <option value="1.5">1.5 s</option>
-              <option value="2">2 s</option>
-              <option value="2.5">2.5 s</option>
               <option value="3">3 s</option>
-              <option value="3.5">3.5 s</option>
-              <option value="4">4 s</option>
-              <option value="4.5">4.5 s</option>
-              <option value="5">5 s</option>
             </select>
-            <span class="setting-hint">quiet pad after the DJ while volume returns to music</span>
+            <span class="setting-hint">matching pre/post pads for the stepped volume handoff (default 3 s)</span>
           </div>
           <div class="settings-actions settings-actions-sticky">
             <button type="button" class="pill-btn success dj-voice-save-btn">Save</button>
@@ -1342,6 +1333,6 @@
     </div>
 
     <script src="vendor/sortable.min.js"></script>
-    <script src="app.js?v=6.2.6"></script>
+    <script src="app.js?v=6.5.0"></script>
   </body>
 </html>

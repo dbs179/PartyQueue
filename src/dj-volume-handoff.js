@@ -1,0 +1,477 @@
+const DEFAULT_POLL_MS = 150;
+const DEFAULT_RAMP_STEPS = 6;
+const RESTORE_RETRIES = 3;
+const RESTORE_RETRY_MS = 250;
+const PAD_RESUME_MS = 1200;
+const PAD_RESUME_TRIES = 8;
+const DEADLINE_SLACK_MS = 10_000;
+
+const clampVolume = (value) =>
+  Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+
+const sleepDefault = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export function isRampSilenceUri(uri) {
+  return /silence-ramp-\d+(?:\.\d+)?s\.mp3/i.test(String(uri || ""));
+}
+
+export function isRestoreSilenceUri(uri) {
+  const value = String(uri || "");
+  return (
+    !isRampSilenceUri(value) &&
+    /silence-\d+(?:\.\d+)?s\.mp3|dj-silence/i.test(value)
+  );
+}
+
+export function isDjClipUri(uri, publicUrl) {
+  const value = String(uri || "");
+  if (isRampSilenceUri(value) || isRestoreSilenceUri(value)) return false;
+  const fileToken = publicUrl
+    ? String(publicUrl).split("/").pop() || ""
+    : "";
+  return (
+    /tts_proxy|\/media\/tts\//i.test(value) ||
+    (fileToken && value.includes(fileToken))
+  );
+}
+
+function defaultLogger() {
+  return {
+    info(message) {
+      console.log(`[dj-volume] ${message}`);
+    },
+    warn(message) {
+      console.warn(`[dj-volume] ${message}`);
+    },
+    error(message) {
+      console.error(`[dj-volume] ${message}`);
+    },
+  };
+}
+
+async function defaultAdapter() {
+  const sonos = await import("./sonos.js");
+  return {
+    getNowPlaying: sonos.getNowPlayingFresh,
+    getVolume: sonos.getGroupVolume,
+    setVolume: sonos.setGroupVolume,
+    pause: sonos.pause,
+    resume: sonos.resumeQueuePlayback,
+    playAt: (trackNumber) => sonos.play({ trackNumber }),
+    next: sonos.next,
+  };
+}
+
+export function createDjVolumeHandoff({
+  publicUrl,
+  approxDurationSec = 8,
+  silenceSec = 3,
+  ttsPosition = null,
+  musicPosition = null,
+  calculateTarget,
+  adapter = null,
+  sleep = sleepDefault,
+  now = Date.now,
+  pollMs = DEFAULT_POLL_MS,
+  rampSteps = DEFAULT_RAMP_STEPS,
+  logger = defaultLogger(),
+} = {}) {
+  if (typeof calculateTarget !== "function") {
+    throw new Error("DJ volume handoff requires calculateTarget.");
+  }
+
+  let phase = "pending";
+  let baselineVolume = null;
+  let announceVolume = null;
+  let cancelled = false;
+  let started = false;
+  let volumeLocked = false;
+  let deadlineAt = null;
+  let task = null;
+  let resolvedAdapter = adapter;
+  let lastPadResumeAt = 0;
+  let padResumeTries = 0;
+  let sawDjPlaying = false;
+  let advancedFromDj = false;
+  let advancedFromRestore = false;
+  let restoreHeldAt = null;
+  let deadlineHandled = false;
+
+  const getAdapter = async () => {
+    if (!resolvedAdapter) resolvedAdapter = await defaultAdapter();
+    return resolvedAdapter;
+  };
+
+  const snapshot = () => ({
+    phase,
+    baselineVolume,
+    announceVolume,
+    cancelled,
+    started,
+    volumeLocked,
+    deadlineAt,
+  });
+
+  const setPhase = (next) => {
+    if (phase === next) return;
+    phase = next;
+    logger.info(`phase ${next}`);
+  };
+
+  const captureBaseline = async () => {
+    if (baselineVolume != null) return baselineVolume;
+    const io = await getAdapter();
+    baselineVolume = clampVolume(await io.getVolume());
+    announceVolume = clampVolume(calculateTarget(baselineVolume));
+    volumeLocked = true;
+    deadlineAt =
+      now() +
+      Math.max(3000, Math.round(Number(approxDurationSec || 8) * 1000)) +
+      Math.round(Number(silenceSec || 3) * 2000) +
+      DEADLINE_SLACK_MS;
+    logger.info(
+      `captured baseline ${baselineVolume}; announce target ${announceVolume}`
+    );
+    return baselineVolume;
+  };
+
+  const setAndCheck = async (target) => {
+    const io = await getAdapter();
+    const result = await io.setVolume(clampVolume(target));
+    if (result?.locked === false) return false;
+    return clampVolume(await io.getVolume()) === clampVolume(target);
+  };
+
+  const ramp = async (from, to) => {
+    const start = clampVolume(from);
+    const end = clampVolume(to);
+    const steps = Math.max(1, Math.floor(Number(rampSteps) || 1));
+    let previous = start;
+    for (let index = 1; index <= steps; index++) {
+      if (cancelled) return false;
+      const next = clampVolume(start + ((end - start) * index) / steps);
+      if (next === previous && index < steps) continue;
+      const io = await getAdapter();
+      await io.setVolume(next);
+      previous = next;
+    }
+    return true;
+  };
+
+  const restoreExact = async (reason = "restore") => {
+    if (baselineVolume == null) {
+      volumeLocked = false;
+      return true;
+    }
+    setPhase("restoring");
+    for (let attempt = 1; attempt <= RESTORE_RETRIES; attempt++) {
+      try {
+        if (await setAndCheck(baselineVolume)) {
+          volumeLocked = false;
+          setPhase("restored");
+          logger.info(`restored exact baseline ${baselineVolume} (${reason})`);
+          return true;
+        }
+      } catch (error) {
+        logger.warn(
+          `restore attempt ${attempt} failed (${reason}): ${error.message}`
+        );
+      }
+      if (attempt < RESTORE_RETRIES) await sleep(RESTORE_RETRY_MS);
+    }
+    logger.error(`could not verify baseline ${baselineVolume} (${reason})`);
+    return false;
+  };
+
+  const maybeResumePad = async (onPad, state) => {
+    const idle = state === "STOPPED" || state === "PAUSED_PLAYBACK";
+    if (
+      !onPad ||
+      !idle ||
+      padResumeTries >= PAD_RESUME_TRIES ||
+      (lastPadResumeAt > 0 && now() - lastPadResumeAt < PAD_RESUME_MS)
+    ) {
+      return;
+    }
+    lastPadResumeAt = now();
+    padResumeTries += 1;
+    try {
+      const io = await getAdapter();
+      await io.resume();
+      logger.info(`resumed stopped announce pad (try ${padResumeTries})`);
+    } catch (error) {
+      logger.warn(`announce-pad resume failed: ${error.message}`);
+    }
+  };
+
+  const holdPad = async (state, label) => {
+    const io = await getAdapter();
+    if (state === "PLAYING" || state === "TRANSITIONING") {
+      try {
+        await io.pause();
+        logger.info(`held ${label} while volume settles`);
+      } catch (error) {
+        logger.warn(`could not hold ${label}: ${error.message}`);
+      }
+    }
+  };
+
+  const resumeHeldPad = async (label) => {
+    try {
+      const io = await getAdapter();
+      await io.resume();
+      logger.info(`resumed ${label} after volume settled`);
+    } catch (error) {
+      logger.warn(`could not resume ${label}: ${error.message}`);
+    }
+  };
+
+  const advanceAfterHeldPad = async (
+    position,
+    label,
+    heldAt,
+    { naturalTransition = false, nextTransition = false } = {}
+  ) => {
+    if (naturalTransition) {
+      await resumeHeldPad(label);
+      return;
+    }
+    const elapsed = Math.max(0, now() - heldAt);
+    const remaining = Math.max(0, Math.round(silenceSec * 1000) - elapsed);
+    if (remaining) await sleep(remaining);
+    const io = await getAdapter();
+    if (nextTransition && typeof io.next === "function") {
+      await io.next();
+      await io.resume();
+      logger.info(`advanced from ${label} with Next after ${silenceSec}s`);
+      return;
+    }
+    if (Number(position) >= 1 && typeof io.playAt === "function") {
+      await io.playAt(Number(position));
+      logger.info(`advanced from ${label} after ${silenceSec}s`);
+      return;
+    }
+    await resumeHeldPad(label);
+  };
+
+  const run = async () => {
+    setPhase("waiting-pre-silence");
+    while (!cancelled) {
+      try {
+        const io = await getAdapter();
+        const np = await io.getNowPlaying();
+        const uri = String(np?.uri || "");
+        const state = String(np?.state || "").toUpperCase();
+        const onRamp = isRampSilenceUri(uri);
+        const onDj = isDjClipUri(uri, publicUrl);
+        const onRestore = isRestoreSilenceUri(uri);
+        const onPad = onRamp || onDj || onRestore;
+        let handledPad = false;
+
+        if (onRamp && baselineVolume == null) {
+          handledPad = true;
+          const heldAt = now();
+          await holdPad(state, "pre-silence");
+          await captureBaseline();
+          setPhase("ramping-up");
+          if (await ramp(baselineVolume, announceVolume)) {
+            setPhase("announcing");
+          }
+          await advanceAfterHeldPad(
+            ttsPosition,
+            "pre-silence",
+            heldAt,
+            { naturalTransition: true }
+          );
+        } else if (onDj) {
+          if (baselineVolume == null) {
+            handledPad = true;
+            await holdPad(state, "DJ fallback");
+            await captureBaseline();
+            setPhase("ramping-up-fallback");
+            await ramp(baselineVolume, announceVolume);
+            await resumeHeldPad("DJ fallback");
+          }
+          if (state === "PLAYING" || state === "TRANSITIONING") {
+            sawDjPlaying = true;
+          }
+          if (phase !== "restored") setPhase("announcing");
+          if (
+            sawDjPlaying &&
+            !advancedFromDj &&
+            (state === "STOPPED" || state === "PAUSED_PLAYBACK") &&
+            Number(musicPosition) >= 2 &&
+            (typeof io.next === "function" || typeof io.playAt === "function")
+          ) {
+            handledPad = true;
+            if (typeof io.next === "function") await io.next();
+            else await io.playAt(Number(musicPosition) - 1);
+            advancedFromDj = true;
+            logger.info("advanced completed DJ clip to post-silence");
+          }
+        } else if (onRestore && baselineVolume != null) {
+          handledPad = true;
+          if (phase !== "restored") {
+            restoreHeldAt = now();
+            await holdPad(state, "post-silence");
+            setPhase("ramping-down");
+            await ramp(announceVolume, baselineVolume);
+            const restored = await restoreExact("post-silence");
+            if (!restored) {
+              try {
+                await io.pause();
+              } catch {
+                /* best effort: keep retrying while transport is held */
+              }
+              continue;
+            }
+          }
+          if (!advancedFromRestore) {
+            await advanceAfterHeldPad(
+              musicPosition,
+              "post-silence",
+              restoreHeldAt ?? now(),
+              { nextTransition: true }
+            );
+            advancedFromRestore = true;
+          }
+        } else if (!onPad && baselineVolume != null) {
+          if (phase !== "restored") {
+            try {
+              await io.pause();
+            } catch {
+              /* best effort */
+            }
+            const restored = await restoreExact("music boundary");
+            if (!restored) {
+              await sleep(RESTORE_RETRY_MS);
+              continue;
+            }
+            try {
+              await io.resume();
+            } catch (error) {
+              logger.warn(`music resume failed: ${error.message}`);
+            }
+          }
+          setPhase("complete");
+          return snapshot();
+        }
+
+        if (
+          baselineVolume != null &&
+          volumeLocked &&
+          !deadlineHandled &&
+          deadlineAt != null &&
+          now() >= deadlineAt
+        ) {
+          deadlineHandled = true;
+          handledPad = true;
+          try {
+            await io.pause();
+          } catch {
+            /* best effort */
+          }
+          const restored = await restoreExact("absolute deadline");
+          if (restored && typeof io.playAt === "function") {
+            if (onRamp && Number(ttsPosition) >= 1) {
+              await io.playAt(Number(ttsPosition));
+            } else if (onDj && Number(musicPosition) >= 2) {
+              advancedFromDj = true;
+              if (typeof io.next === "function") await io.next();
+              else await io.playAt(Number(musicPosition) - 1);
+            } else if (onRestore && Number(musicPosition) >= 1) {
+              await io.playAt(Number(musicPosition));
+            } else if (!onPad) {
+              await io.resume();
+            }
+          } else if (restored && !onPad) {
+            try {
+              await io.resume();
+            } catch {
+              /* best effort */
+            }
+          }
+        }
+
+        // A DJ clip that has played and is now idle is complete. Never send
+        // Play to it again: if advancing failed, retry Next on the next poll.
+        if (onPad && !handledPad && !(onDj && sawDjPlaying)) {
+          await maybeResumePad(true, state);
+        }
+      } catch (error) {
+        logger.error(`watch failed: ${error.message}`);
+      }
+      if (cancelled) break;
+      await sleep(pollMs);
+    }
+    return snapshot();
+  };
+
+  return {
+    start() {
+      if (!started) {
+        started = true;
+        task = run();
+      }
+      return task;
+    },
+    async cancelAndRestore(reason = "superseded") {
+      cancelled = true;
+      if (task) await task.catch(() => {});
+      const restored = await restoreExact(reason);
+      setPhase("cancelled");
+      return restored;
+    },
+    isVolumeLocked() {
+      return volumeLocked;
+    },
+    snapshot,
+    restoreExact,
+    get done() {
+      return task;
+    },
+  };
+}
+
+let activeHandoff = null;
+
+export async function beginDjVolumeHandoff(options = {}) {
+  if (activeHandoff) {
+    const previousPhase = activeHandoff.snapshot().phase;
+    if (previousPhase !== "complete" && previousPhase !== "cancelled") {
+      await activeHandoff.cancelAndRestore("superseded announce");
+    }
+  }
+  const handoff = createDjVolumeHandoff(options);
+  const start = handoff.start.bind(handoff);
+  handoff.start = () => {
+    const running = start();
+    void running.then(
+      () => {
+        if (activeHandoff === handoff) activeHandoff = null;
+      },
+      () => {
+        if (activeHandoff === handoff) activeHandoff = null;
+      }
+    );
+    return running;
+  };
+  activeHandoff = handoff;
+  return handoff;
+}
+
+export function isDjVolumeHandoffActive() {
+  return !!activeHandoff?.isVolumeLocked();
+}
+
+export function getDjVolumeHandoffState() {
+  return activeHandoff?.snapshot() ?? {
+    phase: "idle",
+    baselineVolume: null,
+    announceVolume: null,
+    cancelled: false,
+    started: false,
+    volumeLocked: false,
+    deadlineAt: null,
+  };
+}

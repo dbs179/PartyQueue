@@ -30,11 +30,14 @@ import {
   djSilenceLabel,
 } from "./settings.js";
 import { GENRE_BUCKETS, bucketsForArtistSync } from "./genres.js";
+import { beginDjVolumeHandoff } from "./dj-volume-handoff.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TTS_DIR = path.join(__dirname, "..", "data", "tts");
 
-const TTS_BYTES_PER_SEC = 16000;
+// ElevenLabs HA proxy clips are typically ~64–72 kbps. Use a conservative
+// estimate so Sonos metadata and the handoff deadline never truncate long clips.
+const TTS_BYTES_PER_SEC = 8000;
 
 function ttsSettings() {
   return getDjVoiceSettings();
@@ -2009,20 +2012,9 @@ export function announceVolumeFromMusic(volumeLevel, opts) {
   return Math.min(100, Math.max(1, musicPct + Math.max(0, boost)));
 }
 
-function isTtsUri(uri) {
-  return /tts_proxy|\/media\/tts\//i.test(String(uri || ""));
-}
-
-// Safety: restore anyway if music never starts after boost
-// (ramp + clip + slack). Hard-cap clock starts at the first boost so a
-// missed/failed TTS URI cannot leave the room stuck loud.
-const VOLUME_HARD_CAP_PAD_MS = 5000;
-const VOLUME_RESTORE_RETRY_MS = 2000;
 // If a mid-set shout would land as the next track and the current song ends
 // before TTS is ready, pause so the playhead can't skip the announce.
 const IMMINENT_ANNOUNCE_PAUSE_SEC = 45;
-let volumeSessionId = 0;
-let volumeSessionMusicVol = null; // original music level while a session is active
 
 function silenceFileName(sec) {
   return `silence-${djSilenceLabel(sec)}s.mp3`;
@@ -2038,137 +2030,11 @@ function silenceBundledName(sec) {
 }
 
 function silenceDurationSec() {
-  return normalizeDjSilenceSec(getDjVoiceSettings().djSilenceSec);
+  return normalizeDjSilenceSec(getDjVoiceSettings().djHandoffSilenceSec);
 }
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
-}
-
-async function applyVolume(level, label) {
-  const { setGroupVolume } = await import("./sonos.js");
-  try {
-    await setGroupVolume(level);
-    console.log(`[dj-voice] ${label}`);
-  } catch (err) {
-    console.error(`[dj-voice] ${label} failed:`, err.message);
-  }
-}
-
-async function readLiveGroupVolume() {
-  const { getGroupVolume } = await import("./sonos.js");
-  try {
-    return await getGroupVolume();
-  } catch {
-    return ANNOUNCE_VOLUME_FALLBACK;
-  }
-}
-
-async function captureMusicVolume() {
-  // If a prior session already boosted, reuse its original music level so we
-  // never stack bumps when announces overlap.
-  if (volumeSessionMusicVol != null) return volumeSessionMusicVol;
-  return readLiveGroupVolume();
-}
-
-/** Freeze the pre-ramp music level once per session — restore always uses this. */
-async function freezeMusicVolume(hint = null) {
-  if (volumeSessionMusicVol != null) return volumeSessionMusicVol;
-  let base = hint;
-  if (base == null || !Number.isFinite(Number(base))) {
-    base = await readLiveGroupVolume();
-  }
-  volumeSessionMusicVol = Math.max(0, Math.min(100, Math.round(Number(base))));
-  console.log(
-    `[dj-voice] remembered music volume ${volumeSessionMusicVol} (pre-ramp)`
-  );
-  return volumeSessionMusicVol;
-}
-
-async function boostAnnounceVolume(musicVol, tiers = volumeBumpTiers()) {
-  const { setGroupVolume } = await import("./sonos.js");
-  const level = announceVolumeFromMusic(musicVol, tiers);
-  await setGroupVolume(level);
-  console.log(
-    `[dj-voice] volume ${musicVol} â†’ ${level} for DJ clip (tiers low/mid/high=${tiers.lowPct}/${tiers.midPct}/${tiers.highPct})`
-  );
-  return level;
-}
-
-/**
- * Restore group volume to the frozen pre-ramp music level.
- * @returns {Promise<boolean>} true only when set + verify succeed. Freeze is
- * cleared only on success so a failed restore can't capture the boosted level
- * as the next session's "music" volume.
- */
-async function restoreMusicVolume(musicVol, why, sessionId) {
-  if (sessionId != null && sessionId !== volumeSessionId) return false;
-  // Prefer the frozen pre-ramp memory; never restore to a "live" post-boost read.
-  const target =
-    volumeSessionMusicVol != null
-      ? volumeSessionMusicVol
-      : musicVol != null && Number.isFinite(Number(musicVol))
-        ? Math.max(0, Math.min(100, Math.round(Number(musicVol))))
-        : null;
-  if (target == null) return false;
-
-  const { setGroupVolume, getGroupVolume } = await import("./sonos.js");
-  try {
-    await setGroupVolume(target);
-    console.log(`[dj-voice] volume restored to ${target} (${why})`);
-    // Sonos group settle can miss a member — verify and re-assert once.
-    await sleep(400);
-    if (sessionId != null && sessionId !== volumeSessionId) return false;
-    let now = await getGroupVolume();
-    if (now !== target) {
-      console.warn(
-        `[dj-voice] volume verify ${now} â‰  ${target} after ${why}; re-asserting`
-      );
-      await setGroupVolume(target);
-      await sleep(300);
-      if (sessionId != null && sessionId !== volumeSessionId) return false;
-      now = await getGroupVolume();
-      if (now !== target) {
-        console.warn(
-          `[dj-voice] volume still ${now} after re-assert (${why}); keeping freeze`
-        );
-        return false;
-      }
-    }
-  } catch (err) {
-    console.error(
-      `[dj-voice] volume restore to ${target} (${why}) failed:`,
-      err.message
-    );
-    return false;
-  }
-  if (sessionId == null || sessionId === volumeSessionId) {
-    volumeSessionMusicVol = null;
-  }
-  return true;
-}
-
-function isRampSilenceUri(uri) {
-  return /silence-ramp-\d+(?:\.\d+)?s\.mp3/i.test(String(uri || ""));
-}
-
-function isRestoreSilenceUri(uri) {
-  const u = String(uri || "");
-  if (isRampSilenceUri(u)) return false;
-  return /silence-\d+(?:\.\d+)?s\.mp3|dj-silence/i.test(u);
-}
-
-function isSilenceUri(uri) {
-  return isRampSilenceUri(uri) || isRestoreSilenceUri(uri);
-}
-
-function isDjClipUri(uri, publicUrl) {
-  const u = String(uri || "");
-  if (isSilenceUri(u)) return false;
-  const fileToken = publicUrl
-    ? String(publicUrl).split("/").pop() || ""
-    : "";
-  return isTtsUri(u) || (fileToken && u.includes(fileToken));
 }
 
 // Copy every prebuilt silence length into data/tts as both ramp + restore pads.
@@ -2209,143 +2075,6 @@ export function ensureSilenceRamp(durationSec = silenceDurationSec()) {
   };
 }
 
-async function boostForSession(musicVolHint, sessionId) {
-  if (sessionId !== volumeSessionId) return musicVolHint;
-  // Capture live level once immediately before the ramp, then freeze it for
-  // restore. Never overwrite the memory after boost.
-  const base = await freezeMusicVolume(
-    volumeSessionMusicVol != null ? volumeSessionMusicVol : musicVolHint
-  );
-  await boostAnnounceVolume(base, volumeBumpTiers());
-  return base;
-}
-
-// Watch NP: boost on pre-DJ ramp silence, hold through TTS, restore when
-// music is playing. If Sonos lands on the Spotify track STOPPED, resume it
-// without SwitchToQueue (which can jump back to track 1).
-function runSilenceBridgeWatch({
-  publicUrl,
-  approxDurationSec,
-  silenceSec = silenceDurationSec(),
-  musicVol,
-  sessionId,
-  alreadyBoosted = false,
-} = {}) {
-  (async () => {
-    if (sessionId !== volumeSessionId) return;
-    // Ramp + DJ (+ slack). Cap clock starts at first boost (not DJ URI).
-    const hardCapMs =
-      Math.max(3000, Math.round((approxDurationSec || 8) * 1000)) +
-      Math.round(silenceSec * 1000) +
-      VOLUME_HARD_CAP_PAD_MS;
-    let sawTts = alreadyBoosted;
-    let boosted = alreadyBoosted;
-    let restored = false;
-    let boostedAt = alreadyBoosted ? Date.now() : null;
-    let lastRestoreAttemptAt = 0;
-    let lastPadResumeAt = 0;
-    let padResumeTries = 0;
-
-    console.log(
-      `[dj-voice] watching rampâ†’DJâ†’music (hard cap ${hardCapMs}ms after first boost)`
-    );
-
-    while (sessionId === volumeSessionId) {
-      try {
-        const { getNowPlayingFresh, resumeQueuePlayback } = await import(
-          "./sonos.js"
-        );
-        const np = await getNowPlayingFresh();
-        if (sessionId !== volumeSessionId) return;
-        const uri = String(np?.uri || "");
-        const state = String(np?.state || "").toUpperCase();
-        const onDj = isDjClipUri(uri, publicUrl);
-        const onRamp = isRampSilenceUri(uri);
-        const onRestore = isRestoreSilenceUri(uri);
-        const onAnnouncePad = onDj || onRamp || onRestore;
-        const transportIdle =
-          state === "STOPPED" || state === "PAUSED_PLAYBACK";
-
-        // Empty-queue / fresh-set glitch: Play lands on ramp/TTS then stops.
-        // Resume in place (no SwitchToQueue) so we don't restart the DJ clip.
-        if (
-          onAnnouncePad &&
-          transportIdle &&
-          padResumeTries < 6 &&
-          Date.now() - lastPadResumeAt >= 1500
-        ) {
-          lastPadResumeAt = Date.now();
-          padResumeTries += 1;
-          try {
-            await resumeQueuePlayback();
-            console.log(
-              `[dj-voice] resumed STOPPED announce pad (try ${padResumeTries})`
-            );
-          } catch (err) {
-            console.warn("[dj-voice] announce-pad resume failed:", err.message);
-          }
-        }
-
-        // Song is over; lead silence is playing — ramp here (not under music).
-        if (onRamp && !boosted) {
-          musicVol = await boostForSession(musicVol, sessionId);
-          boosted = true;
-          boostedAt = Date.now();
-          console.log("[dj-voice] boost during pre-DJ ramp silence");
-        }
-
-        if (onDj) {
-          if (!sawTts) sawTts = true;
-          if (!boosted) {
-            musicVol = await boostForSession(musicVol, sessionId);
-            boosted = true;
-            boostedAt = Date.now();
-            console.log("[dj-voice] boost on DJ (missed ramp silence)");
-          }
-        }
-
-        const leftPads = sawTts && boosted && !restored && !onAnnouncePad;
-        // Hard-cap only when we've left announce pads (or never saw TTS).
-        // Restoring while still STOPPED on the ramp was exiting the watch and
-        // leaving the room quiet on silence forever.
-        const hardCapDue =
-          boosted &&
-          !restored &&
-          !onAnnouncePad &&
-          boostedAt != null &&
-          Date.now() - boostedAt >= hardCapMs;
-        const canRetry =
-          Date.now() - lastRestoreAttemptAt >= VOLUME_RESTORE_RETRY_MS;
-
-        // Prefer immediate restore after pads; hard-cap covers missed TTS /
-        // stuck boost. Failed restores keep the freeze and retry.
-        if ((leftPads || hardCapDue) && canRetry) {
-          lastRestoreAttemptAt = Date.now();
-          const why = leftPads ? "left announce pads" : "hard cap";
-          const ok = await restoreMusicVolume(musicVol, why, sessionId);
-          if (ok) {
-            restored = true;
-            if (transportIdle) {
-              try {
-                await resumeQueuePlayback();
-                console.log("[dj-voice] resumed queue after DJâ†’music STOPPED");
-              } catch (err) {
-                console.warn("[dj-voice] music resume failed:", err.message);
-              }
-            }
-            return;
-          }
-        }
-      } catch (err) {
-        console.error("[dj-voice] silence-bridge watch failed:", err.message);
-      }
-      await sleep(200);
-    }
-  })().catch((err) =>
-    console.error("[dj-voice] silence-bridge watch crashed:", err.message)
-  );
-}
-
 /** Pause briefly when an announce would race the end of the current track. */
 async function pauseIfAnnounceImminent(queuePosition) {
   try {
@@ -2375,83 +2104,32 @@ async function beginVolumeSession({
   approxDurationSec,
   silenceSec = silenceDurationSec(),
   startPlayback,
+  ttsPosition,
+  musicPosition,
 } = {}) {
-  // Invalidate any prior session so boosts can't stack. If the prior session
-  // still had the group boosted, restore music level first — otherwise a
-  // mid-set shout enqueued while a fresh-set DJ is speaking leaves volume
-  // stuck loud (old watch exits on sessionId change without restoring).
-  // Keep the freeze until restore succeeds so we never capture the boosted
-  // level as the next session's music baseline.
-  const prevMusic = volumeSessionMusicVol;
-  volumeSessionId += 1;
-  const sessionId = volumeSessionId;
-  if (prevMusic != null) {
-    const ok = await restoreMusicVolume(
-      prevMusic,
-      "superseded announce",
-      sessionId
-    );
-    if (!ok) {
-      volumeSessionMusicVol = prevMusic;
-      console.warn(
-        `[dj-voice] keeping frozen music volume ${prevMusic} after failed supersede restore`
-      );
-    }
-  }
-
   const tiers = volumeBumpTiers();
-
-  if (startPlayback) {
-    // Fresh/empty: Play from ramp silence; watch boosts there, restores after DJ.
-    // Do not boost while paused on the prior song — wait for the lead pad.
-    const musicVol = await freezeMusicVolume();
-    const announceLevel = announceVolumeFromMusic(musicVol, tiers);
-    if (sessionId !== volumeSessionId) {
-      return {
-        sessionId,
-        musicVol,
-        announceLevel,
-        tiers,
-        cancelled: true,
-        startHold: null,
-      };
-    }
-    return {
-      sessionId,
-      musicVol,
-      announceLevel,
-      tiers,
-      cancelled: false,
-      startHold() {
-        runSilenceBridgeWatch({
-          publicUrl,
-          approxDurationSec,
-          silenceSec,
-          musicVol,
-          sessionId,
-          alreadyBoosted: false,
-        });
-      },
-    };
-  }
-
-  // Deferred (mid-queue shout / refill): watch for ramp silence â†’ boost â†’
-  // DJ â†’ restore silence. Freeze happens at first boost, not at enqueue.
-  runSilenceBridgeWatch({
+  const handoff = await beginDjVolumeHandoff({
     publicUrl,
     approxDurationSec,
     silenceSec,
-    musicVol: null,
-    sessionId,
-    alreadyBoosted: false,
+    ttsPosition,
+    musicPosition,
+    calculateTarget: (baseline) => announceVolumeFromMusic(baseline, tiers),
   });
+  const startHold = () => {
+    handoff.start()?.catch((err) =>
+      console.error("[dj-volume] handoff crashed:", err.message)
+    );
+  };
+  if (!startPlayback) startHold();
+
   return {
-    sessionId,
     musicVol: null,
     announceLevel: null,
     tiers,
     cancelled: false,
-    startHold: null,
+    startHold: startPlayback ? startHold : null,
+    handoff,
   };
 }
 
@@ -2879,6 +2557,23 @@ async function enqueueSilenceRamp(position) {
   return ramp;
 }
 
+// Silent MP3 after the DJ clip — stepped restore completes before music resumes.
+async function enqueueSilenceRestore(position) {
+  const { enqueueHttpAudio, pauseQueueTrim } = await import("./sonos.js");
+  const bridge = ensureSilenceBridge();
+  pauseQueueTrim(25000);
+  await enqueueHttpAudio(bridge.publicUrl, {
+    title: "PartyQueue Silence Bridge",
+    artist: "PartyQueue",
+    durationSec: bridge.durationSec,
+    position,
+  });
+  console.log(
+    `[dj-voice] enqueued ${bridge.durationSec}s restore silence at queue position ${position}`
+  );
+  return bridge;
+}
+
 async function startQueuePlayback(trackNumber = 1) {
   // SwitchToQueue â†’ SeekTrack(N) â†’ Play. Seek is required after inserting TTS
   // at the front, otherwise the playhead can stay on the first Spotify track.
@@ -2956,9 +2651,8 @@ async function announceOnSonosUnlocked(
         /* best-effort */
       }
     }
-    // Queue order: ramp silence â†’ DJ TTS â†’ music.
-    // Volume boosts during the lead silence; restore when music is playing.
-    // (A trailing silence pad before Spotify was leaving the transport STOPPED.)
+    // Queue order: ramp silence â†’ DJ TTS â†’ restore silence â†’ music.
+    // Volume rises during the lead pad and returns exactly during the trailing pad.
     //
     // Strip any unplayed ramp/TTS pads first so a new shout supersedes one that
     // hasn't started yet (avoids back-to-back DJ clips). Adjust insert if pads
@@ -2982,16 +2676,25 @@ async function announceOnSonosUnlocked(
           `[dj-voice] supersede: removed ${wiped.removed} upcoming announce pad(s)`
         );
       }
+      if (wiped.protectedThrough >= rampPos) {
+        const requested = rampPos;
+        rampPos = wiped.protectedThrough + 1;
+        console.log(
+          `[dj-voice] active announce block protected; insert ${requested} → ${rampPos}`
+        );
+      }
     } catch (err) {
       console.warn("[dj-voice] supersede pad strip failed:", err.message);
     }
     const ttsPos = rampPos + 1;
+    const restorePos = ttsPos + 1;
     const ramp = await enqueueSilenceRamp(rampPos);
     await enqueueDjClip(clip.publicUrl, {
       durationSec: clip.approxDurationSec,
       position: ttsPos,
     });
     console.log(`[dj-voice] enqueued TTS at queue position ${ttsPos}`);
+    const restore = await enqueueSilenceRestore(restorePos);
 
     // Fresh sets / empty-queue shouts: Play ramp â†’ boost â†’ DJ â†’ music.
     const vol = await beginVolumeSession({
@@ -2999,34 +2702,16 @@ async function announceOnSonosUnlocked(
       approxDurationSec: clip.approxDurationSec,
       silenceSec: ramp.durationSec,
       startPlayback: !!startPlayback,
+      ttsPosition: ttsPos,
+      musicPosition: restorePos + 1,
     });
     volHold = vol.startHold || null;
     if (startPlayback && !vol.cancelled) {
-      try {
-        await startQueuePlayback(rampPos);
-        didStart = true;
-        // Seek+Play sometimes leaves the ramp STOPPED (empty-queue shout hang).
-        await sleep(400);
-        try {
-          const { getNowPlayingFresh, resumeQueuePlayback } = await import(
-            "./sonos.js"
-          );
-          const np = await getNowPlayingFresh();
-          const st = String(np?.state || "").toUpperCase();
-          if (st === "STOPPED" || st === "PAUSED_PLAYBACK") {
-            await resumeQueuePlayback();
-            console.log(
-              "[dj-voice] post-start resume (transport idle after Play)"
-            );
-          }
-        } catch (err) {
-          console.warn("[dj-voice] post-start resume skipped:", err.message);
-        }
-      } finally {
-        // Arm watch even if Play glitched (recovery Play still needs restore).
-        volHold?.();
-        volHold = null;
-      }
+      // Arm before Play so the first pre-silence poll owns the baseline.
+      volHold?.();
+      volHold = null;
+      await startQueuePlayback(rampPos);
+      didStart = true;
     } else if (pausedForImminent) {
       // Resume the current song; ramp+DJ are now ahead of the request.
       try {
@@ -3042,8 +2727,10 @@ async function announceOnSonosUnlocked(
       publicUrl: clip.publicUrl,
       position: ttsPos,
       rampPosition: rampPos,
+      restorePosition: restorePos,
       silenceSec: ramp.durationSec,
       rampSec: ramp.durationSec,
+      restoreSec: restore.durationSec,
       started: didStart,
       volumeBump: vol.announceLevel,
       volumeTiers: vol.tiers,

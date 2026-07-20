@@ -39,6 +39,7 @@ import {
 } from "./closing-time.js";
 import { buildPartyRecap } from "./party-recap.js";
 import { shouldShoutOnSearch, announceRequestShout } from "./dj-shout.js";
+import { isDjVolumeHandoffActive } from "./dj-volume-handoff.js";
 import {
   listGuestProfiles,
   addGuestNote,
@@ -1805,12 +1806,23 @@ app.post("/api/previous", transportLimit, async (_req, res) => {
   }
 });
 
-app.post("/api/mute", transportLimit, async (_req, res) => {
+function blockVolumeDuringDj(_req, res, next) {
+  if (isDjVolumeHandoffActive()) {
+    return res.status(423).json({
+      error: "DJ volume handoff in progress — volume will return automatically.",
+    });
+  }
+  return next();
+}
+
+app.post("/api/mute", transportLimit, blockVolumeDuringDj, async (_req, res) => {
   try {
     res.json({ ok: true, ...(await toggleMute()) });
   } catch (err) {
     console.error("[mute]", err.message);
-    res.status(502).json({ error: err.message || "Could not toggle mute." });
+    res
+      .status(err.statusCode || 502)
+      .json({ error: err.message || "Could not toggle mute." });
   }
 });
 
@@ -1830,21 +1842,25 @@ function parseStep(raw) {
   return Math.min(100, n);
 }
 
-app.post("/api/volume/up", transportLimit, async (req, res) => {
+app.post("/api/volume/up", transportLimit, blockVolumeDuringDj, async (req, res) => {
   try {
     res.json({ ok: true, ...(await volumeUp(parseStep(req.query.step))) });
   } catch (err) {
     console.error("[volume/up]", err.message);
-    res.status(502).json({ error: err.message || "Could not change volume." });
+    res
+      .status(err.statusCode || 502)
+      .json({ error: err.message || "Could not change volume." });
   }
 });
 
-app.post("/api/volume/down", transportLimit, async (req, res) => {
+app.post("/api/volume/down", transportLimit, blockVolumeDuringDj, async (req, res) => {
   try {
     res.json({ ok: true, ...(await volumeDown(parseStep(req.query.step))) });
   } catch (err) {
     console.error("[volume/down]", err.message);
-    res.status(502).json({ error: err.message || "Could not change volume." });
+    res
+      .status(err.statusCode || 502)
+      .json({ error: err.message || "Could not change volume." });
   }
 });
 
@@ -1859,12 +1875,14 @@ app.get("/api/volume", async (_req, res) => {
   }
 });
 
-app.post("/api/group-all", destructiveLimit, async (_req, res) => {
+app.post("/api/group-all", destructiveLimit, blockVolumeDuringDj, async (_req, res) => {
   try {
     res.json({ ok: true, ...(await groupAll()) });
   } catch (err) {
     console.error("[group-all]", err.message);
-    res.status(502).json({ error: err.message || "Could not group speakers." });
+    res
+      .status(err.statusCode || 502)
+      .json({ error: err.message || "Could not group speakers." });
   }
 });
 

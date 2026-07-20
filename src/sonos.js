@@ -6,6 +6,7 @@
 
 import { SonosManager, MetaDataHelper } from "@svrooij/sonos";
 import { withSonosWriteLock } from "./sonos-lock.js";
+import { isDjVolumeHandoffActive } from "./dj-volume-handoff.js";
 import { buildPlaylistPool } from "./spotify.js";
 import { spotifyTrackId, pickWithRelaxation, discoveryPlan, primaryArtist, mixPlaylistAndDiscovery } from "./sampler.js";
 import {
@@ -540,7 +541,32 @@ export function findUpcomingAnnouncePadIndices(
   { currentTrack = 0, playingFromQueue = false } = {}
 ) {
   const list = Array.isArray(items) ? items : [];
-  const start = playingFromQueue && currentTrack >= 1 ? currentTrack : 0;
+  let start = playingFromQueue && currentTrack >= 1 ? currentTrack : 0;
+  // If an announce block is already playing, preserve every contiguous pad in
+  // that active block. Supersede may remove later, wholly-unplayed blocks only.
+  const currentIndex = Number(currentTrack) - 1;
+  if (
+    playingFromQueue &&
+    currentIndex >= 0 &&
+    currentIndex < list.length &&
+    isAnnounceQueuePad(
+      list[currentIndex].TrackUri ?? list[currentIndex].uri,
+      list[currentIndex].Title ?? list[currentIndex].title ?? ""
+    )
+  ) {
+    while (start < list.length) {
+      const item = list[start];
+      if (
+        !isAnnounceQueuePad(
+          item.TrackUri ?? item.uri,
+          item.Title ?? item.title ?? ""
+        )
+      ) {
+        break;
+      }
+      start += 1;
+    }
+  }
   const indices = [];
   for (let i = start; i < list.length; i++) {
     const it = list[i];
@@ -918,8 +944,8 @@ async function addRandomFromPlaylistsUnlocked(
   cfg.bucketsFor = bucketsForArtistSync;
   cfg.lastArtist = queueTailArtist;
 
-  // Large Random: Discovery carved out of count. Small Random: floor total to
-  // Discovery so playlist picks stay (Random 2 + Discovery 5 => 2 + 3 = 5).
+  // Discovery is carved out of the requested count, with at least half of every
+  // batch retained for selected playlists (Random 2 => one playlist + one discovery).
   const plan = discoveryPlan(
     count,
     Math.max(0, Math.min(50, Math.round(opts.similarCount || 0)))
@@ -1404,6 +1430,9 @@ async function getNowPlayingRaw() {
       () => ({ CurrentURI: "" })
     ),
   ]);
+  // Shared snapshots can be reused for up to a few seconds. Clients use this
+  // observation time to advance RelTime by the snapshot's age.
+  const positionObservedAt = Date.now();
 
   const meta = typeof pos.TrackMetaData === "object" ? pos.TrackMetaData : null;
   const state = transport.CurrentTransportState;
@@ -1485,6 +1514,7 @@ async function getNowPlayingRaw() {
     uri,
     albumArt,
     positionSec,
+    positionObservedAt,
     durationSec,
     djVoice: djClip || silenceBridge,
     djSilence: silenceBridge,
@@ -1706,7 +1736,11 @@ function contiguousIndexRanges(indices) {
  * @param {{ beforePosition?: number }} [opts]
  *   beforePosition: count how many removed pads sat strictly before this
  *   1-based index (for adjusting an insert position after the wipe).
- * @returns {Promise<{ removed: number, removedBefore: number }>}
+ * @returns {Promise<{
+ *   removed: number,
+ *   removedBefore: number,
+ *   protectedThrough: number
+ * }>}
  */
 export async function removeUpcomingAnnouncePads(...args) {
   return withSonosWriteLock(() => removeUpcomingAnnouncePadsUnlocked(...args));
@@ -1725,11 +1759,38 @@ async function removeUpcomingAnnouncePadsUnlocked({ beforePosition } = {}) {
   const items = Array.isArray(queue.Result) ? queue.Result : [];
   const playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
   const track = Number(pos.Track) || 0;
+  let protectedThrough = 0;
+  const currentIndex = track - 1;
+  if (
+    playingFromQueue &&
+    currentIndex >= 0 &&
+    currentIndex < items.length &&
+    isAnnounceQueuePad(
+      items[currentIndex].TrackUri ?? items[currentIndex].uri,
+      items[currentIndex].Title ?? items[currentIndex].title ?? ""
+    )
+  ) {
+    protectedThrough = track;
+    while (protectedThrough < items.length) {
+      const item = items[protectedThrough];
+      if (
+        !isAnnounceQueuePad(
+          item.TrackUri ?? item.uri,
+          item.Title ?? item.title ?? ""
+        )
+      ) {
+        break;
+      }
+      protectedThrough += 1;
+    }
+  }
   const indices = findUpcomingAnnouncePadIndices(items, {
     currentTrack: track,
     playingFromQueue,
   });
-  if (!indices.length) return { removed: 0, removedBefore: 0 };
+  if (!indices.length) {
+    return { removed: 0, removedBefore: 0, protectedThrough };
+  }
 
   const before = Number(beforePosition) || 0;
   const removedBefore =
@@ -1763,7 +1824,7 @@ async function removeUpcomingAnnouncePadsUnlocked({ beforePosition } = {}) {
     invalidateSonosSnapshots();
     console.log(`[dj-voice] removed ${removed} superseded announce pad(s)`);
   }
-  return { removed, removedBefore };
+  return { removed, removedBefore, protectedThrough };
 }
 
 // Move a song so it sits just before `beforeUri` (or to the end when null).
@@ -2084,8 +2145,20 @@ async function toggleShuffleUnlocked() {
 
 const VOLUME_STEP = 1;
 
+function assertManualVolumeAvailable() {
+  if (!isDjVolumeHandoffActive()) return;
+  const error = new Error(
+    "DJ volume handoff in progress — volume will return automatically."
+  );
+  error.statusCode = 423;
+  throw error;
+}
+
 export async function toggleMute(...args) {
-  return withSonosWriteLock(() => toggleMuteUnlocked(...args));
+  return withSonosWriteLock(() => {
+    assertManualVolumeAvailable();
+    return toggleMuteUnlocked(...args);
+  });
 }
 
 async function toggleMuteUnlocked() {
@@ -2173,11 +2246,17 @@ async function adjustGroupVolume(delta) {
 }
 
 export async function volumeUp(step = VOLUME_STEP) {
-  return withSonosWriteLock(() => adjustGroupVolume(Math.abs(step)));
+  return withSonosWriteLock(() => {
+    assertManualVolumeAvailable();
+    return adjustGroupVolume(Math.abs(step));
+  });
 }
 
 export async function volumeDown(step = VOLUME_STEP) {
-  return withSonosWriteLock(() => adjustGroupVolume(-Math.abs(step)));
+  return withSonosWriteLock(() => {
+    assertManualVolumeAvailable();
+    return adjustGroupVolume(-Math.abs(step));
+  });
 }
 
 // Absolute group volume helpers (0–100) for DJ Voice boost/restore.
@@ -2210,7 +2289,10 @@ async function setGroupVolumeUnlocked(level) {
 const GROUP_ALL_VOLUME = 15;
 
 export async function groupAll(...args) {
-  return withSonosWriteLock(() => groupAllUnlocked(...args));
+  return withSonosWriteLock(() => {
+    assertManualVolumeAvailable();
+    return groupAllUnlocked(...args);
+  });
 }
 
 async function groupAllUnlocked() {

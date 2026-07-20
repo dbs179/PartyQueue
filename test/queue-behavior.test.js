@@ -185,9 +185,9 @@ test("randomDjAnnouncePlan is none when DJ off or nothing added", () => {
   );
 });
 
-// findUpcomingAnnouncePadIndices: unplayed DJ ramp/TTS pads to strip on supersede.
+// findUpcomingAnnouncePadIndices: unplayed pre/TTS/post blocks to strip.
 
-test("findUpcomingAnnouncePadIndices lists unplayed ramp/TTS pads only", () => {
+test("findUpcomingAnnouncePadIndices lists complete unplayed handoff blocks", () => {
   const list = [
     { TrackUri: "spotify:track:cur", Title: "Cur" },
     {
@@ -198,6 +198,10 @@ test("findUpcomingAnnouncePadIndices lists unplayed ramp/TTS pads only", () => {
       TrackUri: "http://10.10.20.35:8123/api/tts_proxy/abc.mp3",
       Title: "Party DJ",
     },
+    {
+      TrackUri: "http://10.10.10.10:8088/media/tts/silence-3s.mp3",
+      Title: "PartyQueue Silence Bridge",
+    },
     { TrackUri: "spotify:track:s1", Title: "Req" },
     {
       TrackUri: "http://10.10.10.10:8088/media/tts/silence-ramp-2s.mp3",
@@ -207,13 +211,17 @@ test("findUpcomingAnnouncePadIndices lists unplayed ramp/TTS pads only", () => {
       TrackUri: "http://10.10.20.35:8123/api/tts_proxy/def.mp3",
       Title: "Party DJ",
     },
+    {
+      TrackUri: "http://10.10.10.10:8088/media/tts/silence-3s.mp3",
+      Title: "PartyQueue Silence Bridge",
+    },
   ];
   assert.deepEqual(
     findUpcomingAnnouncePadIndices(list, {
       currentTrack: 1,
       playingFromQueue: true,
     }),
-    [2, 3, 5, 6]
+    [2, 3, 4, 6, 7, 8]
   );
 });
 
@@ -231,6 +239,43 @@ test("findUpcomingAnnouncePadIndices skips the current track even if it is a pad
       playingFromQueue: true,
     }),
     []
+  );
+});
+
+test("findUpcomingAnnouncePadIndices preserves the rest of the active block", () => {
+  const list = [
+    {
+      TrackUri: "http://party/media/tts/silence-ramp-3s.mp3",
+      Title: "PartyQueue Volume Ramp",
+    },
+    {
+      TrackUri: "http://ha/api/tts_proxy/active.mp3",
+      Title: "Party DJ",
+    },
+    {
+      TrackUri: "http://party/media/tts/silence-3s.mp3",
+      Title: "PartyQueue Silence Bridge",
+    },
+    { TrackUri: "spotify:track:music", Title: "Music" },
+    {
+      TrackUri: "http://party/media/tts/silence-ramp-3s.mp3",
+      Title: "PartyQueue Volume Ramp",
+    },
+    {
+      TrackUri: "http://ha/api/tts_proxy/pending.mp3",
+      Title: "Party DJ",
+    },
+    {
+      TrackUri: "http://party/media/tts/silence-3s.mp3",
+      Title: "PartyQueue Silence Bridge",
+    },
+  ];
+  assert.deepEqual(
+    findUpcomingAnnouncePadIndices(list, {
+      currentTrack: 1,
+      playingFromQueue: true,
+    }),
+    [5, 6, 7]
   );
 });
 

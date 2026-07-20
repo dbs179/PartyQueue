@@ -75,7 +75,7 @@ test("chill mood stays within known buckets", () => {
   for (const id of CHILL) assert.ok(ALL.includes(id), `unknown chill id ${id}`);
 });
 
-test("discoverySlots still carves within the batch for P2", () => {
+test("discoverySlots keeps at least half of each batch from playlists", () => {
   assert.equal(discoverySlots(25, 5), 5);
-  assert.equal(discoverySlots(2, 5), 3, "small Random floors to Discovery");
+  assert.equal(discoverySlots(2, 5), 1, "Random 2 splits playlist/discovery");
 });

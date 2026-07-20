@@ -922,8 +922,8 @@ function fillSettings(s) {
   if (s.djVolumeBumpHighPct != null && djVolumeHighInput) {
     djVolumeHighInput.value = s.djVolumeBumpHighPct;
   }
-  if (s.djSilenceSec != null && djSilenceInput) {
-    djSilenceInput.value = String(s.djSilenceSec);
+  if (s.djHandoffSilenceSec != null && djSilenceInput) {
+    djSilenceInput.value = String(s.djHandoffSilenceSec);
   }
   if (s.djTtsProvider != null && djTtsProviderInput) {
     djTtsProviderInput.value = String(s.djTtsProvider);
@@ -1196,7 +1196,7 @@ function currentDjVoicePayload() {
     djVolumeBumpLowPct: Number(djVolumeLowInput?.value),
     djVolumeBumpMidPct: Number(djVolumeMidInput?.value),
     djVolumeBumpHighPct: Number(djVolumeHighInput?.value),
-    djSilenceSec: Number(djSilenceInput?.value),
+    djHandoffSilenceSec: Number(djSilenceInput?.value),
     djTtsProvider: provider,
     djTtsVoiceOpenAi: djTtsVoiceInput?.value ?? "onyx",
     djTtsVoiceElevenlabs:
@@ -1292,7 +1292,7 @@ async function resetDjVoiceDefaults() {
     djVolumeBumpLowPct: d.djVolumeBumpLowPct ?? 20,
     djVolumeBumpMidPct: d.djVolumeBumpMidPct ?? 8,
     djVolumeBumpHighPct: d.djVolumeBumpHighPct ?? 4,
-    djSilenceSec: d.djSilenceSec ?? 2,
+    djHandoffSilenceSec: d.djHandoffSilenceSec ?? 3,
     djTtsProvider: d.djTtsProvider ?? "elevenlabs_ha",
     djTtsVoiceOpenAi: d.djTtsVoiceOpenAi ?? "onyx",
     djTtsVoiceElevenlabs: d.djTtsVoiceElevenlabs ?? "CeNX9CMwmxDxUF5Q2Inm",
@@ -1327,7 +1327,7 @@ async function resetDjVoiceDefaults() {
       djVolumeBumpLowPct: d.djVolumeBumpLowPct ?? 20,
       djVolumeBumpMidPct: d.djVolumeBumpMidPct ?? 8,
       djVolumeBumpHighPct: d.djVolumeBumpHighPct ?? 4,
-      djSilenceSec: d.djSilenceSec ?? 2,
+      djHandoffSilenceSec: d.djHandoffSilenceSec ?? 3,
       djTtsProvider: d.djTtsProvider ?? "elevenlabs_ha",
       djTtsVoiceOpenAi: d.djTtsVoiceOpenAi ?? "onyx",
       djTtsVoiceElevenlabs: d.djTtsVoiceElevenlabs ?? "CeNX9CMwmxDxUF5Q2Inm",
@@ -2702,6 +2702,7 @@ settingsResetBtn?.addEventListener("click", () => {
   delete rest.djVolumeBumpHighPct;
   delete rest.djVolumeBump;
   delete rest.djSilenceSec;
+  delete rest.djHandoffSilenceSec;
   delete rest.djTtsVoice;
   delete rest.djTtsProvider;
   delete rest.djTtsVoiceOpenAi;
@@ -3953,6 +3954,9 @@ function showView(name) {
 // Settings-entry data loads whenever a Settings panel is opened.
 function revealSettings() {
   if (VIEWS[currentView]) VIEWS[currentView].hidden = false;
+  // The eager startup request can receive 401 before a host PIN is unlocked.
+  // Retry here so every Settings panel receives persisted/effective values.
+  void loadSettings();
   loadBanners(); // refresh banner gallery on entry
   loadDjIcons(); // refresh DJ icon gallery on entry
   loadGuests(); // refresh shout-out user notes
@@ -4685,19 +4689,35 @@ function estimatedPositionSec() {
   return pos;
 }
 
+// Advance synced lyrics slightly to offset Sonos reporting, polling, ticker,
+// and display latency. This affects lyric highlighting only, not playback.
+const LYRICS_LEAD_SEC = 0.75;
+
 /**
  * Keep a smooth local playhead. Sonos now-playing is polled/cached every few
  * seconds — resetting to that every poll snaps lyrics backward. Only resync
  * on open, track change, pause/play, or a real seek (big drift).
  */
 function applyPlaybackClock(np, { force = false } = {}) {
-  const serverPos = Number(np?.positionSec);
+  const clockNow = Date.now();
+  const rawServerPos = Number(np?.positionSec);
   const playing = !!(np && np.isPlaying && !np.djVoice);
+  const observedAt = Number(np?.positionObservedAt);
+  const snapshotAgeSec =
+    playing &&
+    Number.isFinite(observedAt) &&
+    observedAt > 0 &&
+    observedAt <= clockNow
+      ? Math.min(10, (clockNow - observedAt) / 1000)
+      : 0;
+  const serverPos = Number.isFinite(rawServerPos)
+    ? rawServerPos + snapshotAgeSec
+    : rawServerPos;
   const hasServer = Number.isFinite(serverPos);
 
   if (force || !npPositionAt) {
     npPositionBase = hasServer ? serverPos : 0;
-    npPositionAt = Date.now();
+    npPositionAt = clockNow;
     npIsPlayingOverlay = playing;
     return;
   }
@@ -4707,7 +4727,7 @@ function applyPlaybackClock(np, { force = false } = {}) {
   if (!hasServer) {
     if (playing !== npIsPlayingOverlay && !playing) {
       npPositionBase = estimated;
-      npPositionAt = Date.now();
+      npPositionAt = clockNow;
     }
     npIsPlayingOverlay = playing;
     return;
@@ -4717,7 +4737,7 @@ function applyPlaybackClock(np, { force = false } = {}) {
   const playChanged = playing !== npIsPlayingOverlay;
   if (playChanged || !playing || drift > 1.5) {
     npPositionBase = serverPos;
-    npPositionAt = Date.now();
+    npPositionAt = clockNow;
   }
   npIsPlayingOverlay = playing;
 }
@@ -4729,7 +4749,7 @@ function updateSyncedHighlight(forceScroll) {
   const pos = estimatedPositionSec();
   let idx = -1;
   for (let i = 0; i < npSyncedLines.length; i++) {
-    if (npSyncedLines[i].t <= pos + 0.05) idx = i;
+    if (npSyncedLines[i].t <= pos + LYRICS_LEAD_SEC) idx = i;
     else break;
   }
   if (idx < 0) idx = 0;
@@ -4763,7 +4783,7 @@ function startLyricTicker() {
     const pos = estimatedPositionSec();
     let idx = -1;
     for (let i = 0; i < npSyncedLines.length; i++) {
-      if (npSyncedLines[i].t <= pos + 0.05) idx = i;
+      if (npSyncedLines[i].t <= pos + LYRICS_LEAD_SEC) idx = i;
       else break;
     }
     if (idx < 0) idx = 0;
@@ -5366,6 +5386,10 @@ async function postControl(btn, endpoint, onOk) {
   try {
     const res = await fetch(endpoint, { method: "POST" });
     const data = await res.json();
+    if (res.status === 423) {
+      showToast(data.error || "DJ volume handoff in progress.");
+      return;
+    }
     if (!res.ok) throw new Error(data.error || "Action failed.");
     if (onOk) onOk(data);
     refreshSonos();

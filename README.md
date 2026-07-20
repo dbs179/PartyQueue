@@ -183,6 +183,12 @@ Announcements on Sonos via Home Assistant TTS (ElevenLabs or OpenAI):
 5. Pick your Sonos group in the app. PartyQueue maps the room to
    `media_player.sonos_<room>` for HA.
 
+Every queued announcement uses a fixed handoff: a 3-second pre-silence pad
+smoothly raises the current group volume, the DJ clip plays, then a matching
+3-second post-silence pad returns every speaker to the exact pre-DJ level before
+music continues. Volume and mute buttons are temporarily locked during that
+critical handoff so the saved baseline cannot drift.
+
 **When it speaks**
 
 - **Fresh set** — Random while nothing is playing: announce, then music.

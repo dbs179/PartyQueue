@@ -358,27 +358,23 @@ export function pickWithRelaxation(
 // Small Random (count < Discovery): floor the batch to Discovery so playlist
 // picks stay as requested — Random 2 + Discovery 5 => 2 playlist + 3 discoveries = 5.
 export function discoveryPlan(count, similarCount) {
-  const playlistBase = Math.max(0, Math.floor(Number(count) || 0));
+  const totalTarget = Math.max(0, Math.floor(Number(count) || 0));
   const discCap = Math.max(0, Math.min(50, Math.round(Number(similarCount) || 0)));
-  if (discCap === 0 || playlistBase === 0) {
+  if (discCap === 0 || totalTarget < 2) {
     return {
-      playlistWant: playlistBase,
+      playlistWant: totalTarget,
       similarWant: 0,
-      totalTarget: playlistBase,
+      totalTarget,
     };
   }
-  if (playlistBase >= discCap) {
-    const similarWant = Math.min(discCap, playlistBase);
-    return {
-      playlistWant: playlistBase - similarWant,
-      similarWant,
-      totalTarget: playlistBase,
-    };
-  }
+  // Discovery is carved out of the requested total, while retaining at least
+  // half the batch from selected playlists. Random 2 therefore becomes one
+  // playlist song + one discovery instead of two discoveries.
+  const similarWant = Math.min(discCap, Math.floor(totalTarget / 2));
   return {
-    playlistWant: playlistBase,
-    similarWant: discCap - playlistBase,
-    totalTarget: discCap,
+    playlistWant: totalTarget - similarWant,
+    similarWant,
+    totalTarget,
   };
 }
 
