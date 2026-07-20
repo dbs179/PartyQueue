@@ -59,6 +59,8 @@ let playlistIds = null;
 let genres = null;
 let timer = null;
 let filling = false;
+let stopping = false;
+let activeTick = null;
 
 function clearTimer() {
   if (timer) {
@@ -69,8 +71,15 @@ function clearTimer() {
 
 function schedule(ms) {
   clearTimer();
-  if (!enabled) return;
-  timer = setTimeout(tick, ms);
+  if (!enabled || stopping) return;
+  timer = setTimeout(() => {
+    timer = null;
+    const running = tick();
+    activeTick = running;
+    void running.finally(() => {
+      if (activeTick === running) activeTick = null;
+    });
+  }, ms);
 }
 
 // The configured interval for a given number of upcoming songs.
@@ -198,9 +207,16 @@ export function getAutoFillState() {
 
 /** Re-check soon after a skip/drain so Never-Ending can't lag behind Next. */
 export function nudgeAutoFill() {
-  if (!enabled || filling) return false;
+  if (!enabled || filling || stopping) return false;
   schedule(NUDGE_MS);
   return true;
+}
+
+/** Stop the monitor without changing the persisted Never-Ending setting. */
+export function stopAutoFillMonitor() {
+  stopping = true;
+  clearTimer();
+  return activeTick ?? Promise.resolve();
 }
 
 // Timestamp of the last time "Closing Time" was added (last call). Broadcast in
@@ -257,6 +273,7 @@ export function savePickerSelection(ids, genreIds) {
 
 // Restore the saved state at startup and resume monitoring if it was on.
 export function initAutoFill() {
+  stopping = false;
   const s = loadSettings();
   enabled =
     typeof s.neverEnding === "boolean" ? s.neverEnding : NEVER_ENDING_DEFAULT;

@@ -53,7 +53,7 @@ requests so a random website can’t quietly poke your queue.
 1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard).
 2. **Create app**. Name/description can be anything.
 3. Under **Redirect URIs**, add the callback you’ll use for the one-time
-   playlist login, e.g. `http://127.0.0.1:8088/auth/callback`. (Spotify allows
+   playlist login, e.g. `http://127.0.0.1:8080/auth/callback`. (Spotify allows
    loopback without HTTPS.) Save.
 4. Copy **Client ID** and **Client Secret** into PartyQueue
    (**DJ Booth → Settings → Connections**) or into `.env` for Docker.
@@ -65,7 +65,7 @@ requests so a random website can’t quietly poke your queue.
 Requires Node.js 20+.
 
 ```bash
-npm install
+npm ci
 cp .env.example .env   # optional Sonos/PORT; APIs can go in Settings
 npm start
 ```
@@ -90,16 +90,19 @@ Copy the project (or a [share zip](#sharing-this-project)) onto the server,
 create a `.env` from `.env.example`, then:
 
 ```bash
-cd /mnt/user/appdata/partyqueue
+cd /mnt/user/appdata/PartyQueue
 docker compose build --no-cache && docker compose up -d
 ```
 
 The included `docker-compose.yml` sets `network_mode: host` and mounts
 `./data:/app/data`. The app is reachable at `http://<unraid-ip>:<PORT>`
-(default `8080` unless you change `PORT`).
+(default `8080` unless you change `PORT`). Image builds use the committed npm
+lockfile, so rebuilds install the same dependency versions.
 
 After code updates, use the same rebuild command so you’re not served a stale
-image layer.
+image layer. Docker stop/restart signals are handled gracefully: PartyQueue
+stops its background monitors, flushes pending history and genre-cache writes,
+and then exits for the container restart policy.
 
 ### Manual “Add Container”
 
@@ -140,7 +143,7 @@ SONOS_REGION=NorthAmerica      # or "EU"
 SONOS_ROOM=                    # optional, e.g. "Living Room"
 SONOS_HOST=                    # optional speaker IP (recommended on Docker)
 PORT=8080
-PUBLIC_BASE_URL=               # Docker: http://YOUR_UNRAID_IP:8088 (example)
+PUBLIC_BASE_URL=               # Docker: http://YOUR_UNRAID_IP:8080 (example)
 SETTINGS_PIN=                  # optional bootstrap; prefer Host PIN in the UI
 ```
 
@@ -218,7 +221,7 @@ toolbar.
 npm run package:share
 ```
 
-Writes something like `PartyQueue-share-v6.2.4-….zip` under
+Writes something like `PartyQueue-share-v<version>-….zip` under
 `PartyQueue-backups/`. Includes the MIT `LICENSE`. Recipients configure APIs in
 Settings after install. **Do not** zip the install folder by hand.
 
@@ -231,7 +234,7 @@ Settings after install. **Do not** zip the install folder by hand.
 | GET    | `/api/health`          | Liveness + version                            |
 | GET    | `/api/rooms`           | List Sonos rooms PartyQueue can see           |
 | GET    | `/api/search`          | `?q=` Spotify track search                    |
-| POST   | `/api/queue`           | `{ "uri": "spotify:track:..." }` append       |
+| POST   | `/api/queue`           | `{ "uri": "spotify:track:..." }` append (limited) |
 | POST   | `/api/queue/playlist`  | `{ "uri": "spotify:playlist:..." }` append    |
 | POST   | `/api/queue/random`    | `{ "count", "playlistIds" }` add random songs |
 | POST   | `/api/queue/remove`    | `{ "uri", "position" }` remove a queued song  |
@@ -241,6 +244,20 @@ Settings after install. **Do not** zip the install folder by hand.
 | POST   | `/api/autofill`        | `{ enabled, playlistIds }` toggle refill      |
 | GET    | `/api/auth/status`     | `{ connected }` — Spotify user linked         |
 | GET    | `/auth/login`          | One-time host Spotify login (PIN if set)      |
+
+Guest song adds remain open on the LAN. To prevent accidental double-taps and
+queue floods, `/api/queue` allows three adds per source IP in 10 seconds and 20
+adds in five minutes. A limited request returns `429`, `Retry-After`, and a
+JSON `retryMs` value; normal playback and queue permissions are unchanged.
+
+---
+
+## Tests and CI
+
+Run the complete Node 20 test suite with `npm test`. GitHub Actions runs the
+locked install and tests on Linux and Windows for pushes and pull requests, and
+audits production dependencies on Linux. Sonos/Home Assistant smoke scripts
+remain manual because they control real hardware.
 
 ---
 

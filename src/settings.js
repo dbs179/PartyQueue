@@ -18,7 +18,9 @@ import {
 } from "./dj-icon.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SETTINGS_FILE = path.join(__dirname, "..", "data", "settings.json");
+const SETTINGS_FILE =
+  process.env.PARTYQUEUE_SETTINGS_FILE ||
+  path.join(__dirname, "..", "data", "settings.json");
 
 // In-memory cache: Random / Never-Ending / discovery tick loadSettings() often;
 // avoid a sync disk read on every call.

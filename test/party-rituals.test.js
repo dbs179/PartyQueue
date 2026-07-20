@@ -1,19 +1,19 @@
 import { test, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const STORE = path.join(__dirname, "..", "data", "settings.json");
-const BAK = STORE + ".p3ritualbak";
+const STORE = path.join(
+  os.tmpdir(),
+  `pq-party-rituals-${process.pid}-${Date.now()}.json`
+);
+process.env.PARTYQUEUE_SETTINGS_FILE = STORE;
 
 let settings;
 let rituals;
 
 before(async () => {
-  if (fs.existsSync(STORE)) fs.renameSync(STORE, BAK);
-  else if (fs.existsSync(BAK)) fs.unlinkSync(BAK);
   settings = await import("../src/settings.js");
   settings.bustSettingsCache();
   // Import autofill after settings so Kids lock can update picker genres.
@@ -22,8 +22,8 @@ before(async () => {
 });
 
 after(() => {
-  if (fs.existsSync(STORE)) fs.unlinkSync(STORE);
-  if (fs.existsSync(BAK)) fs.renameSync(BAK, STORE);
+  fs.rmSync(STORE, { recursive: true, force: true });
+  delete process.env.PARTYQUEUE_SETTINGS_FILE;
   settings?.bustSettingsCache();
 });
 

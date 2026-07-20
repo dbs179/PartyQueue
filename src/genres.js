@@ -19,7 +19,9 @@ import { writeFileAtomic } from "./atomic-write.js";
 import { getLastfmApiKey } from "./lastfm.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CACHE_FILE = path.join(__dirname, "..", "data", "genre-cache.json");
+const CACHE_FILE =
+  process.env.PARTYQUEUE_GENRE_CACHE_FILE ||
+  path.join(__dirname, "..", "data", "genre-cache.json");
 const LASTFM_URL = "https://ws.audioscrobbler.com/2.0/";
 
 // The canonical, host-facing genre buckets. "other" is the catch-all for
@@ -116,12 +118,21 @@ function loadCache() {
 }
 
 let saveTimer = null;
+export function flushGenrePersist() {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  if (cache === null) return false;
+  writeFileAtomic(CACHE_FILE, JSON.stringify(cache));
+  return true;
+}
+
 function scheduleSave() {
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
-    saveTimer = null;
     try {
-      writeFileAtomic(CACHE_FILE, JSON.stringify(cache ?? {}));
+      flushGenrePersist();
     } catch (err) {
       console.error("[genres] cache save failed:", err.message);
     }
@@ -234,6 +245,12 @@ export async function bucketsForArtist(artist) {
 }
 
 let warming = false;
+let warmingStopped = false;
+
+/** Stop a background warm loop before process shutdown. */
+export function stopGenreWarm() {
+  warmingStopped = true;
+}
 
 // Resolve any not-yet-cached artists from a list, throttled. Safe to call
 // repeatedly; already-cached artists are skipped, so it only pays for new ones.
@@ -253,10 +270,12 @@ export async function warmArtists(artistNames) {
     if (!todo.length) return;
     console.log(`[genres] warming ${todo.length} artist(s) from Last.fm...`);
     for (const name of todo) {
+      if (warmingStopped) break;
       await resolveArtist(name);
+      if (warmingStopped) break;
       await sleep(REQ_GAP_MS);
     }
-    console.log("[genres] warm complete");
+    console.log(warmingStopped ? "[genres] warm stopped" : "[genres] warm complete");
   } finally {
     warming = false;
   }

@@ -27,8 +27,12 @@ import {
   nudgeAutoFill,
   setAutoFill,
   savePickerSelection,
+  stopAutoFillMonitor,
 } from "./autofill.js";
-import { initQueueMaintenance } from "./queue-maintenance.js";
+import {
+  initQueueMaintenance,
+  stopQueueMaintenance,
+} from "./queue-maintenance.js";
 import {
   isEndOfNightTrack,
   shouldAnnouncePartyRecap,
@@ -48,7 +52,9 @@ import {
   GENRE_BUCKETS,
   genreCounts,
   eligiblePoolSize,
+  flushGenrePersist,
   isGenreDataEnabled,
+  stopGenreWarm,
   warmGenresFromPool,
 } from "./genres.js";
 import {
@@ -131,7 +137,11 @@ import {
   djIconExists,
   seedStarterDjIcons,
 } from "./dj-icon.js";
-import { clearHistory, getHistory } from "./play-history.js";
+import {
+  clearHistory,
+  flushHistoryPersist,
+  getHistory,
+} from "./play-history.js";
 import {
   originOf,
   requestedByOf,
@@ -403,7 +413,19 @@ app.get("/api/search", async (req, res) => {
   }
 });
 
-app.post("/api/queue", async (req, res) => {
+// Keep guest requests open while blunting accidental double-taps and queue floods.
+const queueBurstLimit = softRateLimit({
+  windowMs: 10_000,
+  max: 3,
+  message: "Easy on the requests — wait a few seconds and try again.",
+});
+const queueSustainedLimit = softRateLimit({
+  windowMs: 5 * 60_000,
+  max: 20,
+  message: "Request limit reached — try again in a few minutes.",
+});
+
+app.post("/api/queue", queueBurstLimit, queueSustainedLimit, async (req, res) => {
   const { uri, name, artist, force, requestedBy, requestedByUser, dedication } =
     req.body ?? {};
   if (!uri) {
@@ -589,7 +611,7 @@ app.post("/api/queue/dedication", async (req, res) => {
   res.json({ ok: true, dedication: forWho });
 });
 
-app.post("/api/queue/playlist", async (req, res) => {
+app.post("/api/queue/playlist", queueBurstLimit, queueSustainedLimit, async (req, res) => {
   const { uri } = req.body ?? {};
   if (!uri) {
     return res.status(400).json({ error: "Missing playlist uri." });
@@ -1615,7 +1637,7 @@ app.get("/api/queue/list", async (_req, res) => {
   }
 });
 
-app.post("/api/queue/remove", async (req, res) => {
+app.post("/api/queue/remove", destructiveLimit, async (req, res) => {
   const { uri, position } = req.body ?? {};
   if (!uri) return res.status(400).json({ error: "Missing track uri." });
   try {
@@ -1626,7 +1648,7 @@ app.post("/api/queue/remove", async (req, res) => {
   }
 });
 
-app.post("/api/queue/reorder", async (req, res) => {
+app.post("/api/queue/reorder", destructiveLimit, async (req, res) => {
   const { uri, fromPosition, beforeUri, beforePosition } = req.body ?? {};
   if (!uri) return res.status(400).json({ error: "Missing track uri." });
   try {
@@ -1846,7 +1868,7 @@ app.post("/api/group-all", destructiveLimit, async (_req, res) => {
   }
 });
 
-app.post("/api/groups/join", async (req, res) => {
+app.post("/api/groups/join", destructiveLimit, async (req, res) => {
   try {
     const room = req.body?.room;
     res.json({ ok: true, ...(await joinSpeakerToTarget(room)) });
@@ -1856,7 +1878,7 @@ app.post("/api/groups/join", async (req, res) => {
   }
 });
 
-app.post("/api/groups/leave", async (req, res) => {
+app.post("/api/groups/leave", destructiveLimit, async (req, res) => {
   try {
     const room = req.body?.room;
     res.json({ ok: true, ...(await leaveSpeakerGroup(room)) });
@@ -1866,7 +1888,7 @@ app.post("/api/groups/leave", async (req, res) => {
   }
 });
 
-app.post("/api/groups/ungroup-all", async (_req, res) => {
+app.post("/api/groups/ungroup-all", destructiveLimit, async (_req, res) => {
   try {
     res.json({ ok: true, ...(await ungroupAll()) });
   } catch (err) {
@@ -2133,11 +2155,56 @@ app.post("/api/cache/refresh", requireHost, async (_req, res) => {
   }
 });
 
-// Host restart from Options. Docker (restart: unless-stopped) just exits;
-// bare Windows/macOS respawns the same node argv before exiting.
-app.post("/api/restart", requireHost, destructiveLimit, (_req, res) => {
-  res.json({ ok: true, restarting: true });
-  setTimeout(() => {
+const SHUTDOWN_TIMEOUT_MS = 5_000;
+let httpServer = null;
+let shuttingDown = false;
+
+function flushShutdownStores() {
+  for (const [name, flush] of [
+    ["history", flushHistoryPersist],
+    ["genres", flushGenrePersist],
+  ]) {
+    try {
+      flush();
+    } catch (err) {
+      console.error(`[shutdown] ${name} flush failed:`, err.message);
+    }
+  }
+}
+
+async function shutdownAndExit(reason, { restart = false } = {}) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] ${reason}`);
+
+  const forceExit = setTimeout(() => {
+    console.error("[shutdown] timed out; forcing exit");
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+  forceExit.unref();
+
+  stopGenreWarm();
+  const pendingShutdown = [
+    stopAutoFillMonitor(),
+    stopQueueMaintenance(),
+  ];
+
+  if (httpServer?.listening) {
+    pendingShutdown.push(
+      new Promise((resolve) => {
+        httpServer.close((err) => {
+          if (err) console.error("[shutdown] server close failed:", err.message);
+          resolve();
+        });
+        httpServer.closeIdleConnections?.();
+      })
+    );
+  }
+
+  await Promise.allSettled(pendingShutdown);
+  flushShutdownStores();
+
+  if (restart) {
     try {
       const inDocker = fs.existsSync("/.dockerenv");
       if (!inDocker) {
@@ -2156,11 +2223,28 @@ app.post("/api/restart", requireHost, destructiveLimit, (_req, res) => {
     } catch (err) {
       console.error("[restart] spawn failed:", err.message);
     }
-    process.exit(0);
+  }
+
+  clearTimeout(forceExit);
+  process.exit(0);
+}
+
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.once(signal, () => {
+    void shutdownAndExit(signal);
+  });
+}
+
+// Host restart from Options. Docker (restart: unless-stopped) just exits;
+// bare Windows/macOS respawns the same node argv after a clean shutdown.
+app.post("/api/restart", requireHost, destructiveLimit, (_req, res) => {
+  res.json({ ok: true, restarting: true });
+  setTimeout(() => {
+    void shutdownAndExit("host restart", { restart: true });
   }, 400);
 });
 
-app.listen(PORT, () => {
+httpServer = app.listen(PORT, () => {
   console.log(`PartyQueue running on http://0.0.0.0:${PORT}`);
   // Seed bundled DJ icons + hero banners into data/ (add missing only).
   seedStarterDjIcons();

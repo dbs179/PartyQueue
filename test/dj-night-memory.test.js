@@ -12,9 +12,14 @@ const TMP_GUESTS = path.join(
   os.tmpdir(),
   `pq-guests-${process.pid}-${Date.now()}.json`
 );
+const TMP_SETTINGS = path.join(
+  os.tmpdir(),
+  `pq-dj-settings-${process.pid}-${Date.now()}.json`
+);
 
 process.env.PARTYQUEUE_DJ_MEMORY_FILE = TMP_MEM;
 process.env.PARTYQUEUE_GUESTS_FILE = TMP_GUESTS;
+process.env.PARTYQUEUE_SETTINGS_FILE = TMP_SETTINGS;
 
 const mem = await import("../src/dj-night-memory.js");
 const guests = await import("../src/guest-profiles.js");
@@ -40,9 +45,11 @@ after(() => {
   try {
     fs.rmSync(TMP_MEM, { force: true });
     fs.rmSync(TMP_GUESTS, { force: true });
+    fs.rmSync(TMP_SETTINGS, { force: true });
   } catch {
     /* ok */
   }
+  delete process.env.PARTYQUEUE_SETTINGS_FILE;
 });
 
 test("isFirstShoutTonight is true until rememberShout, then false", () => {

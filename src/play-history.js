@@ -114,12 +114,14 @@ function flushPersist() {
     clearTimeout(persistTimer);
     persistTimer = null;
   }
+  if (cache === null) return false;
   persistNow();
+  return true;
 }
 
 /** Flush pending history writes (tests / shutdown). */
 export function flushHistoryPersist() {
-  flushPersist();
+  return flushPersist();
 }
 
 function loadCooldowns() {

@@ -1,31 +1,30 @@
-import { describe, it, before, after } from "node:test";
+import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
-import {
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const SETTINGS_FILE = path.join(
+  os.tmpdir(),
+  `pq-closing-time-${process.pid}-${Date.now()}.json`
+);
+process.env.PARTYQUEUE_SETTINGS_FILE = SETTINGS_FILE;
+
+const {
   isEndOfNightTrack,
   isClosingTime,
   shouldAnnouncePartyRecap,
   getEndOfNightTrack,
-} from "../src/closing-time.js";
-import {
-  getDjVoiceSettings,
+} = await import("../src/closing-time.js");
+const {
   setDjVoiceSettings,
   bustSettingsCache,
-} from "../src/settings.js";
+} = await import("../src/settings.js");
 
 describe("end of night matcher", () => {
-  let prev;
-
-  before(() => {
-    prev = getDjVoiceSettings();
-  });
-
   after(() => {
-    setDjVoiceSettings({
-      endOfNightTrackUri: prev.endOfNightTrackUri,
-      endOfNightTrackName: prev.endOfNightTrackName,
-      endOfNightTrackArtist: prev.endOfNightTrackArtist,
-      djPartyRecapEnabled: prev.djPartyRecapEnabled,
-    });
+    fs.rmSync(SETTINGS_FILE, { force: true });
+    delete process.env.PARTYQUEUE_SETTINGS_FILE;
     bustSettingsCache();
   });
 

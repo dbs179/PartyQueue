@@ -17,6 +17,8 @@ const ERROR_MS = 60_000; // back off after a failed check
 const START_DELAY_MS = 15_000; // wait after boot (let things settle)
 
 let timer = null;
+let stopping = false;
+let activeTick = null;
 
 function clearTimer() {
   if (timer) {
@@ -27,7 +29,15 @@ function clearTimer() {
 
 function schedule(ms) {
   clearTimer();
-  timer = setTimeout(tick, ms);
+  if (stopping) return;
+  timer = setTimeout(() => {
+    timer = null;
+    const running = tick();
+    activeTick = running;
+    void running.finally(() => {
+      if (activeTick === running) activeTick = null;
+    });
+  }, ms);
 }
 
 async function tick() {
@@ -50,5 +60,13 @@ async function tick() {
 
 // Start the maintenance loop. Safe to call once at startup.
 export function initQueueMaintenance() {
+  stopping = false;
   schedule(START_DELAY_MS);
+}
+
+/** Stop the self-scheduling loop during process shutdown. */
+export function stopQueueMaintenance() {
+  stopping = true;
+  clearTimer();
+  return activeTick ?? Promise.resolve();
 }
