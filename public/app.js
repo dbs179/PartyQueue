@@ -1006,7 +1006,7 @@ function formatDjIconLabel(name) {
   if (!name) return "Default";
   const base = String(name)
     .replace(/\.[^.]+$/, "")
-    .replace(/^dj-icon-\d+-?/i, "")
+    .replace(/^dj-icon-(?:\d+-)?/i, "")
     .replace(/[-_]+/g, " ")
     .trim();
   const label = base || String(name);
@@ -1840,14 +1840,14 @@ function renderDjIcons(data) {
   updateDjHubSummaries();
   const defaultUrl = data.defaultUrl || "/dj-icons/flat.png";
   const defaultIconName =
-    settingsDefaults?.djIcon || "dj-icon-1-flat.png";
+    settingsDefaults?.djIcon || "dj-icon-flat.png";
   djIconGallery.innerHTML = "";
 
-  const tiles = [{ name: null, url: defaultUrl }];
+  const tiles = [{ name: null, url: defaultUrl, starter: true }];
   for (const b of data.icons || []) {
     // Default tile already represents the seeded flat starter.
     if (b.name === defaultIconName) continue;
-    tiles.push({ name: b.name, url: b.url });
+    tiles.push({ name: b.name, url: b.url, starter: !!b.starter });
   }
 
   for (const t of tiles) {
@@ -1855,8 +1855,7 @@ function renderDjIcons(data) {
       t.name === null
         ? !active || active === defaultIconName
         : active === t.name;
-    const isStarter =
-      typeof t.name === "string" && /^dj-icon-1-[a-z0-9]+\./i.test(t.name);
+    const isStarter = !!t.starter;
     const tile = document.createElement("div");
     tile.className = "banner-thumb" + (isActive ? " active" : "");
     const tag = isActive ? "Active" : t.name === null ? "Default" : "";
@@ -1987,13 +1986,14 @@ function renderBanners(data) {
   const defaultUrl = data.defaultUrl || "hero.png";
   bannerGallery.innerHTML = "";
 
-  const tiles = [{ name: null, url: defaultUrl }];
-  for (const b of data.banners || []) tiles.push({ name: b.name, url: b.url });
+  const tiles = [{ name: null, url: defaultUrl, starter: true }];
+  for (const b of data.banners || []) {
+    tiles.push({ name: b.name, url: b.url, starter: !!b.starter });
+  }
 
   for (const t of tiles) {
     const isActive = active === t.name;
-    const isStarter =
-      typeof t.name === "string" && /banner-\d+-starter\d+\./i.test(t.name);
+    const isStarter = !!t.starter;
     const tile = document.createElement("div");
     tile.className = "banner-thumb" + (isActive ? " active" : "");
     const tag = isActive ? "Active" : t.name === null ? "Default" : "";

@@ -30,5 +30,5 @@ test("saveDjIcon rejects SVG uploads", () => {
 test("saveDjIcon accepts a small PNG", () => {
   const name = saveDjIcon(TINY_PNG);
   created.push(name);
-  assert.match(name, /^dj-icon-\d+-[a-z0-9]+\.png$/i);
+  assert.match(name, /^dj-icon-[a-z0-9]+\.png$/i);
 });

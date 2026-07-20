@@ -18,13 +18,35 @@ const MAX_BYTES = 8 * 1024 * 1024; // 8 MB decoded image cap
 // Bundled defaults (public/banners → data/banners). hero.png remains the
 // true app Default (null); these are extra gallery choices.
 const STARTER_BANNERS = [
-  { src: "vinyl.jpg", dest: "banner-1-starter01.jpg" },
-  { src: "speakers.jpg", dest: "banner-1-starter02.jpg" },
-  { src: "backyard.jpg", dest: "banner-1-starter03.jpg" },
-  { src: "karaoke.jpg", dest: "banner-1-starter04.jpg" },
-  { src: "records.jpg", dest: "banner-1-starter05.jpg" },
+  { src: "vinyl.jpg", dest: "banner-vinyl.jpg" },
+  { src: "speakers.jpg", dest: "banner-speakers.jpg" },
+  { src: "backyard.jpg", dest: "banner-backyard.jpg" },
+  { src: "karaoke.jpg", dest: "banner-karaoke.jpg" },
+  { src: "records.jpg", dest: "banner-records.jpg" },
 ];
 const STARTER_DEST = new Set(STARTER_BANNERS.map((s) => s.dest));
+
+// Older banner-1-starterNN.* names → descriptive slugs (incl. retired starters).
+const LEGACY_STARTER_SLUGS = {
+  "01": "vinyl",
+  "02": "speakers",
+  "03": "backyard",
+  "04": "karaoke",
+  "05": "records",
+  "06": "kitchen",
+  "07": "acoustic",
+  "08": "dancefloor",
+  "09": "jukebox",
+  "10": "rooftop",
+};
+
+const BANNER_EXT = "png|jpg|webp|gif";
+// Preferred: banner-vinyl.jpg. Still accept older banner-1-starter01.jpg /
+// banner-1784…-6kwgfm.png forms during migration.
+const BANNER_NAME_RE = new RegExp(
+  `^banner-(?:\\d+-)?[a-z0-9]+\\.(${BANNER_EXT})$`,
+  "i"
+);
 
 // Accepted image types mapped to the extension we store them as.
 const EXT_BY_MIME = {
@@ -40,12 +62,53 @@ function ensureDir() {
 }
 
 // Only allow plain banner filenames we generated (no path traversal).
+export function isSafeBannerName(name) {
+  return typeof name === "string" && BANNER_NAME_RE.test(name);
+}
+
 function isSafeName(name) {
-  return typeof name === "string" && /^banner-\d+-[a-z0-9]+\.(png|jpg|webp|gif)$/i.test(name);
+  return isSafeBannerName(name);
 }
 
 function isStarterBannerName(name) {
   return STARTER_DEST.has(name);
+}
+
+/** Rename banner-1-starter02.jpg / banner-123-choir1.png → banner-speakers.jpg etc. */
+export function migrateBannerFilenames() {
+  const renamed = new Map();
+  try {
+    if (!fs.existsSync(BANNERS_DIR)) return renamed;
+    ensureDir();
+    for (const name of fs.readdirSync(BANNERS_DIR)) {
+      let dest = null;
+      const starter = /^banner-1-starter(\d+)\.(png|jpg|webp|gif)$/i.exec(name);
+      if (starter) {
+        const slug = LEGACY_STARTER_SLUGS[starter[1].padStart(2, "0")] ||
+          LEGACY_STARTER_SLUGS[starter[1]];
+        if (slug) dest = `banner-${slug}.${starter[2].toLowerCase()}`;
+      } else {
+        const m = /^banner-(\d+)-([a-z0-9]+)\.(png|jpg|webp|gif)$/i.exec(name);
+        if (m) dest = `banner-${m[2].toLowerCase()}.${m[3].toLowerCase()}`;
+      }
+      if (!dest || dest === name) continue;
+      const from = path.join(BANNERS_DIR, name);
+      const to = path.join(BANNERS_DIR, dest);
+      try {
+        if (fs.existsSync(to)) {
+          fs.unlinkSync(from);
+        } else {
+          fs.renameSync(from, to);
+        }
+        renamed.set(name, dest);
+      } catch (err) {
+        console.error("[banners] rename failed:", err.message);
+      }
+    }
+  } catch (err) {
+    console.error("[banners] rename scan failed:", err.message);
+  }
+  return renamed;
 }
 
 /** Copy any missing bundled starter banners into data/. Never overwrites. */
@@ -69,9 +132,10 @@ export function seedStarterBanners() {
   }
 }
 
-// Banner files newest-first, each as { name, url }.
+// Banner files newest-first, each as { name, url, starter }.
 export function listBanners() {
   try {
+    migrateBannerFilenames();
     seedStarterBanners();
     ensureDir();
     return fs
@@ -82,7 +146,11 @@ export function listBanners() {
         mtime: fs.statSync(path.join(BANNERS_DIR, name)).mtimeMs,
       }))
       .sort((a, b) => b.mtime - a.mtime)
-      .map(({ name }) => ({ name, url: `/banners/${name}` }));
+      .map(({ name }) => ({
+        name,
+        url: `/banners/${name}`,
+        starter: isStarterBannerName(name),
+      }));
   } catch (err) {
     console.error("[banners] list failed:", err.message);
     return [];
@@ -130,7 +198,7 @@ export function saveBanner(dataUrl) {
   if (buf.length > MAX_BYTES) throw new Error("Image is too large (8 MB max).");
 
   ensureDir();
-  const name = `banner-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const name = `banner-${Math.random().toString(36).slice(2, 10)}.${ext}`;
   fs.writeFileSync(path.join(BANNERS_DIR, name), buf);
   prune(name);
   return name;

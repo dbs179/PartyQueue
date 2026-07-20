@@ -1,6 +1,6 @@
 // DJ Voice icon store: host-uploaded icons under data/dj-icons/ (Docker-
 // persisted). Keeps the newest few for quick reuse. null in settings means
-// the seeded starter default (dj-icon-1-flat.png / public/dj-icons/flat.png).
+// the seeded starter default (dj-icon-flat.png / public/dj-icons/flat.png).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -17,11 +17,11 @@ export const MAX_DJ_ICONS = 20;
 
 // Stable gallery names for bundled styles (copied from public/dj-icons).
 const STARTER_ICONS = [
-  { src: "flat.png", dest: "dj-icon-1-flat.png" },
-  { src: "retro.jpg", dest: "dj-icon-1-retro.jpg" },
-  { src: "neon.png", dest: "dj-icon-1-neon.png" },
-  { src: "cartoon.png", dest: "dj-icon-1-cartoon.png" },
-  { src: "headphones.png", dest: "dj-icon-1-headphones.png" },
+  { src: "flat.png", dest: "dj-icon-flat.png" },
+  { src: "retro.png", dest: "dj-icon-retro.png" },
+  { src: "neon.png", dest: "dj-icon-neon.png" },
+  { src: "cartoon.png", dest: "dj-icon-cartoon.png" },
+  { src: "headphones.png", dest: "dj-icon-headphones.png" },
 ];
 const STARTER_DEST = new Set(STARTER_ICONS.map((s) => s.dest));
 const MAX_BYTES = 2 * 1024 * 1024; // 2 MB decoded image cap
@@ -36,16 +36,20 @@ const EXT_BY_MIME = {
   "image/gif": "gif",
 };
 
+const DJ_ICON_EXT = "png|jpg|webp|svg|gif";
+// Preferred: dj-icon-flat.png. Still accept older dj-icon-1-flat.png forms.
+const DJ_ICON_NAME_RE = new RegExp(
+  `^dj-icon-(?:\\d+-)?[a-z][a-z0-9]*\\.(${DJ_ICON_EXT})$`,
+  "i"
+);
+
 function ensureDir() {
   fs.mkdirSync(ICONS_DIR, { recursive: true });
 }
 
 // Only allow plain icon filenames we generated (no path traversal).
 export function isSafeDjIconName(name) {
-  return (
-    typeof name === "string" &&
-    /^dj-icon-\d+-[a-z0-9]+\.(png|jpg|webp|svg|gif)$/i.test(name)
-  );
+  return typeof name === "string" && DJ_ICON_NAME_RE.test(name);
 }
 
 function isLegacyDjIconName(name) {
@@ -66,7 +70,7 @@ export function migrateLegacyIcons() {
       if (!isLegacyDjIconName(name)) continue;
       ensureDir();
       const ext = path.extname(name).slice(1).toLowerCase();
-      const dest = `dj-icon-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const dest = `dj-icon-${Math.random().toString(36).slice(2, 10)}.${ext}`;
       try {
         fs.renameSync(path.join(LEGACY_DATA_DIR, name), path.join(ICONS_DIR, dest));
         renamed.set(name, dest);
@@ -76,6 +80,38 @@ export function migrateLegacyIcons() {
     }
   } catch (err) {
     console.error("[dj-icon] migrate scan failed:", err.message);
+  }
+  return renamed;
+}
+
+/** Rename dj-icon-1-flat.png / dj-icon-123-holyroller.png → dj-icon-flat.png etc. */
+export function migrateDjIconFilenames() {
+  const renamed = new Map();
+  try {
+    if (!fs.existsSync(ICONS_DIR)) return renamed;
+    ensureDir();
+    for (const name of fs.readdirSync(ICONS_DIR)) {
+      const m = /^dj-icon-(?:\d+-)?([a-z][a-z0-9]*)\.(png|jpg|webp|svg|gif)$/i.exec(
+        name
+      );
+      if (!m) continue;
+      const dest = `dj-icon-${m[1].toLowerCase()}.${m[2].toLowerCase()}`;
+      if (dest === name) continue;
+      const from = path.join(ICONS_DIR, name);
+      const to = path.join(ICONS_DIR, dest);
+      try {
+        if (fs.existsSync(to)) {
+          fs.unlinkSync(from);
+        } else {
+          fs.renameSync(from, to);
+        }
+        renamed.set(name, dest);
+      } catch (err) {
+        console.error("[dj-icon] rename failed:", err.message);
+      }
+    }
+  } catch (err) {
+    console.error("[dj-icon] rename scan failed:", err.message);
   }
   return renamed;
 }
@@ -123,7 +159,11 @@ export function listDjIcons() {
         mtime: fs.statSync(path.join(ICONS_DIR, name)).mtimeMs,
       }))
       .sort((a, b) => b.mtime - a.mtime)
-      .map(({ name }) => ({ name, url: `/dj-icon/${name}` }));
+      .map(({ name }) => ({
+        name,
+        url: `/dj-icon/${name}`,
+        starter: isStarterDjIconName(name),
+      }));
   } catch (err) {
     console.error("[dj-icon] list failed:", err.message);
     return [];
@@ -166,7 +206,7 @@ export function saveDjIcon(dataUrl) {
   if (buf.length > MAX_BYTES) throw new Error("Image is too large (2 MB max).");
 
   ensureDir();
-  const name = `dj-icon-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const name = `dj-icon-${Math.random().toString(36).slice(2, 10)}.${ext}`;
   fs.writeFileSync(path.join(ICONS_DIR, name), buf);
   prune(name);
   return name;

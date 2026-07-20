@@ -7,7 +7,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "./atomic-write.js";
 import {
+  bannerExists,
+  migrateBannerFilenames,
+} from "./banners.js";
+import {
   djIconExists,
+  migrateDjIconFilenames,
   migrateLegacyIcons,
   seedStarterDjIcons,
 } from "./dj-icon.js";
@@ -144,7 +149,7 @@ export const DJ_VOICE_DEFAULTS = {
   djName: "Party DJ",
   // Seeded starter from public/dj-icons/flat.png → data/dj-icons/.
   // Fresh installs use this; hosts can upload/rename freely.
-  djIcon: "dj-icon-1-flat.png",
+  djIcon: "dj-icon-flat.png",
   djNameIntroPercent: 25,
   djAnnounceMaxWords: 55,
   // DJ announce volume: boost = % of remaining room up to 100, by music tier.
@@ -441,7 +446,7 @@ function cleanDjIcon(value) {
   if (typeof value !== "string") return null;
   // Gallery filenames (and a one-time legacy single-file name).
   if (
-    !/^dj-icon-\d+-[a-z0-9]+\.(png|jpg|webp|svg|gif)$/i.test(value) &&
+    !/^dj-icon-(?:\d+-)?[a-z][a-z0-9]*\.(png|jpg|webp|svg|gif)$/i.test(value) &&
     !/^dj-icon\.(png|jpg|webp|svg|gif)$/i.test(value)
   ) {
     return null;
@@ -457,9 +462,12 @@ export function djIconUrl(iconName) {
 export function getDjVoiceSettings() {
   const s = loadSettings();
   const name = cleanDjName(s.djName);
-  // One-time move of the old single-file icon into the gallery.
+  // One-time move / rename of older icon filenames into the short gallery names.
   seedStarterDjIcons();
-  const migrated = migrateLegacyIcons();
+  const migrated = new Map([
+    ...migrateLegacyIcons(),
+    ...migrateDjIconFilenames(),
+  ]);
   let iconRaw = cleanDjIcon(s.djIcon);
   if (iconRaw && migrated.has(iconRaw)) {
     iconRaw = migrated.get(iconRaw);
@@ -818,6 +826,17 @@ export function getBrandingSettings() {
   const s = loadSettings();
   const name = cleanText(s.eventName, BRANDING_MAXLEN.eventName);
   const sub = cleanText(s.subtitle, BRANDING_MAXLEN.subtitle);
+  const renamed = migrateBannerFilenames();
+  let heroBanner = typeof s.heroBanner === "string" ? s.heroBanner : null;
+  if (heroBanner && renamed.has(heroBanner)) {
+    heroBanner = renamed.get(heroBanner);
+    try {
+      saveSettings({ ...s, heroBanner });
+    } catch {
+      /* migration is best-effort */
+    }
+  }
+  if (heroBanner && !bannerExists(heroBanner)) heroBanner = null;
   return {
     eventName: name || BRANDING_DEFAULTS.eventName,
     subtitle: sub == null ? BRANDING_DEFAULTS.subtitle : sub,
@@ -825,7 +844,7 @@ export function getBrandingSettings() {
       typeof s.showVersion === "boolean"
         ? s.showVersion
         : BRANDING_DEFAULTS.showVersion,
-    heroBanner: typeof s.heroBanner === "string" ? s.heroBanner : null,
+    heroBanner,
   };
 }
 

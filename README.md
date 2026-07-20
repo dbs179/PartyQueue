@@ -1,6 +1,6 @@
 # PartyQueue
 
-**Version:** 6.2.5 (tracked in `package.json`)
+**Version:** 6.2.6 (tracked in `package.json`)
 
 A LAN party app for Sonos: guests open it on their phones, search Spotify, and
 add songs to **your** queue. Playback controls, Random, and Music Mix are on the
