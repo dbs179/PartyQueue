@@ -4752,7 +4752,6 @@ function updateSyncedHighlight(forceScroll) {
     if (npSyncedLines[i].t <= pos + LYRICS_LEAD_SEC) idx = i;
     else break;
   }
-  if (idx < 0) idx = 0;
   const kids = ul.children;
   let activeEl = null;
   let becameActive = false;
@@ -4786,7 +4785,6 @@ function startLyricTicker() {
       if (npSyncedLines[i].t <= pos + LYRICS_LEAD_SEC) idx = i;
       else break;
     }
-    if (idx < 0) idx = 0;
     if (idx !== lastIdx) {
       lastIdx = idx;
       updateSyncedHighlight(false);
