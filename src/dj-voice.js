@@ -37,6 +37,10 @@ import {
 import { GENRE_BUCKETS, bucketsForArtistSync } from "./genres.js";
 import { beginDjVolumeHandoff } from "./dj-volume-handoff.js";
 import {
+  queueWorkGeneration,
+  queueWorkWasPreempted,
+} from "./queue-preempt.js";
+import {
   DJ_BOOTH_ASIDES,
   DJ_SHARED_OUTROS,
   filterIntrosByContext,
@@ -2955,10 +2959,16 @@ export async function announceOnSonos(
     room = getSonosTargetRoom(),
     startPlayback = false,
     queuePosition = 1,
+    preemptGeneration = queueWorkGeneration(),
   } = {}
 ) {
   return withAnnounceLock(() =>
-    announceOnSonosUnlocked(message, { room, startPlayback, queuePosition })
+    announceOnSonosUnlocked(message, {
+      room,
+      startPlayback,
+      queuePosition,
+      preemptGeneration,
+    })
   );
 }
 
@@ -2968,8 +2978,13 @@ async function announceOnSonosUnlocked(
     room = getSonosTargetRoom(),
     startPlayback = false,
     queuePosition = 1,
+    preemptGeneration = queueWorkGeneration(),
   } = {}
 ) {
+  const preempted = () => queueWorkWasPreempted(preemptGeneration);
+  if (preempted()) {
+    return { ok: false, skipped: true, reason: "queue-preempted" };
+  }
   if (!isHaConfigured()) {
     return { ok: false, error: "Home Assistant is not configured." };
   }
@@ -2989,11 +3004,17 @@ async function announceOnSonosUnlocked(
     if (!startPlayback) {
       pausedForImminent = await pauseIfAnnounceImminent(queuePosition);
     }
+    if (preempted()) {
+      return { ok: false, skipped: true, reason: "queue-preempted" };
+    }
     const clip = await saveTtsClip(String(message).trim());
     console.log(
       `[dj-voice] saved ${clip.fileName} (${clip.bytes} bytes; ` +
         `${clip.publicUrl === clip.localUrl ? "local media" : "external TTS media"})`
     );
+    if (preempted()) {
+      return { ok: false, skipped: true, reason: "queue-preempted" };
+    }
     // Pause before inserting when we're about to Play from the DJ clip.
     // Avoids Sonos auto-starting a shifted track, then Seek+Play restarting TTS.
     if (startPlayback) {
@@ -3039,13 +3060,22 @@ async function announceOnSonosUnlocked(
     } catch (err) {
       console.warn("[dj-voice] supersede pad strip failed:", err.message);
     }
+    if (preempted()) {
+      return { ok: false, skipped: true, reason: "queue-preempted" };
+    }
     const ttsPos = rampPos + 1;
     const restorePos = ttsPos + 1;
     const ramp = await enqueueSilenceRamp(rampPos);
+    if (preempted()) {
+      return { ok: false, skipped: true, reason: "queue-preempted" };
+    }
     await enqueueDjClip(clip.publicUrl, {
       durationSec: clip.approxDurationSec,
       position: ttsPos,
     });
+    if (preempted()) {
+      return { ok: false, skipped: true, reason: "queue-preempted" };
+    }
     console.log(`[dj-voice] enqueued TTS at queue position ${ttsPos}`);
     const restore = await enqueueSilenceRestore(restorePos);
 
@@ -3096,7 +3126,7 @@ async function announceOnSonosUnlocked(
       /* ignore */
     }
     // Only start as a recovery if we never reached Play — avoids DJ-twice.
-    if (startPlayback && !didStart) {
+    if (startPlayback && !didStart && !preempted()) {
       try {
         // Best-effort recovery Play; prefer position 1 (fresh-set path).
         await startQueuePlayback(1);
@@ -3122,8 +3152,13 @@ export function getPendingAnnounce() {
 // placing TTS so rapid Next can't leave the announce stranded behind us.
 export async function scheduleRefillAnnounce(
   summary,
-  { boundaryTrack, upcoming = 0 } = {}
+  {
+    boundaryTrack,
+    upcoming = 0,
+    preemptGeneration = queueWorkGeneration(),
+  } = {}
 ) {
+  if (queueWorkWasPreempted(preemptGeneration)) return null;
   if (!getDjVoiceSettings().djVoiceEnabled || !isHaConfigured()) {
     pending = null;
     return null;
@@ -3139,6 +3174,7 @@ export async function scheduleRefillAnnounce(
     highlights: summary?.highlights ?? [],
     similarAdded: summary?.similarAdded ?? 0,
   });
+  if (queueWorkWasPreempted(preemptGeneration)) return null;
   const left = Math.max(0, Math.floor(Number(upcoming) || 0));
   const planned = track + left + 1;
 
@@ -3180,6 +3216,7 @@ export async function scheduleRefillAnnounce(
       room: pending.room,
       startPlayback: false,
       queuePosition: insertAt,
+      preemptGeneration,
     });
     pending.enqueued = !!result?.ok;
     pending.publicUrl = result?.publicUrl || null;
@@ -3215,7 +3252,10 @@ export async function checkPendingAnnounce(status) {
 
 // Manual Random when a fresh set starts (playback was idle â†’ we deferred start).
 // Music is already in the queue; insert TTS at position 1 and Play from track 1.
-export async function announceFreshSet(summary) {
+export async function announceFreshSet(
+  summary,
+  { preemptGeneration = queueWorkGeneration() } = {}
+) {
   if (!getDjVoiceSettings().djVoiceEnabled || !isHaConfigured()) {
     return { ok: false, skipped: true };
   }
@@ -3226,17 +3266,29 @@ export async function announceFreshSet(summary) {
     highlights: summary.highlights ?? [],
     similarAdded: summary.similarAdded ?? 0,
   });
+  if (queueWorkWasPreempted(preemptGeneration)) {
+    return { ok: false, skipped: true, reason: "queue-preempted" };
+  }
   console.log(
     `[dj-voice] fresh set announce (${summary.added} songs) â†’ queue insert`
   );
   console.log(`[dj-voice] script: ${message}`);
-  return announceOnSonos(message, { startPlayback: true, queuePosition: 1 });
+  return announceOnSonos(message, {
+    startPlayback: true,
+    queuePosition: 1,
+    preemptGeneration,
+  });
 }
 
 // Mid-queue / leftover-batch announce (Random while music is already playing).
 export async function announceSetBatch(
   summary,
-  { queuePosition, startPlayback = false, event = "session_refill" } = {}
+  {
+    queuePosition,
+    startPlayback = false,
+    event = "session_refill",
+    preemptGeneration = queueWorkGeneration(),
+  } = {}
 ) {
   if (!getDjVoiceSettings().djVoiceEnabled || !isHaConfigured()) {
     return { ok: false, skipped: true };
@@ -3252,6 +3304,9 @@ export async function announceSetBatch(
     highlights: summary.highlights ?? [],
     similarAdded: summary.similarAdded ?? 0,
   });
+  if (queueWorkWasPreempted(preemptGeneration)) {
+    return { ok: false, skipped: true, reason: "queue-preempted" };
+  }
   console.log(
     `[dj-voice] set batch announce (${summary.added} songs) â†’ queue #${pos}`
   );
@@ -3259,6 +3314,7 @@ export async function announceSetBatch(
   return announceOnSonos(message, {
     startPlayback: !!startPlayback,
     queuePosition: pos,
+    preemptGeneration,
   });
 }
 
@@ -3273,9 +3329,15 @@ export function isDjVoiceReady() {
 /**
  * Party recap TTS inserted immediately before Closing Time in the queue.
  * @param {{ script?: string }} recap
- * @param {{ queuePosition?: number }} [opts]
+ * @param {{ queuePosition?: number, preemptGeneration?: number }} [opts]
  */
-export async function announcePartyRecap(recap, { queuePosition } = {}) {
+export async function announcePartyRecap(
+  recap,
+  {
+    queuePosition,
+    preemptGeneration = queueWorkGeneration(),
+  } = {}
+) {
   if (!getDjVoiceSettings().djVoiceEnabled || !isHaConfigured()) {
     return { ok: false, skipped: true };
   }
@@ -3292,6 +3354,7 @@ export async function announcePartyRecap(recap, { queuePosition } = {}) {
   return announceOnSonos(message, {
     startPlayback: false,
     queuePosition: pos,
+    preemptGeneration,
   });
 }
 

@@ -108,6 +108,15 @@ test.describe("PartyQueue browser smoke", () => {
     await expect(page.locator("#view-display")).toBeVisible();
     await expect(page.locator("#view-main")).toBeHidden();
     await expect(page.locator("body")).toHaveClass(/party-display-active/);
+    await expect(page.locator(".party-display-kicker")).toHaveCount(0);
+    await expect(page.locator("#display-event-name")).toHaveClass(
+      /party-display-label/
+    );
+    const brandedTitle =
+      (await page.locator("#event-name").textContent()) || "PartyQueue";
+    await expect(page.locator("#display-event-name")).toHaveText(
+      brandedTitle
+    );
     await expect(page.locator("#display-title")).toBeAttached();
     await expect(page.locator("#display-queue")).toBeAttached();
     await expect(page.locator("#display-join-qr")).toBeAttached();
@@ -119,6 +128,20 @@ test.describe("PartyQueue browser smoke", () => {
     await expect(page.locator("#display-join-url")).toHaveText(
       "http://partyqueue.local"
     );
+    await expect(page.locator("#display-progress")).toBeVisible();
+    const displayBefore = await page
+      .locator("#display-progress-elapsed")
+      .textContent();
+    await page.waitForTimeout(1_100);
+    const displayAfter = await page
+      .locator("#display-progress-elapsed")
+      .textContent();
+    const toSeconds = (value) =>
+      String(value)
+        .split(":")
+        .map(Number)
+        .reduce((total, part) => total * 60 + part, 0);
+    expect(toSeconds(displayAfter)).toBeGreaterThan(toSeconds(displayBefore));
     await expect(page.locator("#view-display button")).toHaveCount(0);
     await expect(page.locator("#np-toggle")).toBeHidden();
   });
@@ -277,6 +300,17 @@ test.describe("PartyQueue browser smoke", () => {
       "Changing track…"
     );
     expect(lyricsRequests).toBe(0);
+
+    await page.keyboard.press("Escape");
+    await page.evaluate(() => {
+      location.hash = "#/display";
+    });
+    await expect(page.locator("#view-display")).toBeVisible();
+    await expect(page.locator("#display-title")).toHaveText("Changing track…");
+    await expect(page.locator("#display-state")).toHaveText("Changing");
+    await expect(page.locator("#display-art")).not.toHaveAttribute("src", /.+/);
+    await expect(page.locator("#display-progress")).toBeHidden();
+    await expect(page.locator("#display-reactions")).toBeHidden();
   });
 
   test("js modules are served as ES modules", async ({ request }) => {

@@ -15,6 +15,10 @@ import {
 } from "./guest-profiles.js";
 import { writeRequestShoutTemplate } from "./party-recap.js";
 import {
+  queueWorkGeneration,
+  queueWorkWasPreempted,
+} from "./queue-preempt.js";
+import {
   isFirstShoutTonight,
   shouldBirthdayShout,
   pickFreshNotes,
@@ -427,6 +431,7 @@ export async function announceRequestShout(
     trackId = null,
     queuePosition,
     startPlayback = false,
+    preemptGeneration = queueWorkGeneration(),
   } = {}
 ) {
   if (!isDjVoiceReady()) {
@@ -445,6 +450,9 @@ export async function announceRequestShout(
     dedication,
     trackId: id,
   });
+  if (queueWorkWasPreempted(preemptGeneration)) {
+    return { ok: false, skipped: true, reason: "queue-preempted" };
+  }
   // Script/TTS can take several seconds — re-find the song so the shout still
   // lands immediately before it (not after, if the queue shifted).
   if (!startPlayback) {
@@ -467,5 +475,6 @@ export async function announceRequestShout(
   return announceOnSonos(message, {
     startPlayback: !!startPlayback,
     queuePosition: pos,
+    preemptGeneration,
   });
 }

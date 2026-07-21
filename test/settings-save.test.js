@@ -76,3 +76,17 @@ test("request fairness defaults off and persists bounded controls", () => {
     requestFairnessHostBypass: false,
   });
 });
+
+test("Discover is enabled once on upgrade, then respects the host choice", () => {
+  settings.saveSettings({ discoverEnabled: false });
+  assert.equal(settings.getDiscoverySettings().discoverEnabled, true);
+
+  let disk = JSON.parse(fs.readFileSync(STORE, "utf8"));
+  assert.equal(disk.discoverEnabled, true);
+  assert.equal(disk.discoveryDefaultVersion, 1);
+
+  settings.setDiscoverySettings({ discoverEnabled: false });
+  assert.equal(settings.getDiscoverySettings().discoverEnabled, false);
+  disk = JSON.parse(fs.readFileSync(STORE, "utf8"));
+  assert.equal(disk.discoveryDefaultVersion, 1);
+});

@@ -485,6 +485,14 @@ export async function beginDjVolumeHandoff(options = {}) {
   return handoff;
 }
 
+export async function cancelActiveDjVolumeHandoff(reason = "queue preempted") {
+  const handoff = activeHandoff;
+  if (!handoff) return false;
+  await handoff.cancelAndRestore(reason);
+  if (activeHandoff === handoff) activeHandoff = null;
+  return true;
+}
+
 export function isDjVolumeHandoffActive() {
   return !!activeHandoff?.isVolumeLocked();
 }

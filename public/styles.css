@@ -2641,9 +2641,7 @@ body.party-display-active > .container {
 }
 
 .party-display-event {
-  margin: 3px 0 0;
-  font-size: clamp(1.5rem, 2.4vw, 3rem);
-  line-height: 1.05;
+  margin: 0;
 }
 
 .party-display-back {

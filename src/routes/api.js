@@ -6,6 +6,10 @@ import {
   createByteLruCache,
   createInFlightCoalescer,
 } from "../byte-lru-cache.js";
+import {
+  queueWorkGeneration,
+  queueWorkWasPreempted,
+} from "../queue-preempt.js";
 import { upsertEnvKeys } from "../env-file.js";
 import {
   exchangeCodeForTokens,
@@ -345,6 +349,7 @@ export function registerApiRoutes(app, ctx) {
   });
   
   app.post("/api/queue", queueBurstLimit, queueSustainedLimit, async (req, res) => {
+    const preemptGeneration = queueWorkGeneration();
     const { uri, name, artist, force, requestedBy, requestedByUser, dedication } =
       req.body ?? {};
     if (!uri) {
@@ -447,7 +452,10 @@ export function registerApiRoutes(app, ctx) {
           Number.isFinite(pos) &&
           pos >= 1
         ) {
-          void announcePartyRecap(partyRecap, { queuePosition: pos }).catch(
+          void announcePartyRecap(partyRecap, {
+            queuePosition: pos,
+            preemptGeneration,
+          }).catch(
             (err) => console.error("[queue] party recap announce:", err.message)
           );
         }
@@ -477,16 +485,23 @@ export function registerApiRoutes(app, ctx) {
                 trackId: reqId,
                 queuePosition: pos,
                 startPlayback: true,
+                preemptGeneration,
               });
-              if (!voice?.ok && !voice?.skipped) {
+              if (
+                !voice?.ok &&
+                !voice?.skipped &&
+                !queueWorkWasPreempted(preemptGeneration)
+              ) {
                 await play({ trackNumber: 1 });
               }
             } catch (err) {
               console.error("[queue] request shout:", err.message);
-              try {
-                await play({ trackNumber: 1 });
-              } catch (playErr) {
-                console.error("[queue] shout fallback play:", playErr.message);
+              if (!queueWorkWasPreempted(preemptGeneration)) {
+                try {
+                  await play({ trackNumber: 1 });
+                } catch (playErr) {
+                  console.error("[queue] shout fallback play:", playErr.message);
+                }
               }
             }
           } else {
@@ -504,6 +519,7 @@ export function registerApiRoutes(app, ctx) {
                 trackId: reqId,
                 queuePosition: pos,
                 startPlayback: false,
+                preemptGeneration,
               });
             } catch (err) {
               console.error("[queue] request shout:", err.message);
@@ -513,7 +529,8 @@ export function registerApiRoutes(app, ctx) {
       } else if (
         result.requestCreated !== false &&
         result.deferredStart &&
-        !result.started
+        !result.started &&
+        !queueWorkWasPreempted(preemptGeneration)
       ) {
         // Shout was deferred-start but didn't fire (DJ not ready, etc.) — play song.
         void play({ trackNumber: 1 }).catch((err) =>
@@ -539,6 +556,7 @@ export function registerApiRoutes(app, ctx) {
   // searched origins. If a mid-queue shout pad is still upcoming, supersede it
   // so the DJ can say “goes out to …”.
   app.post("/api/queue/dedication", async (req, res) => {
+    const preemptGeneration = queueWorkGeneration();
     const { uri, dedication, name, artist } = req.body ?? {};
     const id = spotifyTrackId(uri);
     if (!id) {
@@ -568,6 +586,7 @@ export function registerApiRoutes(app, ctx) {
             trackId: id,
             queuePosition: pos,
             startPlayback: false,
+            preemptGeneration,
           }).catch((err) =>
             console.error("[queue] dedication shout refresh:", err.message)
           );
@@ -602,6 +621,7 @@ export function registerApiRoutes(app, ctx) {
   }
 
   app.post("/api/queue/random", destructiveLimit, async (req, res) => {
+    const preemptGeneration = queueWorkGeneration();
     if (!isUserConnected()) {
       return res.status(400).json({ error: "Connect your Spotify account first." });
     }
@@ -647,6 +667,7 @@ export function registerApiRoutes(app, ctx) {
         similarCount: discoverEnabled ? similarCount : 0,
         filterExplicit,
         deferAutoStart: djReady,
+        preemptGeneration,
       });
   
       // Fresh idle Random: set announce at #1 + Play. Mid-party Random: set
@@ -663,21 +684,25 @@ export function registerApiRoutes(app, ctx) {
       });
       if (plan.action === "fresh_set") {
         try {
-          const voice = await announceFreshSet(result);
+          const voice = await announceFreshSet(result, { preemptGeneration });
           announced = !!voice?.ok;
           if (voice?.ok) {
             result.started = true;
-          } else {
+          } else if (!queueWorkWasPreempted(preemptGeneration)) {
             await play({ trackNumber: 1 });
             result.started = true;
           }
         } catch (err) {
           console.error("[queue/random] DJ announce failed:", err.message);
-          try {
-            await play({ trackNumber: 1 });
-            result.started = true;
-          } catch (playErr) {
-            console.error("[queue/random] fallback play failed:", playErr.message);
+          if (queueWorkWasPreempted(preemptGeneration)) {
+            result.preempted = true;
+          } else {
+            try {
+              await play({ trackNumber: 1 });
+              result.started = true;
+            } catch (playErr) {
+              console.error("[queue/random] fallback play failed:", playErr.message);
+            }
           }
         }
       } else if (plan.action === "before_batch") {
@@ -686,9 +711,13 @@ export function registerApiRoutes(app, ctx) {
             queuePosition: plan.queuePosition,
             startPlayback: false,
             event: "session_refill",
+            preemptGeneration,
           });
           announced = !!voice?.ok;
-          if (plan.resumePlay) {
+          if (
+            plan.resumePlay &&
+            !queueWorkWasPreempted(preemptGeneration)
+          ) {
             // Leftover queue was STOPPED — resume without seeking to the
             // bottom announce (guest requests at the front stay first).
             await play();
@@ -696,7 +725,10 @@ export function registerApiRoutes(app, ctx) {
           }
         } catch (err) {
           console.error("[queue/random] mid-queue set announce failed:", err.message);
-          if (plan.resumePlay) {
+          if (
+            plan.resumePlay &&
+            !queueWorkWasPreempted(preemptGeneration)
+          ) {
             try {
               await play();
               result.started = true;
@@ -1772,11 +1804,12 @@ export function registerApiRoutes(app, ctx) {
   });
   
   app.post("/api/next", transportLimit, requireHostControls, async (_req, res) => {
+    const transitionFrom = nowPlayingMonitor.latest;
     try {
       const result = await next();
       // Never-Ending can lag behind rapid skips; re-check queue depth soon.
       nudgeAutoFill();
-      nudgeNowPlayingTransition();
+      nudgeNowPlayingTransition(transitionFrom);
       res.json({ ok: true, ...result });
     } catch (err) {
       console.error("[next]", err.message);
@@ -1785,9 +1818,10 @@ export function registerApiRoutes(app, ctx) {
   });
   
   app.post("/api/previous", transportLimit, requireHostControls, async (_req, res) => {
+    const transitionFrom = nowPlayingMonitor.latest;
     try {
       const result = await previous();
-      nudgeNowPlayingTransition();
+      nudgeNowPlayingTransition(transitionFrom);
       res.json({ ok: true, ...result });
     } catch (err) {
       console.error("[previous]", err.message);

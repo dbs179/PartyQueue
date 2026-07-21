@@ -110,10 +110,28 @@ export const DISCOVERY_DEFAULTS = {
   discoverEnabled: true,
   similarCount: 2,
 };
+const DISCOVERY_DEFAULT_VERSION = 1;
 const SIMILAR_BOUNDS = { min: 0, max: 50 };
 
 export function getDiscoverySettings() {
-  const s = loadSettings();
+  let s = loadSettings();
+  // 7.1.x migration: older persisted settings may explicitly contain false,
+  // which masks the newer on-by-default behavior. Enable it once on upgrade,
+  // then preserve any host choice made after this migration.
+  if ((Number(s.discoveryDefaultVersion) || 0) < DISCOVERY_DEFAULT_VERSION) {
+    const migrated = {
+      ...s,
+      discoverEnabled: true,
+      discoveryDefaultVersion: DISCOVERY_DEFAULT_VERSION,
+    };
+    try {
+      saveSettings(migrated);
+      s = migrated;
+    } catch {
+      // Keep reads usable if the data volume is temporarily unwritable.
+      s = { ...s, discoverEnabled: true };
+    }
+  }
   return {
     discoverEnabled:
       typeof s.discoverEnabled === "boolean"

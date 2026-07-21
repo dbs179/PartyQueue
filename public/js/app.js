@@ -849,6 +849,10 @@ function applyBranding(eventName, subtitle) {
     if (headerEventName.textContent !== eventName) {
       headerEventName.textContent = eventName;
     }
+    const displayName = document.getElementById("display-event-name");
+    if (displayName && displayName.textContent !== eventName) {
+      displayName.textContent = eventName;
+    }
     if (document.title !== eventName) document.title = eventName;
   }
   if (subtitle != null && headerSubtitle) {
@@ -5260,7 +5264,7 @@ function paintTrackProgress(container, fill, elapsed, total, position, duration)
 function updateTrackProgress() {
   const isAnnouncement =
     !!lastNowPlaying?.djVoice || !!lastNowPlaying?.djSilence;
-  const duration = isAnnouncement
+  const duration = isAnnouncement || lastNowPlaying?.metadataPending
     ? Number.NaN
     : Number(lastNowPlaying?.durationSec);
   const position = estimatedPositionSec();
@@ -5725,8 +5729,7 @@ async function syncMyReactions(trackId) {
 function renderPartyDisplayNowPlaying(np, hasTrack) {
   if (!displayTitle || !displayEmpty || !displayArt) return;
   if (!hasTrack) {
-    displayArt.removeAttribute("src");
-    displayArt.alt = "";
+    bindNowPlayingArtwork(displayArt, null);
     displayEmpty.hidden = false;
     displayEmpty.textContent = EMPTY_MESSAGE;
     displayTitle.textContent = "";
@@ -5744,10 +5747,17 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
   bindNowPlayingArtwork(displayArt, np);
   if (displayState) {
     displayState.hidden = false;
-    displayState.textContent = np.isPlaying ? "Playing" : "Paused";
-    displayState.classList.toggle("playing", !!np.isPlaying);
+    const playing = !!np.isPlaying && !np.metadataPending;
+    displayState.textContent = np.metadataPending
+      ? "Changing"
+      : playing
+        ? "Playing"
+        : "Paused";
+    displayState.classList.toggle("playing", playing);
   }
-  if (displayReactions) displayReactions.hidden = !!np.djVoice;
+  if (displayReactions) {
+    displayReactions.hidden = !!np.djVoice || !!np.metadataPending;
+  }
 }
 
 function renderNowPlaying(np) {
@@ -5848,7 +5858,7 @@ function renderNowPlaying(np) {
     npTitle.hidden = true;
     npArtist.hidden = true;
     npAlbum.hidden = true;
-    npArt.removeAttribute("src");
+    bindNowPlayingArtwork(npArt, null);
     npEmpty.hidden = false;
     npEmpty.textContent = EMPTY_MESSAGE;
     if (npReactions) npReactions.hidden = true;

@@ -128,8 +128,8 @@ export function nudgeNowPlayingStream() {
   nowPlayingMonitor.nudge();
 }
 
-export function nudgeNowPlayingTransition() {
-  const current = nowPlayingMonitor.latest;
+export function nudgeNowPlayingTransition(previousSnapshot = null) {
+  const current = previousSnapshot || nowPlayingMonitor.latest;
   if (current) {
     pendingTransitionMetadata = {
       queueTrack: Number(current.queueTrack),

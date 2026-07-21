@@ -6,6 +6,11 @@ import {
   autofillNextDelayMs,
   clearQueueWithoutAutoRefill,
 } from "../src/autofill.js";
+import {
+  queueWorkGeneration,
+  queueWorkWasPreempted,
+  resetQueuePreemptForTests,
+} from "../src/queue-preempt.js";
 
 test("shouldAutofillRefill while playing near the end", () => {
   assert.equal(
@@ -146,28 +151,21 @@ test("autofillNextDelayMs tightens while playing near the end", () => {
   assert.ok(deep > near);
 });
 
-test("Clear waits for an active refill, then clears last", async () => {
-  let finishRefill;
+test("Clear preempts active work and does not wait for a refill promise", async () => {
+  resetQueuePreemptForTests();
+  const generation = queueWorkGeneration();
   const events = [];
-  const pendingTick = new Promise((resolve) => {
-    finishRefill = () => {
-      events.push("refill-finished");
-      resolve();
-    };
-  });
-
-  const clearing = clearQueueWithoutAutoRefill({
-    pendingTick,
+  const clearing = await clearQueueWithoutAutoRefill({
+    cancelDj: async () => {
+      events.push("dj-cancelled");
+    },
     clear: async () => {
       events.push("queue-cleared");
       return { ok: true };
     },
   });
 
-  await Promise.resolve();
-  assert.deepEqual(events, [], "Clear must wait while autofill is active");
-
-  finishRefill();
-  assert.deepEqual(await clearing, { ok: true });
-  assert.deepEqual(events, ["refill-finished", "queue-cleared"]);
+  assert.deepEqual(clearing, { ok: true });
+  assert.equal(queueWorkWasPreempted(generation), true);
+  assert.deepEqual(events, ["dj-cancelled", "queue-cleared"]);
 });

@@ -26,7 +26,14 @@ import {
 import {
   scheduleRefillAnnounce,
   checkPendingAnnounce,
+  clearPendingAnnounce,
 } from "./dj-voice.js";
+import { cancelActiveDjVolumeHandoff } from "./dj-volume-handoff.js";
+import {
+  preemptQueueWork,
+  queueWorkGeneration,
+  queueWorkWasPreempted,
+} from "./queue-preempt.js";
 
 // Top up when this many (or fewer) songs remain AFTER the current one. Keeping
 // it at 1 means we refill while a song is still queued, so playback never gaps.
@@ -134,8 +141,10 @@ export function autofillNextDelayMs(status, threshold = REFILL_THRESHOLD) {
 
 async function tick() {
   if (!enabled || queueClearPauseCount > 0) return;
+  const workGeneration = queueWorkGeneration();
   try {
     const status = await getQueueStatus();
+    if (queueWorkWasPreempted(workGeneration)) return;
 
     // Fire a scheduled set-boundary announce when playback crosses into the
     // next Never-Ending set (after the previous set's last song).
@@ -163,8 +172,10 @@ async function tick() {
           {
             similarCount: discoverEnabled ? similarCount : 0,
             filterExplicit,
+            preemptGeneration: workGeneration,
           }
         );
+        if (queueWorkWasPreempted(workGeneration)) return;
         // addRandomFromPlaylists auto-starts when transport is STOPPED/idle
         // (respects deliberate pause via autoStartDecision).
         console.log(
@@ -179,10 +190,11 @@ async function tick() {
                 ? " [relaxed artist cap]"
                 : "")
         );
-        if (res.added > 0) {
+        if (res.added > 0 && !queueWorkWasPreempted(workGeneration)) {
           await scheduleRefillAnnounce(res, {
             boundaryTrack,
             upcoming: status.upcoming,
+            preemptGeneration: workGeneration,
           });
         }
       } catch (err) {
@@ -214,24 +226,24 @@ export function nudgeAutoFill() {
 
 /**
  * Clear the Sonos queue without allowing an already-approved Never-Ending
- * refill to land afterward. Stop new ticks, let the current one finish, then
- * clear last so any songs it added are removed. Monitoring resumes afterward
- * and the normal total=0 guard keeps the empty queue quiet.
+ * refill to land afterward. Cancel pending work and the active DJ handoff, then
+ * clear through the Sonos write lock. Any refill already holding that lock
+ * finishes first; Clear runs next and stale work is barred from later DJ inserts.
  *
  * `options` exists for deterministic race tests; production callers omit it.
  * @param {{
- *   pendingTick?: Promise<unknown>|null,
  *   clear?: () => Promise<unknown>,
+ *   cancelDj?: (reason: string) => Promise<unknown>,
  * }} [options]
  */
 export async function clearQueueWithoutAutoRefill(options = {}) {
+  preemptQueueWork();
   queueClearPauseCount += 1;
   clearTimer();
   try {
-    const pendingTick =
-      Object.hasOwn(options, "pendingTick") ? options.pendingTick : activeTick;
-    if (pendingTick) await pendingTick;
-    // A finishing tick may have attempted to schedule its next check.
+    clearPendingAnnounce();
+    const cancelDj = options.cancelDj || cancelActiveDjVolumeHandoff;
+    await cancelDj("queue cleared by host");
     clearTimer();
     const clear = options.clear || clearQueue;
     return await clear();

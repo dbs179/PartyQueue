@@ -50,3 +50,18 @@ test("transport fresh reads are private, bounded, and shared through SSE", () =>
   assert.doesNotMatch(src, /req\.query\.fresh/);
   assert.match(src, /Cache-Control", "no-store"/);
 });
+
+test("transport convergence uses the snapshot captured before the Sonos command", () => {
+  const src = fs.readFileSync(
+    path.join(here, "..", "src", "routes", "api.js"),
+    "utf8"
+  );
+  assert.match(
+    src,
+    /const transitionFrom = nowPlayingMonitor\.latest;\s*try \{\s*const result = await next\(\);[\s\S]*?nudgeNowPlayingTransition\(transitionFrom\)/
+  );
+  assert.match(
+    src,
+    /const transitionFrom = nowPlayingMonitor\.latest;\s*try \{\s*const result = await previous\(\);\s*nudgeNowPlayingTransition\(transitionFrom\)/
+  );
+});

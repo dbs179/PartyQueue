@@ -36,6 +36,7 @@ import {
 import { getSimilarUris, isDiscoveryAvailable } from "./similar.js";
 import { markOrigin, originOf, originSnapshot } from "./queue-origin.js";
 import { warmLyrics } from "./lyrics.js";
+import { queueWorkWasPreempted } from "./queue-preempt.js";
 
 // Sonos Spotify "region" codes used when building track metadata.
 // These map to the SA_RINCON<region> service id the library embeds.
@@ -854,6 +855,9 @@ async function addRandomFromPlaylistsUnlocked(
   genres = null,
   opts = {}
 ) {
+  const wasPreempted = () =>
+    opts.preemptGeneration != null &&
+    queueWorkWasPreempted(opts.preemptGeneration);
   const m = await getManager();
 
   const playlists = await buildPlaylistPool();
@@ -1172,6 +1176,7 @@ async function addRandomFromPlaylistsUnlocked(
   const discoveredIds = [];
   const fillerIds = [];
   for (const item of order) {
+    if (wasPreempted()) break;
     try {
       const meta = MetaDataHelper.GuessMetaDataAndTrackUri(item.uri, resolveRegion());
       await enqueueMeta(m, meta);
@@ -1200,7 +1205,7 @@ async function addRandomFromPlaylistsUnlocked(
   // 5) Top up if some enqueues failed (or discovery shortfall left us under
   // totalTarget), appended at the end. Refresh the artist seed from disk so the
   // budget includes what we just recorded.
-  while (added < totalTarget) {
+  while (added < totalTarget && !wasPreempted()) {
     artistSeed = artistCountsInWindow(cfg.artistWindow);
     const more = pickWithRelaxation(
       usable,
@@ -1218,6 +1223,7 @@ async function addRandomFromPlaylistsUnlocked(
     const rec2 = [];
     const filler2 = [];
     for (const uri of more.uris) {
+      if (wasPreempted()) break;
       const id = spotifyTrackId(uri);
       exclude.add(id);
       try {
@@ -1252,7 +1258,7 @@ async function addRandomFromPlaylistsUnlocked(
   // first, then Play.
   let started = false;
   let deferredStart = false;
-  if (added > 0) {
+  if (added > 0 && !wasPreempted()) {
     if (opts.deferAutoStart) {
       try {
         const transport = await coordinator.AVTransportService.GetTransportInfo();
@@ -1307,6 +1313,7 @@ async function addRandomFromPlaylistsUnlocked(
     relaxedMemory,
     memoryReuseCount,
     genreLane: setLane,
+    preempted: wasPreempted(),
   };
 }
 
@@ -2489,29 +2496,43 @@ async function clearQueueUnlocked() {
   const m = await getManager();
   let coordinator = await resolveCoordinator(m);
 
+  const stop = async (c) => {
+    try {
+      await c.Stop();
+    } catch {
+      /* best effort */
+    }
+  };
   const removeAll = (c) =>
     c.AVTransportService.RemoveAllTracksFromQueue({ InstanceID: 0 });
 
+  // Stop first so Clear is immediately audible once it owns the write lock.
+  await stop(coordinator);
+  let alreadyEmpty = false;
   try {
     await removeAll(coordinator);
   } catch (err) {
     // Error 804 means the queue is already empty \u2014 treat that as success.
     if (/\b804\b/.test(err?.message ?? "")) {
-      return { room: coordinator.Name, group: coordinator.GroupName, alreadyEmpty: true };
+      alreadyEmpty = true;
+    } else {
+      // Stale topology: re-resolve against the live coordinator and retry once.
+      if (!isNotCoordinatorError(err)) throw err;
+      coordinator = await resolveCoordinator(m, { fresh: true });
+      await stop(coordinator);
+      try {
+        await removeAll(coordinator);
+      } catch (retryErr) {
+        if (!/\b804\b/.test(retryErr?.message ?? "")) throw retryErr;
+        alreadyEmpty = true;
+      }
     }
-    // Stale topology: re-resolve against the live coordinator and retry once.
-    if (!isNotCoordinatorError(err)) throw err;
-    coordinator = await resolveCoordinator(m, { fresh: true });
-    await removeAll(coordinator);
-  }
-
-  // Reset the playhead so the next Play starts at track 1 (not a stale index).
-  try {
-    await coordinator.Stop();
-  } catch {
-    /* ignore */
   }
 
   invalidateSonosSnapshots();
-  return { room: coordinator.Name, group: coordinator.GroupName };
+  return {
+    room: coordinator.Name,
+    group: coordinator.GroupName,
+    ...(alreadyEmpty ? { alreadyEmpty: true } : {}),
+  };
 }
