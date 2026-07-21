@@ -1,5 +1,5 @@
-// Lyrics lookup via LRClib (https://lrclib.net) — free, no API key.
-// Match by title/artist/album/duration; cache so party phones share one fetch.
+// Lyrics lookup: LRClib (synced primary) → Unison → lyrics.ovh plain.
+// Cached so party phones share one fetch. 503 only when zero providers respond.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -9,15 +9,15 @@ import {
   lookupUnisonLyrics,
   UnisonUnavailableError,
 } from "./unison-lyrics.js";
+import { lookupOvhLyrics, OvhUnavailableError } from "./ovh-lyrics.js";
 
 const LRCLIB_BASE = "https://lrclib.net";
 const FOUND_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MISS_CACHE_TTL_MS = 30 * 60 * 1000;
 const CACHE_MAX = 200;
-const LOOKUP_BUDGET_MS = 8_000;
-const LRCLIB_BUDGET_MS = 5_000;
+const LOOKUP_BUDGET_MS = 10_000;
+const LRCLIB_CALL_MS = 2_500;
 const PROVIDER_BACKOFF_MS = 10_000;
-const BUSY_CACHE_TTL_MS = 10_000;
 const PERSIST_DEBOUNCE_MS = 250;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -41,9 +41,9 @@ const USER_AGENT = `PartyQueue/${appVersion}`;
 const cache = new Map();
 /** @type {Map<string, Promise<object>>} */
 const inFlight = new Map();
-const busyCache = new Map();
 let lrclibBackoffUntil = 0;
 let unisonBackoffUntil = 0;
+let ovhBackoffUntil = 0;
 let persistTimer = null;
 
 function loadPersistentCache() {
@@ -147,7 +147,6 @@ function readCache(key) {
     persistCache();
     return null;
   }
-  // LRU touch
   cache.delete(key);
   cache.set(key, hit);
   return hit.value;
@@ -198,7 +197,10 @@ function normalizeRecord(rec, provider = "lrclib") {
 }
 
 async function lrclibFetch(urlPath, deadline) {
-  const remainingMs = Math.max(1, deadline - Date.now());
+  const remainingMs = Math.max(1, Math.min(LRCLIB_CALL_MS, deadline - Date.now()));
+  if (deadline - Date.now() <= 0) {
+    throw new Error("LRClib lookup timed out.");
+  }
   const res = await fetch(`${LRCLIB_BASE}${urlPath}`, {
     headers: {
       "User-Agent": USER_AGENT,
@@ -232,7 +234,6 @@ function pickBestSearchHit(results, duration) {
     if (r.instrumental) score += 5;
     if (target != null && Number.isFinite(Number(r.duration))) {
       const delta = Math.abs(Math.round(Number(r.duration)) - target);
-      // Prefer close duration; within ±5s is a strong match.
       score += Math.max(0, 40 - delta * 4);
     }
     if (score > bestScore) {
@@ -244,15 +245,36 @@ function pickBestSearchHit(results, duration) {
 }
 
 /**
- * Look up lyrics for a track. Duration (seconds) improves LRClib matching.
- * @param {{ title?: string, artist?: string, album?: string, duration?: number|null, uri?: string }} q
+ * Search-first LRClib lookup so a hung /api/get cannot burn the whole budget.
+ * @returns {Promise<{ result: object, responded: boolean }>}
  */
 async function lookupLrclib(query, deadline) {
   const { title, artist, album, duration } = query;
   let record = null;
-  let unavailable = false;
+  let sawSuccess = false;
+  let sawError = false;
 
-  if (duration != null && duration > 0 && album) {
+  const searchParams = new URLSearchParams({
+    track_name: title,
+    artist_name: artist,
+  });
+  if (album) searchParams.set("album_name", album);
+  try {
+    const results = await lrclibFetch(`/api/search?${searchParams}`, deadline);
+    sawSuccess = true;
+    record = pickBestSearchHit(results, duration);
+  } catch (err) {
+    sawError = true;
+    console.error("[lyrics] LRClib search failed:", err.message);
+  }
+
+  const wantExact =
+    duration != null &&
+    duration > 0 &&
+    album &&
+    (!record || !record.syncedLyrics) &&
+    Date.now() < deadline;
+  if (wantExact) {
     const params = new URLSearchParams({
       track_name: title,
       artist_name: artist,
@@ -260,38 +282,54 @@ async function lookupLrclib(query, deadline) {
       duration: String(Math.round(duration)),
     });
     try {
-      record = await lrclibFetch(`/api/get?${params}`, deadline);
+      const exact = await lrclibFetch(`/api/get?${params}`, deadline);
+      sawSuccess = true;
+      if (
+        exact &&
+        (!record ||
+          (exact.syncedLyrics && !record.syncedLyrics) ||
+          (!record.plainLyrics && exact.plainLyrics))
+      ) {
+        record = exact;
+      }
     } catch (err) {
-      unavailable = true;
+      sawError = true;
       console.error("[lyrics] LRClib get failed:", err.message);
     }
   }
 
-  if (!record || !record.syncedLyrics) {
-    const params = new URLSearchParams({
-      track_name: title,
-      artist_name: artist,
-    });
-    if (album) params.set("album_name", album);
-    try {
-      const results = await lrclibFetch(`/api/search?${params}`, deadline);
-      unavailable = false;
-      const hit = pickBestSearchHit(results, duration);
-      if (
-        hit &&
-        (!record ||
-          (hit.syncedLyrics && !record.syncedLyrics) ||
-          (!record.plainLyrics && hit.plainLyrics))
-      ) {
-        record = hit;
-      }
-    } catch (err) {
-      unavailable = true;
-      console.error("[lyrics] LRClib search failed:", err.message);
+  return {
+    result: normalizeRecord(record),
+    responded: sawSuccess,
+    unavailable: sawError && !sawSuccess,
+  };
+}
+
+function preferenceScore(result) {
+  if (!result?.found) return -1;
+  if (result.instrumental) return 45;
+  if (result.syncedLyrics) {
+    return result.provider === "lrclib" ? 100 : 90;
+  }
+  if (result.plainLyrics) {
+    if (result.provider === "lrclib") return 40;
+    if (result.provider === "unison") return 35;
+    return 20;
+  }
+  return 0;
+}
+
+function pickPreferred(...results) {
+  let best = null;
+  let bestScore = -1;
+  for (const result of results) {
+    const score = preferenceScore(result);
+    if (score > bestScore) {
+      best = result;
+      bestScore = score;
     }
   }
-
-  return { result: normalizeRecord(record), unavailable };
+  return bestScore >= 0 ? best : { found: false };
 }
 
 function retryDelay(...deadlines) {
@@ -320,11 +358,6 @@ export async function lookupLyrics(q = {}) {
   const key = cacheKey(query);
   const cached = readCache(key);
   if (cached) return { ...cached, cached: true };
-  const busyUntil = busyCache.get(key) || 0;
-  if (busyUntil > Date.now()) {
-    throw new LyricsUnavailableError(busyUntil - Date.now());
-  }
-  busyCache.delete(key);
   const pending = inFlight.get(key);
   if (pending) return pending;
 
@@ -332,59 +365,95 @@ export async function lookupLyrics(q = {}) {
     const startedAt = Date.now();
     const deadline = startedAt + LOOKUP_BUDGET_MS;
     let lrclibResult = { found: false };
+    let unisonResult = { found: false };
+    let ovhResult = { found: false };
     let lrclibResponded = false;
     let unisonResponded = false;
+    let ovhResponded = false;
+
+    const jobs = [];
 
     if (startedAt >= lrclibBackoffUntil) {
-      const primary = await lookupLrclib(
-        query,
-        Math.min(deadline, startedAt + LRCLIB_BUDGET_MS)
+      jobs.push(
+        lookupLrclib(query, deadline).then((primary) => {
+          lrclibResult = primary.result;
+          lrclibResponded = primary.responded;
+          if (primary.unavailable) {
+            lrclibBackoffUntil = Date.now() + PROVIDER_BACKOFF_MS;
+          } else if (primary.responded) {
+            lrclibBackoffUntil = 0;
+          }
+        })
       );
-      lrclibResult = primary.result;
-      if (primary.unavailable) {
-        lrclibBackoffUntil = Date.now() + PROVIDER_BACKOFF_MS;
-      } else {
-        lrclibBackoffUntil = 0;
-        lrclibResponded = true;
-      }
     }
 
-    if (lrclibResult.instrumental || lrclibResult.syncedLyrics) {
-      writeCache(key, lrclibResult);
-      return lrclibResult;
+    if (startedAt >= unisonBackoffUntil) {
+      jobs.push(
+        lookupUnisonLyrics(query, {
+          deadline,
+          userAgent: USER_AGENT,
+        })
+          .then((result) => {
+            unisonResult = result;
+            unisonResponded = true;
+            unisonBackoffUntil = 0;
+          })
+          .catch((err) => {
+            if (!(err instanceof UnisonUnavailableError)) throw err;
+            unisonBackoffUntil = Date.now() + PROVIDER_BACKOFF_MS;
+            console.error("[lyrics] Unison failed:", err.message);
+          })
+      );
     }
 
-    let unisonResult = { found: false };
-    if (Date.now() >= unisonBackoffUntil && Date.now() < deadline) {
+    if (jobs.length) await Promise.all(jobs);
+
+    let out = pickPreferred(lrclibResult, unisonResult);
+    const needsPlainFallback =
+      !out.found || (!out.syncedLyrics && !out.instrumental && !out.plainLyrics);
+
+    if (
+      needsPlainFallback &&
+      Date.now() >= ovhBackoffUntil &&
+      Date.now() < deadline
+    ) {
       try {
-        unisonResult = await lookupUnisonLyrics(query, {
+        ovhResult = await lookupOvhLyrics(query, {
           deadline,
           userAgent: USER_AGENT,
         });
-        unisonBackoffUntil = 0;
-        unisonResponded = true;
+        ovhResponded = true;
+        ovhBackoffUntil = 0;
+        out = pickPreferred(out, ovhResult);
       } catch (err) {
-        if (!(err instanceof UnisonUnavailableError)) throw err;
-        unisonBackoffUntil = Date.now() + PROVIDER_BACKOFF_MS;
-        console.error("[lyrics] Unison failed:", err.message);
+        if (!(err instanceof OvhUnavailableError)) throw err;
+        ovhBackoffUntil = Date.now() + PROVIDER_BACKOFF_MS;
+        console.error("[lyrics] lyrics.ovh failed:", err.message);
       }
     }
 
-    const out = unisonResult.syncedLyrics
-      ? unisonResult
-      : lrclibResult.found
-        ? lrclibResult
-        : unisonResult;
-    if (out.found || (lrclibResponded && unisonResponded)) {
-      writeCache(key, out);
-      return out;
+    const anyResponded = lrclibResponded || unisonResponded || ovhResponded;
+    // Prefer telling guests LRClib was unreachable when only backups answered.
+    const degraded = !lrclibResponded && (unisonResponded || ovhResponded);
+
+    if (out.found) {
+      const payload = degraded ? { ...out, degraded: true } : out;
+      writeCache(key, payload);
+      return payload;
     }
-    const retryAfterMs = Math.min(
-      BUSY_CACHE_TTL_MS,
-      retryDelay(lrclibBackoffUntil, unisonBackoffUntil)
+
+    if (anyResponded) {
+      const miss = {
+        found: false,
+        ...(degraded ? { degraded: true } : {}),
+      };
+      writeCache(key, miss);
+      return miss;
+    }
+
+    throw new LyricsUnavailableError(
+      retryDelay(lrclibBackoffUntil, unisonBackoffUntil, ovhBackoffUntil)
     );
-    busyCache.set(key, Date.now() + retryAfterMs);
-    throw new LyricsUnavailableError(retryAfterMs);
   })();
   inFlight.set(key, request);
   try {
@@ -396,7 +465,7 @@ export async function lookupLyrics(q = {}) {
   }
 }
 
-/** Fire-and-forget cache warm so overlay opens hit LRClib less often. */
+/** Fire-and-forget cache warm so overlay opens hit providers less often. */
 export function warmLyrics(q = {}) {
   const title = String(q.title || "").trim();
   const artist = String(q.artist || "").trim();
@@ -411,6 +480,7 @@ export function warmLyrics(q = {}) {
   const key = cacheKey({ title, artist, album, duration, uri });
   if (readCache(key)) return;
   lookupLyrics({ title, artist, album, duration, uri }).catch((err) => {
+    // Warm must never poison interactive lookups; provider backoffs already apply.
     console.error("[lyrics] warm failed:", err.message);
   });
 }
@@ -419,9 +489,9 @@ export function warmLyrics(q = {}) {
 export function resetLyricsStateForTests() {
   cache.clear();
   inFlight.clear();
-  busyCache.clear();
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = null;
   lrclibBackoffUntil = 0;
   unisonBackoffUntil = 0;
+  ovhBackoffUntil = 0;
 }

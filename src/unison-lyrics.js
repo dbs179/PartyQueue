@@ -1,12 +1,22 @@
-// Focused fallback adapter for Unison (https://unisonlyrics.org).
+// Focused fallback adapter for Unison (https://unison.boidu.dev).
 // Unison's catalog includes enhanced LRC and TTML. PartyQueue consumes line
-// timestamps, so this adapter intentionally accepts LRC and plain text only.
+// timestamps, so this adapter accepts LRC-like and plain text payloads.
 
 const UNISON_BASE = "https://unison.boidu.dev";
 export const UNISON_ATTRIBUTION = {
   text: "Lyrics from Unison",
   url: "https://unisonlyrics.org",
 };
+
+const LRC_FORMATS = new Set([
+  "lrc",
+  "enhanced",
+  "enhanced_lrc",
+  "enhanced-lrc",
+  "linesync",
+  "line",
+]);
+const PLAIN_FORMATS = new Set(["plain", "text", "txt", "unsynced"]);
 
 export class UnisonUnavailableError extends Error {
   constructor(message = "Unison is temporarily unavailable.") {
@@ -22,14 +32,24 @@ function normalized(value) {
     .replace(/[^\p{L}\p{N}]+/gu, " ");
 }
 
+function looksLikeLrc(value) {
+  return /^\s*\[\d{1,3}:\d{2}/m.test(String(value || ""));
+}
+
+function formatKind(format, lyrics = "") {
+  const key = String(format || "").toLowerCase();
+  if (LRC_FORMATS.has(key) || looksLikeLrc(lyrics)) return "lrc";
+  if (PLAIN_FORMATS.has(key) || key === "") return "plain";
+  // Unknown formats: still accept if the body looks like timed LRC.
+  return looksLikeLrc(lyrics) ? "lrc" : null;
+}
+
 function scoreHit(hit, { title, artist, duration }) {
   if (!hit || typeof hit !== "object") return -Infinity;
-  const format = String(hit.format || "").toLowerCase();
-  if (!["lrc", "plain", "text", "txt", "unsynced"].includes(format)) {
-    return -Infinity;
-  }
+  const kind = formatKind(hit.format, hit.lyrics);
+  if (!kind) return -Infinity;
 
-  let score = format === "lrc" ? 100 : 40;
+  let score = kind === "lrc" ? 100 : 40;
   if (normalized(hit.song) === normalized(title)) score += 50;
   if (normalized(hit.artist) === normalized(artist)) score += 50;
   if (duration != null && Number.isFinite(Number(hit.duration))) {
@@ -82,6 +102,45 @@ function lrcToPlain(value) {
     .join("\n");
 }
 
+function normalizeRecord(record, fallback = null) {
+  const lyrics = String(record?.lyrics || "");
+  if (!lyrics) return { found: false };
+
+  const format = String(record.format || fallback?.format || "").toLowerCase();
+  const kind = formatKind(format, lyrics);
+  if (!kind) return { found: false };
+
+  const common = {
+    found: true,
+    instrumental: false,
+    trackName: record.song || fallback?.song || null,
+    artistName: record.artist || fallback?.artist || null,
+    provider: "unison",
+    attribution: UNISON_ATTRIBUTION,
+  };
+
+  if (kind === "lrc") {
+    const syncedLyrics = cleanEnhancedLrc(lyrics);
+    if (!looksLikeLrc(syncedLyrics)) return { found: false };
+    return {
+      ...common,
+      plainLyrics: lrcToPlain(lyrics),
+      syncedLyrics,
+      syncKind: "line",
+    };
+  }
+
+  return {
+    ...common,
+    plainLyrics: lyrics.trim(),
+    syncedLyrics: "",
+    syncKind: "plain",
+  };
+}
+
+/**
+ * @returns {Promise<{ data: any, notFound?: boolean }>}
+ */
 async function unisonFetch(path, deadline, userAgent) {
   const remainingMs = deadline - Date.now();
   if (remainingMs <= 0) throw new UnisonUnavailableError("Unison lookup timed out.");
@@ -97,6 +156,9 @@ async function unisonFetch(path, deadline, userAgent) {
   } catch (error) {
     throw new UnisonUnavailableError(error.message);
   }
+  if (response.status === 404) {
+    return { data: null, notFound: true };
+  }
   if (!response.ok) {
     throw new UnisonUnavailableError(`Unison ${response.status}`);
   }
@@ -104,11 +166,11 @@ async function unisonFetch(path, deadline, userAgent) {
   if (!payload || payload.success === false) {
     throw new UnisonUnavailableError("Unison returned an invalid response.");
   }
-  return payload.data;
+  return { data: payload.data, notFound: false };
 }
 
 /**
- * @param {{ title: string, artist: string, duration?: number|null }} query
+ * @param {{ title: string, artist: string, album?: string, duration?: number|null }} query
  * @param {{ deadline: number, userAgent: string }} options
  */
 export async function lookupUnisonLyrics(query, { deadline, userAgent }) {
@@ -116,41 +178,37 @@ export async function lookupUnisonLyrics(query, { deadline, userAgent }) {
     song: query.title,
     artist: query.artist,
   });
-  const rows = await unisonFetch(`/lyrics/search?${params}`, deadline, userAgent);
+  if (query.album) params.set("album", query.album);
+  if (query.duration != null && Number.isFinite(query.duration) && query.duration > 0) {
+    params.set("duration", String(Math.round(query.duration)));
+  }
+
+  // Direct match first (one round trip per Unison docs).
+  const direct = await unisonFetch(`/lyrics?${params}`, deadline, userAgent);
+  if (!direct.notFound && direct.data) {
+    const normalized = normalizeRecord(direct.data);
+    if (normalized.found) return normalized;
+  }
+
+  const search = await unisonFetch(`/lyrics/search?${params}`, deadline, userAgent);
+  if (search.notFound) return { found: false };
+  const rows = Array.isArray(search.data) ? search.data : [];
+  if (!rows.length) return { found: false };
+
   const hit = pickHit(rows, query);
   if (!hit || hit.id == null) return { found: false };
 
-  const record = await unisonFetch(
+  // Some search hits already include lyrics; prefer that when present.
+  if (hit.lyrics) {
+    const fromHit = normalizeRecord(hit);
+    if (fromHit.found) return fromHit;
+  }
+
+  const byId = await unisonFetch(
     `/lyrics/${encodeURIComponent(hit.id)}`,
     deadline,
     userAgent
   );
-  const lyrics = String(record?.lyrics || "");
-  if (!lyrics) return { found: false };
-
-  const format = String(record.format || hit.format || "").toLowerCase();
-  const common = {
-    found: true,
-    instrumental: false,
-    trackName: record.song || hit.song || null,
-    artistName: record.artist || hit.artist || null,
-    provider: "unison",
-    attribution: UNISON_ATTRIBUTION,
-  };
-  if (format === "lrc") {
-    const syncedLyrics = cleanEnhancedLrc(lyrics);
-    if (!/^\s*\[\d+:\d+/m.test(syncedLyrics)) return { found: false };
-    return {
-      ...common,
-      plainLyrics: lrcToPlain(lyrics),
-      syncedLyrics,
-      syncKind: "line",
-    };
-  }
-  return {
-    ...common,
-    plainLyrics: lyrics.trim(),
-    syncedLyrics: "",
-    syncKind: "plain",
-  };
+  if (byId.notFound || !byId.data) return { found: false };
+  return normalizeRecord(byId.data, hit);
 }

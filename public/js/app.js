@@ -5498,6 +5498,13 @@ function fillNpOverlayMeta(np) {
   bindNowPlayingArtwork(npFsArt, np);
 }
 
+function lyricsMissMessage(data) {
+  if (data?.degraded) {
+    return "No lyrics found — providers are having trouble";
+  }
+  return "No lyrics found";
+}
+
 async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
   clearLyricsRetry();
   const fetchId = ++npLyricsFetchId;
@@ -5507,7 +5514,11 @@ async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
     );
     return;
   }
-  setNpFsLyricsStatus("Loading lyrics…");
+  // Keep an already-painted lyric sheet visible while a quiet refresh runs.
+  const hasPaintedLyrics = !!(
+    npFsLyrics?.querySelector(".np-fs-lyrics-synced, .np-fs-lyrics-plain")
+  );
+  if (!hasPaintedLyrics) setNpFsLyricsStatus("Loading lyrics…");
   const params = new URLSearchParams({
     title: np.title,
     artist: np.artist,
@@ -5532,7 +5543,7 @@ async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
       return;
     }
     if (!data.found) {
-      setNpFsLyricsStatus("No lyrics found");
+      setNpFsLyricsStatus(lyricsMissMessage(data));
       return;
     }
     const synced = parseSyncedLyrics(data.syncedLyrics);
@@ -5544,7 +5555,7 @@ async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
       renderPlainLyrics(data.plainLyrics);
       renderLyricsAttribution(data);
     } else {
-      setNpFsLyricsStatus("No lyrics found");
+      setNpFsLyricsStatus(lyricsMissMessage(data));
     }
   } catch (err) {
     if (fetchId !== npLyricsFetchId) return;
@@ -5552,9 +5563,11 @@ async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
       const retryAfterSec = Number.isFinite(err.retryAfterSec)
         ? Math.max(1, Math.min(30, err.retryAfterSec))
         : 10;
-      setNpFsLyricsStatus(
-        `Lyrics service is busy — retrying in ${retryAfterSec}s…`
-      );
+      if (!hasPaintedLyrics) {
+        setNpFsLyricsStatus(
+          `Lyrics service is busy — retrying in ${retryAfterSec}s…`
+        );
+      }
       npLyricsRetryTimer = setTimeout(() => {
         npLyricsRetryTimer = null;
         if (npOverlayOpen && lyricsTrackKey(lastNowPlaying) === npLyricsKey) {
@@ -5563,7 +5576,9 @@ async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
       }, retryAfterSec * 1000);
       return;
     }
-    setNpFsLyricsStatus(err.message || "Could not load lyrics");
+    if (!hasPaintedLyrics) {
+      setNpFsLyricsStatus(err.message || "Could not load lyrics");
+    }
   }
 }
 
@@ -5572,6 +5587,8 @@ function syncNpOverlay(np) {
   const key = lyricsTrackKey(np);
   const trackChanged = key !== npLyricsKey;
   fillNpOverlayMeta(np);
+  // Only refetch when the displayed track identity changes. Brief updating /
+  // converging toggles must not wipe a successful lyric paint.
   if (trackChanged) {
     npLyricsKey = key;
     clearLyricsRetry();
