@@ -4175,7 +4175,7 @@ function setNowPlayingConnectionStatus(status, message = "") {
   const disconnected = status === "disconnected";
   if (disconnected && npIsPlayingOverlay) {
     npPositionBase = estimatedPositionSec();
-    npPositionAt = Date.now();
+    npPositionAt = playbackClockNow();
     npIsPlayingOverlay = false;
     updateTrackProgress();
   }
@@ -5149,6 +5149,10 @@ let npProgressClockKey = "";
 let npLyricTick = null;
 let npOverlayHistoryPushed = false;
 
+function playbackClockNow() {
+  return globalThis.performance?.now?.() ?? Date.now();
+}
+
 function parseSyncedLyrics(raw) {
   if (!raw) return null;
   const lines = [];
@@ -5205,7 +5209,7 @@ function renderSyncedLyrics(lines) {
 function estimatedPositionSec() {
   let pos = npPositionBase;
   if (npIsPlayingOverlay && npPositionAt) {
-    pos += (Date.now() - npPositionAt) / 1000;
+    pos += (playbackClockNow() - npPositionAt) / 1000;
   }
   return pos;
 }
@@ -5276,21 +5280,20 @@ function updateTrackProgress() {
 const LYRICS_LEAD_SEC = 0.75;
 
 /**
- * Keep a smooth local playhead. Sonos now-playing is polled/cached every few
- * seconds — resetting to that every poll snaps lyrics backward. Only resync
- * on open, track change, pause/play, or a real seek (big drift).
+ * Keep a smooth local playhead. Sonos provides sparse position anchors, so the
+ * browser advances them using a monotonic clock. Resync only on initial load,
+ * track/play-state changes, or a real seek (large drift).
  */
 function applyPlaybackClock(np, { force = false } = {}) {
-  const clockNow = Date.now();
+  const clockNow = playbackClockNow();
   const rawServerPos = Number(np?.positionSec);
   const playing = !!(np && np.isPlaying && !np.djVoice);
-  const observedAt = Number(np?.positionObservedAt);
+  // This age is calculated on the server, where positionObservedAt and send
+  // time share a clock. Never subtract a phone's wall clock from server time.
+  const reportedAgeSec = Number(np?.positionAgeSec);
   const snapshotAgeSec =
-    playing &&
-    Number.isFinite(observedAt) &&
-    observedAt > 0 &&
-    observedAt <= clockNow
-      ? Math.min(10, (clockNow - observedAt) / 1000)
+    playing && Number.isFinite(reportedAgeSec)
+      ? Math.max(0, Math.min(10, reportedAgeSec))
       : 0;
   const serverPos = Number.isFinite(rawServerPos)
     ? rawServerPos + snapshotAgeSec
@@ -5384,7 +5387,7 @@ function stopLyricTicker() {
   }
 }
 
-function fillNpOverlayMeta(np, { resetClock = false } = {}) {
+function fillNpOverlayMeta(np) {
   if (!npFsTitle) return;
   const hasTrack = np && (np.title || np.artist);
   npFsTitle.textContent = hasTrack ? np.title || "" : "";
@@ -5398,7 +5401,6 @@ function fillNpOverlayMeta(np, { resetClock = false } = {}) {
   } else if (npFsArt) {
     npFsArt.removeAttribute("src");
   }
-  applyPlaybackClock(np, { force: resetClock });
 }
 
 async function loadOverlayLyrics(np) {
@@ -5448,7 +5450,7 @@ function syncNpOverlay(np) {
   if (!npOverlayOpen) return;
   const key = lyricsTrackKey(np);
   const trackChanged = key !== npLyricsKey;
-  fillNpOverlayMeta(np, { resetClock: trackChanged });
+  fillNpOverlayMeta(np);
   if (trackChanged) {
     npLyricsKey = key;
     stopLyricTicker();
@@ -5463,7 +5465,10 @@ function openNpOverlay() {
   npOverlay.hidden = false;
   document.body.classList.add("np-overlay-open");
   npLyricsKey = lyricsTrackKey(np);
-  fillNpOverlayMeta(np, { resetClock: true });
+  // The overlay is another view of the shared playhead. Re-anchoring from
+  // lastNowPlaying here can move time backward when its SSE payload is old.
+  fillNpOverlayMeta(np);
+  updateTrackProgress();
   loadOverlayLyrics(np);
   try {
     history.pushState({ npOverlay: true }, "");

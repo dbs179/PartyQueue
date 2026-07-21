@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   createSnapshotMonitor,
   createNowPlayingMonitor,
+  nowPlayingClockDiscontinuous,
   nowPlayingSignature,
 } from "../src/now-playing-stream.js";
 import {
@@ -123,6 +124,69 @@ test("a reconnect receives the newest position without broadcasting clock ticks"
   assert.equal(second.length, 1);
   assert.equal(second[0].positionSec, 8);
   assert.equal(second[0].streamSequence, first[0].streamSequence);
+  await monitor.stop();
+});
+
+test("steady playback publishes a sparse clock anchor without extra reads", async () => {
+  let clock = 1_000;
+  let position = 1;
+  const received = [];
+  const monitor = createNowPlayingMonitor({
+    autoSchedule: false,
+    logger: { warn() {} },
+    maxSilenceMs: 10_000,
+    now: () => clock,
+    readSnapshot: async () => ({
+      uri: "spotify:track:1",
+      state: "PLAYING",
+      isPlaying: true,
+      positionSec: position,
+      positionObservedAt: clock,
+    }),
+  });
+  monitor.subscribe((snapshot) => received.push(snapshot));
+
+  await monitor.pollNow();
+  clock += 5_000;
+  position += 5;
+  await monitor.pollNow();
+  assert.equal(received.length, 1);
+
+  clock += 5_000;
+  position += 5;
+  await monitor.pollNow();
+  assert.equal(received.length, 2);
+  assert.equal(received[1].positionSec, 11);
+  assert.equal(received[1].positionAgeSec, 0);
+  await monitor.stop();
+});
+
+test("a seek publishes immediately instead of waiting for the clock anchor", async () => {
+  let clock = 1_000;
+  let position = 30;
+  const received = [];
+  const monitor = createNowPlayingMonitor({
+    autoSchedule: false,
+    logger: { warn() {} },
+    maxSilenceMs: 10_000,
+    now: () => clock,
+    readSnapshot: async () => ({
+      uri: "spotify:track:1",
+      state: "PLAYING",
+      isPlaying: true,
+      positionSec: position,
+      positionObservedAt: clock,
+    }),
+  });
+  monitor.subscribe((snapshot) => received.push(snapshot));
+  await monitor.pollNow();
+
+  clock += 1_500;
+  position = 8;
+  await monitor.pollNow();
+
+  assert.equal(received.length, 2);
+  assert.equal(received[1].positionSec, 8);
   await monitor.stop();
 });
 
@@ -267,14 +331,49 @@ test("the fingerprint ignores playback clock fields and key order", () => {
     reactions: { fire: 2, like: 1 },
     positionSec: 1,
     positionObservedAt: 100,
+    positionAgeSec: 0.2,
   };
   const second = {
     positionObservedAt: 200,
+    positionAgeSec: 0.4,
     reactions: { like: 1, fire: 2 },
     positionSec: 9,
     title: "One",
   };
   assert.equal(nowPlayingSignature(first), nowPlayingSignature(second));
+});
+
+test("clock discontinuity detection tolerates normal Sonos time quantization", () => {
+  assert.equal(
+    nowPlayingClockDiscontinuous(
+      {
+        state: "PLAYING",
+        positionSec: 10,
+        positionObservedAt: 1_000,
+      },
+      {
+        state: "PLAYING",
+        positionSec: 12,
+        positionObservedAt: 2_500,
+      }
+    ),
+    false
+  );
+  assert.equal(
+    nowPlayingClockDiscontinuous(
+      {
+        state: "PLAYING",
+        positionSec: 30,
+        positionObservedAt: 1_000,
+      },
+      {
+        state: "PLAYING",
+        positionSec: 8,
+        positionObservedAt: 2_500,
+      }
+    ),
+    true
+  );
 });
 
 test("Now Playing cache expires before queue and group snapshots", () => {

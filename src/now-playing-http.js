@@ -23,8 +23,24 @@ export function enrichNowPlaying(np) {
   };
 }
 
+export function addPositionAge(np, sentAt = Date.now()) {
+  const observedAt = Number(np?.positionObservedAt);
+  if (
+    !np ||
+    !Number.isFinite(observedAt) ||
+    observedAt <= 0 ||
+    observedAt > sentAt
+  ) {
+    return np;
+  }
+  return {
+    ...np,
+    positionAgeSec: (sentAt - observedAt) / 1000,
+  };
+}
+
 export async function readNowPlayingPayload() {
-  return enrichNowPlaying(await getNowPlaying());
+  return addPositionAge(enrichNowPlaying(await getNowPlaying()));
 }
 
 const nowPlayingStreamClients = new Map();

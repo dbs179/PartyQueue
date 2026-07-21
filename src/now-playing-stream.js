@@ -1,5 +1,6 @@
 const DEFAULT_INTERVAL_MS = 1500;
 const DEFAULT_ERROR_INTERVAL_MS = 3000;
+const DEFAULT_CLOCK_SYNC_MS = 10_000;
 
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -16,12 +17,48 @@ export function nowPlayingSignature(snapshot = null) {
   const {
     positionSec: _positionSec,
     positionObservedAt: _positionObservedAt,
+    positionAgeSec: _positionAgeSec,
     streamSession: _streamSession,
     streamSequence: _streamSequence,
     streamSentAt: _streamSentAt,
     ...meaningful
   } = snapshot;
   return JSON.stringify(stableValue(meaningful));
+}
+
+export function nowPlayingClockDiscontinuous(previous, next) {
+  if (!previous || !next) return false;
+  const previousPosition = Number(previous.positionSec);
+  const nextPosition = Number(next.positionSec);
+  if (!Number.isFinite(previousPosition) || !Number.isFinite(nextPosition)) {
+    return false;
+  }
+
+  const previousObservedAt = Number(previous.positionObservedAt);
+  const nextObservedAt = Number(next.positionObservedAt);
+  const hasObservationWindow =
+    Number.isFinite(previousObservedAt) &&
+    Number.isFinite(nextObservedAt) &&
+    nextObservedAt >= previousObservedAt;
+  const previousPlaybackKnown =
+    typeof previous.isPlaying === "boolean" ||
+    typeof previous.state === "string";
+  const nextPlaybackKnown =
+    typeof next.isPlaying === "boolean" || typeof next.state === "string";
+  if (!previousPlaybackKnown || !nextPlaybackKnown) return false;
+  const wasPlaying =
+    previous.isPlaying === true || previous.state === "PLAYING";
+  const isPlaying = next.isPlaying === true || next.state === "PLAYING";
+  if (wasPlaying !== isPlaying) return false;
+  // During playback, elapsed observation time is required to distinguish a
+  // seek from ordinary forward progress. Legacy/test payloads may omit it.
+  if (isPlaying && !hasObservationWindow) return false;
+
+  const elapsedSec = hasObservationWindow
+    ? (nextObservedAt - previousObservedAt) / 1000
+    : 0;
+  const expectedPosition = previousPosition + (isPlaying ? elapsedSec : 0);
+  return Math.abs(nextPosition - expectedPosition) > (isPlaying ? 2.5 : 1.5);
 }
 
 export function createSnapshotMonitor({
@@ -35,6 +72,8 @@ export function createSnapshotMonitor({
   clearTimer = clearTimeout,
   autoSchedule = true,
   failureThreshold = 2,
+  maxSilenceMs = 0,
+  forcePublishFor = null,
   onStatusChange = null,
   logger = console,
 } = {}) {
@@ -51,6 +90,7 @@ export function createSnapshotMonitor({
   let latest = null;
   let latestSignature = "";
   let streamSequence = 0;
+  let lastPublishedAt = null;
   const streamSession = `${now()}-${Math.random().toString(36).slice(2)}`;
   let stopped = false;
   let nudgePending = false;
@@ -109,25 +149,48 @@ export function createSnapshotMonitor({
 
   function publish(snapshot, { force = false } = {}) {
     const signature = signatureFor(snapshot);
-    if (!force && signature === latestSignature) {
+    const sentAt = now();
+    const observedAt = Number(snapshot?.positionObservedAt);
+    const positionAgeSec =
+      Number.isFinite(observedAt) && observedAt > 0 && observedAt <= sentAt
+        ? (sentAt - observedAt) / 1000
+        : undefined;
+    const decorate = (sequence) => ({
+      ...snapshot,
+      ...(positionAgeSec == null ? {} : { positionAgeSec }),
+      streamSession,
+      streamSequence: sequence,
+      streamSentAt: sentAt,
+    });
+    const clockSyncDue =
+      maxSilenceMs > 0 &&
+      lastPublishedAt != null &&
+      sentAt - lastPublishedAt >= maxSilenceMs;
+    let discontinuity = false;
+    if (typeof forcePublishFor === "function" && latest) {
+      try {
+        discontinuity = !!forcePublishFor(latest, snapshot);
+      } catch (err) {
+        logger.warn?.(
+          `[${monitorName}-stream] publish check failed:`,
+          err.message
+        );
+      }
+    }
+    if (
+      !force &&
+      !clockSyncDue &&
+      !discontinuity &&
+      signature === latestSignature
+    ) {
       // Position-only reads do not fan out to every connected browser, but keep
       // the retained snapshot fresh so a reconnect gets an accurate clock.
-      latest = {
-        ...latest,
-        ...snapshot,
-        streamSession,
-        streamSequence,
-        streamSentAt: now(),
-      };
+      latest = decorate(streamSequence);
       return false;
     }
     latestSignature = signature;
-    latest = {
-      ...snapshot,
-      streamSession,
-      streamSequence: ++streamSequence,
-      streamSentAt: now(),
-    };
+    latest = decorate(++streamSequence);
+    lastPublishedAt = sentAt;
     for (const listener of [...subscribers]) {
       notify(listener, latest);
     }
@@ -202,6 +265,7 @@ export function createSnapshotMonitor({
         cancelTimer();
         latest = null;
         latestSignature = "";
+        lastPublishedAt = null;
         nudgePending = false;
       }
     };
@@ -224,6 +288,7 @@ export function createSnapshotMonitor({
     subscribers.clear();
     latest = null;
     latestSignature = "";
+    lastPublishedAt = null;
     nudgePending = false;
     await activeTick;
   }
@@ -248,6 +313,8 @@ export function createSnapshotMonitor({
 export function createNowPlayingMonitor(options = {}) {
   return createSnapshotMonitor({
     monitorName: "now-playing",
+    maxSilenceMs: DEFAULT_CLOCK_SYNC_MS,
+    forcePublishFor: nowPlayingClockDiscontinuous,
     ...options,
   });
 }

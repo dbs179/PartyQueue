@@ -20,6 +20,15 @@ test("enrichNowPlaying adds shared party flags without throwing", async () => {
   assert.ok("reactions" in enriched);
 });
 
+test("position age is calculated using the server clock", async () => {
+  const { addPositionAge } = await import("../src/now-playing-http.js");
+  const payload = addPositionAge(
+    { positionSec: 12, positionObservedAt: 10_000 },
+    10_750
+  );
+  assert.equal(payload.positionAgeSec, 0.75);
+});
+
 test("/api/state compatibility route is explicitly deprecated in source", () => {
   const src = fs.readFileSync(
     path.join(here, "..", "src", "now-playing-http.js"),

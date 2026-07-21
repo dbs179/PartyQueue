@@ -123,6 +123,69 @@ test.describe("PartyQueue browser smoke", () => {
     await expect(page.locator("#np-toggle")).toBeHidden();
   });
 
+  test("opening album art keeps the shared playback clock moving forward", async ({
+    page,
+  }) => {
+    const nowPlaying = {
+      title: "Clock Test",
+      artist: "PartyQueue",
+      album: "Timing",
+      albumArt: "",
+      uri: "spotify:track:clock-test",
+      state: "PLAYING",
+      isPlaying: true,
+      queuePlaying: true,
+      durationSec: 240,
+      positionSec: 60,
+      positionAgeSec: 0,
+      reactions: {},
+      streamSession: "clock-smoke",
+      streamSequence: 1,
+    };
+    await page.route("**/api/nowplaying/stream", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: ${JSON.stringify(nowPlaying)}\n\n`,
+      })
+    );
+    await page.route("**/api/nowplaying", (route) =>
+      route.fulfill({ status: 200, json: nowPlaying })
+    );
+    await page.route("**/api/queue/stream", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: ${JSON.stringify({
+          tracks: [],
+          streamSession: "clock-queue",
+          streamSequence: 1,
+        })}\n\n`,
+      })
+    );
+    await page.route("**/api/queue/list", (route) =>
+      route.fulfill({ status: 200, json: { tracks: [] } })
+    );
+    await page.route(/\/api\/lyrics\?/, (route) =>
+      route.fulfill({ status: 200, json: { found: false } })
+    );
+
+    await page.goto("/");
+    await expect(page.locator("#np-title")).toHaveText("Clock Test");
+    await page.waitForTimeout(1_500);
+    const before = await page.locator("#np-progress-elapsed").textContent();
+
+    await page.locator("#np-card").click();
+    await expect(page.locator("#np-overlay")).toBeVisible();
+    const after = await page.locator("#np-fs-progress-elapsed").textContent();
+
+    const seconds = (value) => {
+      const parts = String(value).split(":").map(Number);
+      return parts.reduce((total, part) => total * 60 + part, 0);
+    };
+    expect(seconds(after)).toBeGreaterThanOrEqual(seconds(before));
+  });
+
   test("js modules are served as ES modules", async ({ request }) => {
     const main = await request.get("/js/main.js?v=smoke");
     expect(main.ok()).toBeTruthy();
