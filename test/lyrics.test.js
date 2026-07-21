@@ -3,9 +3,17 @@ import assert from "node:assert/strict";
 import {
   LyricsUnavailableError,
   lookupLyrics,
+  normalizeLrc,
   resetLyricsStateForTests,
   warmLyrics,
 } from "../src/lyrics.js";
+
+it("normalizes common LRC timestamp and enhanced-word variants", () => {
+  assert.equal(
+    normalizeLrc("[ar:Artist]\n[00:01:50][00:03.25]<00:01.50>Hello"),
+    "[00:01.50][00:03.25]Hello"
+  );
+});
 
 describe("lookupLyrics", () => {
   beforeEach(() => {

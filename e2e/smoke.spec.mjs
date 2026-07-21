@@ -219,6 +219,66 @@ test.describe("PartyQueue browser smoke", () => {
     expect(lyricsRequests).toBe(2);
   });
 
+  test("metadata-pending transition never paints stale art or lyrics", async ({
+    page,
+  }) => {
+    const pending = {
+      queueTrack: 2,
+      title: "Previous Song",
+      artist: "Previous Artist",
+      album: "Previous Album",
+      albumArt: "/stale-cover.jpg",
+      uri: "spotify:track:previous",
+      metadataPending: true,
+      isPlaying: true,
+      queuePlaying: true,
+      positionSec: 0,
+      durationSec: 180,
+      reactions: {},
+      streamSession: "pending-smoke",
+      streamSequence: 1,
+    };
+    await page.route("**/api/nowplaying/stream", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: ${JSON.stringify(pending)}\n\n`,
+      })
+    );
+    await page.route("**/api/nowplaying", (route) =>
+      route.fulfill({ status: 200, json: pending })
+    );
+    await page.route("**/api/queue/stream", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: ${JSON.stringify({
+          tracks: [],
+          streamSession: "pending-queue",
+          streamSequence: 1,
+        })}\n\n`,
+      })
+    );
+    await page.route("**/api/queue/list", (route) =>
+      route.fulfill({ status: 200, json: { tracks: [] } })
+    );
+    let lyricsRequests = 0;
+    await page.route(/\/api\/lyrics\?/, (route) => {
+      lyricsRequests += 1;
+      return route.abort();
+    });
+
+    await page.goto("/");
+    await expect(page.locator("#np-title")).toHaveText("Changing track…");
+    await expect(page.locator("#np-art")).not.toHaveAttribute("src", /.+/);
+    await page.locator("#np-card").click();
+    await expect(page.locator("#np-fs-title")).toHaveText("Changing track…");
+    await expect(page.locator(".np-fs-lyrics-status")).toHaveText(
+      "Changing track…"
+    );
+    expect(lyricsRequests).toBe(0);
+  });
+
   test("js modules are served as ES modules", async ({ request }) => {
     const main = await request.get("/js/main.js?v=smoke");
     expect(main.ok()).toBeTruthy();

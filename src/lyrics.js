@@ -17,6 +17,8 @@ const CACHE_MAX = 200;
 const LOOKUP_BUDGET_MS = 8_000;
 const LRCLIB_BUDGET_MS = 5_000;
 const PROVIDER_BACKOFF_MS = 10_000;
+const BUSY_CACHE_TTL_MS = 10_000;
+const PERSIST_DEBOUNCE_MS = 250;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_FILE =
@@ -39,8 +41,10 @@ const USER_AGENT = `PartyQueue/${appVersion}`;
 const cache = new Map();
 /** @type {Map<string, Promise<object>>} */
 const inFlight = new Map();
+const busyCache = new Map();
 let lrclibBackoffUntil = 0;
 let unisonBackoffUntil = 0;
+let persistTimer = null;
 
 function loadPersistentCache() {
   if (!CACHE_FILE) return;
@@ -65,13 +69,22 @@ function loadPersistentCache() {
   }
 }
 
-function persistCache() {
+function persistCacheNow() {
   if (!CACHE_FILE) return;
   try {
     writeFileAtomic(CACHE_FILE, JSON.stringify([...cache.entries()]));
   } catch (err) {
     console.error("[lyrics] cache save failed:", err.message);
   }
+}
+
+function persistCache() {
+  if (!CACHE_FILE || persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    persistCacheNow();
+  }, PERSIST_DEBOUNCE_MS);
+  persistTimer.unref?.();
 }
 
 loadPersistentCache();
@@ -84,17 +97,45 @@ export class LyricsUnavailableError extends Error {
   }
 }
 
-function cacheKey({ title, artist, album, duration }) {
+function cacheKey({ title, artist, album, duration, uri }) {
   const d =
     duration != null && Number.isFinite(Number(duration))
       ? Math.round(Number(duration))
       : "";
   return [
+    String(uri || "").trim().toLowerCase(),
     String(title || "").trim().toLowerCase(),
     String(artist || "").trim().toLowerCase(),
     String(album || "").trim().toLowerCase(),
     d,
   ].join("|");
+}
+
+export function normalizeLrc(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .filter((line) => !/^\[(?:ar|al|ti|au|by|offset|length|re|ve):/i.test(line))
+    .map((line) =>
+      line
+        .replace(
+          /\[(\d{1,3}:\d{2}):(\d{1,3})\]/g,
+          (_all, time, fraction) => `[${time}.${fraction}]`
+        )
+        .replace(/<\d{1,3}:\d{2}(?:[.:]\d{1,3})?>/g, "")
+        .trimEnd()
+    )
+    .join("\n")
+    .trim();
+}
+
+function lrcToPlain(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((line) =>
+      line.replace(/^(?:\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\])+\s*/, "").trim()
+    )
+    .filter(Boolean)
+    .join("\n");
 }
 
 function readCache(key) {
@@ -126,8 +167,12 @@ function normalizeRecord(rec, provider = "lrclib") {
   if (!rec || typeof rec !== "object") {
     return { found: false };
   }
-  const plain = typeof rec.plainLyrics === "string" ? rec.plainLyrics : "";
-  const synced = typeof rec.syncedLyrics === "string" ? rec.syncedLyrics : "";
+  const synced =
+    typeof rec.syncedLyrics === "string" ? normalizeLrc(rec.syncedLyrics) : "";
+  const plain =
+    typeof rec.plainLyrics === "string" && rec.plainLyrics.trim()
+      ? rec.plainLyrics.trim()
+      : lrcToPlain(synced);
   const instrumental = !!rec.instrumental;
   if (instrumental && !plain && !synced) {
     return {
@@ -200,7 +245,7 @@ function pickBestSearchHit(results, duration) {
 
 /**
  * Look up lyrics for a track. Duration (seconds) improves LRClib matching.
- * @param {{ title?: string, artist?: string, album?: string, duration?: number|null }} q
+ * @param {{ title?: string, artist?: string, album?: string, duration?: number|null, uri?: string }} q
  */
 async function lookupLrclib(query, deadline) {
   const { title, artist, album, duration } = query;
@@ -269,11 +314,17 @@ export async function lookupLyrics(q = {}) {
     durationRaw != null && Number.isFinite(Number(durationRaw))
       ? Number(durationRaw)
       : null;
-  const query = { title, artist, album, duration };
+  const uri = String(q.uri || "").trim();
+  const query = { title, artist, album, duration, uri };
 
   const key = cacheKey(query);
   const cached = readCache(key);
   if (cached) return { ...cached, cached: true };
+  const busyUntil = busyCache.get(key) || 0;
+  if (busyUntil > Date.now()) {
+    throw new LyricsUnavailableError(busyUntil - Date.now());
+  }
+  busyCache.delete(key);
   const pending = inFlight.get(key);
   if (pending) return pending;
 
@@ -328,9 +379,12 @@ export async function lookupLyrics(q = {}) {
       writeCache(key, out);
       return out;
     }
-    throw new LyricsUnavailableError(
+    const retryAfterMs = Math.min(
+      BUSY_CACHE_TTL_MS,
       retryDelay(lrclibBackoffUntil, unisonBackoffUntil)
     );
+    busyCache.set(key, Date.now() + retryAfterMs);
+    throw new LyricsUnavailableError(retryAfterMs);
   })();
   inFlight.set(key, request);
   try {
@@ -353,9 +407,10 @@ export function warmLyrics(q = {}) {
     durationRaw != null && Number.isFinite(Number(durationRaw))
       ? Number(durationRaw)
       : null;
-  const key = cacheKey({ title, artist, album, duration });
+  const uri = String(q.uri || "").trim();
+  const key = cacheKey({ title, artist, album, duration, uri });
   if (readCache(key)) return;
-  lookupLyrics({ title, artist, album, duration }).catch((err) => {
+  lookupLyrics({ title, artist, album, duration, uri }).catch((err) => {
     console.error("[lyrics] warm failed:", err.message);
   });
 }
@@ -364,6 +419,9 @@ export function warmLyrics(q = {}) {
 export function resetLyricsStateForTests() {
   cache.clear();
   inFlight.clear();
+  busyCache.clear();
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = null;
   lrclibBackoffUntil = 0;
   unisonBackoffUntil = 0;
 }

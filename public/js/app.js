@@ -14,6 +14,11 @@ import {
   guestBadgeName as guestBadgeNameFrom,
   guestIdentityPayload as guestIdentityPayloadFrom,
 } from "./guest.js";
+import {
+  playbackIdentity,
+  parseSyncedLyrics,
+  serverPlaybackPosition,
+} from "./now-playing-utils.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -4198,8 +4203,8 @@ function setNowPlayingConnectionStatus(status, message = "") {
 
 function openNowPlayingStream() {
   if (nowPlayingSource || !shouldPoll()) return;
+  void loadNowPlaying();
   if (typeof EventSource !== "function") {
-    void loadNowPlaying();
     startNowPlayingFallback();
     return;
   }
@@ -5125,9 +5130,14 @@ function shouldPrefetchMedia() {
 /** Warm browser/HTTP cache for upcoming covers (next 1–2 in queue). */
 function prefetchUpcomingAlbumArt(queueTracks = lastQueueTracks) {
   if (!shouldPrefetchMedia() || document.visibilityState !== "visible") return;
-  const upcoming = (Array.isArray(queueTracks) ? queueTracks : [])
-    .filter((t) => t && t.albumArt && !t.djVoice)
-    .slice(0, 2);
+  const seen = new Set();
+  const upcoming = [];
+  for (const track of Array.isArray(queueTracks) ? queueTracks : []) {
+    if (!track?.albumArt || track.djVoice || seen.has(track.albumArt)) continue;
+    seen.add(track.albumArt);
+    upcoming.push(track);
+    if (upcoming.length === 2) break;
+  }
   const key = upcoming.map((t) => t.albumArt).join("|");
   if (!key || key === lastArtPrefetchKey) return;
   lastArtPrefetchKey = key;
@@ -5154,25 +5164,8 @@ function playbackClockNow() {
   return globalThis.performance?.now?.() ?? Date.now();
 }
 
-function parseSyncedLyrics(raw) {
-  if (!raw) return null;
-  const lines = [];
-  for (const row of String(raw).split(/\r?\n/)) {
-    const m = row.match(/^\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]\s*(.*)$/);
-    if (!m) continue;
-    const min = Number(m[1]);
-    const sec = Number(m[2]);
-    const frac = m[3] ? Number(`0.${m[3]}`) : 0;
-    const text = (m[4] || "").trim();
-    if (!text) continue;
-    lines.push({ t: min * 60 + sec + frac, text });
-  }
-  return lines.length ? lines : null;
-}
-
 function lyricsTrackKey(np) {
-  if (!np) return "";
-  return [np.title || "", np.artist || "", np.album || "", np.uri || ""].join("|");
+  return playbackIdentity(np);
 }
 
 function setNpFsLyricsStatus(msg) {
@@ -5308,19 +5301,11 @@ const LYRICS_LEAD_SEC = 0.75;
  */
 function applyPlaybackClock(np, { force = false } = {}) {
   const clockNow = playbackClockNow();
-  const rawServerPos = Number(np?.positionSec);
-  const playing = !!(np && np.isPlaying && !np.djVoice);
-  // This age is calculated on the server, where positionObservedAt and send
-  // time share a clock. Never subtract a phone's wall clock from server time.
-  const reportedAgeSec = Number(np?.positionAgeSec);
-  const snapshotAgeSec =
-    playing && Number.isFinite(reportedAgeSec)
-      ? Math.max(0, Math.min(10, reportedAgeSec))
-      : 0;
-  const serverPos = Number.isFinite(rawServerPos)
-    ? rawServerPos + snapshotAgeSec
-    : rawServerPos;
-  const hasServer = Number.isFinite(serverPos);
+  const playing = !!(np && np.isPlaying && !np.djVoice && !np.metadataPending);
+  // Snapshot age is calculated server-side; never compare server wall time with
+  // the phone clock.
+  const serverPos = serverPlaybackPosition(np);
+  const hasServer = serverPos != null;
 
   if (force || !npPositionAt) {
     npPositionBase = hasServer ? serverPos : 0;
@@ -5416,27 +5401,87 @@ function clearLyricsRetry() {
   }
 }
 
+const artworkRequests = new WeakMap();
+
+function bindNowPlayingArtwork(img, np) {
+  if (!img) return;
+  const key = playbackIdentity(np);
+  const url = np?.metadataPending ? "" : String(np?.albumArt || "");
+  const alt = np?.album
+    ? `Album art for ${np.album}`
+    : np?.title
+      ? `Artwork for ${np.title}`
+      : "";
+  if (!url) {
+    artworkRequests.delete(img);
+    img.removeAttribute("src");
+    img.alt = "";
+    delete img.dataset.artIdentity;
+    return;
+  }
+  if (img.dataset.artIdentity === key && img.getAttribute("src") === url) {
+    img.alt = alt;
+    return;
+  }
+
+  const request = { key, url };
+  artworkRequests.set(img, request);
+  // Hide old pixels while the replacement decodes. This prevents metadata for
+  // one track appearing beside artwork from another.
+  img.removeAttribute("src");
+  img.alt = "";
+  const preload = new Image();
+  preload.decoding = "async";
+  preload.src = url;
+  const ready =
+    typeof preload.decode === "function"
+      ? preload.decode().catch(() => {
+          if (!preload.complete || !preload.naturalWidth) throw new Error("decode failed");
+        })
+      : new Promise((resolve, reject) => {
+          preload.onload = resolve;
+          preload.onerror = reject;
+        });
+  ready
+    .then(() => {
+      if (artworkRequests.get(img) !== request) return;
+      img.decoding = "async";
+      img.src = url;
+      img.alt = alt;
+      img.dataset.artIdentity = key;
+    })
+    .catch(() => {
+      if (artworkRequests.get(img) !== request) return;
+      img.removeAttribute("src");
+      img.alt = "";
+      delete img.dataset.artIdentity;
+    });
+}
+
 function fillNpOverlayMeta(np) {
   if (!npFsTitle) return;
   const hasTrack = np && (np.title || np.artist);
-  npFsTitle.textContent = hasTrack ? np.title || "" : "";
-  npFsArtist.textContent = hasTrack ? np.artist || "" : "";
-  npFsAlbum.textContent = hasTrack ? np.album || "" : "";
-  if (hasTrack && np.albumArt) {
-    if (npFsArt.getAttribute("src") !== np.albumArt) {
-      npFsArt.decoding = "async";
-      npFsArt.src = np.albumArt;
-    }
-  } else if (npFsArt) {
-    npFsArt.removeAttribute("src");
-  }
+  npFsTitle.textContent = np?.metadataPending
+    ? "Changing track…"
+    : hasTrack
+      ? np.title || ""
+      : "";
+  npFsArtist.textContent = np?.metadataPending ? "" : hasTrack ? np.artist || "" : "";
+  npFsAlbum.textContent = np?.metadataPending ? "" : hasTrack ? np.album || "" : "";
+  bindNowPlayingArtwork(npFsArt, np);
 }
 
 async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
   clearLyricsRetry();
   const fetchId = ++npLyricsFetchId;
-  if (!np || np.djVoice || !(np.title && np.artist)) {
-    setNpFsLyricsStatus(np?.djVoice ? "DJ Voice — no lyrics" : "No lyrics for this track");
+  if (!np || np.metadataPending || np.djVoice || !(np.title && np.artist)) {
+    setNpFsLyricsStatus(
+      np?.metadataPending
+        ? "Changing track…"
+        : np?.djVoice
+          ? "DJ Voice — no lyrics"
+          : "No lyrics for this track"
+    );
     return;
   }
   setNpFsLyricsStatus("Loading lyrics…");
@@ -5445,6 +5490,7 @@ async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
     artist: np.artist,
   });
   if (np.album) params.set("album", np.album);
+  if (np.uri) params.set("uri", np.uri);
   if (np.durationSec != null && Number.isFinite(np.durationSec) && np.durationSec > 0) {
     params.set("duration", String(Math.round(np.durationSec)));
   }
@@ -5692,21 +5738,10 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
   }
 
   displayEmpty.hidden = true;
-  displayTitle.textContent = np.title || "";
-  if (displayArtist) displayArtist.textContent = np.artist || "";
-  if (displayAlbum) displayAlbum.textContent = np.album || "";
-  if (np.albumArt) {
-    if (displayArt.getAttribute("src") !== np.albumArt) {
-      displayArt.decoding = "async";
-      displayArt.src = np.albumArt;
-    }
-    displayArt.alt = np.album
-      ? `Album art for ${np.album}`
-      : `Artwork for ${np.title || "current track"}`;
-  } else {
-    displayArt.removeAttribute("src");
-    displayArt.alt = "";
-  }
+  displayTitle.textContent = np.metadataPending ? "Changing track…" : np.title || "";
+  if (displayArtist) displayArtist.textContent = np.metadataPending ? "" : np.artist || "";
+  if (displayAlbum) displayAlbum.textContent = np.metadataPending ? "" : np.album || "";
+  bindNowPlayingArtwork(displayArt, np);
   if (displayState) {
     displayState.hidden = false;
     displayState.textContent = np.isPlaying ? "Playing" : "Paused";
@@ -5727,7 +5762,7 @@ function renderNowPlaying(np) {
     }
     maybeAnnounceClosingTime(np.closingTimeAt, np.partyRecap);
   }
-  const hasTrack = np && (np.title || np.artist);
+  const hasTrack = np && (np.metadataPending || np.title || np.artist);
   const progressClockKey = lyricsTrackKey(np);
   applyPlaybackClock(np, {
     force: progressClockKey !== npProgressClockKey,
@@ -5746,7 +5781,7 @@ function renderNowPlaying(np) {
   shuffleBtn.classList.toggle("active", shuffling);
   shuffleBtn.setAttribute("aria-pressed", shuffling ? "true" : "false");
 
-  const nextNpId = hasTrack ? trackIdFromUri(np.uri) : null;
+  const nextNpId = hasTrack && !np.metadataPending ? trackIdFromUri(np.uri) : null;
   if (nextNpId !== npReactionsSyncedFor) {
     npMyMood = null;
     npMyMic = false;
@@ -5760,9 +5795,14 @@ function renderNowPlaying(np) {
   if (npPills) npPills.hidden = !hasTrack;
   npState.hidden = !hasTrack;
   if (hasTrack) {
-    npState.textContent = npIsPlaying ? "Playing" : "Paused";
-    npState.classList.toggle("playing", npIsPlaying);
-    npState.classList.toggle("paused", !npIsPlaying);
+    const transportPlaying = !!np.isPlaying && !np.metadataPending;
+    npState.textContent = np.metadataPending
+      ? "Changing"
+      : transportPlaying
+        ? "Playing"
+        : "Paused";
+    npState.classList.toggle("playing", transportPlaying);
+    npState.classList.toggle("paused", !transportPlaying);
   }
   if (npOrigin) {
     const origin = nowPlayingOriginLabel(np, hasTrack);
@@ -5789,20 +5829,11 @@ function renderNowPlaying(np) {
     npTitle.hidden = false;
     npArtist.hidden = false;
     npAlbum.hidden = false;
-    npTitle.textContent = np.title || "";
-    npArtist.textContent = np.artist || "";
-    npAlbum.textContent = np.album || "";
-    if (np.albumArt) {
-      // Only reassign when it actually changed, so the cached image isn't
-      // disturbed on every poll (no flicker, no needless work).
-      if (npArt.getAttribute("src") !== np.albumArt) {
-        npArt.decoding = "async";
-        npArt.src = np.albumArt;
-      }
-    } else {
-      npArt.removeAttribute("src");
-    }
-    if (npReactions) npReactions.hidden = false;
+    npTitle.textContent = np.metadataPending ? "Changing track…" : np.title || "";
+    npArtist.textContent = np.metadataPending ? "" : np.artist || "";
+    npAlbum.textContent = np.metadataPending ? "" : np.album || "";
+    bindNowPlayingArtwork(npArt, np);
+    if (npReactions) npReactions.hidden = !!np.metadataPending;
     if (np?.reactions) {
       // Poll has counts only; keep local mine/micMine until sync finishes.
       paintNpReactions({
@@ -5811,7 +5842,7 @@ function renderNowPlaying(np) {
         micMine: npMyMic,
       });
     }
-    void syncMyReactions(nowPlayingId);
+    if (!np.metadataPending) void syncMyReactions(nowPlayingId);
   } else {
     npCard.classList.add("is-empty");
     npTitle.hidden = true;

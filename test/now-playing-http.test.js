@@ -38,3 +38,15 @@ test("/api/state compatibility route is explicitly deprecated in source", () => 
   assert.match(src, /Deprecation/);
   assert.match(src, /\/api\/nowplaying and \/api\/queue\/list/);
 });
+
+test("transport fresh reads are private, bounded, and shared through SSE", () => {
+  const src = fs.readFileSync(
+    path.join(here, "..", "src", "now-playing-http.js"),
+    "utf8"
+  );
+  assert.match(src, /getNowPlayingFresh/);
+  assert.match(src, /nudgeNowPlayingTransition/);
+  assert.match(src, /monitorFreshReadsPending/);
+  assert.doesNotMatch(src, /req\.query\.fresh/);
+  assert.match(src, /Cache-Control", "no-store"/);
+});

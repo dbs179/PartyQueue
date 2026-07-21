@@ -87,6 +87,19 @@ test("position-only changes are deduplicated but meaningful changes publish", as
   await monitor.stop();
 });
 
+test("queue position changes publish even when track metadata is temporarily stale", () => {
+  const before = {
+    queueTrack: 4,
+    uri: "spotify:track:1",
+    title: "Old title",
+  };
+  const after = {
+    ...before,
+    queueTrack: 5,
+  };
+  assert.notEqual(nowPlayingSignature(before), nowPlayingSignature(after));
+});
+
 test("a new subscriber immediately receives the shared latest snapshot", async () => {
   let reads = 0;
   const monitor = makeMonitor(async () => {

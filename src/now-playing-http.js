@@ -6,6 +6,7 @@ import { getReactions } from "./reactions.js";
 import { spotifyTrackId } from "./sampler.js";
 import {
   getNowPlaying,
+  getNowPlayingFresh,
   getQueueList,
   onSonosSnapshotsInvalidated,
 } from "./sonos.js";
@@ -39,11 +40,63 @@ export function addPositionAge(np, sentAt = Date.now()) {
   };
 }
 
-export async function readNowPlayingPayload() {
-  return addPositionAge(enrichNowPlaying(await getNowPlaying()));
+const nowPlayingReadCounters = { regular: 0, fresh: 0 };
+
+export async function readNowPlayingPayload({ fresh = false } = {}) {
+  nowPlayingReadCounters[fresh ? "fresh" : "regular"] += 1;
+  const read = fresh ? getNowPlayingFresh : getNowPlaying;
+  return addPositionAge(enrichNowPlaying(await read()));
 }
 
 const nowPlayingStreamClients = new Map();
+let monitorFreshReadsPending = 0;
+let transitionConfirmTimer = null;
+let pendingTransitionMetadata = null;
+
+function sameTrackMetadata(a, b) {
+  return (
+    String(a?.uri || "") === String(b?.uri || "") &&
+    String(a?.title || "") === String(b?.title || "") &&
+    String(a?.artist || "") === String(b?.artist || "") &&
+    String(a?.album || "") === String(b?.album || "") &&
+    String(a?.albumArt || "") === String(b?.albumArt || "")
+  );
+}
+
+async function readNowPlayingMonitorPayload() {
+  const fresh = monitorFreshReadsPending > 0;
+  if (fresh) monitorFreshReadsPending -= 1;
+  const snapshot = await readNowPlayingPayload({ fresh });
+  const previous = nowPlayingMonitor?.latest;
+  const queueChanged =
+    Number(previous?.queueTrack) > 0 &&
+    Number(snapshot?.queueTrack) > 0 &&
+    Number(previous.queueTrack) !== Number(snapshot.queueTrack);
+  if (queueChanged && sameTrackMetadata(previous, snapshot)) {
+    pendingTransitionMetadata = {
+      queueTrack: Number(snapshot.queueTrack),
+      uri: snapshot.uri,
+      title: snapshot.title,
+      artist: snapshot.artist,
+      album: snapshot.album,
+      albumArt: snapshot.albumArt,
+    };
+  }
+  const metadataPending =
+    Number(pendingTransitionMetadata?.queueTrack) === Number(snapshot.queueTrack) &&
+    sameTrackMetadata(pendingTransitionMetadata, snapshot);
+  if (pendingTransitionMetadata && !metadataPending) {
+    pendingTransitionMetadata = null;
+  }
+  if (fresh && !metadataPending && transitionConfirmTimer) {
+    clearTimeout(transitionConfirmTimer);
+    transitionConfirmTimer = null;
+  }
+  return {
+    ...snapshot,
+    metadataPending,
+  };
+}
 
 function writeNowPlayingStreamEvent(res, eventName, payload, id = null) {
   if (res.writableEnded || res.destroyed) return;
@@ -59,7 +112,7 @@ function broadcastNowPlayingStatus(health) {
 }
 
 export const nowPlayingMonitor = createNowPlayingMonitor({
-  readSnapshot: readNowPlayingPayload,
+  readSnapshot: readNowPlayingMonitorPayload,
   intervalMs: 1500,
   errorIntervalMs: 3000,
   failureThreshold: 2,
@@ -75,6 +128,38 @@ export function nudgeNowPlayingStream() {
   nowPlayingMonitor.nudge();
 }
 
+export function nudgeNowPlayingTransition() {
+  const current = nowPlayingMonitor.latest;
+  if (current) {
+    pendingTransitionMetadata = {
+      queueTrack: Number(current.queueTrack),
+      uri: current.uri,
+      title: current.title,
+      artist: current.artist,
+      album: current.album,
+      albumArt: current.albumArt,
+    };
+  }
+  monitorFreshReadsPending = Math.max(monitorFreshReadsPending, 1);
+  nowPlayingMonitor.nudge();
+  if (transitionConfirmTimer) clearTimeout(transitionConfirmTimer);
+  transitionConfirmTimer = setTimeout(() => {
+    transitionConfirmTimer = null;
+    monitorFreshReadsPending = Math.max(monitorFreshReadsPending, 1);
+    nowPlayingMonitor.nudge();
+  }, 1200);
+  transitionConfirmTimer.unref?.();
+}
+
+export function nowPlayingDiagnostics() {
+  return {
+    subscribers: nowPlayingMonitor.subscriberCount,
+    lastSuccessAt: nowPlayingMonitor.health.lastSuccessAt || 0,
+    reads: { ...nowPlayingReadCounters },
+    transitionFreshReadsPending: monitorFreshReadsPending,
+  };
+}
+
 function removeNowPlayingStreamClient(res) {
   const client = nowPlayingStreamClients.get(res);
   if (!client) return;
@@ -85,6 +170,11 @@ function removeNowPlayingStreamClient(res) {
 
 export function closeNowPlayingStreams() {
   unsubscribeSonosStreamNudge();
+  if (transitionConfirmTimer) {
+    clearTimeout(transitionConfirmTimer);
+    transitionConfirmTimer = null;
+  }
+  pendingTransitionMetadata = null;
   for (const res of [...nowPlayingStreamClients.keys()]) {
     removeNowPlayingStreamClient(res);
     try {
@@ -101,6 +191,7 @@ let stateDeprecationLogged = false;
 export function registerNowPlayingRoutes(app) {
   app.get("/api/nowplaying", async (_req, res) => {
     try {
+      res.setHeader("Cache-Control", "no-store");
       res.json(await readNowPlayingPayload());
     } catch (err) {
       res.status(502).json({ error: err.message });

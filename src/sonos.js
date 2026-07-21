@@ -1424,7 +1424,8 @@ function scheduleLyricsWarm(q, slot) {
     q?.duration != null && Number.isFinite(Number(q.duration))
       ? Math.round(Number(q.duration))
       : "";
-  const key = `${title.toLowerCase()}|${artist.toLowerCase()}|${album.toLowerCase()}|${duration}`;
+  const uri = String(q?.uri || "").trim().toLowerCase();
+  const key = `${uri}|${title.toLowerCase()}|${artist.toLowerCase()}|${album.toLowerCase()}|${duration}`;
   if (slot === "next") {
     if (key === lastWarmedLyricsNext) return;
     lastWarmedLyricsNext = key;
@@ -1520,6 +1521,7 @@ async function getNowPlayingRaw() {
         artist,
         album: album || "",
         duration: durationSec,
+        uri,
       },
       "current"
     );
@@ -1528,6 +1530,7 @@ async function getNowPlayingRaw() {
   return {
     isPlaying: state === "PLAYING",
     queuePlaying: state === "PLAYING" && playingFromQueue,
+    queueTrack: Number(pos.Track) || 0,
     state,
     muted: !!groupMute.CurrentMute,
     shuffle: /SHUFFLE/.test(settings.PlayMode || ""),
@@ -1658,7 +1661,12 @@ async function getQueueListRaw() {
   const next = tracks.find((t) => !t.djVoice && t.title && t.artist);
   if (next) {
     scheduleLyricsWarm(
-      { title: next.title, artist: next.artist, album: next.album || "" },
+      {
+        title: next.title,
+        artist: next.artist,
+        album: next.album || "",
+        uri: next.uri || "",
+      },
       "next"
     );
   }

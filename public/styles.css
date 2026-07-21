@@ -690,6 +690,9 @@ button.guest-name:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
+  width: 5.75rem;
+  min-height: 1.65rem;
   padding: 0.25rem 0.7rem;
   border-radius: 999px;
   font-size: 0.72rem;

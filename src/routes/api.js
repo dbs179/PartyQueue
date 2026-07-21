@@ -2,6 +2,10 @@ import express from "express";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import {
+  createByteLruCache,
+  createInFlightCoalescer,
+} from "../byte-lru-cache.js";
 import { upsertEnvKeys } from "../env-file.js";
 import {
   exchangeCodeForTokens,
@@ -226,7 +230,12 @@ import {
 
 } from "../sonos.js";
 import { requireHostControls } from "../http/host-controls.js";
-import { nudgeNowPlayingStream, nowPlayingMonitor } from "../now-playing-http.js";
+import {
+  nudgeNowPlayingStream,
+  nudgeNowPlayingTransition,
+  nowPlayingDiagnostics,
+  nowPlayingMonitor,
+} from "../now-playing-http.js";
 
 /**
  * @param {import('express').Express} app
@@ -278,6 +287,7 @@ export function registerApiRoutes(app, ctx) {
         shuttingDown: isShuttingDown(),
         spotifyConfigured: !!getSpotifyAppStatus().configured,
         sonos: nowPlayingMonitor?.health?.status || "unknown",
+        nowPlaying: nowPlayingDiagnostics(),
       },
     };
     if (!ready) return res.status(503).json(payload);
@@ -1573,6 +1583,7 @@ export function registerApiRoutes(app, ctx) {
       return res.status(400).json({ error: "Missing title or artist." });
     }
     const album = String(req.query.album || "").trim();
+    const uri = String(req.query.uri || "").trim();
     const durationRaw = req.query.duration;
     const duration =
       durationRaw != null && String(durationRaw).trim() !== ""
@@ -1584,6 +1595,7 @@ export function registerApiRoutes(app, ctx) {
           title,
           artist,
           album,
+          uri,
           duration: Number.isFinite(duration) ? duration : null,
         })
       );
@@ -1642,9 +1654,10 @@ export function registerApiRoutes(app, ctx) {
   // Small in-memory cache of album-art bytes, keyed by the upstream URL. Art is
   // immutable per URL, so once one client (or a poll) fetches a track's cover we
   // serve it instantly to everyone and stop re-hitting the (slow) Sonos speaker.
-  // Capped so it can't grow without bound (~a few MB at most).
-  const artCache = new Map();
-  const ART_CACHE_MAX = 80;
+  // The LRU is byte-bounded so unusually large images cannot consume unbounded RAM.
+  const ART_CACHE_MAX_BYTES = 16 * 1024 * 1024;
+  const artCache = createByteLruCache(ART_CACHE_MAX_BYTES);
+  const artInFlight = createInFlightCoalescer();
   
   /** Pull a Spotify track id out of a (possibly multi-encoded) Sonos getaa URL. */
   function trackIdFromArtUrl(u) {
@@ -1664,8 +1677,6 @@ export function registerApiRoutes(app, ctx) {
   }
   
   function sendCachedArt(res, key, hit) {
-    artCache.delete(key);
-    artCache.set(key, hit);
     res.set("Content-Type", hit.type);
     res.set("Cache-Control", "public, max-age=86400, immutable");
     return res.send(hit.body);
@@ -1673,9 +1684,6 @@ export function registerApiRoutes(app, ctx) {
   
   function putArtCache(key, hit) {
     artCache.set(key, hit);
-    if (artCache.size > ART_CACHE_MAX) {
-      artCache.delete(artCache.keys().next().value);
-    }
   }
   
   /** Fetch + cache album art bytes from a Spotify CDN image URL. */
@@ -1693,6 +1701,36 @@ export function registerApiRoutes(app, ctx) {
     if (!body.length) return null;
     return { body, type };
   }
+
+  async function loadAlbumArt(key) {
+    const target = new URL(key);
+    const allowed =
+      target.port === "1400" && (await isKnownSonosHost(target.hostname));
+    if (!allowed) {
+      const error = new Error("Album-art host is not allowed.");
+      error.status = 403;
+      throw error;
+    }
+
+    const trackId = trackIdFromArtUrl(key);
+    if (trackId) {
+      try {
+        const art = await fetchSpotifyArtBytes(trackId);
+        if (art) return art;
+      } catch (err) {
+        console.warn("[albumart] Spotify fallback failed:", err.message);
+      }
+    }
+
+    const upstream = await fetch(target.toString(), {
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!upstream.ok) throw new Error(`Sonos artwork ${upstream.status}`);
+    const type = upstream.headers.get("content-type") || "image/jpeg";
+    const body = Buffer.from(await upstream.arrayBuffer());
+    if (!body.length) throw new Error("Sonos returned empty artwork.");
+    return { body, type };
+  }
   
   app.get("/api/albumart", async (req, res) => {
     const u = req.query.u;
@@ -1702,40 +1740,13 @@ export function registerApiRoutes(app, ctx) {
     const hit = artCache.get(key);
     if (hit) return sendCachedArt(res, key, hit);
   
-    // Sonos /getaa often hangs when Spotify art is slow/unavailable on the
-    // speaker. Prefer Spotify CDN when we can parse a track id from the URL.
-    const trackId = trackIdFromArtUrl(key);
-    if (trackId) {
-      try {
-        const art = await fetchSpotifyArtBytes(trackId);
-        if (art) {
-          putArtCache(key, art);
-          return sendCachedArt(res, key, art);
-        }
-      } catch (err) {
-        console.warn("[albumart] Spotify fallback failed:", err.message);
-      }
-    }
-  
+    const pending = artInFlight.run(key, () => loadAlbumArt(key));
     try {
-      const target = new URL(key);
-      const allowed =
-        target.port === "1400" && (await isKnownSonosHost(target.hostname));
-      if (!allowed) return res.status(403).end();
-  
-      // Keep Sonos short — a hung getaa used to blank every cover for 5s+.
-      const upstream = await fetch(target.toString(), {
-        signal: AbortSignal.timeout(2500),
-      });
-      if (!upstream.ok) return res.status(502).end();
-  
-      const type = upstream.headers.get("content-type") || "image/jpeg";
-      const body = Buffer.from(await upstream.arrayBuffer());
-      const art = { body, type };
+      const art = await pending;
       putArtCache(key, art);
       return sendCachedArt(res, key, art);
-    } catch {
-      res.status(502).end();
+    } catch (err) {
+      res.status(err.status || 502).end();
     }
   });
   
@@ -1765,6 +1776,7 @@ export function registerApiRoutes(app, ctx) {
       const result = await next();
       // Never-Ending can lag behind rapid skips; re-check queue depth soon.
       nudgeAutoFill();
+      nudgeNowPlayingTransition();
       res.json({ ok: true, ...result });
     } catch (err) {
       console.error("[next]", err.message);
@@ -1774,7 +1786,9 @@ export function registerApiRoutes(app, ctx) {
   
   app.post("/api/previous", transportLimit, requireHostControls, async (_req, res) => {
     try {
-      res.json({ ok: true, ...(await previous()) });
+      const result = await previous();
+      nudgeNowPlayingTransition();
+      res.json({ ok: true, ...result });
     } catch (err) {
       console.error("[previous]", err.message);
       res.status(502).json({ error: err.message || "Could not go to previous track." });

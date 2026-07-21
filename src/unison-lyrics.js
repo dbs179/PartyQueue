@@ -57,7 +57,14 @@ function cleanEnhancedLrc(value) {
   return String(value || "")
     .split(/\r?\n/)
     .filter((line) => !/^\[(?:ar|al|ti|au|by|offset|length|re|ve):/i.test(line))
-    .map((line) => line.replace(/<\d+:\d+(?:\.\d+)?>/g, ""))
+    .map((line) =>
+      line
+        .replace(
+          /\[(\d{1,3}:\d{2}):(\d{1,3})\]/g,
+          (_all, time, fraction) => `[${time}.${fraction}]`
+        )
+        .replace(/<\d{1,3}:\d{2}(?:[.:]\d{1,3})?>/g, "")
+    )
     .join("\n")
     .trim();
 }
@@ -68,7 +75,7 @@ function lrcToPlain(value) {
     .map((line) =>
       line
         .replace(/^(?:\[\d+:\d+(?:[.:]\d+)?])+\s*/, "")
-        .replace(/<\d+:\d+(?:\.\d+)?>/g, "")
+        .replace(/<\d{1,3}:\d{2}(?:[.:]\d{1,3})?>/g, "")
         .trim()
     )
     .filter(Boolean)
