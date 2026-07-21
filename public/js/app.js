@@ -5147,6 +5147,7 @@ let npPositionAt = 0;
 let npIsPlayingOverlay = false;
 let npProgressClockKey = "";
 let npLyricTick = null;
+let npLyricsRetryTimer = null;
 let npOverlayHistoryPushed = false;
 
 function playbackClockNow() {
@@ -5387,6 +5388,13 @@ function stopLyricTicker() {
   }
 }
 
+function clearLyricsRetry() {
+  if (npLyricsRetryTimer) {
+    clearTimeout(npLyricsRetryTimer);
+    npLyricsRetryTimer = null;
+  }
+}
+
 function fillNpOverlayMeta(np) {
   if (!npFsTitle) return;
   const hasTrack = np && (np.title || np.artist);
@@ -5403,7 +5411,8 @@ function fillNpOverlayMeta(np) {
   }
 }
 
-async function loadOverlayLyrics(np) {
+async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
+  clearLyricsRetry();
   const fetchId = ++npLyricsFetchId;
   if (!np || np.djVoice || !(np.title && np.artist)) {
     setNpFsLyricsStatus(np?.djVoice ? "DJ Voice — no lyrics" : "No lyrics for this track");
@@ -5422,7 +5431,12 @@ async function loadOverlayLyrics(np) {
     const res = await fetch(`/api/lyrics?${params}`);
     const data = await res.json();
     if (fetchId !== npLyricsFetchId) return;
-    if (!res.ok) throw new Error(data.error || "Could not load lyrics.");
+    if (!res.ok) {
+      const error = new Error(data.error || "Could not load lyrics.");
+      error.status = res.status;
+      error.retryAfterSec = Number(data.retryAfterSec);
+      throw error;
+    }
     if (data.instrumental) {
       setNpFsLyricsStatus("Instrumental");
       return;
@@ -5442,6 +5456,21 @@ async function loadOverlayLyrics(np) {
     }
   } catch (err) {
     if (fetchId !== npLyricsFetchId) return;
+    if (err.status === 503 && retryCount < 2 && npOverlayOpen) {
+      const retryAfterSec = Number.isFinite(err.retryAfterSec)
+        ? Math.max(1, Math.min(30, err.retryAfterSec))
+        : 10;
+      setNpFsLyricsStatus(
+        `Lyrics service is busy — retrying in ${retryAfterSec}s…`
+      );
+      npLyricsRetryTimer = setTimeout(() => {
+        npLyricsRetryTimer = null;
+        if (npOverlayOpen && lyricsTrackKey(lastNowPlaying) === npLyricsKey) {
+          loadOverlayLyrics(lastNowPlaying, { retryCount: retryCount + 1 });
+        }
+      }, retryAfterSec * 1000);
+      return;
+    }
     setNpFsLyricsStatus(err.message || "Could not load lyrics");
   }
 }
@@ -5453,6 +5482,7 @@ function syncNpOverlay(np) {
   fillNpOverlayMeta(np);
   if (trackChanged) {
     npLyricsKey = key;
+    clearLyricsRetry();
     stopLyricTicker();
     loadOverlayLyrics(np);
   }
@@ -5482,6 +5512,7 @@ function openNpOverlay() {
 function closeNpOverlay({ fromPopstate = false } = {}) {
   if (!npOverlayOpen) return;
   npOverlayOpen = false;
+  clearLyricsRetry();
   stopLyricTicker();
   npLyricsFetchId += 1;
   if (npOverlay) npOverlay.hidden = true;

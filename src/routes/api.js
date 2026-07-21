@@ -193,7 +193,7 @@ import {
   SUGGESTION_TEXT_MAX,
 } from "../suggestion-box.js";
 import { spotifyTrackId } from "../sampler.js";
-import { lookupLyrics } from "../lyrics.js";
+import { LyricsUnavailableError, lookupLyrics } from "../lyrics.js";
 import {
   addPlaylistToQueue,
   addRandomFromPlaylists,
@@ -1589,6 +1589,17 @@ export function registerApiRoutes(app, ctx) {
       );
     } catch (err) {
       console.error("[lyrics]", err.message);
+      if (err instanceof LyricsUnavailableError) {
+        const retryAfterSec = Math.max(
+          1,
+          Math.ceil(Number(err.retryAfterMs || 0) / 1000)
+        );
+        res.setHeader("Retry-After", String(retryAfterSec));
+        return res.status(503).json({
+          error: "Lyrics service is temporarily busy.",
+          retryAfterSec,
+        });
+      }
       res.status(502).json({ error: err.message || "Could not fetch lyrics." });
     }
   });

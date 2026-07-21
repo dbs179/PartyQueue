@@ -4,12 +4,21 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeFileAtomic } from "./atomic-write.js";
 
 const LRCLIB_BASE = "https://lrclib.net";
-const CACHE_TTL_MS = 30 * 60 * 1000;
-const CACHE_MAX = 80;
+const FOUND_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const MISS_CACHE_TTL_MS = 30 * 60 * 1000;
+const CACHE_MAX = 200;
+const LOOKUP_BUDGET_MS = 8_000;
+const PROVIDER_BACKOFF_MS = 10_000;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CACHE_FILE =
+  process.env.PARTYQUEUE_LYRICS_CACHE_FILE ||
+  (process.env.NODE_ENV === "production"
+    ? path.join(__dirname, "..", "data", "lyrics-cache.json")
+    : "");
 let appVersion = "0";
 try {
   appVersion = JSON.parse(
@@ -23,6 +32,51 @@ const USER_AGENT = `PartyQueue/${appVersion}`;
 
 /** @type {Map<string, { at: number, value: object }>} */
 const cache = new Map();
+/** @type {Map<string, Promise<object>>} */
+const inFlight = new Map();
+let providerBackoffUntil = 0;
+
+function loadPersistentCache() {
+  if (!CACHE_FILE) return;
+  try {
+    const rows = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
+    if (!Array.isArray(rows)) return;
+    for (const row of rows) {
+      if (
+        Array.isArray(row) &&
+        row.length === 2 &&
+        typeof row[0] === "string" &&
+        row[1] &&
+        typeof row[1] === "object"
+      ) {
+        cache.set(row[0], row[1]);
+      }
+    }
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      console.error("[lyrics] cache load failed:", err.message);
+    }
+  }
+}
+
+function persistCache() {
+  if (!CACHE_FILE) return;
+  try {
+    writeFileAtomic(CACHE_FILE, JSON.stringify([...cache.entries()]));
+  } catch (err) {
+    console.error("[lyrics] cache save failed:", err.message);
+  }
+}
+
+loadPersistentCache();
+
+export class LyricsUnavailableError extends Error {
+  constructor(retryAfterMs = PROVIDER_BACKOFF_MS) {
+    super("Lyrics service is temporarily busy.");
+    this.name = "LyricsUnavailableError";
+    this.retryAfterMs = Math.max(1_000, Number(retryAfterMs) || 0);
+  }
+}
 
 function cacheKey({ title, artist, album, duration }) {
   const d =
@@ -40,8 +94,10 @@ function cacheKey({ title, artist, album, duration }) {
 function readCache(key) {
   const hit = cache.get(key);
   if (!hit) return null;
-  if (Date.now() - hit.at > CACHE_TTL_MS) {
+  const ttl = hit.value?.found ? FOUND_CACHE_TTL_MS : MISS_CACHE_TTL_MS;
+  if (Date.now() - hit.at > ttl) {
     cache.delete(key);
+    persistCache();
     return null;
   }
   // LRU touch
@@ -57,6 +113,7 @@ function writeCache(key, value) {
     const oldest = cache.keys().next().value;
     cache.delete(oldest);
   }
+  persistCache();
 }
 
 function normalizeRecord(rec) {
@@ -80,13 +137,14 @@ function normalizeRecord(rec) {
   };
 }
 
-async function lrclibFetch(urlPath) {
+async function lrclibFetch(urlPath, deadline) {
+  const remainingMs = Math.max(1, deadline - Date.now());
   const res = await fetch(`${LRCLIB_BASE}${urlPath}`, {
     headers: {
       "User-Agent": USER_AGENT,
       Accept: "application/json",
     },
-    signal: AbortSignal.timeout(12_000),
+    signal: AbortSignal.timeout(remainingMs),
   });
   if (res.status === 404) return null;
   if (!res.ok) {
@@ -145,54 +203,73 @@ export async function lookupLyrics(q = {}) {
   const key = cacheKey({ title, artist, album, duration });
   const cached = readCache(key);
   if (cached) return { ...cached, cached: true };
-
-  let record = null;
-
-  if (duration != null && duration > 0 && album) {
-    const params = new URLSearchParams({
-      track_name: title,
-      artist_name: artist,
-      album_name: album,
-      duration: String(Math.round(duration)),
-    });
-    try {
-      record = await lrclibFetch(`/api/get?${params}`);
-    } catch (err) {
-      console.error("[lyrics] get failed:", err.message);
-    }
+  const pending = inFlight.get(key);
+  if (pending) return pending;
+  if (Date.now() < providerBackoffUntil) {
+    throw new LyricsUnavailableError(providerBackoffUntil - Date.now());
   }
 
-  // Always search as well when /get missed synced lyrics — search often has
-  // alternate timed uploads for the same song.
-  if (!record || !record.syncedLyrics) {
-    const params = new URLSearchParams({
-      track_name: title,
-      artist_name: artist,
-    });
-    if (album) params.set("album_name", album);
-    try {
-      const results = await lrclibFetch(`/api/search?${params}`);
-      const hit = pickBestSearchHit(results, duration);
-      if (
-        hit &&
-        (!record ||
-          (hit.syncedLyrics && !record.syncedLyrics) ||
-          (!record.plainLyrics && hit.plainLyrics))
-      ) {
-        record = hit;
+  const request = (async () => {
+    const deadline = Date.now() + LOOKUP_BUDGET_MS;
+    let record = null;
+
+    if (duration != null && duration > 0 && album) {
+      const params = new URLSearchParams({
+        track_name: title,
+        artist_name: artist,
+        album_name: album,
+        duration: String(Math.round(duration)),
+      });
+      try {
+        record = await lrclibFetch(`/api/get?${params}`, deadline);
+      } catch (err) {
+        console.error("[lyrics] get failed:", err.message);
       }
-    } catch (err) {
-      if (!record) {
-        console.error("[lyrics] search failed:", err.message);
-        throw new Error(err.message || "Could not fetch lyrics.");
+    }
+
+    // Search when /get missed synced lyrics. Both attempts share one deadline,
+    // so an overloaded provider cannot make the overlay wait twice.
+    if (!record || !record.syncedLyrics) {
+      const params = new URLSearchParams({
+        track_name: title,
+        artist_name: artist,
+      });
+      if (album) params.set("album_name", album);
+      try {
+        const results = await lrclibFetch(`/api/search?${params}`, deadline);
+        const hit = pickBestSearchHit(results, duration);
+        if (
+          hit &&
+          (!record ||
+            (hit.syncedLyrics && !record.syncedLyrics) ||
+            (!record.plainLyrics && hit.plainLyrics))
+        ) {
+          record = hit;
+        }
+      } catch (err) {
+        if (record) {
+          console.error("[lyrics] search failed:", err.message);
+        } else {
+          providerBackoffUntil = Date.now() + PROVIDER_BACKOFF_MS;
+          console.error("[lyrics] search failed:", err.message);
+          throw new LyricsUnavailableError();
+        }
       }
-      console.error("[lyrics] search failed:", err.message);
+    }
+
+    providerBackoffUntil = 0;
+    const out = normalizeRecord(record);
+    writeCache(key, out);
+    return out;
+  })();
+  inFlight.set(key, request);
+  try {
+    return await request;
+  } finally {
+    if (inFlight.get(key) === request) {
+      inFlight.delete(key);
     }
   }
-
-  const out = normalizeRecord(record);
-  writeCache(key, out);
-  return out;
 }
 
 /** Fire-and-forget cache warm so overlay opens hit LRClib less often. */

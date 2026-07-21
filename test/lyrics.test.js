@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { lookupLyrics, warmLyrics } from "../src/lyrics.js";
+import {
+  LyricsUnavailableError,
+  lookupLyrics,
+  warmLyrics,
+} from "../src/lyrics.js";
 
 describe("lookupLyrics", () => {
   it("rejects missing title/artist", async () => {
@@ -45,6 +49,74 @@ describe("lookupLyrics", () => {
       });
       assert.equal(out.found, true);
       assert.match(out.syncedLyrics, /Mock synced lyrics/);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("shares one provider request between concurrent lookups", async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    let release;
+    globalThis.fetch = async () => {
+      calls += 1;
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            trackName: "Concurrent Test",
+            artistName: "PartyQueue",
+            duration: 180,
+            syncedLyrics: "[00:01.00]Shared lookup",
+          };
+        },
+      };
+    };
+
+    try {
+      const query = {
+        title: "Concurrent Test",
+        artist: "PartyQueue",
+        album: "Tests",
+        duration: 180,
+      };
+      const first = lookupLyrics(query);
+      const second = lookupLyrics(query);
+      await Promise.resolve();
+      assert.equal(calls, 1);
+      release();
+      const [a, b] = await Promise.all([first, second]);
+      assert.equal(a.found, true);
+      assert.deepEqual(a, b);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("backs off quickly after the provider becomes unavailable", async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      throw new Error("upstream unavailable");
+    };
+
+    try {
+      const query = {
+        title: "Provider Failure Test",
+        artist: "PartyQueue",
+        album: "Tests",
+        duration: 181,
+      };
+      await assert.rejects(lookupLyrics(query), LyricsUnavailableError);
+      assert.equal(calls, 2, "exact and search attempts share one lookup budget");
+
+      await assert.rejects(lookupLyrics(query), LyricsUnavailableError);
+      assert.equal(calls, 2, "backoff prevents another provider request");
     } finally {
       globalThis.fetch = originalFetch;
     }

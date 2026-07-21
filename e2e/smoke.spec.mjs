@@ -123,9 +123,7 @@ test.describe("PartyQueue browser smoke", () => {
     await expect(page.locator("#np-toggle")).toBeHidden();
   });
 
-  test("opening album art keeps the shared playback clock moving forward", async ({
-    page,
-  }) => {
+  test("album art keeps time moving and retries busy lyrics", async ({ page }) => {
     const nowPlaying = {
       title: "Clock Test",
       artist: "PartyQueue",
@@ -166,9 +164,26 @@ test.describe("PartyQueue browser smoke", () => {
     await page.route("**/api/queue/list", (route) =>
       route.fulfill({ status: 200, json: { tracks: [] } })
     );
-    await page.route(/\/api\/lyrics\?/, (route) =>
-      route.fulfill({ status: 200, json: { found: false } })
-    );
+    let lyricsRequests = 0;
+    await page.route(/\/api\/lyrics\?/, (route) => {
+      lyricsRequests += 1;
+      if (lyricsRequests === 1) {
+        return route.fulfill({
+          status: 503,
+          json: {
+            error: "Lyrics service is temporarily busy.",
+            retryAfterSec: 1,
+          },
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        json: {
+          found: true,
+          syncedLyrics: "[01:00.00]Recovered lyrics",
+        },
+      });
+    });
 
     await page.goto("/");
     await expect(page.locator("#np-title")).toHaveText("Clock Test");
@@ -184,6 +199,11 @@ test.describe("PartyQueue browser smoke", () => {
       return parts.reduce((total, part) => total * 60 + part, 0);
     };
     expect(seconds(after)).toBeGreaterThanOrEqual(seconds(before));
+    await expect(page.locator(".np-fs-line")).toContainText(
+      "Recovered lyrics",
+      { timeout: 3_000 }
+    );
+    expect(lyricsRequests).toBe(2);
   });
 
   test("js modules are served as ES modules", async ({ request }) => {
