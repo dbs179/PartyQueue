@@ -34,26 +34,26 @@ beforeEach(() => {
 });
 
 test("renameGuestProfile moves key and rewrites notes", () => {
-  guests.addGuestNote("DK", "DK is a dipshit.");
-  guests.addGuestNote("Sarah", "Especially likes DK.");
-  const result = guests.renameGuestProfile("DK", "Darin");
+  guests.addGuestNote("Alex", "Alex likes dance classics.");
+  guests.addGuestNote("Jordan", "Especially likes Alex.");
+  const result = guests.renameGuestProfile("Alex", "Casey");
   assert.equal(result.ok, true);
-  assert.equal(result.guest.name, "Darin");
-  assert.equal(guests.getGuestProfile("DK"), null);
+  assert.equal(result.guest.name, "Casey");
+  assert.equal(guests.getGuestProfile("Alex"), null);
   assert.ok(
-    guests.getGuestNotesList("Darin").some((n) => n.startsWith("Darin is"))
+    guests.getGuestNotesList("Casey").some((n) => n.startsWith("Casey likes"))
   );
   assert.ok(
     guests
-      .getGuestNotesList("Sarah")
-      .some((n) => /Darin/.test(n) && !/\bDK\b/.test(n))
+      .getGuestNotesList("Jordan")
+      .some((n) => /Casey/.test(n) && !/\bAlex\b/.test(n))
   );
 });
 
 test("renameGuestProfile refuses colliding names", () => {
-  guests.addGuestNote("DK", "One");
-  guests.addGuestNote("Darin", "Two");
-  const result = guests.renameGuestProfile("DK", "Darin");
+  guests.addGuestNote("Alex", "One");
+  guests.addGuestNote("Casey", "Two");
+  const result = guests.renameGuestProfile("Alex", "Casey");
   assert.equal(result.ok, false);
   assert.match(result.error, /already exists/i);
 });

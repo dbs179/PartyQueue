@@ -250,26 +250,9 @@ let selectedPlaylistIds = loadSelection();
 // selection (see SELECTION_VERSION below). Hosts can still check them by hand;
 // that choice is remembered. Bump SELECTION_VERSION whenever this list changes
 // so the new exclusions take effect for existing browsers.
-const DEFAULT_UNCHECKED = [
-  "Henri Music",
-  "Holidays - Halloween 2025",
-  "Dave's NYE 2024",
-  "The Polar Express",
-  "Holidays - 4th of July",
-  "GD songs",
-  "Owen's Bday Party 2023",
-  "Holidays - New Years 2023",
-  "Dave's  String Tribute Players",
-  "Holidays - Halloween 2018",
-  "Holidays - Halloween Music",
-  "Holidays - Christmas Hymns",
-  "Holidays - Christmas Metal",
-  "Holidays - Christmas Music",
-  "Holidays - Christmas Rock",
-  "Owen's Minecraft",
-];
+const DEFAULT_UNCHECKED = [];
 const SELECTION_VERSION_KEY = "pq.selectionVersion";
-const SELECTION_VERSION = "2";
+const SELECTION_VERSION = "3";
 
 function isDefaultUnchecked(name) {
   const n = (name || "").trim().toLowerCase();
@@ -1291,12 +1274,11 @@ function currentDjVoicePayload() {
     djHandoffSilenceSec: Number(djSilenceInput?.value),
     djTtsProvider: provider,
     djTtsVoiceOpenAi: djTtsVoiceInput?.value ?? "onyx",
-    djTtsVoiceElevenlabs:
-      djTtsVoiceElevenlabsInput?.value?.trim() || "CeNX9CMwmxDxUF5Q2Inm",
+    djTtsVoiceElevenlabs: djTtsVoiceElevenlabsInput?.value?.trim() || "",
     djTtsVoice:
       provider === "openai_ha"
         ? djTtsVoiceInput?.value ?? "onyx"
-        : djTtsVoiceElevenlabsInput?.value?.trim() || "CeNX9CMwmxDxUF5Q2Inm",
+        : djTtsVoiceElevenlabsInput?.value?.trim() || "",
     djTtsSpeed: Number(djTtsSpeedInput?.value ?? 1),
     djCharacterIntensity: djIntensityInput?.value ?? "classic",
     djCatchphrase: djCatchphraseInput?.value ?? "",
@@ -1317,7 +1299,7 @@ async function runDjVoicePreview(btn) {
   const voice =
     provider === "openai_ha"
       ? djTtsVoiceInput?.value || "onyx"
-      : djTtsVoiceElevenlabsInput?.value?.trim() || "CeNX9CMwmxDxUF5Q2Inm";
+      : djTtsVoiceElevenlabsInput?.value?.trim() || "";
   const speed = Number(djTtsSpeedInput?.value || 1);
   if (btn) btn.disabled = true;
   const prevLabel = btn?.textContent;
@@ -1414,7 +1396,7 @@ djAdvancedResetBtn?.addEventListener("click", async () => {
     djPersonaNotes: d.djPersonaNotes ?? "",
     djAlwaysInstructions: d.djAlwaysInstructions ?? "",
     djNeverInstructions: d.djNeverInstructions ?? "",
-    djPronunciations: d.djPronunciations ?? "Bow Down = Bough Down",
+    djPronunciations: d.djPronunciations ?? "",
   };
   fillSettings(values);
   const saved = await saveSettings(values, {
@@ -1444,7 +1426,7 @@ async function resetDjVoiceDefaults() {
     djHandoffSilenceSec: d.djHandoffSilenceSec ?? 3,
     djTtsProvider: d.djTtsProvider ?? "elevenlabs_ha",
     djTtsVoiceOpenAi: d.djTtsVoiceOpenAi ?? "onyx",
-    djTtsVoiceElevenlabs: d.djTtsVoiceElevenlabs ?? "CeNX9CMwmxDxUF5Q2Inm",
+    djTtsVoiceElevenlabs: d.djTtsVoiceElevenlabs ?? "",
     djTtsSpeed: d.djTtsSpeed ?? 1,
     djCharacterIntensity: d.djCharacterIntensity ?? "extra",
     djCatchphrase: d.djCatchphrase ?? "",
@@ -1452,7 +1434,7 @@ async function resetDjVoiceDefaults() {
     djPersonaNotes: d.djPersonaNotes ?? "",
     djAlwaysInstructions: d.djAlwaysInstructions ?? "",
     djNeverInstructions: d.djNeverInstructions ?? "",
-    djPronunciations: d.djPronunciations ?? "Bow Down = Bough Down",
+    djPronunciations: d.djPronunciations ?? "",
     djShoutEnabled: d.djShoutEnabled ?? true,
     djShoutMode: d.djShoutMode ?? "every",
     djShoutPercent: d.djShoutPercent ?? 25,
@@ -1483,7 +1465,7 @@ async function resetDjVoiceDefaults() {
       djHandoffSilenceSec: d.djHandoffSilenceSec ?? 3,
       djTtsProvider: d.djTtsProvider ?? "elevenlabs_ha",
       djTtsVoiceOpenAi: d.djTtsVoiceOpenAi ?? "onyx",
-      djTtsVoiceElevenlabs: d.djTtsVoiceElevenlabs ?? "CeNX9CMwmxDxUF5Q2Inm",
+      djTtsVoiceElevenlabs: d.djTtsVoiceElevenlabs ?? "",
       djTtsSpeed: d.djTtsSpeed ?? 1,
       djCharacterIntensity: d.djCharacterIntensity ?? "extra",
       djCatchphrase: d.djCatchphrase ?? "",
@@ -1491,7 +1473,7 @@ async function resetDjVoiceDefaults() {
       djPersonaNotes: d.djPersonaNotes ?? "",
       djAlwaysInstructions: d.djAlwaysInstructions ?? "",
       djNeverInstructions: d.djNeverInstructions ?? "",
-      djPronunciations: d.djPronunciations ?? "Bow Down = Bough Down",
+      djPronunciations: d.djPronunciations ?? "",
       djShoutEnabled: d.djShoutEnabled ?? true,
       djShoutMode: d.djShoutMode ?? "every",
       djShoutPercent: d.djShoutPercent ?? 25,

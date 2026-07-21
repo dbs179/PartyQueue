@@ -92,16 +92,16 @@ test("rejects unknown kinds and short guest ids", () => {
 });
 
 test("persists votes to disk", () => {
-  reactions.setReaction("t9", "fire", "guestpersist1", { by: "Darin" });
+  reactions.setReaction("t9", "fire", "guestpersist1", { by: "Alex" });
   reactions.setReaction("t9", "mic", "guestpersist1", {
     name: "Mic Song",
     artist: "Singer",
-    by: "Darin",
+    by: "Alex",
   });
   const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
   assert.equal(raw.byTrack.t9.votes.guestpersist1.kind, "fire");
-  assert.equal(raw.byTrack.t9.votes.guestpersist1.by, "Darin");
-  assert.equal(raw.byTrack.t9.micVotes.guestpersist1.by, "Darin");
+  assert.equal(raw.byTrack.t9.votes.guestpersist1.by, "Alex");
+  assert.equal(raw.byTrack.t9.micVotes.guestpersist1.by, "Alex");
   assert.equal(raw.byTrack.t9.name, "Mic Song");
 });
 
@@ -134,23 +134,23 @@ test("lists include display names; empty by shows as Guest", () => {
   reactions.setReaction("t1", "fire", "guest1111", {
     name: "Hot Song",
     artist: "Band",
-    by: "Darin",
+    by: "Alex",
   });
-  reactions.setReaction("t1", "heart", "guest2222", { by: "Sarah" });
-  reactions.setReaction("t1", "mic", "guest1111", { by: "Darin" });
+  reactions.setReaction("t1", "heart", "guest2222", { by: "Riley" });
+  reactions.setReaction("t1", "mic", "guest1111", { by: "Alex" });
   reactions.setReaction("t1", "mic", "guest3333", { by: "Mark" });
 
   const karaoke = reactions.listKaraokeTracks(10);
   assert.equal(karaoke.length, 1);
-  assert.deepEqual(karaoke[0].by, ["Darin", "Mark"]);
+  assert.deepEqual(karaoke[0].by, ["Alex", "Mark"]);
 
   const reacted = reactions.listReactedTracks(10);
   assert.equal(reacted.length, 1);
   assert.equal(reacted[0].count, 2);
   const fire = reacted[0].reactions.find((r) => r.kind === "fire");
   const heart = reacted[0].reactions.find((r) => r.kind === "heart");
-  assert.deepEqual(fire.by, ["Darin"]);
-  assert.deepEqual(heart.by, ["Sarah"]);
+  assert.deepEqual(fire.by, ["Alex"]);
+  assert.deepEqual(heart.by, ["Riley"]);
 
   reactions.setReaction("t2", "up", "guestaaaa", {
     name: "No Name",
@@ -166,23 +166,23 @@ test("lists include display names; empty by shows as Guest", () => {
 });
 
 test("mood switch updates by; mic stays independent", () => {
-  reactions.setReaction("t1", "fire", "guestcccc", { by: "Darin" });
-  reactions.setReaction("t1", "mic", "guestcccc", { by: "Darin" });
-  reactions.setReaction("t1", "heart", "guestcccc", { by: "DK" });
+  reactions.setReaction("t1", "fire", "guestcccc", { by: "Alex" });
+  reactions.setReaction("t1", "mic", "guestcccc", { by: "Alex" });
+  reactions.setReaction("t1", "heart", "guestcccc", { by: "Casey" });
   const reacted = reactions.listReactedTracks(10);
   assert.equal(reacted[0].reactions.length, 1);
   assert.equal(reacted[0].reactions[0].kind, "heart");
-  assert.deepEqual(reacted[0].reactions[0].by, ["DK"]);
-  assert.deepEqual(reactions.listKaraokeTracks(10)[0].by, ["Darin"]);
+  assert.deepEqual(reacted[0].reactions[0].by, ["Casey"]);
+  assert.deepEqual(reactions.listKaraokeTracks(10)[0].by, ["Alex"]);
 });
 
 test("top liked, party music, and most hated rank by kind groups", () => {
   reactions.setReaction("liked1", "fire", "guest1111", {
     name: "Hot",
     artist: "A",
-    by: "Darin",
+    by: "Alex",
   });
-  reactions.setReaction("liked1", "heart", "guest2222", { by: "Sarah" });
+  reactions.setReaction("liked1", "heart", "guest2222", { by: "Riley" });
   reactions.setReaction("liked2", "up", "guest3333", {
     name: "Okay",
     artist: "B",
@@ -191,19 +191,19 @@ test("top liked, party music, and most hated rank by kind groups", () => {
   reactions.setReaction("party1", "party", "guest1111", {
     name: "Banger",
     artist: "C",
-    by: "Darin",
+    by: "Alex",
   });
   reactions.setReaction("hate1", "down", "guest2222", {
     name: "Nope",
     artist: "D",
-    by: "Sarah",
+    by: "Riley",
   });
   reactions.setReaction("hate1", "vomit", "guest3333", { by: "Mark" });
   // Laugh alone should not appear on liked / party / hated lists
   reactions.setReaction("funny1", "laugh", "guest1111", {
     name: "Joke",
     artist: "E",
-    by: "Darin",
+    by: "Alex",
   });
 
   const liked = reactions.listTopLikedTracks(10);

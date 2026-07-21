@@ -54,12 +54,11 @@ import {
 describe("music pronunciation", () => {
   it("rewrites known ambiguous titles and stylized artist names for TTS", () => {
     assert.equal(
-      applyMusicPronunciations("Bow Down by AC/DC, U2, and R.E.M."),
-      "Bough Down by A C D C, U Two, and R E M"
-    );
-    assert.equal(
-      applyMusicPronunciations("The crowd should bow down to nobody."),
-      "The crowd should bow down to nobody."
+      applyMusicPronunciations(
+        "Xylo with AC/DC, U2, and R.E.M.",
+        "Xylo = Zye-lo"
+      ),
+      "Zye-lo with A C D C, U Two, and R E M"
     );
   });
 
@@ -67,26 +66,25 @@ describe("music pronunciation", () => {
     const guide = formatMusicPronunciationGuide();
     assert.match(guide, /song titles, artist names, and band names/i);
     assert.match(guide, /standard spoken pronunciation/i);
-    assert.match(guide, /Bow.*rhyme with "how"/i);
     assert.match(guide, /omit the name instead of guessing/i);
   });
 
   it("parses safe literal host mappings and applies them case-sensitively", () => {
-    const raw = "Deftones = Deaf-tones\ninvalid line\n# comment\nBow Down => Bough Down";
+    const raw = "Xylo = Zye-lo\ninvalid line\n# comment\nDJ Q => DJ Cue";
     assert.deepEqual(parseDjPronunciations(raw), [
-      { written: "Deftones", spoken: "Deaf-tones" },
-      { written: "Bow Down", spoken: "Bough Down" },
+      { written: "Xylo", spoken: "Zye-lo" },
+      { written: "DJ Q", spoken: "DJ Cue" },
     ]);
     assert.equal(
-      applyMusicPronunciations("Deftones and deftones", raw),
-      "Deaf-tones and deftones"
+      applyMusicPronunciations("Xylo and xylo", raw),
+      "Zye-lo and xylo"
     );
-    assert.match(formatMusicPronunciationGuide(raw), /Deftones.*Deaf-tones/);
+    assert.match(formatMusicPronunciationGuide(raw), /Xylo.*Zye-lo/);
   });
 
   it("normalizes advanced guidance and clearly marks it supplemental", () => {
     assert.equal(normalizeDjPersonaNotes("  Local host\u0000  "), "Local host");
-    assert.equal(normalizeDjPronunciations(null), "Bow Down = Bough Down");
+    assert.equal(normalizeDjPronunciations(null), "");
     const block = formatHostDjGuidance({
       personaNotes: "Dry humor.",
       alwaysInstructions: "Keep it warm.",
@@ -394,8 +392,8 @@ describe("normalizeDjTtsVoice", () => {
 
   it("accepts ElevenLabs voice IDs for elevenlabs_ha", () => {
     assert.equal(
-      normalizeDjTtsVoice("CeNX9CMwmxDxUF5Q2Inm", "elevenlabs_ha"),
-      "CeNX9CMwmxDxUF5Q2Inm"
+      normalizeDjTtsVoice("AbCdEfGhIjKlMnOpQrSt", "elevenlabs_ha"),
+      "AbCdEfGhIjKlMnOpQrSt"
     );
     assert.equal(
       normalizeDjTtsVoice("bad", "elevenlabs_ha"),
@@ -524,7 +522,7 @@ describe("DJ character bible", () => {
     assert.match(DJ_CHARACTER_BIBLE.identity, /\{event\}/);
     assert.doesNotMatch(
       DJ_CHARACTER_BIBLE.identity + DJ_CHARACTER_BIBLE.quirks.join(" "),
-      /Holy Roller|Church Night|worship/i
+      /religious persona|worship service/i
     );
     const prompt = formatCharacterBibleForPrompt();
     assert.ok(prompt.includes(eventDisplayName()));
@@ -885,7 +883,7 @@ describe("Phase 6 character knobs", () => {
     assert.ok(DJ_INTENSITY_PROFILES.subtle && DJ_INTENSITY_PROFILES.extra);
     assert.equal(getDjIntensityProfile("extra").bitEveryN, 2);
     assert.equal(
-      normalizeDjCatchphrase("  Keep the faith!  ").length > 0,
+      normalizeDjCatchphrase("  Let's turn it up!  ").length > 0,
       true
     );
     assert.deepEqual(parseDjBanList("party people, crank it up"), [
@@ -930,10 +928,10 @@ describe("Phase 6 character knobs", () => {
       mood: "party",
       salt: 0,
       includeBit: true,
-      catchphrase: "Keep the faith!",
+      catchphrase: "Let's turn it up!",
       intensity: "classic",
     });
-    assert.equal(bit, "Keep the faith!");
+    assert.equal(bit, "Let's turn it up!");
   });
 
   it("kids mood skips catchphrase for bits", () => {
@@ -941,15 +939,15 @@ describe("Phase 6 character knobs", () => {
       mood: "kids",
       salt: 0,
       includeBit: true,
-      catchphrase: "Keep the faith!",
+      catchphrase: "Let's turn it up!",
       intensity: "extra",
     });
-    assert.notEqual(bit, "Keep the faith!");
+    assert.notEqual(bit, "Let's turn it up!");
     assert.ok(bit);
   });
 
   it("characterBitKind classifies catchphrase vs bible vs none", () => {
-    const phrase = "Keep the faith — and keep it loud.";
+    const phrase = "Let's turn it up!";
     assert.equal(
       characterBitKind({ include: true, bit: phrase }, phrase),
       "catchphrase"
@@ -966,7 +964,7 @@ describe("Phase 6 character knobs", () => {
   });
 
   it("catchphrase-as-bit prompt requires exact wording", () => {
-    const phrase = "Keep the faith — and keep it loud.";
+    const phrase = "Let's turn it up!";
     const prompt = formatCharacterBibleForPrompt(
       { include: true, bit: phrase },
       { intensity: "extra", catchphrase: phrase, banList: "" }
@@ -985,7 +983,7 @@ describe("Phase 6 character knobs", () => {
   });
 
   it("bible-bit prompt still allows paraphrase", () => {
-    const phrase = "Keep the faith — and keep it loud.";
+    const phrase = "Let's turn it up!";
     const aside = "Smile if you feel it. Dance if you mean it.";
     const prompt = formatCharacterBibleForPrompt(
       { include: true, bit: aside },

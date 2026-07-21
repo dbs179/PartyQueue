@@ -136,6 +136,22 @@ test(
         .filter((file) => credentialPattern.test(fs.readFileSync(file, "utf8")))
         .map((file) => path.relative(expanded, file));
       assert.deepEqual(hits, []);
+
+      const installationMarkers = [
+        ["CeNX9CMw", "mxDxUF5Q2Inm"].join(""),
+        ["Holy", " Roller"].join(""),
+        ["David", " Swineford"].join(""),
+        ["Henri", " Music"].join(""),
+        ["Owen", "'s Minecraft"].join(""),
+      ];
+      const personalizedHits = files
+        .filter((file) => fs.statSync(file).size <= 5_000_000)
+        .filter((file) => {
+          const content = fs.readFileSync(file, "utf8");
+          return installationMarkers.some((marker) => content.includes(marker));
+        })
+        .map((file) => path.relative(expanded, file));
+      assert.deepEqual(personalizedHits, []);
     } finally {
       for (const trap of traps) fs.rmSync(trap, { force: true });
       fs.rmSync(temp, { recursive: true, force: true });

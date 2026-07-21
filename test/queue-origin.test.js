@@ -115,17 +115,17 @@ test("sanitizes blank / oversized requestedBy", () => {
 
 test("stores badge alias and requestedByUser separately", () => {
   origin.markOrigin(["alias1"], "searched", {
-    requestedBy: "Party Dave",
+    requestedBy: "Party Alex",
     requestedByUser: "Mark",
   });
-  assert.equal(origin.requestedByOf("alias1"), "Party Dave");
+  assert.equal(origin.requestedByOf("alias1"), "Party Alex");
   assert.equal(origin.requestedByUserOf("alias1"), "Mark");
   const snap = origin.originSnapshot().get("alias1");
-  assert.equal(snap.requestedBy, "Party Dave");
+  assert.equal(snap.requestedBy, "Party Alex");
   assert.equal(snap.requestedByUser, "Mark");
   // Re-mark without identity keeps previous values.
   origin.markOrigin(["alias1"], "searched");
-  assert.equal(origin.requestedByOf("alias1"), "Party Dave");
+  assert.equal(origin.requestedByOf("alias1"), "Party Alex");
   assert.equal(origin.requestedByUserOf("alias1"), "Mark");
   // Old rows without requestedByUser fall back to badge for user lookup.
   origin.markOrigin(["legacy"], "searched", { requestedBy: "Sam" });

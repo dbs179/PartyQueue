@@ -106,7 +106,7 @@ test("topRequesters ranks by count and skips blank names", () => {
 test("topRequesters aggregates by User when aliases differ", () => {
   // Server stamps requestedBy=User; alias is audit-only and must not split stats.
   reqlog.recordRequest(
-    { id: "a", name: "A", artist: "X", requestedBy: "Mark", alias: "Party Dave" },
+    { id: "a", name: "A", artist: "X", requestedBy: "Mark", alias: "Party Alex" },
     100
   );
   reqlog.recordRequest(
@@ -114,17 +114,17 @@ test("topRequesters aggregates by User when aliases differ", () => {
     200
   );
   reqlog.recordRequest(
-    { id: "c", name: "C", artist: "Z", requestedBy: "Dave", alias: "Disco Dave" },
+    { id: "c", name: "C", artist: "Z", requestedBy: "Alex", alias: "Disco Alex" },
     300
   );
   const top = reqlog.topRequesters(reqlog.getRequests(), 0, 5);
   assert.deepEqual(top, [
     { name: "Mark", count: 2 },
-    { name: "Dave", count: 1 },
+    { name: "Alex", count: 1 },
   ]);
   const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
   assert.equal(raw[0].requestedBy, "Mark");
-  assert.equal(raw[0].alias, "Party Dave");
+  assert.equal(raw[0].alias, "Party Alex");
 });
 
 test("recentRequests returns newest first", () => {
@@ -148,7 +148,7 @@ test("stores dedication on record and listDedications", () => {
     100
   );
   reqlog.recordRequest(
-    { id: "d2", name: "Other", artist: "Art", requestedBy: "Dave" },
+    { id: "d2", name: "Other", artist: "Art", requestedBy: "Alex" },
     200
   );
   const all = reqlog.getRequests();

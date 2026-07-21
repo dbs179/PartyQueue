@@ -55,7 +55,7 @@ test("setSuggestionDone toggles and sorts open before done", () => {
 });
 
 test("persists to disk", () => {
-  const row = box.addSuggestion({ text: "Keep this", requestedBy: "Dave" }, 42);
+  const row = box.addSuggestion({ text: "Keep this", requestedBy: "Alex" }, 42);
   const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
   assert.ok(raw.some((e) => e.id === row.id && e.text === "Keep this"));
 });

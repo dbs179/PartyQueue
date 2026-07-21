@@ -35,12 +35,12 @@ test("resolveGuestIdentity: empty alias falls back to User for badge", () => {
 
 test("resolveGuestIdentity: alias is badge, User stays separate", () => {
   const out = resolveGuestIdentity({
-    requestedBy: "Party Dave",
+    requestedBy: "Party Alex",
     requestedByUser: "Mark",
   });
   assert.equal(out.user, "Mark");
-  assert.equal(out.badge, "Party Dave");
-  assert.equal(out.alias, "Party Dave");
+  assert.equal(out.badge, "Party Alex");
+  assert.equal(out.alias, "Party Alex");
 });
 
 test("resolveGuestIdentity: old clients send only requestedBy as both", () => {

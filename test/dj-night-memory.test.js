@@ -36,7 +36,7 @@ const { getDjVoiceSettings, setDjVoiceSettings } = await import(
 beforeEach(() => {
   mem.clearDjNightMemory();
   resetSearchAddCountForTests();
-  for (const name of ["Mark", "Dave", "Jen", "Sam", "Alice"]) {
+  for (const name of ["Mark", "Alex", "Jen", "Sam", "Alice"]) {
     guests.deleteGuestProfile(name);
   }
 });
@@ -60,7 +60,7 @@ test("isFirstShoutTonight is true until rememberShout, then false", () => {
     notes: ["Mark likes crayons"],
   });
   assert.equal(mem.isFirstShoutTonight("Mark"), false);
-  assert.equal(mem.isFirstShoutTonight("Dave"), true);
+  assert.equal(mem.isFirstShoutTonight("Alex"), true);
 });
 
 test("anonymous / empty names are never first-shout tonight", () => {
@@ -137,7 +137,7 @@ test("shouldShoutOnSearch forces first named request even when percent is 0", ()
       "second request follows percent=0"
     );
     assert.equal(
-      shouldShoutOnSearch({ requestedBy: "Dave", ready: true }),
+      shouldShoutOnSearch({ requestedBy: "Alex", ready: true }),
       true,
       "different guest still gets first-shout"
     );
@@ -189,11 +189,11 @@ test("shouldShoutOnSearch keys first-shout on User, not queue alias", async () =
       djShoutPercent: 0,
     });
     const first = resolveGuestIdentity({
-      requestedBy: "Party Dave",
+      requestedBy: "Party Alex",
       requestedByUser: "Mark",
     });
     assert.equal(first.user, "Mark");
-    assert.equal(first.badge, "Party Dave");
+    assert.equal(first.badge, "Party Alex");
     assert.equal(
       shouldShoutOnSearch({ requestedBy: first.user, ready: true }),
       true
@@ -208,7 +208,7 @@ test("shouldShoutOnSearch keys first-shout on User, not queue alias", async () =
       false,
       "alias change must not re-trigger first-shout"
     );
-    assert.equal(mem.isFirstShoutTonight("Party Dave"), true);
+    assert.equal(mem.isFirstShoutTonight("Party Alex"), true);
     assert.equal(mem.isFirstShoutTonight("Mark"), false);
   } finally {
     setDjVoiceSettings({
@@ -287,7 +287,7 @@ test("shouldShoutOnSearch every-N: other guest first-shout does not advance coun
       true
     );
     assert.equal(
-      shouldShoutOnSearch({ requestedBy: "Dave", ready: true }),
+      shouldShoutOnSearch({ requestedBy: "Alex", ready: true }),
       true,
       "new guest first-shout"
     );
@@ -325,13 +325,13 @@ test("tonightBirthdayGuests filters to calendar birthdays in the window", () => 
   const mm = String(now.getMonth() + 1).padStart(2, "0");
   const dd = String(now.getDate()).padStart(2, "0");
   guests.setGuestBirthday("Mark", `${mm}-${dd}`, "boy");
-  guests.setGuestBirthday("Dave", "01-01", "boy");
+  guests.setGuestBirthday("Alex", "01-01", "boy");
 
   const ts = now.getTime();
   const found = tonightBirthdayGuests(
     [
       { requestedBy: "Mark", ts },
-      { requestedBy: "Dave", ts },
+      { requestedBy: "Alex", ts },
       { requestedBy: "Jen", ts },
     ],
     ts - 1000,

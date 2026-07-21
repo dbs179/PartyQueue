@@ -598,12 +598,6 @@ export function formatMusicPronunciationGuide(
   pronunciations = DJ_VOICE_DEFAULTS.djPronunciations
 ) {
   const custom = parseDjPronunciations(pronunciations);
-  const bowDown = custom.some(
-    ({ written, spoken }) => written === "Bow Down" && spoken === "Bough Down"
-  );
-  const bowDownLine = bowDown
-    ? '\n- "Bow Down": pronounce "Bow" to rhyme with "how"; write "Bough Down" in spoken output.'
-    : "";
   const customBlock = custom.length
     ? `\n- Host pronunciation dictionary (write the spoken form when naming these):\n${custom
         .map(({ written, spoken }) => `  - "${written}" → "${spoken}"`)
@@ -614,7 +608,7 @@ export function formatMusicPronunciationGuide(
 - Before using a music name, silently determine its standard spoken pronunciation from context.
 - If uncertain, omit the name instead of guessing.
 - When a name is included, make the spoken output TTS-friendly. Use a natural phonetic respelling only when needed; never explain the pronunciation to listeners.
-- AC/DC is spoken "A C D C"; U2 is "U Two"; R.E.M. is "R E M".${bowDownLine}${customBlock}`;
+- AC/DC is spoken "A C D C"; U2 is "U Two"; R.E.M. is "R E M".${customBlock}`;
 }
 
 export function formatHostDjGuidance(characterKnobs = null) {
@@ -2627,9 +2621,8 @@ function applyTempoWithFfmpeg(inputPath, outputPath, speed) {
 }
 
 // Generate TTS via Home Assistant (OpenAI or ElevenLabs engine). Prefer the HA
-// proxy URL for the Sonos queue — speakers are on the HA LAN (10.10.20.x) and
-// often cannot reach this PC's 10.10.10.x address. Still save a local copy for
-// debugging/pruning.
+// proxy URL for the Sonos queue when speakers cannot reach the PartyQueue host
+// directly. Still save a local copy for debugging/pruning.
 // Optional voice/speed/provider overrides (used by Settings Preview). When
 // speed â‰  1, the local PartyQueue URL is used so Sonos hears the tempo-changed clip.
 export async function saveTtsClip(

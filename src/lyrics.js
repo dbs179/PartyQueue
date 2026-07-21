@@ -19,7 +19,7 @@ try {
   /* keep default */
 }
 
-const USER_AGENT = `PartyQueue/${appVersion} (https://github.com/local/partyqueue)`;
+const USER_AGENT = `PartyQueue/${appVersion}`;
 
 /** @type {Map<string, { at: number, value: object }>} */
 const cache = new Map();

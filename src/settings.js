@@ -239,7 +239,7 @@ export const DJ_VOICE_DEFAULTS = {
   // TTS via Home Assistant: ElevenLabs (expressive) or OpenAI.
   djTtsProvider: "elevenlabs_ha",
   djTtsVoiceOpenAi: "onyx",
-  djTtsVoiceElevenlabs: "CeNX9CMwmxDxUF5Q2Inm",
+  djTtsVoiceElevenlabs: "",
   // OpenAI TTS speaking rate (0.25–4.0; we expose useful party values).
   // Also applied locally via ffmpeg for ElevenLabs clips.
   djTtsSpeed: 1,
@@ -252,7 +252,7 @@ export const DJ_VOICE_DEFAULTS = {
   djAlwaysInstructions: "",
   djNeverInstructions: "",
   // One literal mapping per line: Written name = TTS-friendly pronunciation.
-  djPronunciations: "Bow Down = Bough Down",
+  djPronunciations: "",
   // Mood Pulse / DJ shout-outs on searched adds.
   djShoutEnabled: true,
   djShoutMode: "every", // "percent" | "every"

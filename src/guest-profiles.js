@@ -19,13 +19,28 @@ export const BIRTHDAY_ROLES = ["boy", "girl", "star"];
 
 let cache = null; // { [name]: { notes: string[], birthday, birthdayRole, updatedAt } }
 
+function freshInstallProfiles() {
+  return {
+    "Sample Guest": {
+      notes: [
+        "Enjoys upbeat sing-alongs.",
+        "Likes a friendly shout-out when their request plays.",
+      ],
+      birthday: null,
+      birthdayRole: null,
+      updatedAt: Date.now(),
+    },
+  };
+}
+
 function load() {
   if (cache) return cache;
   try {
     const raw = JSON.parse(fs.readFileSync(STORE_FILE, "utf8"));
     cache = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-  } catch {
-    cache = {};
+  } catch (err) {
+    cache = err?.code === "ENOENT" ? freshInstallProfiles() : {};
+    if (err?.code === "ENOENT") persist();
   }
   let dirty = false;
   for (const key of Object.keys(cache)) {
@@ -462,7 +477,7 @@ export function renameGuestProfile(fromName, toName) {
   if (!from) return { ok: false, error: "Guest not found." };
   if (!to) return { ok: false, error: "Enter a new name." };
   if (from.toLowerCase() === to.toLowerCase() && from !== to) {
-    // Case-only rename (e.g. dk → DK): rewrite key.
+    // Case-only rename (e.g. alex → Alex): rewrite key.
   } else if (from === to) {
     return { ok: true, guest: getGuestProfile(from) };
   }

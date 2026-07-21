@@ -1,319 +1,323 @@
 # PartyQueue
 
-**Version:** 6.8.0 (tracked in `package.json`)
+**Version 7.0.0**
 
-A LAN party app for Sonos: guests open it on their phones, search Spotify, and
-add songs to **your** queue. Playback controls, Random, and Music Mix are on the
-LAN so anyone at the party can help run the night.
+PartyQueue lets everyone at your party help choose the music. Guests open a
+web page on their phones, search Spotify, and add songs to your Sonos queue.
+There is no app to install on their phones and guests do not need to sign in to
+Spotify.
 
-**License:** [MIT](LICENSE). Not affiliated with, endorsed by, or supported by
-Sonos or Spotify. You must use your own
-[Spotify Developer](https://developer.spotify.com/dashboard) app and a
-**Spotify Premium** account, and you are responsible for complying with their
-terms. Intended for **personal use on a trusted home LAN** — do not expose it to
-the public internet.
+PartyQueue is designed for personal use on a trusted home network. Do not make
+it directly available on the public internet.
 
----
+## What you need
 
-## Quick start (minimum path)
+Before you begin, make sure you have:
 
-1. **Requirements:** Spotify Premium, PartyQueue on the **same Wi‑Fi/LAN** as
-   your Sonos, Spotify already added as a music service in the Sonos app.
-2. **Create a Spotify app** (one time) — see [Spotify Developer app](#spotify-developer-app).
-3. **Run** PartyQueue ([locally](#run-locally) or [Unraid/Docker](#run-on-unraid-docker)).
-4. Open **DJ Booth → Settings → Connections**, paste Client ID / Secret /
-   Redirect URI / Market, Save, then **Test**.
-5. On a phone on the same network, open `http://<host-ip>:<PORT>`, search, tap
-   **Add**. That starts (or extends) the queue — you do **not** need music
-   playing in Sonos first.
-6. Optional next: turn on **Never-Ending** / use **Random**, set a
-   [host PIN](#host-pin), connect your playlists, Last.fm, or DJ Voice.
+- A Sonos system with Spotify already added as a music service
+- A Spotify Premium account
+- A free Spotify Developer app (instructions below)
+- A computer or Unraid server that stays on during the party
+- All phones, Sonos speakers, and PartyQueue on the same home network
 
----
+Last.fm, Home Assistant, and DJ Voice are optional. You can add them later.
 
-## How it works
+## Setup at a glance
 
-- **Spotify search** uses an app-level token (Client Credentials). Guests never
-  log in and never touch your Spotify account.
-- **Queue adds** talk to Sonos on your LAN (append / insert — not “replace
-  everything and hijack the house” by default).
-- Spotify must already be a music service in your Sonos system.
-- **Now Playing** uses a demand-driven Server-Sent Events stream. While at least
-  one guest is viewing the main page, the server takes at most one shared Sonos
-  snapshot every 1.5 seconds, regardless of guest count, and broadcasts
-  meaningful changes. With no active viewers the stream poller stops entirely.
-  Queue and group lists remain on a conservative 5-second browser refresh, and
-  browsers fall back to `/api/nowplaying` every 15 seconds if streaming fails.
-  After repeated Sonos read failures, clients mark the last snapshot as stale
-  and clear the warning automatically when Sonos recovers.
+1. [Create a Spotify Developer app](#1-create-a-spotify-developer-app).
+2. [Install and start PartyQueue](#2-install-partyqueue).
+3. Open PartyQueue in a browser.
+4. Go to **DJ Booth → Settings → Connections**.
+5. Enter your Spotify details, save them, and select **Test**.
+6. Open PartyQueue on a phone and add a song.
 
-**Optional host PIN:** set it under **DJ Booth → Settings → Connections → Host
-PIN** (stored hashed on the server), or use `SETTINGS_PIN` in `.env`. On a fresh
-install, enter the six-digit setup code stored in
-`data/host-bootstrap-code.json` before choosing the first PIN; it expires after
-two hours, is deleted after setup, and a restart issues a new one. The PIN locks
-the **DJ Booth** UI and host-only APIs
-(settings, credentials, resets, restart, guest admin, uploads). Party controls
-remain open by default; **Music Mix → Host-only controls** can also require the
-PIN for playback, queue editing, and Sonos grouping. Random requests remain
-available to guests. The server also rejects cross-site browser requests so a
-random website can’t quietly poke your queue.
+You do not need to start music in the Sonos app first. Adding the first song
+from PartyQueue will create and start the queue.
 
----
+## 1. Create a Spotify Developer app
 
-## Spotify Developer app
+This is a one-time setup. It gives PartyQueue permission to search Spotify.
+Your guests never see these credentials and never access your Spotify account.
 
-1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard).
-2. **Create app**. Name/description can be anything.
-3. Under **Redirect URIs**, add the callback you’ll use for the one-time
-   playlist login, e.g. `http://127.0.0.1:8080/auth/callback`. (Spotify allows
-   loopback without HTTPS.) Save.
-4. Copy **Client ID** and **Client Secret** into PartyQueue
-   (**DJ Booth → Settings → Connections**) or into `.env` for Docker.
+1. Open the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+   and sign in.
+2. Select **Create app**. The app name and description can be anything.
+3. Add this Redirect URI:
 
----
+   `http://127.0.0.1:8080/auth/callback`
 
-## Run locally
+   If you change PartyQueue's port from `8080`, use that same port here.
+4. Save the Spotify app.
+5. Copy its **Client ID** and **Client Secret**. You will enter both in
+   PartyQueue after it starts.
 
-Requires Node.js 20+.
+The Redirect URI in Spotify and PartyQueue must match exactly.
 
-```bash
-npm ci
-cp .env.example .env   # optional Sonos/PORT; APIs can go in Settings
-npm start
-```
+## 2. Install PartyQueue
 
-Then open **DJ Booth → Settings → Connections** and enter Spotify (and
-optionally Last.fm / Home Assistant).
+Choose the setup that matches your system.
 
-Open `http://<your-computer-ip>:<PORT>` on your phone (same Wi‑Fi). Default
-`PORT` in `.env.example` is `8080`. Use `/api/health` for a quick liveness check
-(process up + version). Use `/api/rooms` to confirm Sonos discovery.
+### Unraid or another Docker server
 
----
+Copy the PartyQueue folder to `/mnt/user/appdata/PartyQueue`. In that folder,
+make a copy of `.env.example` named `.env`.
 
-## Run on Unraid (Docker)
-
-Sonos uses multicast (SSDP) discovery, which does **not** work over Docker’s
-default bridge network. Use **host networking**.
-
-### Compose (recommended)
-
-Copy the project (or a [share zip](#sharing-this-project)) onto the server,
-create a `.env` from `.env.example`, then:
+Then open an Unraid terminal and run:
 
 ```bash
 cd /mnt/user/appdata/PartyQueue
 docker compose build --no-cache && docker compose up -d
 ```
 
-The included `docker-compose.yml` sets `network_mode: host` and mounts
-`./data:/app/data`. The app is reachable at `http://<unraid-ip>:<PORT>`
-(default `8080` unless you change `PORT`). Image builds use the committed npm
-lockfile, so rebuilds install the same dependency versions.
+Open PartyQueue at:
 
-After code updates, use the same rebuild command so you’re not served a stale
-image layer. Docker stop/restart signals are handled gracefully: PartyQueue
-stops its background monitors, flushes pending history and genre-cache writes,
-and then exits for the container restart policy. The image includes a
-`HEALTHCHECK` against `/api/health`. For stricter orchestration use
-`/api/ready` (503 while the HTTP server is down or shutting down; Sonos and
-Spotify are reported as checks, not hard requirements).
+`http://YOUR_UNRAID_IP:8080`
 
-### Manual “Add Container”
+Replace `YOUR_UNRAID_IP` with the address of your Unraid server.
 
-1. **Docker** tab → **Add Container**.
-2. **Network Type:** `Host`.
-3. Build first (`docker build -t partyqueue .`) or point at your image.
-4. Add env vars as needed (`SPOTIFY_*`, `SONOS_REGION`, `SONOS_HOST`, `PORT`, …).
-5. Persist `data/` if you use Settings-stored credentials.
+The included Docker setup uses host networking because Sonos discovery usually
+does not work through Docker's normal bridge network. It also stores your
+settings in the local `data` folder so they survive updates.
 
-> **Tip:** If discovery is flaky even with host networking, give a speaker a
-> DHCP reservation and set `SONOS_HOST` to that IP.
+Use the same two-line command after downloading a PartyQueue update.
 
----
+### Windows, macOS, or Linux
 
-## Configure
+Install [Node.js 20 or newer](https://nodejs.org/), open a terminal in the
+PartyQueue folder, and run:
 
-### Credentials (preferred: in the app)
-
-**DJ Booth → Settings → Connections:**
-
-| Section | What to enter | Stored in (gitignored) |
-|---------|---------------|------------------------|
-| **Host PIN** | Optional booth / host-API lock | `data/host-pin.json` (hashed) |
-| **Sonos** | Speaker IP + room name (when discovery fails) | `data/sonos.json` |
-| **Spotify** | Client ID, Secret, Redirect URI, Market | `data/spotify-app.json` |
-| **Last.fm** | API key (genres + Discover) | `data/lastfm.json` |
-| **Home Assistant** | URL + long-lived token (DJ Voice) | `data/home-assistant.json` |
-
-Secrets are never returned to the browser after save and are **not** included in
-the share zip.
-
-### `.env` (Sonos / server / Docker)
-
-Copy from `.env.example`. Common keys:
-
-```
-SONOS_REGION=NorthAmerica      # or "EU"
-SONOS_ROOM=                    # optional, e.g. "Living Room"
-SONOS_HOST=                    # optional speaker IP (recommended on Docker)
-PORT=8080
-PUBLIC_BASE_URL=               # Docker: http://YOUR_UNRAID_IP:8080 (example)
-SETTINGS_PIN=                  # optional bootstrap; prefer Host PIN in the UI
+```bash
+npm ci
+npm start
 ```
 
-For Docker/Unraid you can also set `SPOTIFY_*`, `LASTFM_API_KEY`, `HA_URL`, and
-`HA_TOKEN` in `.env`; env values override the JSON files.
+The `.env` file is optional for a local install because most settings can be
+entered in PartyQueue.
 
-- **SONOS_ROOM** — blank = first group coordinator; or a room name for that group.
-- **SONOS_HOST** — blank = SSDP discovery; pin an IP if discovery is flaky.
-- **Redirect URI** — must match the Spotify Developer app exactly (playlist login).
+Open `http://localhost:8080` on that computer. On another phone or computer,
+use the PartyQueue computer's network address, for example:
 
-### Your playlists (one-time login)
+`http://192.168.1.50:8080`
 
-Guest search needs no login. To use **your** playlists (including private ones):
+## 3. Finish first-time setup
 
-1. **Music Mix → Playlists** (or Connect Spotify where shown) and approve access.
-2. Do that on the machine running the app so a `127.0.0.1` redirect resolves.
-3. Refresh token lands in `data/spotify-tokens.json` (or set
-   `SPOTIFY_REFRESH_TOKEN` in Docker `.env`).
+Open **DJ Booth → Settings → Connections**.
 
-### Last.fm (optional)
+### Spotify (required)
 
-Genre filters and Discover Similar. Free key:
-[last.fm/api/account/create](https://www.last.fm/api/account/create) →
-**DJ Booth → Settings → Connections → Last.fm** → Test.
+Enter:
 
-### Home Assistant + DJ Voice (optional)
+- **Client ID** — copied from your Spotify Developer app
+- **Client Secret** — copied from your Spotify Developer app
+- **Redirect URI** — normally `http://127.0.0.1:8080/auth/callback`
+- **Market** — your two-letter country code, such as `US`, `CA`, or `GB`
 
-Announcements on Sonos via Home Assistant TTS (ElevenLabs or OpenAI):
+Select **Save**, then **Test**.
 
-1. **DJ Booth → Settings → Connections → Home Assistant** — URL + long-lived
-   token → Test.
-2. In HA, add **ElevenLabs** (or OpenAI TTS). PartyQueue calls `tts_get_url` on
-   `tts.elevenlabs_text_to_speech` or `tts.openai_tts_2`.
-3. **DJ Booth → Settings → DJ** — provider, voice, character → Test.
-4. Enable **DJ Voice** in those DJ settings (and shouts if you want request
-   shout-outs).
-5. Pick your Sonos group in the app. PartyQueue maps the room to
-   `media_player.sonos_<room>` for HA.
+### Sonos
 
-The Docker image includes `ffmpeg`, which PartyQueue uses to apply non-default
-OpenAI TTS speed locally. Local Windows/macOS/Linux installs need `ffmpeg` on
-`PATH` (or `FFMPEG_PATH`) only when a non-1× speed is selected.
+PartyQueue normally finds Sonos automatically. If it does not:
 
-Every queued announcement uses a fixed handoff: a 3-second pre-silence pad
-smoothly raises the current group volume, the DJ clip plays, then a matching
-3-second post-silence pad returns every speaker to the exact pre-DJ level before
-music continues. Volume and mute buttons are temporarily locked during that
-critical handoff so the saved baseline cannot drift.
+1. Open **Connections → Sonos**.
+2. Enter the IP address of one Sonos speaker.
+3. Optionally enter the room you want PartyQueue to control.
+4. Save and test again.
 
-**When it speaks**
+Giving that speaker a reserved IP address in your router will prevent the
+address from changing later.
 
-- **Fresh set** — Random while nothing is playing: announce, then music.
-- **Never-Ending refill** — announce when playback crosses into the new batch.
+### Host PIN (recommended)
 
-HA token: profile → **Long-lived access tokens** → Create → paste into PartyQueue.
+A Host PIN protects settings, credentials, resets, uploads, and other DJ Booth
+tools.
 
----
+On a new install:
 
-## Using it at a party
+1. Open **Connections → Host PIN**.
+2. Find the temporary six-digit setup code in
+   `data/host-bootstrap-code.json`.
+3. Enter that setup code and choose your Host PIN.
 
-1. Share `http://<host-ip>:<PORT>` (Join QR in the app helps). Same Wi‑Fi as Sonos.
-2. Guests set a name if prompted, search, tap **Add**. An empty queue is fine —
-   the first add (or **Random**) starts the night.
-3. **Random** draws from playlists/genres in **Music Mix**. **Never-Ending**
-   tops up while music is already playing from the queue and running low — it
-   will **not** seed an empty idle queue after boot, Stop, or Clear.
-   Optional **Request fairness** under **Settings → Queue** can cap each User's
-   upcoming songs after the shared request queue reaches a configurable size,
-   plus successful requests in a rolling time window. It is off by default;
-   queue aliases do not create extra quota.
-4. **Controls** — play/pause, skip, volume, clear (with confirm), etc.
-5. **Edit** on the queue — delete / drag-reorder when you need it; off by default.
-6. **Last call:** hand-adding the **End of night song** (default: Closing Time
-   by Semisonic — change it under **DJ Booth → Settings → DJ → Last call**)
-   turns off Never-Ending and shows a last-call toast. Optional **Party
-   Summary** has the DJ speak a short recap before that song (needs DJ Voice).
+The temporary code expires after two hours and is deleted after setup. Restart
+PartyQueue to create a new code if it expires.
 
-Host tools (credentials, Users, Reset, Restart, branding) live under **DJ Booth**
-(PIN-gated when configured). Stats, Sonos Group, and Music Mix are on the
-toolbar.
+Party controls stay open to guests unless you also enable **Host-only
+controls** in Music Mix.
 
----
+## Using PartyQueue at a party
 
-## Sharing this project
+1. Make sure guests are connected to the same Wi-Fi as PartyQueue and Sonos.
+2. Open the **Join** QR code in PartyQueue, or share its web address.
+3. Guests enter a name, search for a song, and select **Add**.
+4. Use the main controls to play, pause, skip, change volume, or clear the
+   queue.
 
-`.env` and `data/` are gitignored. For a **share-safe** zip (no secrets):
+Useful music tools:
+
+- **Random** adds a fresh group of songs from your selected music.
+- **Never-Ending** adds more music when the active queue is running low. It
+  will not restart an empty queue after Stop or Clear.
+- **Music Mix** controls which playlists and genres Random can use.
+- **Edit queue** lets you remove or rearrange songs. It is off by default.
+- **Request fairness** can limit how many songs one person adds after the
+  shared request queue reaches a size you choose. It is off by default.
+- **Last call** stops Never-Ending when the configured final song is added.
+  The default final song is “Closing Time” by Semisonic.
+
+Host settings, user notes, branding, connections, reset, and restart tools are
+under **DJ Booth**. Stats, Sonos groups, and Music Mix are available from the
+main toolbar.
+
+## Your Spotify playlists (optional)
+
+Basic song search works without linking your personal Spotify account. Link it
+only if you want Random and Music Mix to use your own playlists, including
+private playlists.
+
+1. Register PartyQueue's Redirect URI in your Spotify Developer app.
+2. In PartyQueue, open **Music Mix → Playlists**.
+3. Select **Connect Spotify** and approve access.
+
+PartyQueue saves a refresh token in `data/spotify-tokens.json`. Keep that file
+private.
+
+## Optional features
+
+### Last.fm
+
+Last.fm adds genre information and similar-song discovery.
+
+1. Request a free key at
+   [last.fm/api/account/create](https://www.last.fm/api/account/create).
+2. Open **DJ Booth → Settings → Connections → Last.fm**.
+3. Paste the key, save, and test.
+
+### Home Assistant and DJ Voice
+
+DJ Voice can make spoken announcements on Sonos through Home Assistant using
+ElevenLabs or OpenAI TTS.
+
+1. In Home Assistant, add the ElevenLabs or OpenAI TTS integration.
+2. Create a Home Assistant long-lived access token from your profile.
+3. In PartyQueue, open **Connections → Home Assistant**.
+4. Enter the Home Assistant URL and token, then select **Test**.
+5. Open **Settings → DJ**, choose the provider and voice, and test it.
+6. Enable **DJ Voice** and any request shout-outs you want.
+
+During an announcement, PartyQueue temporarily adjusts the volume and then
+returns every speaker to its exact previous level before music continues.
+
+## Where settings are stored
+
+Settings entered in PartyQueue are stored in the `data` folder. This includes
+Spotify credentials, tokens, Home Assistant credentials, user notes, and your
+Host PIN hash.
+
+- Keep the `data` folder private.
+- Back it up if you want to preserve your setup.
+- Never upload it to GitHub or include it in a shared copy.
+- Never share your `.env` file.
+
+Saved secrets are not sent back to the browser after they are stored.
+
+## Sharing a clean copy
+
+Do not zip your working PartyQueue folder by hand because it may contain your
+private settings.
+
+On Windows, create a share-safe package with:
 
 ```bash
 npm run package:share
 ```
 
-Writes something like `PartyQueue-share-v<version>-….zip` under
-`PartyQueue-backups/`. The script uses an explicit source allow-list and rejects
-credential stores, environment variants, diagnostics, traces, and nested
-archives. It includes the MIT `LICENSE`; recipients configure APIs in Settings
-after install. **Do not** zip the install folder by hand.
-
----
-
-## Endpoints
-
-| Method | Path                   | Purpose                                       |
-| ------ | ---------------------- | --------------------------------------------- |
-| GET    | `/api/health`          | Liveness + version + Spotify-configured flag  |
-| GET    | `/api/ready`           | Readiness for orchestrators (503 if stopping) |
-| GET    | `/api/rooms`           | List Sonos rooms PartyQueue can see           |
-| GET    | `/api/nowplaying/stream` | Shared live Now Playing event stream         |
-| GET    | `/api/queue/stream`    | Shared live queue event stream                 |
-| GET    | `/api/search`          | `?q=` Spotify track search                    |
-| POST   | `/api/queue`           | `{ "uri": "spotify:track:..." }` append (limited) |
-| POST   | `/api/queue/playlist`  | `{ "uri": "spotify:playlist:..." }` append    |
-| POST   | `/api/queue/random`    | `{ "count", "playlistIds" }` add random songs |
-| POST   | `/api/queue/remove`    | `{ "uri", "position" }` remove a queued song  |
-| POST   | `/api/queue/reorder`   | `{ "uri", "beforeUri", ... }` move a song     |
-| GET    | `/api/playlists`       | Host playlists (after Connect Spotify)        |
-| GET    | `/api/autofill`        | `{ enabled }` — Never-Ending state            |
-| POST   | `/api/autofill`        | `{ enabled, playlistIds }` toggle refill      |
-| GET    | `/api/auth/status`     | `{ connected }` — Spotify user linked         |
-| GET    | `/auth/login`          | One-time host Spotify login (PIN if set)      |
-
-Guest song adds remain open on the LAN. To prevent accidental double-taps and
-queue floods, `/api/queue` allows three adds per source IP in 10 seconds and 20
-adds in five minutes. A limited request returns `429`, `Retry-After`, and a
-JSON `retryMs` value; normal playback and queue permissions are unchanged.
-
----
-
-## Tests and CI
-
-Run the complete Node 20 test suite with `npm test`. That includes an in-process
-HTTP harness (`createApp` / `startServer` / `shutdownServer`) covering liveness,
-readiness, CSRF rejection, and request IDs — without binding the production
-port or starting Spotify/Sonos warmers. GitHub Actions runs the locked install
-and tests on Linux and Windows for pushes and pull requests, and audits
-production dependencies on Linux. Sonos/Home Assistant smoke scripts remain
-manual because they control real hardware.
-
-### Logging
-
-By default PartyQueue logs human-readable tagged lines (`[server]`, `[http]`,
-`[dj-voice]`, …). Set `LOG_FORMAT=json` for one JSON object per line. API
-responses include `X-Request-Id` (echoed from the request header when provided)
-so Unraid/Docker logs can be correlated with a browser session.
-
----
+The package is written to the nearby `PartyQueue-backups` folder. The packaging
+script includes only approved project files and leaves out `data`, `.env`,
+logs, diagnostics, and other private files.
 
 ## Troubleshooting
 
-- **"No Sonos devices found"** — under **DJ Booth → Settings → Connections → Sonos**,
-  pin a speaker IP (or set `SONOS_HOST`). On Docker, use host networking.
-- **Song adds but won’t play / unavailable** — Spotify service on Sonos + Premium;
-  try `SONOS_REGION` `NorthAmerica` vs `EU`.
-- **Search returns nothing** — check Client ID/Secret and `SPOTIFY_MARKET`.
-- **Host actions 401 / DJ Booth locked** — unlock with your PIN, or set one under
-  Connections if you haven’t yet.
-- **Music came back after Clear** — upgrade to a build that only Never-Ending
-  refills while playback is already on the queue (empty idle queues stay quiet).
+### PartyQueue cannot find Sonos
+
+- Confirm PartyQueue and Sonos are on the same network.
+- For Docker or Unraid, confirm the container uses host networking.
+- Enter a speaker's IP address under **Connections → Sonos**.
+- Avoid guest Wi-Fi, VPNs, or network isolation between PartyQueue and Sonos.
+
+### Search returns no songs
+
+- Recheck the Spotify Client ID and Client Secret.
+- Make sure the Market is a valid two-letter country code.
+- Select **Test** in Spotify Connections.
+
+### A song is found but will not play
+
+- Confirm Spotify is added as a music service in the Sonos app.
+- Confirm the Sonos account can use Spotify Premium.
+- Try changing the Sonos region between `NorthAmerica` and `EU`.
+
+### A phone cannot open PartyQueue
+
+- Confirm the phone is on the same Wi-Fi.
+- Use the computer or Unraid server's network IP, not `localhost`.
+- Confirm the address includes the port, normally `:8080`.
+- Check whether a firewall is blocking Node.js or port `8080`.
+
+### DJ Booth is locked
+
+Enter your Host PIN. If you are setting the first PIN, use the temporary setup
+code from `data/host-bootstrap-code.json`.
+
+### Music returns after Clear
+
+Update PartyQueue and rebuild the Docker image. Current versions only refill
+while music is actively playing from the queue.
+
+## Advanced configuration
+
+Most people can skip this section.
+
+To use environment settings, copy `.env.example` to `.env`. Values in `.env`
+override settings saved through PartyQueue.
+
+Common options:
+
+```text
+PORT=8080
+SONOS_REGION=NorthAmerica
+SONOS_ROOM=
+SONOS_HOST=
+PUBLIC_BASE_URL=http://YOUR_SERVER_IP:8080
+SETTINGS_PIN=
+```
+
+- `SONOS_ROOM` chooses a room or group coordinator.
+- `SONOS_HOST` pins discovery to one speaker IP.
+- `PUBLIC_BASE_URL` is the address Sonos uses to reach PartyQueue media.
+- `SETTINGS_PIN` is an optional setup fallback; using the Host PIN screen is
+  preferred.
+
+Docker users can also configure Spotify, Last.fm, and Home Assistant in `.env`.
+See `.env.example` for every available option.
+
+## For developers
+
+Run all automated tests:
+
+```bash
+npm test
+```
+
+GitHub Actions tests Node.js 20 on Linux and Windows and audits production
+dependencies. Hardware smoke tests are manual because they control real Sonos
+and Home Assistant devices.
+
+Useful health checks:
+
+- `/api/health` — confirms PartyQueue is running and shows its version
+- `/api/ready` — reports startup and shutdown readiness
+- `/api/rooms` — shows the Sonos rooms PartyQueue can find
+
+PartyQueue uses the MIT license. It is not affiliated with or endorsed by
+Sonos, Spotify, Last.fm, Home Assistant, ElevenLabs, or OpenAI. You are
+responsible for following the terms of any connected service.
