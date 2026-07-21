@@ -36,6 +36,16 @@ import {
 } from "./settings.js";
 import { GENRE_BUCKETS, bucketsForArtistSync } from "./genres.js";
 import { beginDjVolumeHandoff } from "./dj-volume-handoff.js";
+import {
+  DJ_BOOTH_ASIDES,
+  DJ_SHARED_OUTROS,
+  filterIntrosByContext,
+} from "./dj-phrase-bank.js";
+import {
+  getRecentDjAnnounceScripts,
+  rememberDjAnnounceScript,
+  reserveDjPhrase,
+} from "./dj-night-memory.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TTS_DIR = path.join(__dirname, "..", "data", "tts");
@@ -352,40 +362,11 @@ export const DJ_CHARACTER_BIBLE = {
     "One short vibe sentence beats a genre encyclopedia.",
   ],
   // Short asides — used occasionally, not every announce.
-  recurringBits: [
-    {
-      line: "Don't make me come out from behind these speakers.",
-      familySafe: false,
-    },
-    {
-      line: "If you know, you know — and if you don't, you're about to.",
-      familySafe: true,
-    },
-    {
-      line: "This booth has opinions tonight.",
-      familySafe: true,
-    },
-    {
-      line: "Somebody's about to remember why they cleared the furniture.",
-      familySafe: false,
-    },
-    {
-      line: "Consider this your friendly warning from the ones and twos.",
-      familySafe: true,
-    },
-    {
-      line: "I didn't come to {event} to whisper.",
-      familySafe: false,
-    },
-    {
-      line: "Keep your drinks steady — this stretch has ideas.",
-      familySafe: false,
-    },
-    {
-      line: "Smile if you feel it. Dance if you mean it.",
-      familySafe: true,
-    },
-  ],
+  recurringBits: DJ_BOOTH_ASIDES.map((entry) => ({
+    id: entry.id,
+    line: entry.text,
+    familySafe: entry.familySafe,
+  })),
 };
 
 export const DJ_INTENSITY_PROFILES = {
@@ -441,6 +422,7 @@ export function pickDjCharacterBit({
   includeBit = true,
   catchphrase = "",
   intensity = "classic",
+  reserve = false,
 } = {}) {
   if (!includeBit) return null;
   const kids = String(mood || "").toLowerCase() === "kids";
@@ -459,12 +441,14 @@ export function pickDjCharacterBit({
     kids ? b.familySafe : true
   );
   if (!bank.length) return null;
-  return fillEventName(
-    pick(
-      bank.map((b) => b.line),
-      salt + 11
-    )
-  );
+  const selected = reserve
+    ? reserveDjPhrase(
+        "aside",
+        bank.map((item) => ({ id: item.id, text: item.line })),
+        { salt: salt + 11 }
+      )
+    : pick(bank, salt + 11);
+  return fillEventName(selected?.text || selected?.line || "");
 }
 
 export function resolveCharacterMoment({
@@ -474,6 +458,7 @@ export function resolveCharacterMoment({
   forceBit = null,
   intensity = "classic",
   catchphrase = "",
+  reserve = false,
 } = {}) {
   const include =
     forceBit != null
@@ -491,6 +476,7 @@ export function resolveCharacterMoment({
       includeBit: include,
       catchphrase,
       intensity,
+      reserve,
     }),
   };
 }
@@ -760,7 +746,7 @@ export const DJ_MOOD_VOICE_PACKS = {
       "Run with it.",
       "Keep that momentum.",
       "Take it away.",
-      "Meet this one in the middle.",
+      "Give this next one some room.",
     ],
     avoid: [
       "listing genres like a report card",
@@ -1349,6 +1335,44 @@ function fillCountTemplate(template, howMany) {
   );
 }
 
+function phraseId(prefix, text) {
+  return `${prefix}-${crypto
+    .createHash("sha1")
+    .update(String(text || ""))
+    .digest("hex")
+    .slice(0, 12)}`;
+}
+
+function phraseEntries(prefix, entries) {
+  return (Array.isArray(entries) ? entries : [])
+    .map((entry) => {
+      if (entry && typeof entry === "object") {
+        return {
+          id: String(entry.id || phraseId(prefix, entry.text)),
+          text: String(entry.text || "").trim(),
+        };
+      }
+      const text = String(entry || "").trim();
+      return { id: phraseId(prefix, text), text };
+    })
+    .filter((entry) => entry.text);
+}
+
+function reserveIntroPhrase(event, salt) {
+  return reserveDjPhrase("intro", filterIntrosByContext(event), { salt });
+}
+
+function reserveOutroPhrase(pack, mood, salt) {
+  return reserveDjPhrase(
+    "outro",
+    [
+      ...phraseEntries("shared-outro", DJ_SHARED_OUTROS),
+      ...phraseEntries(`mood-${mood}-outro`, pack?.outros),
+    ],
+    { salt }
+  );
+}
+
 function fillEnergyTemplate(template, energySignature) {
   return fillEventName(
     String(template || "").replaceAll(
@@ -1599,6 +1623,13 @@ function formatAnnounceShapeForPrompt(announceShape, djName) {
       : announceShape.outro
         ? `Close with a short transition in this spirit (paraphrase OK, do not stack outros): "${announceShape.outro}"`
         : "Close with exactly one short mood-matched transition phrase.";
+  const introCue = announceShape.introPhrase
+    ? `- Opening cue: ${
+        announceShape.nameIntro ? "after the DJ name intro, continue" : "begin"
+      } in this spirit (paraphrase OK): "${fillEventName(
+        announceShape.introPhrase
+      )}"`
+    : "";
   const countLine =
     announceShape.includeCount === false
       ? "- Track count: omit — do not say how many tracks are coming."
@@ -1609,6 +1640,7 @@ function formatAnnounceShapeForPrompt(announceShape, djName) {
       : "- Vibe: one vivid sentence only — do NOT list genres.";
   return `Delivery shape for THIS announce (follow structure; paraphrase wording):
 ${beatLine}
+${introCue}
 - Opener shape (${announceShape.opener?.label || announceShape.openerShape}): ${announceShape.opener?.instruction || ""}
 - Body shape (${announceShape.body?.label || announceShape.bodyShape}): ${announceShape.body?.instruction || ""}
 ${countLine}
@@ -1701,8 +1733,23 @@ function buildTemplateOpener({
 }) {
   const shape = announceShape?.openerShape || "cold_open";
   const includeCount = announceShape?.includeCount !== false;
+  const sharedTemplate = String(announceShape?.introPhrase || "").trim();
+  const sharedOpener = sharedTemplate
+    ? `${fillCountTemplate(sharedTemplate, howMany)}${
+        includeCount && !/\{count\}/i.test(sharedTemplate)
+          ? ` ${howMany} queued.`
+          : ""
+      }`
+    : "";
   if (shape === "name_intro") {
     const nameLine = pick(intros, salt + 5);
+    if (sharedOpener) {
+      return {
+        intro: `${nameLine} `,
+        opener: sharedOpener,
+        openerKey: announceShape.introPhraseId || sharedOpener,
+      };
+    }
     if (!includeCount) {
       return { intro: `${nameLine} `, opener: "", openerKey: nameLine };
     }
@@ -1741,6 +1788,13 @@ function buildTemplateOpener({
     return { intro: "", opener, openerKey: opener };
   }
   // cold_open
+  if (sharedOpener) {
+    return {
+      intro: "",
+      opener: sharedOpener,
+      openerKey: announceShape.introPhraseId || sharedOpener,
+    };
+  }
   if (!includeCount) {
     const opener = pickAvoidingRecent(
       DEFAULT_COLD_OPEN_NO_COUNT,
@@ -1930,6 +1984,7 @@ export function buildSetScript({
       outro: shape.outro,
       openerLine: openerKey,
     });
+    rememberDjAnnounceScript(line);
   }
   return line;
 }
@@ -1950,7 +2005,7 @@ export function cleanSpokenScript(text, maxWords = null, banList = null) {
   return t;
 }
 
-function buildLlmPrompt(summary) {
+export function buildLlmPrompt(summary) {
   const {
     event = "session_start",
     count = 0,
@@ -1963,6 +2018,7 @@ function buildLlmPrompt(summary) {
     characterMoment = null,
     announceShape = null,
     characterKnobs = null,
+    recentAnnounceScripts = [],
   } = summary;
   const name = String(djName || DJ_VOICE_DEFAULTS.djName).trim() || DJ_VOICE_DEFAULTS.djName;
   const highlightList = Array.isArray(highlights) ? highlights : [];
@@ -1990,6 +2046,14 @@ function buildLlmPrompt(summary) {
   const genreLine = mood.genreLabels?.length
     ? mood.genreLabels.join(", ")
     : "all genres";
+  const recentBlock = (Array.isArray(recentAnnounceScripts)
+    ? recentAnnounceScripts
+    : []
+  )
+    .slice(-5)
+    .map((line) => `  - ${String(line || "").trim()}`)
+    .filter((line) => line !== "  - ")
+    .join("\n");
 
   return `${buildDjSystemPrompt(
     name,
@@ -2013,7 +2077,7 @@ Playlist block:
 - Sample tracks in play order (context only — mention at most 1—2 artists, never recite):
 ${tracks || "(no track titles available)"}
 
-Write only the spoken announcement now. Keep it DJ X short. Follow the flavor beat, delivery shape, character bible, intensity, and mood voice pack.`;
+${recentBlock ? `Already said during this party — do not reuse their wording, images, or punchlines:\n${recentBlock}\n\n` : ""}Write only the spoken announcement now. Keep it DJ X short. Follow the flavor beat, delivery shape, character bible, intensity, and mood voice pack.`;
 }
 
 export function buildDjEffectivePromptPreview() {
@@ -2117,6 +2181,8 @@ export async function generateDjSpeechFromPrompt(
 // Prefer LLM-written DJ copy; fall back to varied templates.
 export async function writeSetScript(summary = {}) {
   const dj = getDjVoiceSettings();
+  const event =
+    summary.event === "session_refill" ? "session_refill" : "session_start";
   const discoveryEnabled =
     summary.discoveryEnabled != null
       ? !!summary.discoveryEnabled
@@ -2151,6 +2217,7 @@ export async function writeSetScript(summary = {}) {
       forceBit: summary.forceCharacterBit,
       intensity: characterKnobs.intensity,
       catchphrase: characterKnobs.catchphrase,
+      reserve: true,
     });
   let announceShape =
     summary.announceShape ||
@@ -2183,8 +2250,40 @@ export async function writeSetScript(summary = {}) {
       body: DJ_BODY_SHAPES.energy_first,
     };
   }
+  const pack = getDjMoodVoicePack(moodContext.mood);
+  if (
+    !summary.announceShape &&
+    ["name_intro", "cold_open"].includes(announceShape.openerShape)
+  ) {
+    const introPhrase = reserveIntroPhrase(event, saltHint + 19);
+    if (introPhrase) {
+      announceShape = {
+        ...announceShape,
+        introPhraseId: introPhrase.id,
+        introPhrase: introPhrase.text,
+      };
+    }
+  }
+  if (
+    announceShape.includeOutro !== false &&
+    !summary.announceShape &&
+    !(summary.outro != null && String(summary.outro).trim())
+  ) {
+    const outroPhrase = reserveOutroPhrase(
+      pack,
+      moodContext.mood,
+      saltHint + 23
+    );
+    if (outroPhrase) {
+      announceShape = {
+        ...announceShape,
+        outroId: outroPhrase.id,
+        outro: fillEventName(outroPhrase.text),
+      };
+    }
+  }
   const payload = {
-    event: summary.event || "session_start",
+    event,
     count: summary.count ?? summary.added ?? 0,
     highlights,
     similarAdded,
@@ -2198,6 +2297,7 @@ export async function writeSetScript(summary = {}) {
     characterKnobs,
     announceOrdinal,
     recordMemory: true,
+    recentAnnounceScripts: getRecentDjAnnounceScripts(5),
   };
 
   try {
@@ -2216,6 +2316,7 @@ export async function writeSetScript(summary = {}) {
     console.log(
       `[dj-voice] script via OpenAI conversation (nameIntro=${announceShape.nameIntro}, dj=${payload.djName}, mood=${moodContext.mood}, intensity=${characterKnobs.intensity}, opener=${announceShape.openerShape}, body=${announceShape.bodyShape}, beat=${announceShape.beatFocus}, bit=${bitKind})`
     );
+    rememberDjAnnounceScript(line);
     return line;
   } catch (err) {
     console.error("[dj-voice] LLM script failed, using template:", err.message);

@@ -2902,8 +2902,8 @@ settingsClearStatsBtn.addEventListener("click", async () => {
 
 settingsClearDjMemoryBtn?.addEventListener("click", async () => {
   const ok = await confirmModal(
-    "Reset DJ shout memory? Clears first-request, birthday, and used shout-blurb memory for every guest.",
-    "Reset DJ shout memory"
+    "Reset DJ memory? Clears recent set phrases, scripts, first-request, birthday, and guest shout-blurb memory.",
+    "Reset DJ memory"
   );
   if (!ok) return;
   settingsClearDjMemoryBtn.disabled = true;
@@ -2911,7 +2911,7 @@ settingsClearDjMemoryBtn?.addEventListener("click", async () => {
     const res = await hostFetch("/api/settings/clear-dj-memory", { method: "POST" });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Could not clear DJ memory.");
-    showToast("DJ shout memory cleared");
+    showToast("DJ memory cleared");
   } catch (err) {
     showToast(err.message, true);
   } finally {

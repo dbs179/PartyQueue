@@ -26,6 +26,7 @@ import {
   formatMusicPronunciationGuide,
   formatHostDjGuidance,
   buildDjEffectivePromptPreview,
+  buildLlmPrompt,
   eventDisplayName,
   DJ_MOOD_PRESETS,
   DJ_MOOD_VOICE_PACKS,
@@ -514,12 +515,18 @@ describe("DJ character bible", () => {
     assert.ok(DJ_CHARACTER_BIBLE.identity?.length > 20);
     assert.ok(DJ_CHARACTER_BIBLE.quirks?.length >= 4);
     assert.ok(DJ_CHARACTER_BIBLE.hostingRules?.length >= 4);
-    assert.ok(DJ_CHARACTER_BIBLE.recurringBits?.length >= 6);
+    assert.ok(DJ_CHARACTER_BIBLE.recurringBits?.length >= 50);
     assert.ok(
       DJ_CHARACTER_BIBLE.recurringBits.some((b) => b.familySafe),
       "needs family-safe bits for Kids"
     );
     assert.match(DJ_CHARACTER_BIBLE.identity, /\{event\}/);
+    assert.equal(
+      DJ_CHARACTER_BIBLE.recurringBits.some((b) =>
+        /cleared|moved the furniture/i.test(b.line)
+      ),
+      false
+    );
     assert.doesNotMatch(
       DJ_CHARACTER_BIBLE.identity + DJ_CHARACTER_BIBLE.quirks.join(" "),
       /religious persona|worship service/i
@@ -693,6 +700,59 @@ describe("DJ announce shape anti-repeat", () => {
     assert.doesNotMatch(short, /We're talking/i);
   });
 
+  it("template fallback uses selected shared intro and outro cues", () => {
+    const base = resolveAnnounceShape({
+      nameIntroForced: false,
+      salt: 2,
+      openerShape: "cold_open",
+      bodyShape: "energy_first",
+      beatFocus: "count_vibe_tag",
+      mood: "party",
+    });
+    const line = buildSetScript({
+      event: "session_refill",
+      count: 6,
+      announceShape: {
+        ...base,
+        introPhraseId: "intro-test",
+        introPhrase: "The booth has a fresh route.",
+        outroId: "outro-test",
+        outro: "Let the next track steer.",
+      },
+      characterMoment: { include: false, bit: null },
+    });
+    assert.match(line, /booth has a fresh route/i);
+    assert.match(line, /6 queued/i);
+    assert.match(line, /next track steer/i);
+  });
+
+  it("LLM prompt includes selected cues and recent-script avoidance", () => {
+    const shape = {
+      ...resolveAnnounceShape({
+        nameIntroForced: false,
+        salt: 3,
+        openerShape: "cold_open",
+        bodyShape: "energy_first",
+        beatFocus: "count_tag",
+        mood: "party",
+      }),
+      introPhrase: "Fresh signal from the booth.",
+      outro: "Give the rhythm some road.",
+    };
+    const prompt = buildLlmPrompt({
+      count: 4,
+      announceShape: shape,
+      recentAnnounceScripts: [
+        "The old punchline that should not return.",
+        "Another recent booth image.",
+      ],
+    });
+    assert.match(prompt, /Fresh signal from the booth/i);
+    assert.match(prompt, /Give the rhythm some road/i);
+    assert.match(prompt, /do not reuse their wording, images, or punchlines/i);
+    assert.match(prompt, /old punchline that should not return/i);
+  });
+
   it("template artist_tease opener mentions the artist up front", () => {
     resetDjAnnounceOrdinal(0);
     const shape = resolveAnnounceShape({
@@ -828,7 +888,9 @@ describe("Phase 5 template mirrors mood packs", () => {
       highlights: [{ artist: "Norah Jones", name: "Don't Know Why" }],
     });
     assert.ok(
-      pack.crowdCalls.some((c) => line.includes(c)),
+      pack.crowdCalls.some((c) =>
+        line.includes(c.replaceAll("{event}", eventDisplayName()))
+      ),
       line
     );
     assert.doesNotMatch(line, /this one's for the floor|Make some noise/i);

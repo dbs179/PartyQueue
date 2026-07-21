@@ -20,6 +20,8 @@ const MEMORY_FILE =
 export const NIGHT_WINDOW_HOURS = 12;
 const MAX_RECENT_SCRIPTS = 5;
 const MAX_USED_NOTES = 40;
+const MAX_GLOBAL_PHRASE_USES = 240;
+const MAX_GLOBAL_ANNOUNCE_SCRIPTS = 20;
 
 let cache = null;
 
@@ -32,7 +34,13 @@ function nightStart(now = Date.now()) {
 }
 
 function emptyStore() {
-  return { guests: {} };
+  return {
+    guests: {},
+    global: {
+      phraseUses: [],
+      recentAnnounceScripts: [],
+    },
+  };
 }
 
 function load() {
@@ -43,12 +51,13 @@ function load() {
       raw && typeof raw === "object" && raw.guests && typeof raw.guests === "object"
         ? raw.guests
         : {};
-    cache = { guests: {} };
+    cache = emptyStore();
     for (const [name, entry] of Object.entries(guests)) {
       const key = sanitizeDisplayName(name);
       if (!key || !entry || typeof entry !== "object") continue;
       cache.guests[key] = normalizeEntry(entry);
     }
+    cache.global = normalizeGlobal(raw?.global);
   } catch {
     cache = emptyStore();
   }
@@ -80,6 +89,36 @@ function normalizeEntry(entry) {
     usedNotes,
     recentScripts,
   };
+}
+
+function normalizeGlobal(global) {
+  const phraseUses = Array.isArray(global?.phraseUses)
+    ? global.phraseUses
+        .filter(
+          (item) =>
+            item &&
+            typeof item.category === "string" &&
+            item.category.trim() &&
+            typeof item.id === "string" &&
+            item.id.trim()
+        )
+        .map((item) => ({
+          category: String(item.category).trim(),
+          id: String(item.id).trim(),
+          ts: Number(item.ts) || 0,
+        }))
+        .slice(-MAX_GLOBAL_PHRASE_USES)
+    : [];
+  const recentAnnounceScripts = Array.isArray(global?.recentAnnounceScripts)
+    ? global.recentAnnounceScripts
+        .filter((item) => item && typeof item.text === "string" && item.text.trim())
+        .map((item) => ({
+          text: String(item.text).trim(),
+          ts: Number(item.ts) || 0,
+        }))
+        .slice(-MAX_GLOBAL_ANNOUNCE_SCRIPTS)
+    : [];
+  return { phraseUses, recentAnnounceScripts };
 }
 
 function persist() {
@@ -124,6 +163,14 @@ function pruneStore(now = Date.now()) {
     const kept = pruneGuest(entry, since);
     if (kept) next.guests[name] = kept;
   }
+  next.global = {
+    phraseUses: (store.global?.phraseUses || [])
+      .filter((item) => item.ts >= since)
+      .slice(-MAX_GLOBAL_PHRASE_USES),
+    recentAnnounceScripts: (store.global?.recentAnnounceScripts || [])
+      .filter((item) => item.ts >= since)
+      .slice(-MAX_GLOBAL_ANNOUNCE_SCRIPTS),
+  };
   cache = next;
   return cache;
 }
@@ -161,6 +208,92 @@ function shuffle(list) {
     [out[i], out[j]] = [out[j], out[i]];
   }
   return out;
+}
+
+function candidatePhrase(candidate) {
+  if (!candidate || typeof candidate !== "object") return null;
+  const id = String(candidate.id || "").trim();
+  const text = String(candidate.text || "").trim();
+  return id && text ? candidate : null;
+}
+
+/**
+ * Select and synchronously reserve a global DJ phrase. Unused phrases win;
+ * after exhaustion, the least-recently used phrase returns.
+ */
+export function reserveDjPhrase(
+  category,
+  candidates,
+  { salt = 0, now = Date.now() } = {}
+) {
+  const key = String(category || "").trim();
+  const bank = (Array.isArray(candidates) ? candidates : [])
+    .map(candidatePhrase)
+    .filter(Boolean);
+  if (!key || !bank.length) return null;
+
+  const ts = Number(now) || Date.now();
+  const store = pruneStore(ts);
+  const usage = new Map();
+  for (const item of store.global.phraseUses) {
+    if (item.category !== key) continue;
+    const previous = usage.get(item.id);
+    if (previous == null || item.ts > previous) usage.set(item.id, item.ts);
+  }
+
+  const unused = bank.filter((item) => !usage.has(item.id));
+  let selected;
+  if (unused.length) {
+    const index = Math.abs(Math.floor(Number(salt) || 0)) % unused.length;
+    selected = unused[index];
+  } else {
+    selected = [...bank].sort(
+      (a, b) => (usage.get(a.id) || 0) - (usage.get(b.id) || 0)
+    )[0];
+  }
+
+  store.global.phraseUses.push({ category: key, id: selected.id, ts });
+  while (store.global.phraseUses.length > MAX_GLOBAL_PHRASE_USES) {
+    store.global.phraseUses.shift();
+  }
+  persist();
+  return selected;
+}
+
+export function getRecentDjPhraseIds(category, limit = 50, now = Date.now()) {
+  const key = String(category || "").trim();
+  if (!key) return [];
+  const store = pruneStore(now);
+  const n = Math.max(0, Math.min(MAX_GLOBAL_PHRASE_USES, Number(limit) || 50));
+  return store.global.phraseUses
+    .filter((item) => item.category === key)
+    .slice(-n)
+    .map((item) => item.id);
+}
+
+export function rememberDjAnnounceScript(script, now = Date.now()) {
+  const text = String(script || "").trim();
+  if (!text) return;
+  const ts = Number(now) || Date.now();
+  const store = pruneStore(ts);
+  store.global.recentAnnounceScripts.push({ text, ts });
+  while (
+    store.global.recentAnnounceScripts.length > MAX_GLOBAL_ANNOUNCE_SCRIPTS
+  ) {
+    store.global.recentAnnounceScripts.shift();
+  }
+  persist();
+}
+
+export function getRecentDjAnnounceScripts(limit = 5, now = Date.now()) {
+  const store = pruneStore(now);
+  const n = Math.max(
+    0,
+    Math.min(MAX_GLOBAL_ANNOUNCE_SCRIPTS, Math.floor(Number(limit) || 5))
+  );
+  return store.global.recentAnnounceScripts
+    .slice(-n)
+    .map((item) => item.text);
 }
 
 /** True when this named guest has not yet received a request shout tonight. */
@@ -313,4 +446,9 @@ export function clearDjNightMemory() {
   } catch {
     /* nothing to remove */
   }
+}
+
+/** Test helper for reloading a fixture from disk. */
+export function resetDjNightMemoryCacheForTests() {
+  cache = null;
 }

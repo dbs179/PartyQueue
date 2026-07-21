@@ -114,6 +114,84 @@ test("getRecentScripts returns remembered lines", () => {
   ]);
 });
 
+test("global DJ phrases stay fresh, then reuse least-recently used", () => {
+  const bank = [
+    { id: "intro-a", text: "First option" },
+    { id: "intro-b", text: "Second option" },
+  ];
+  const now = Date.now();
+  assert.equal(
+    mem.reserveDjPhrase("intro", bank, { salt: 0, now }).id,
+    "intro-a"
+  );
+  assert.equal(
+    mem.reserveDjPhrase("intro", bank, { salt: 0, now: now + 1 }).id,
+    "intro-b"
+  );
+  assert.equal(
+    mem.reserveDjPhrase("intro", bank, { salt: 1, now: now + 2 }).id,
+    "intro-a"
+  );
+});
+
+test("global phrase reservations survive a memory reload", () => {
+  const bank = [
+    { id: "aside-a", text: "First aside" },
+    { id: "aside-b", text: "Second aside" },
+  ];
+  const now = Date.now();
+  assert.equal(
+    mem.reserveDjPhrase("aside", bank, { salt: 0, now }).id,
+    "aside-a"
+  );
+  mem.resetDjNightMemoryCacheForTests();
+  assert.equal(
+    mem.reserveDjPhrase("aside", bank, { salt: 0, now: now + 1 }).id,
+    "aside-b"
+  );
+});
+
+test("global announce memory is bounded and pruned after twelve hours", () => {
+  const now = Date.now();
+  for (let i = 0; i < 25; i += 1) {
+    mem.rememberDjAnnounceScript(`Script ${i}`, now + i);
+  }
+  assert.equal(mem.getRecentDjAnnounceScripts(50, now + 30).length, 20);
+  assert.deepEqual(mem.getRecentDjAnnounceScripts(2, now + 30), [
+    "Script 23",
+    "Script 24",
+  ]);
+
+  const expired = now + (mem.NIGHT_WINDOW_HOURS * 60 * 60_000) + 100;
+  assert.deepEqual(mem.getRecentDjAnnounceScripts(5, expired), []);
+});
+
+test("old DJ memory files load without global announce history", () => {
+  mem.clearDjNightMemory();
+  fs.writeFileSync(
+    TMP_MEM,
+    JSON.stringify({
+      guests: {
+        Mark: {
+          firstShoutAt: Date.now(),
+          recentScripts: [{ text: "Legacy shout", ts: Date.now() }],
+        },
+      },
+    })
+  );
+  mem.resetDjNightMemoryCacheForTests();
+  assert.deepEqual(mem.getRecentDjAnnounceScripts(5), []);
+  assert.deepEqual(mem.getRecentScripts("Mark", 1), ["Legacy shout"]);
+});
+
+test("clear DJ memory also clears global phrases and scripts", () => {
+  mem.reserveDjPhrase("outro", [{ id: "outro-a", text: "Keep it moving" }]);
+  mem.rememberDjAnnounceScript("A recent global set script");
+  mem.clearDjNightMemory();
+  assert.deepEqual(mem.getRecentDjPhraseIds("outro"), []);
+  assert.deepEqual(mem.getRecentDjAnnounceScripts(), []);
+});
+
 test("shouldShoutOnSearch forces first named request even when percent is 0", () => {
   const prev = getDjVoiceSettings();
   try {
