@@ -1,3 +1,5 @@
+import { createLogger } from "./logger.js";
+
 const DEFAULT_POLL_MS = 150;
 const DEFAULT_RAMP_STEPS = 6;
 const RESTORE_RETRIES = 3;
@@ -36,15 +38,16 @@ export function isDjClipUri(uri, publicUrl) {
 }
 
 function defaultLogger() {
+  const log = createLogger("dj-volume");
   return {
-    info(message) {
-      console.log(`[dj-volume] ${message}`);
+    info(message, meta) {
+      log.info(message, meta);
     },
-    warn(message) {
-      console.warn(`[dj-volume] ${message}`);
+    warn(message, meta) {
+      log.warn(message, meta);
     },
-    error(message) {
-      console.error(`[dj-volume] ${message}`);
+    error(message, meta) {
+      log.error(message, meta);
     },
   };
 }

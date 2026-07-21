@@ -47,6 +47,15 @@ test("setRequestsPaused toggles the content flag", () => {
   assert.equal(rituals.setRequestsPaused(false).requestsPaused, false);
 });
 
+test("host-only controls are opt-in and persist independently", () => {
+  assert.equal(settings.getContentSettings().hostControlsOnly, false);
+  assert.equal(
+    settings.setContentSettings({ hostControlsOnly: true }).hostControlsOnly,
+    true
+  );
+  assert.equal(settings.getContentSettings().requestsPaused, false);
+});
+
 test("setKidsLock pins Kids mood + subtle DJ and restores on unlock", () => {
   const on = rituals.setKidsLock(true);
   assert.equal(on.kidsLock, true);

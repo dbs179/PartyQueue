@@ -14,6 +14,7 @@ const auth = await import("../src/host-auth.js");
 
 beforeEach(() => {
   auth._resetHostSessionsForTests();
+  auth._resetHostBootstrapForTests();
   auth._bustHostPinCacheForTests();
   delete process.env.SETTINGS_PIN;
   try {
@@ -25,6 +26,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  auth._resetHostBootstrapForTests();
   try {
     fs.rmSync(TMP_PIN, { force: true });
   } catch {
@@ -37,6 +39,20 @@ test("isHostPinConfigured follows SETTINGS_PIN env", () => {
   process.env.SETTINGS_PIN = "1234";
   assert.equal(auth.isHostPinConfigured(), true);
   assert.equal(auth.hostPinSource(), "env");
+});
+
+test("first-time setup requires a short-lived bootstrap code", () => {
+  const status = auth.hostPinStatus();
+  const code = auth._hostBootstrapCodeForTests();
+  assert.equal(status.bootstrapRequired, true);
+  assert.equal(code.length, 6);
+  assert.equal(auth.verifyHostBootstrapCode("000000"), false);
+  assert.equal(auth.verifyHostBootstrapCode(code), true);
+
+  auth.setHostPin("party42");
+
+  assert.equal(auth.hostPinStatus().bootstrapRequired, false);
+  assert.equal(auth.verifyHostBootstrapCode(code), false);
 });
 
 test("setHostPin stores a hash and verifies", () => {

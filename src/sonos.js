@@ -1360,7 +1360,8 @@ function albumArtUrl(albumArtUri, host) {
 // flat ~one read per TTL no matter how many phones are connected. Mutations
 // (add/remove/skip/etc.) bust the snapshot so a guest's own action shows up on
 // the very next poll instead of waiting out the TTL.
-const SNAPSHOT_TTL_MS = 3000;
+export const NOW_PLAYING_TTL_MS = 1000;
+export const SNAPSHOT_TTL_MS = 3000;
 
 function makeCachedReader(fn, ttlMs) {
   let cache = { at: 0, value: null };
@@ -1646,7 +1647,10 @@ async function getQueueListRaw() {
 // Public, coalesced readers. Every client polling within the TTL window shares a
 // single Sonos read (and concurrent callers share one in-flight request), so
 // Sonos/network load stays flat regardless of how many guests have the app open.
-export const getNowPlaying = makeCachedReader(getNowPlayingRaw, SNAPSHOT_TTL_MS);
+export const getNowPlaying = makeCachedReader(
+  getNowPlayingRaw,
+  NOW_PLAYING_TTL_MS
+);
 
 // Bypass the shared snapshot (and in-flight coalescing). DJ Voice volume
 // timing needs a true live URI; a stale guest poll must not delay boost or
@@ -1661,9 +1665,24 @@ export const getQueueStatus = makeCachedReader(getQueueStatusRaw, SNAPSHOT_TTL_M
 // Drop the cached now-playing/queue snapshots so the next poll re-reads Sonos.
 // Every mutation below calls this so a guest's own add/remove/skip/clear is
 // reflected on the very next refresh instead of lingering for up to the TTL.
+const snapshotInvalidationListeners = new Set();
+
+export function onSonosSnapshotsInvalidated(listener) {
+  if (typeof listener !== "function") return () => {};
+  snapshotInvalidationListeners.add(listener);
+  return () => snapshotInvalidationListeners.delete(listener);
+}
+
 export function invalidateSonosSnapshots() {
   getNowPlaying.bust();
   getQueueList.bust();
+  for (const listener of [...snapshotInvalidationListeners]) {
+    try {
+      listener();
+    } catch {
+      /* invalidation must never fail a Sonos mutation */
+    }
+  }
 }
 
 // Find a queued track's CURRENT absolute 1-based position from a fresh queue

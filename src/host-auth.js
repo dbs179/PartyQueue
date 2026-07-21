@@ -23,12 +23,15 @@ const SCRYPT_N = 16384;
 const SCRYPT_R = 8;
 const SCRYPT_P = 1;
 const SCRYPT_KEYLEN = 32;
+const BOOTSTRAP_TTL_MS = 2 * 60 * 60 * 1000;
 
 /** @type {Map<string, { expiresAt: number }>} */
 const sessions = new Map();
 
 /** @type {{ salt: string, hash: string, algo: string }|null|undefined} */
 let pinCache = undefined;
+let bootstrapCode = "";
+let bootstrapExpiresAt = 0;
 
 function readPinFile() {
   try {
@@ -81,6 +84,30 @@ export function hostPinSource() {
 
 export function isHostPinConfigured() {
   return hostPinSource() != null;
+}
+
+export function ensureHostBootstrapCode() {
+  if (isHostPinConfigured()) return "";
+  if (!bootstrapCode) {
+    bootstrapCode = String(crypto.randomInt(100000, 1000000));
+    bootstrapExpiresAt = Date.now() + BOOTSTRAP_TTL_MS;
+  }
+  return bootstrapCode;
+}
+
+export function verifyHostBootstrapCode(candidate) {
+  if (isHostPinConfigured() || !bootstrapCode) return false;
+  if (Date.now() > bootstrapExpiresAt) return false;
+  const cleaned = String(candidate || "").trim();
+  const actual = Buffer.from(cleaned);
+  const expected = Buffer.from(bootstrapCode);
+  if (actual.length !== expected.length) return false;
+  return crypto.timingSafeEqual(actual, expected);
+}
+
+export function clearHostBootstrapCode() {
+  bootstrapCode = "";
+  bootstrapExpiresAt = 0;
 }
 
 /** @deprecated use verifyHostPin — kept for older call sites */
@@ -152,6 +179,7 @@ export function setHostPin(newPin) {
   }
   bustPinCache();
   revokeAllHostSessions();
+  clearHostBootstrapCode();
   return { ok: true };
 }
 
@@ -182,9 +210,12 @@ export function clearHostPin() {
 
 export function hostPinStatus() {
   const source = hostPinSource();
+  if (!source) ensureHostBootstrapCode();
   return {
     required: source != null,
     source,
+    bootstrapRequired: source == null,
+    bootstrapExpiresAt: source == null ? bootstrapExpiresAt : 0,
     /** True when a file PIN can be cleared from the UI (env-only needs .env edit). */
     removable: source === "file",
   };
@@ -320,4 +351,13 @@ export function _resetHostSessionsForTests() {
 /** Test helper — drop cached PIN record. */
 export function _bustHostPinCacheForTests() {
   bustPinCache();
+}
+
+/** Test helper — inspect/reset the short-lived first-run bootstrap code. */
+export function _hostBootstrapCodeForTests() {
+  return ensureHostBootstrapCode();
+}
+
+export function _resetHostBootstrapForTests() {
+  clearHostBootstrapCode();
 }

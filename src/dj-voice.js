@@ -2295,16 +2295,18 @@ function sleep(ms) {
 }
 
 // Copy every prebuilt silence length into data/tts as both ramp + restore pads.
-function syncSilencePadFiles() {
-  const publicDir = path.join(__dirname, "..", "public");
-  fs.mkdirSync(TTS_DIR, { recursive: true });
+export function syncSilencePadFiles({
+  publicDir = path.join(__dirname, "..", "public"),
+  ttsDir = TTS_DIR,
+} = {}) {
+  fs.mkdirSync(ttsDir, { recursive: true });
   for (const opt of DJ_SILENCE_OPTIONS) {
     const bundled = path.join(publicDir, silenceBundledName(opt));
     if (!fs.existsSync(bundled)) {
       throw new Error(`Missing ${silenceBundledName(opt)} silence bridge.`);
     }
-    fs.copyFileSync(bundled, path.join(TTS_DIR, silenceFileName(opt)));
-    fs.copyFileSync(bundled, path.join(TTS_DIR, silenceRampFileName(opt)));
+    fs.copyFileSync(bundled, path.join(ttsDir, silenceFileName(opt)));
+    fs.copyFileSync(bundled, path.join(ttsDir, silenceRampFileName(opt)));
   }
 }
 

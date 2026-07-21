@@ -67,10 +67,10 @@ body {
 
 .toolbar-grid .pill-btn {
   width: 100%;
-  min-height: 40px;
+  min-height: 44px;
   height: auto;
   max-height: none;
-  padding: 6px 4px;
+  padding: 8px 4px;
   font-size: 0.72rem;
   line-height: 1.15;
   white-space: normal;
@@ -146,10 +146,10 @@ body {
   font-family: inherit;
   font-size: 0.85rem;
   font-weight: 600;
-  height: 34px;
-  min-height: 34px;
-  max-height: 34px;
-  padding: 0 12px;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  padding: 0 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -311,6 +311,7 @@ body {
 
 .modal-actions .pill-btn {
   flex: 1;
+  min-height: 44px;
 }
 
 .header h1 {
@@ -404,7 +405,10 @@ body {
   position: sticky;
   top: 0;
   z-index: 5;
-  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 0 4px;
   background: var(--bg);
 }
 
@@ -431,16 +435,16 @@ body {
 
 .search-clear {
   position: absolute;
-  right: 10px;
+  right: 6px;
   top: 50%;
   transform: translateY(-50%);
-  width: 30px;
-  height: 30px;
+  width: 44px;
+  height: 44px;
   border: none;
   border-radius: 50%;
   background: var(--surface-2);
   color: var(--muted);
-  font-size: 1.3rem;
+  font-size: 1.35rem;
   line-height: 1;
   cursor: pointer;
   display: flex;
@@ -483,12 +487,15 @@ body {
   margin: 20px 0 10px;
 }
 
-/* Search heading doubles as the display-name editor: "Adding as Dave". */
+/* Name chip above Search — separate from the search field itself. */
 button.guest-name {
-  display: block;
+  display: inline-flex;
+  align-items: center;
   width: fit-content;
   max-width: 100%;
-  padding: 0;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 2px;
   border: 0;
   background: none;
   font: inherit;
@@ -532,8 +539,18 @@ button.guest-name:focus-visible {
   margin-bottom: 0;
 }
 
+.np-connection-status {
+  margin: -4px 0 8px;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 /* Collapsible main-page panels (Controls, Suggestion Box, …). */
 .controls-panel.collapsed > .controls {
+  display: none;
+}
+
+.controls-panel.collapsed > .host-lock-panel {
   display: none;
 }
 
@@ -565,6 +582,10 @@ button.guest-name:focus-visible {
 
 .np-card.is-empty {
   cursor: default;
+}
+
+.np-card.is-stale {
+  opacity: 0.72;
 }
 
 .np-art {
@@ -717,8 +738,10 @@ button.guest-name:focus-visible {
 .np-react-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.3rem;
-  padding: 0.32rem 0.6rem;
+  min-height: 44px;
+  padding: 0.45rem 0.75rem;
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.35);
@@ -756,8 +779,8 @@ button.guest-name:focus-visible {
 }
 
 .requests-paused-banner {
-  margin: 0.5rem 0 0;
-  padding: 0.55rem 0.75rem;
+  margin: 0;
+  padding: 0.65rem 0.8rem;
   border-radius: 10px;
   background: rgba(234, 179, 8, 0.14);
   color: #fbbf24;
@@ -918,8 +941,8 @@ button.guest-name:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   background: var(--surface-2);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -1218,8 +1241,8 @@ button.guest-name:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 34px;
-  padding: 6px 12px;
+  min-height: 44px;
+  padding: 8px 14px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: var(--surface-2);
@@ -1309,7 +1332,8 @@ button.guest-name:focus-visible {
 }
 .stats-win-btn {
   flex: 1;
-  padding: 7px 10px;
+  min-height: 44px;
+  padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid var(--border, #2a2a32);
   background: rgba(255, 255, 255, 0.04);
@@ -1689,15 +1713,15 @@ button.guest-name:focus-visible {
 
 .banner-del {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 22px;
-  height: 22px;
+  top: 0;
+  right: 0;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   border: none;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.55);
   color: #fff;
-  font-size: 0.9rem;
+  font-size: 1rem;
   line-height: 1;
   cursor: pointer;
   display: flex;
@@ -2366,7 +2390,8 @@ button.guest-name:focus-visible {
   text-shadow: 0 0 24px rgba(29, 185, 84, 0.25);
 }
 
-body.np-overlay-open {
+body.np-overlay-open,
+body.modal-open {
   overflow: hidden;
 }
 
@@ -2490,10 +2515,10 @@ body.np-overlay-open {
 }
 .guest-note-remove {
   flex: 0 0 auto;
-  min-width: 2rem;
-  min-height: 2rem;
-  height: 2rem;
-  padding: 0 6px;
+  min-width: 44px;
+  min-height: 44px;
+  height: 44px;
+  padding: 0 8px;
   font-size: 1rem;
   line-height: 1;
 }
@@ -2522,5 +2547,58 @@ body.np-overlay-open {
 }
 .recap-stat {
   font-weight: 600;
+}
+
+/* ---- Phase 3: phone composition + reduced motion ---------------------- */
+
+@media (max-width: 640px) {
+  .hero {
+    max-height: 28vw;
+    min-height: 72px;
+    object-fit: cover;
+    margin-bottom: 8px;
+  }
+
+  .header h1 {
+    font-size: clamp(1.55rem, 7.5vw, 2.4rem);
+  }
+
+  .header .subtitle {
+    font-size: 0.9rem;
+    margin-bottom: 4px;
+  }
+
+  .np-reactions {
+    gap: 0.35rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .toast {
+    transform: translateX(-50%) translateY(0);
+  }
+
+  .toast.show {
+    transform: translateX(-50%) translateY(0);
+  }
+
+  .np-fs-line.active,
+  .np-react-btn:active,
+  .add-btn:active {
+    transform: none;
+  }
+
+  .np-progress-fill {
+    transition: none;
+  }
 }
 

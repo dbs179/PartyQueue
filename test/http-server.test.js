@@ -1,0 +1,122 @@
+import { after, before, describe, test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { once } from "node:events";
+
+const tmpRoot = fs.mkdtempSync(
+  path.join(os.tmpdir(), `pq-http-server-${process.pid}-`)
+);
+process.env.PARTYQUEUE_SETTINGS_FILE = path.join(tmpRoot, "settings.json");
+process.env.PARTYQUEUE_HOST_PIN_FILE = path.join(tmpRoot, "host-pin.json");
+process.env.PARTYQUEUE_HISTORY_FILE = path.join(tmpRoot, "history.json");
+process.env.PARTYQUEUE_COOLDOWN_FILE = path.join(tmpRoot, "cooldowns.json");
+process.env.PARTYQUEUE_REQUESTS_FILE = path.join(tmpRoot, "requests.json");
+process.env.PARTYQUEUE_REACTIONS_FILE = path.join(tmpRoot, "reactions.json");
+process.env.PARTYQUEUE_SUGGESTIONS_FILE = path.join(tmpRoot, "suggestions.json");
+process.env.PARTYQUEUE_GUESTS_FILE = path.join(tmpRoot, "guests.json");
+process.env.PARTYQUEUE_ORIGIN_FILE = path.join(tmpRoot, "origins.json");
+process.env.PARTYQUEUE_DJ_MEMORY_FILE = path.join(tmpRoot, "dj-memory.json");
+delete process.env.SETTINGS_PIN;
+
+const { createApp, startServer, shutdownServer } = await import(
+  "../src/server.js"
+);
+
+describe("HTTP server harness", { concurrency: false }, () => {
+  let baseUrl = "";
+  let runtime = null;
+
+  before(async () => {
+    const harness = createApp();
+    assert.equal(harness.listening, false);
+
+    runtime = startServer({
+      port: 18089,
+      host: "127.0.0.1",
+      signals: false,
+      seed: false,
+      warm: false,
+      exit() {
+        /* keep the test runner alive */
+      },
+    });
+    if (!runtime.httpServer.listening) {
+      await once(runtime.httpServer, "listening");
+    }
+    baseUrl = `http://127.0.0.1:${runtime.port}`;
+  });
+
+  after(async () => {
+    await shutdownServer({ reason: "http-server.test teardown", exit: false });
+    try {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  });
+
+  test("GET /api/health stays a stable liveness contract", async () => {
+    const res = await fetch(`${baseUrl}/api/health`);
+    assert.equal(res.status, 200);
+    assert.ok(res.headers.get("x-request-id"));
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(typeof body.version, "string");
+    assert.equal(typeof body.spotifyConfigured, "boolean");
+  });
+
+  test("GET /api/ready reports listening while the harness is up", async () => {
+    const res = await fetch(`${baseUrl}/api/ready`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ready, true);
+    assert.equal(body.checks.listening, true);
+    assert.equal(body.checks.shuttingDown, false);
+    assert.ok(
+      ["connecting", "connected", "disconnected", "unknown"].includes(
+        body.checks.sonos
+      )
+    );
+  });
+
+  test("cross-origin POSTs are blocked by the CSRF guard", async () => {
+    const res = await fetch(`${baseUrl}/api/queue/clear`, {
+      method: "POST",
+      headers: {
+        Origin: "http://evil.example",
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    });
+    assert.equal(res.status, 403);
+    const body = await res.json();
+    assert.match(body.error || "", /cross-origin/i);
+  });
+
+  test("incoming X-Request-Id is echoed on responses", async () => {
+    const res = await fetch(`${baseUrl}/api/health`, {
+      headers: { "X-Request-Id": "phase2-test-id" },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("x-request-id"), "phase2-test-id");
+  });
+
+  test("static UI modules are served with Cache-Control: no-cache", async () => {
+    const res = await fetch(`${baseUrl}/js/main.js`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("cache-control") || "", /no-cache/i);
+    const body = await res.text();
+    assert.match(body, /import\(/);
+  });
+
+  test("GET /api/settings/pin-required reports whether a host PIN is set", async () => {
+    const res = await fetch(`${baseUrl}/api/settings/pin-required`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(typeof body.required, "boolean");
+  });
+});
+
+

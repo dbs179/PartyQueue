@@ -37,3 +37,44 @@ jobs:
       - name: Audit production dependencies
         if: runner.os == 'Linux'
         run: npm audit --omit=dev
+
+  browser:
+    name: Browser smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser smoke suite
+        run: npm run test:browser
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build production image
+        run: docker build --tag partyqueue:ci .
+
+      - name: Verify DJ runtime assets
+        run: >-
+          docker run --rm --entrypoint sh partyqueue:ci -c
+          'command -v ffmpeg &&
+          test -f /app/public/dj-silence-0.5s.mp3 &&
+          test -f /app/public/dj-silence-5s.mp3'

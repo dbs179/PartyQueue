@@ -1,6 +1,6 @@
 # PartyQueue
 
-**Version:** 6.2.6 (tracked in `package.json`)
+**Version:** 6.7.0 (tracked in `package.json`)
 
 A LAN party app for Sonos: guests open it on their phones, search Spotify, and
 add songs to **your** queue. Playback controls, Random, and Music Mix are on the
@@ -38,13 +38,25 @@ the public internet.
 - **Queue adds** talk to Sonos on your LAN (append / insert — not “replace
   everything and hijack the house” by default).
 - Spotify must already be a music service in your Sonos system.
+- **Now Playing** uses a demand-driven Server-Sent Events stream. While at least
+  one guest is viewing the main page, the server takes at most one shared Sonos
+  snapshot every 1.5 seconds, regardless of guest count, and broadcasts
+  meaningful changes. With no active viewers the stream poller stops entirely.
+  Queue and group lists remain on a conservative 5-second browser refresh, and
+  browsers fall back to `/api/nowplaying` every 15 seconds if streaming fails.
+  After repeated Sonos read failures, clients mark the last snapshot as stale
+  and clear the warning automatically when Sonos recovers.
 
 **Optional host PIN:** set it under **DJ Booth → Settings → Connections → Host
-PIN** (stored hashed on the server), or use `SETTINGS_PIN` in `.env` as a
-bootstrap fallback. It locks the **DJ Booth** UI and host-only APIs (settings,
-credentials, resets, restart, guest admin, uploads). It does **not** lock party
-Controls, Random, or Music Mix. The server also rejects cross-site browser
-requests so a random website can’t quietly poke your queue.
+PIN** (stored hashed on the server), or use `SETTINGS_PIN` in `.env`. On a fresh
+install, enter the six-digit setup code printed in the PartyQueue server or
+Unraid logs before choosing the first PIN; it expires after two hours, and a
+restart issues a new one. The PIN locks the **DJ Booth** UI and host-only APIs
+(settings, credentials, resets, restart, guest admin, uploads). Party controls
+remain open by default; **Music Mix → Host-only controls** can also require the
+PIN for playback, queue editing, and Sonos grouping. Random requests remain
+available to guests. The server also rejects cross-site browser requests so a
+random website can’t quietly poke your queue.
 
 ---
 
@@ -74,8 +86,8 @@ Then open **DJ Booth → Settings → Connections** and enter Spotify (and
 optionally Last.fm / Home Assistant).
 
 Open `http://<your-computer-ip>:<PORT>` on your phone (same Wi‑Fi). Default
-`PORT` in `.env.example` is `8080`. Try `/api/rooms` or `/api/health` to confirm
-the server and Sonos discovery look healthy.
+`PORT` in `.env.example` is `8080`. Use `/api/health` for a quick liveness check
+(process up + version). Use `/api/rooms` to confirm Sonos discovery.
 
 ---
 
@@ -102,7 +114,10 @@ lockfile, so rebuilds install the same dependency versions.
 After code updates, use the same rebuild command so you’re not served a stale
 image layer. Docker stop/restart signals are handled gracefully: PartyQueue
 stops its background monitors, flushes pending history and genre-cache writes,
-and then exits for the container restart policy.
+and then exits for the container restart policy. The image includes a
+`HEALTHCHECK` against `/api/health`. For stricter orchestration use
+`/api/ready` (503 while the HTTP server is down or shutting down; Sonos and
+Spotify are reported as checks, not hard requirements).
 
 ### Manual “Add Container”
 
@@ -183,6 +198,10 @@ Announcements on Sonos via Home Assistant TTS (ElevenLabs or OpenAI):
 5. Pick your Sonos group in the app. PartyQueue maps the room to
    `media_player.sonos_<room>` for HA.
 
+The Docker image includes `ffmpeg`, which PartyQueue uses to apply non-default
+OpenAI TTS speed locally. Local Windows/macOS/Linux installs need `ffmpeg` on
+`PATH` (or `FFMPEG_PATH`) only when a non-1× speed is selected.
+
 Every queued announcement uses a fixed handoff: a 3-second pre-silence pad
 smoothly raises the current group volume, the DJ clip plays, then a matching
 3-second post-silence pad returns every speaker to the exact pre-DJ level before
@@ -237,8 +256,10 @@ Settings after install. **Do not** zip the install folder by hand.
 
 | Method | Path                   | Purpose                                       |
 | ------ | ---------------------- | --------------------------------------------- |
-| GET    | `/api/health`          | Liveness + version                            |
+| GET    | `/api/health`          | Liveness + version + Spotify-configured flag  |
+| GET    | `/api/ready`           | Readiness for orchestrators (503 if stopping) |
 | GET    | `/api/rooms`           | List Sonos rooms PartyQueue can see           |
+| GET    | `/api/nowplaying/stream` | Shared live Now Playing event stream         |
 | GET    | `/api/search`          | `?q=` Spotify track search                    |
 | POST   | `/api/queue`           | `{ "uri": "spotify:track:..." }` append (limited) |
 | POST   | `/api/queue/playlist`  | `{ "uri": "spotify:playlist:..." }` append    |
@@ -260,10 +281,20 @@ JSON `retryMs` value; normal playback and queue permissions are unchanged.
 
 ## Tests and CI
 
-Run the complete Node 20 test suite with `npm test`. GitHub Actions runs the
-locked install and tests on Linux and Windows for pushes and pull requests, and
-audits production dependencies on Linux. Sonos/Home Assistant smoke scripts
-remain manual because they control real hardware.
+Run the complete Node 20 test suite with `npm test`. That includes an in-process
+HTTP harness (`createApp` / `startServer` / `shutdownServer`) covering liveness,
+readiness, CSRF rejection, and request IDs — without binding the production
+port or starting Spotify/Sonos warmers. GitHub Actions runs the locked install
+and tests on Linux and Windows for pushes and pull requests, and audits
+production dependencies on Linux. Sonos/Home Assistant smoke scripts remain
+manual because they control real hardware.
+
+### Logging
+
+By default PartyQueue logs human-readable tagged lines (`[server]`, `[http]`,
+`[dj-voice]`, …). Set `LOG_FORMAT=json` for one JSON object per line. API
+responses include `X-Request-Id` (echoed from the request header when provided)
+so Unraid/Docker logs can be correlated with a browser session.
 
 ---
 

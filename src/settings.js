@@ -886,6 +886,7 @@ export function setDjVoiceSettings(partial = {}) {
 export const CONTENT_DEFAULTS = {
   filterExplicit: false,
   requestsPaused: false,
+  hostControlsOnly: false,
   kidsLock: false,
 };
 
@@ -903,6 +904,10 @@ export function getContentSettings() {
       typeof s.requestsPaused === "boolean"
         ? s.requestsPaused
         : CONTENT_DEFAULTS.requestsPaused,
+    hostControlsOnly:
+      typeof s.hostControlsOnly === "boolean"
+        ? s.hostControlsOnly
+        : CONTENT_DEFAULTS.hostControlsOnly,
     kidsLock:
       typeof s.kidsLock === "boolean" ? s.kidsLock : CONTENT_DEFAULTS.kidsLock,
     kidsLockSnapshot:
@@ -918,6 +923,9 @@ export function setContentSettings(partial = {}) {
   const next = { ...loadSettings() };
   if (partial.filterExplicit != null) next.filterExplicit = !!partial.filterExplicit;
   if (partial.requestsPaused != null) next.requestsPaused = !!partial.requestsPaused;
+  if (partial.hostControlsOnly != null) {
+    next.hostControlsOnly = !!partial.hostControlsOnly;
+  }
   if (partial.kidsLock != null) next.kidsLock = !!partial.kidsLock;
   if (partial.kidsLockSnapshot !== undefined) {
     next.kidsLockSnapshot = partial.kidsLockSnapshot;
