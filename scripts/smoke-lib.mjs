@@ -5,6 +5,7 @@
 export const BASE = process.env.PQ_BASE || "http://127.0.0.1:8088";
 
 let hostToken = process.env.PQ_HOST_TOKEN || "";
+let hostCookie = process.env.PQ_HOST_COOKIE || "";
 
 export async function api(method, pathName, body, timeoutMs = 120000) {
   const ctrl = new AbortController();
@@ -13,12 +14,15 @@ export async function api(method, pathName, body, timeoutMs = 120000) {
     const headers = {};
     if (body) headers["Content-Type"] = "application/json";
     if (hostToken) headers["X-PartyQueue-Host"] = hostToken;
+    if (hostCookie) headers.Cookie = hostCookie;
     const res = await fetch(`${BASE}${pathName}`, {
       method,
       headers: Object.keys(headers).length ? headers : undefined,
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
     });
+    const setCookie = res.headers.get("set-cookie");
+    if (setCookie) hostCookie = setCookie.split(";", 1)[0];
     const text = await res.text();
     let json = null;
     try {
@@ -44,9 +48,8 @@ export async function api(method, pathName, body, timeoutMs = 120000) {
 export async function ensureHostAuth() {
   const pin = (process.env.PQ_HOST_PIN || process.env.SETTINGS_PIN || "").trim();
   if (!pin) return false;
-  const j = await api("POST", "/api/settings/verify-pin", { pin });
-  if (j?.token) hostToken = j.token;
-  return !!hostToken;
+  await api("POST", "/api/settings/verify-pin", { pin });
+  return !!(hostCookie || hostToken);
 }
 
 export async function sleep(ms) {

@@ -298,20 +298,20 @@ describe("resolvePublicBaseUrl / getPublicBaseUrl", () => {
   it("uses PUBLIC_BASE_URL in Docker even when it is not a local interface", () => {
     assert.equal(
       resolvePublicBaseUrl({
-        envUrl: "http://10.10.1.30:8088/",
+        envUrl: "http://192.0.2.30:8088/",
         port: 8088,
         localIps: ["172.17.0.2"],
         preferredIp: "172.17.0.2",
         inDocker: true,
       }),
-      "http://10.10.1.30:8088"
+      "http://192.0.2.30:8088"
     );
   });
 
   it("ignores Unraid PUBLIC_BASE_URL on local runs and auto-detects LAN IP", () => {
     assert.equal(
       resolvePublicBaseUrl({
-        envUrl: "http://10.10.1.30:8088",
+        envUrl: "http://192.0.2.30:8088",
         port: 8088,
         localIps: ["10.10.10.10", "192.168.1.5"],
         preferredIp: "10.10.10.10",
@@ -337,14 +337,14 @@ describe("resolvePublicBaseUrl / getPublicBaseUrl", () => {
   it("honors PUBLIC_BASE_URL when FORCE is set", () => {
     assert.equal(
       resolvePublicBaseUrl({
-        envUrl: "http://10.10.1.30:8088",
+        envUrl: "http://192.0.2.30:8088",
         port: 8088,
         localIps: ["10.10.10.10"],
         preferredIp: "10.10.10.10",
         inDocker: false,
         forceEnv: true,
       }),
-      "http://10.10.1.30:8088"
+      "http://192.0.2.30:8088"
     );
   });
 

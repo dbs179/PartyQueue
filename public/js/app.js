@@ -345,6 +345,7 @@ const toolbarMoodBtn = document.getElementById("toolbar-mood");
 const toolbarBoothBtn = document.getElementById("toolbar-booth");
 const toolbarStatsBtn = document.getElementById("toolbar-stats");
 const toolbarJoinBtn = document.getElementById("toolbar-join");
+const toolbarDisplayBtn = document.getElementById("toolbar-display");
 const moodNeedSpotify = document.getElementById("mood-need-spotify");
 const musicMixHub = document.getElementById("music-mix-hub");
 
@@ -371,6 +372,9 @@ if (toolbarStatsBtn) {
 }
 if (toolbarJoinBtn) {
   toolbarJoinBtn.addEventListener("click", () => navigate("join"));
+}
+if (toolbarDisplayBtn) {
+  toolbarDisplayBtn.addEventListener("click", () => navigate("display"));
 }
 syncToolbarMoodVisibility();
 
@@ -645,6 +649,24 @@ const settingsClearKaraokeBtn = document.getElementById("settings-clear-karaoke"
 const discoverEnabledInput = document.getElementById("set-discover-enabled");
 const similarCountInput = document.getElementById("set-similar-count");
 const endlessCountInput = document.getElementById("set-endless-count");
+const requestFairnessEnabledInput = document.getElementById(
+  "set-request-fairness-enabled"
+);
+const requestFairnessThresholdInput = document.getElementById(
+  "set-request-fairness-threshold"
+);
+const requestFairnessUpcomingInput = document.getElementById(
+  "set-request-fairness-upcoming"
+);
+const requestFairnessRollingMaxInput = document.getElementById(
+  "set-request-fairness-rolling-max"
+);
+const requestFairnessWindowInput = document.getElementById(
+  "set-request-fairness-window"
+);
+const requestFairnessHostBypassInput = document.getElementById(
+  "set-request-fairness-host-bypass"
+);
 const autofillHint = document.getElementById("autofill-hint");
 const filterExplicitInput = document.getElementById("filter-explicit-toggle");
 const requestsPausedInput = document.getElementById("requests-paused-toggle");
@@ -864,6 +886,27 @@ function fillSettings(s) {
   if (s.strictFill != null) strictFillInput.checked = !!s.strictFill;
   if (s.discoverEnabled != null) discoverEnabledInput.checked = !!s.discoverEnabled;
   if (s.similarCount != null) similarCountInput.value = s.similarCount;
+  if (s.requestFairnessEnabled != null && requestFairnessEnabledInput) {
+    requestFairnessEnabledInput.checked = !!s.requestFairnessEnabled;
+  }
+  if (
+    s.requestFairnessUpcomingThreshold != null &&
+    requestFairnessThresholdInput
+  ) {
+    requestFairnessThresholdInput.value = s.requestFairnessUpcomingThreshold;
+  }
+  if (s.requestFairnessUpcomingCap != null && requestFairnessUpcomingInput) {
+    requestFairnessUpcomingInput.value = s.requestFairnessUpcomingCap;
+  }
+  if (s.requestFairnessRollingMax != null && requestFairnessRollingMaxInput) {
+    requestFairnessRollingMaxInput.value = s.requestFairnessRollingMax;
+  }
+  if (s.requestFairnessWindowMinutes != null && requestFairnessWindowInput) {
+    requestFairnessWindowInput.value = s.requestFairnessWindowMinutes;
+  }
+  if (s.requestFairnessHostBypass != null && requestFairnessHostBypassInput) {
+    requestFairnessHostBypassInput.checked = !!s.requestFairnessHostBypass;
+  }
   if (s.endlessQueueCount != null && endlessCountInput) {
     endlessCountInput.value = s.endlessQueueCount;
     if (autofillHint) {
@@ -1136,6 +1179,14 @@ function currentSettingsPayload() {
     discoverEnabled: discoverEnabledInput.checked,
     similarCount: Number(similarCountInput.value),
     endlessQueueCount: Number(endlessCountInput?.value),
+    requestFairnessEnabled: !!requestFairnessEnabledInput?.checked,
+    requestFairnessUpcomingThreshold: Number(
+      requestFairnessThresholdInput?.value
+    ),
+    requestFairnessUpcomingCap: Number(requestFairnessUpcomingInput?.value),
+    requestFairnessRollingMax: Number(requestFairnessRollingMaxInput?.value),
+    requestFairnessWindowMinutes: Number(requestFairnessWindowInput?.value),
+    requestFairnessHostBypass: !!requestFairnessHostBypassInput?.checked,
   };
 }
 
@@ -1151,6 +1202,14 @@ discoverEnabledInput.addEventListener("change", () => {
 // Strict fill also saves immediately — it's a safety switch like Discover.
 strictFillInput.addEventListener("change", () => {
   saveSettings(currentSettingsPayload());
+});
+
+requestFairnessEnabledInput?.addEventListener("change", () => {
+  saveSettings(currentSettingsPayload(), {
+    toastMessage: requestFairnessEnabledInput.checked
+      ? "Request fairness enabled"
+      : "Request fairness disabled",
+  });
 });
 
 // The explicit filter is an independent switch (like Never-Ending Queue): it
@@ -3487,11 +3546,37 @@ const genresBackBtn = document.getElementById("genres-back");
 const boothBackBtn = document.getElementById("booth-back");
 const joinBackBtn = document.getElementById("join-back");
 const viewJoin = document.getElementById("view-join");
+const viewDisplay = document.getElementById("view-display");
 const joinQrEl = document.getElementById("join-qr");
 const joinUrlEl = document.getElementById("join-url");
 const joinErrorEl = document.getElementById("join-error");
 const joinRefreshBtn = document.getElementById("join-refresh");
 const joinCopyBtn = document.getElementById("join-copy");
+const displayEventName = document.getElementById("display-event-name");
+const displayConnectionStatus = document.getElementById(
+  "display-connection-status"
+);
+const displayArt = document.getElementById("display-art");
+const displayEmpty = document.getElementById("display-empty");
+const displayState = document.getElementById("display-state");
+const displayTitle = document.getElementById("display-title");
+const displayArtist = document.getElementById("display-artist");
+const displayAlbum = document.getElementById("display-album");
+const displayProgress = document.getElementById("display-progress");
+const displayProgressFill = document.getElementById("display-progress-fill");
+const displayProgressElapsed = document.getElementById(
+  "display-progress-elapsed"
+);
+const displayProgressDuration = document.getElementById(
+  "display-progress-duration"
+);
+const displayReactions = document.getElementById("display-reactions");
+const displayQueueCount = document.getElementById("display-queue-count");
+const displayQueue = document.getElementById("display-queue");
+const displayQueueEmpty = document.getElementById("display-queue-empty");
+const displayJoinQr = document.getElementById("display-join-qr");
+const displayJoinUrl = document.getElementById("display-join-url");
+const displayJoinError = document.getElementById("display-join-error");
 const recapOverlay = document.getElementById("recap-overlay");
 const recapBody = document.getElementById("recap-body");
 const recapDismissBtn = document.getElementById("recap-dismiss");
@@ -3522,6 +3607,7 @@ const VIEWS = {
   genres: viewGenres,
   booth: viewBooth,
   join: viewJoin,
+  display: viewDisplay,
 };
 let currentView = "main";
 /** Last non-Settings view — PIN Cancel returns here (fallback: main). */
@@ -3581,46 +3667,24 @@ const pinError = document.getElementById("pin-error");
 const pinUnlockBtn = document.getElementById("pin-unlock");
 const pinCancelBtn = document.getElementById("pin-cancel");
 const PIN_UNLOCK_KEY = "pq.settingsUnlocked";
-const PIN_TOKEN_KEY = "pq.hostToken";
 let settingsPinRequired = false;
 /** @type {null | "reveal-settings" | "reveal-controls" | "restart"} */
 let pendingPinAction = null;
 
-function getHostToken() {
-  try {
-    return sessionStorage.getItem(PIN_TOKEN_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
-function setHostToken(token) {
-  try {
-    if (token) sessionStorage.setItem(PIN_TOKEN_KEY, token);
-    else sessionStorage.removeItem(PIN_TOKEN_KEY);
-  } catch {
-    /* ignore storage errors */
-  }
-}
-
 function settingsUnlocked() {
   try {
-    if (getHostToken()) return true;
-    // Legacy flag from pre-session builds.
     return sessionStorage.getItem(PIN_UNLOCK_KEY) === "1";
   } catch {
     return false;
   }
 }
 
-function setSettingsUnlocked(on, token = null) {
+function setSettingsUnlocked(on) {
   try {
     if (on) {
       sessionStorage.setItem(PIN_UNLOCK_KEY, "1");
-      if (token) setHostToken(token);
     } else {
       sessionStorage.removeItem(PIN_UNLOCK_KEY);
-      setHostToken("");
     }
   } catch {
     /* ignore storage errors */
@@ -3631,11 +3695,9 @@ function settingsGateOk() {
   return !settingsPinRequired || settingsUnlocked();
 }
 
-/** fetch() for host-only APIs — attaches session token; re-locks on 401. */
+/** fetch() for host-only APIs — uses the HttpOnly session cookie; re-locks on 401. */
 async function hostFetch(url, options = {}) {
   const headers = new Headers(options.headers || {});
-  const token = getHostToken();
-  if (token) headers.set("X-PartyQueue-Host", token);
   const res = await fetch(url, {
     ...options,
     headers,
@@ -3757,7 +3819,7 @@ function paintHostPinSettings() {
   const source = hostPinInfo?.source || null;
   if (!required) {
     hostPinStatusEl.textContent =
-      "No host PIN set. Enter the six-digit setup code from the PartyQueue server or Unraid logs to claim the DJ Booth.";
+      "No host PIN set. Enter the six-digit setup code from data/host-bootstrap-code.json to claim the DJ Booth.";
   } else if (source === "file") {
     hostPinStatusEl.textContent = "Host PIN is set (saved on this server).";
   } else if (source === "env") {
@@ -3823,7 +3885,7 @@ async function saveHostPin({
   if (!res.ok || !data.ok) {
     throw new Error(data.error || "Could not save PIN.");
   }
-  if (data.token) setSettingsUnlocked(true, data.token);
+  setSettingsUnlocked(true);
   hostPinInfo = {
     required: !!data.required,
     source: data.source ?? null,
@@ -3893,7 +3955,7 @@ hostPinClearBtn?.addEventListener("click", async () => {
     if (!res.ok || !data.ok) {
       throw new Error(data.error || "Could not remove PIN.");
     }
-    setSettingsUnlocked(false, null);
+    setSettingsUnlocked(false);
     hostPinInfo = data;
     settingsPinRequired = !!data.required;
     paintHostPinSettings();
@@ -3917,7 +3979,7 @@ pinSetupSaveBtn?.addEventListener("click", async () => {
   const pin = (pinSetupInput?.value || "").trim();
   const confirm = (pinSetupConfirm?.value || "").trim();
   if (!/^\d{6}$/.test(bootstrapCode)) {
-    showPinSetupError("Enter the six-digit setup code from the server logs.");
+    showPinSetupError("Enter the six-digit setup code from data/host-bootstrap-code.json.");
     return;
   }
   if (!pin || pin.length < 4) {
@@ -4004,7 +4066,7 @@ async function submitPin() {
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.ok) {
-      setSettingsUnlocked(true, data.token || null);
+      setSettingsUnlocked(true);
       closePinGate();
       syncHostControlsVisibility();
       const action = pendingPinAction;
@@ -4046,14 +4108,13 @@ if (pinCancelBtn) {
   pinCancelBtn.addEventListener("click", dismissPinGate);
 }
 
-// ---- Live Now Playing + conservative queue polling ---------------------
-// Visible main views share one server-side Sonos poller through SSE. Queue and
-// group data stay on a 5-second browser interval. Hidden tabs and sub-pages
-// close the stream and stop polling, so idle phones produce no Sonos reads.
-const POLL_MS = 5000;
+// ---- Shared live Now Playing + queue streams ----------------------------
+// Visible main views share demand-driven server monitors through SSE. Hidden
+// tabs and sub-pages close both streams so idle phones produce no Sonos reads.
 const NOW_PLAYING_FALLBACK_MS = 15000;
 const NOW_PLAYING_FALLBACK_DELAY_MS = 5000;
-let pollTimer = null;
+const QUEUE_FALLBACK_MS = 15000;
+const QUEUE_FALLBACK_DELAY_MS = 5000;
 let nowPlayingSource = null;
 let nowPlayingStreamConnected = false;
 let nowPlayingFallbackTimer = null;
@@ -4061,10 +4122,22 @@ let nowPlayingFallbackDelayTimer = null;
 let nowPlayingStreamSession = "";
 let nowPlayingStreamSequence = 0;
 let nowPlayingStreamVersion = 0;
+let queueSource = null;
+let queueStreamConnected = false;
+let queueFallbackTimer = null;
+let queueFallbackDelayTimer = null;
+let queueStreamSession = "";
+let queueStreamSequence = 0;
+let queueStreamVersion = 0;
+let queueHttpRequest = 0;
+let pendingQueueStreamTracks = null;
 let appReady = false;
 
 function shouldPoll() {
-  return document.visibilityState === "visible" && currentView === "main";
+  return (
+    document.visibilityState === "visible" &&
+    (currentView === "main" || currentView === "display")
+  );
 }
 
 function stopNowPlayingFallback() {
@@ -4132,6 +4205,13 @@ function setNowPlayingConnectionStatus(status, message = "") {
         message || "Sonos reconnecting — showing the last update.";
     }
   }
+  if (displayConnectionStatus) {
+    displayConnectionStatus.hidden = !disconnected;
+    if (disconnected) {
+      displayConnectionStatus.textContent =
+        message || "Sonos reconnecting — showing the last update.";
+    }
+  }
 }
 
 function openNowPlayingStream() {
@@ -4189,28 +4269,127 @@ function closeNowPlayingStream() {
   }
 }
 
-function startPolling() {
-  if (!pollTimer && shouldPoll()) pollTimer = setInterval(refreshSonos, POLL_MS);
-}
-
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
+function stopQueueFallback() {
+  if (queueFallbackDelayTimer) {
+    clearTimeout(queueFallbackDelayTimer);
+    queueFallbackDelayTimer = null;
+  }
+  if (queueFallbackTimer) {
+    clearInterval(queueFallbackTimer);
+    queueFallbackTimer = null;
   }
 }
 
-// Resume (immediate refresh + start the timer) when we should be polling;
-// otherwise make sure the timer is stopped. Safe to call on any visibility or
-// view change.
+function startQueueFallback() {
+  if (
+    !shouldPoll() ||
+    queueStreamConnected ||
+    queueFallbackDelayTimer ||
+    queueFallbackTimer
+  ) {
+    return;
+  }
+  queueFallbackDelayTimer = setTimeout(() => {
+    queueFallbackDelayTimer = null;
+    if (!shouldPoll() || queueStreamConnected) return;
+    void loadQueue();
+    queueFallbackTimer = setInterval(loadQueue, QUEUE_FALLBACK_MS);
+  }, QUEUE_FALLBACK_DELAY_MS);
+}
+
+function applyQueueStreamSnapshot(snapshot) {
+  const session =
+    typeof snapshot?.streamSession === "string" ? snapshot.streamSession : "";
+  const sequence = Number(snapshot?.streamSequence);
+  if (
+    session &&
+    session === queueStreamSession &&
+    Number.isFinite(sequence) &&
+    sequence <= queueStreamSequence
+  ) {
+    return;
+  }
+  if (session && session !== queueStreamSession) {
+    queueStreamSession = session;
+    queueStreamSequence = 0;
+  }
+  if (Number.isFinite(sequence)) queueStreamSequence = sequence;
+  queueStreamVersion += 1;
+  const tracks = Array.isArray(snapshot?.tracks) ? snapshot.tracks : [];
+  if (queueEditMode) {
+    pendingQueueStreamTracks = tracks;
+    return;
+  }
+  pendingQueueStreamTracks = null;
+  applyQueueTracks(tracks);
+}
+
+function openQueueStream() {
+  if (queueSource || !shouldPoll()) return;
+  if (typeof EventSource !== "function") {
+    void loadQueue();
+    startQueueFallback();
+    return;
+  }
+  queueStreamSession = "";
+  queueStreamSequence = 0;
+  const source = new EventSource("/api/queue/stream");
+  queueSource = source;
+  source.onopen = () => {
+    if (queueSource !== source) return;
+    queueStreamConnected = true;
+    stopQueueFallback();
+  };
+  source.addEventListener("queue-status", (event) => {
+    if (queueSource !== source) return;
+    try {
+      const health = JSON.parse(event.data);
+      if (health?.status === "disconnected") {
+        queueStreamConnected = false;
+        startQueueFallback();
+      } else if (health?.status === "connected") {
+        queueStreamConnected = true;
+        stopQueueFallback();
+      }
+    } catch {
+      /* ignore malformed status events */
+    }
+  });
+  source.onmessage = (event) => {
+    if (queueSource !== source) return;
+    try {
+      applyQueueStreamSnapshot(JSON.parse(event.data));
+    } catch {
+      /* ignore malformed stream events and await the next snapshot */
+    }
+  };
+  source.onerror = () => {
+    if (queueSource !== source) return;
+    queueStreamConnected = false;
+    startQueueFallback();
+  };
+}
+
+function closeQueueStream() {
+  queueStreamConnected = false;
+  stopQueueFallback();
+  if (queueSource) {
+    queueSource.close();
+    queueSource = null;
+  }
+}
+
+// Open/close live streams to match the active visible view. An initial HTTP
+// read paints immediately while SSE establishes and remains the fallback path.
 function syncPolling() {
   if (shouldPoll()) {
-    refreshSonos();
+    void loadQueue();
+    if (currentView !== "display") void loadGroups();
     openNowPlayingStream();
-    startPolling();
+    openQueueStream();
   } else {
-    stopPolling();
     closeNowPlayingStream();
+    closeQueueStream();
   }
 }
 
@@ -4219,8 +4398,13 @@ function showView(name) {
   if (!isHostArea(target)) lastNonSettingsView = target;
   currentView = target;
   for (const key of Object.keys(VIEWS)) VIEWS[key].hidden = key !== target;
+  document.body.classList.toggle("party-display-active", target === "display");
   if (target === "stats") loadStats();
-  if (target === "join") loadJoinCode();
+  if (target === "join" || target === "display") loadJoinCode();
+  if (target === "display" && displayEventName) {
+    displayEventName.textContent =
+      document.getElementById("event-name")?.textContent?.trim() || "PartyQueue";
+  }
   if (target === "settings-dj") updateDjHubSummaries();
   if (target === "settings-dj-advanced") void loadDjEffectivePrompt();
   if (isSettingsArea(target)) revealSettings();
@@ -4449,33 +4633,47 @@ moodPresetsBackBtn?.addEventListener("click", () => navigate("mix"));
 genresBackBtn?.addEventListener("click", () => navigate("mix"));
 boothBackBtn?.addEventListener("click", () => navigate("main"));
 joinBackBtn?.addEventListener("click", () => navigate("main"));
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && currentView === "display") {
+    event.preventDefault();
+    navigate("main");
+  }
+});
 window.addEventListener("hashchange", routeFromHash);
 routeFromHash();
 
 let joinUrlCache = "";
 
 async function loadJoinCode() {
-  if (joinErrorEl) {
-    joinErrorEl.hidden = true;
-    joinErrorEl.textContent = "";
+  for (const errorEl of [joinErrorEl, displayJoinError]) {
+    if (!errorEl) continue;
+    errorEl.hidden = true;
+    errorEl.textContent = "";
   }
-  if (joinQrEl) joinQrEl.innerHTML = "";
+  for (const qrEl of [joinQrEl, displayJoinQr]) {
+    if (qrEl) qrEl.innerHTML = "";
+  }
   if (joinUrlEl) joinUrlEl.textContent = "Loading…";
+  if (displayJoinUrl) displayJoinUrl.textContent = "Loading…";
   try {
     const res = await fetch("/api/join");
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Could not load join code.");
     joinUrlCache = data.url || "";
     if (joinUrlEl) joinUrlEl.textContent = joinUrlCache;
-    if (joinQrEl && data.qrSvg) {
-      joinQrEl.innerHTML = data.qrSvg;
+    if (displayJoinUrl) displayJoinUrl.textContent = joinUrlCache;
+    if (data.qrSvg) {
+      if (joinQrEl) joinQrEl.innerHTML = data.qrSvg;
+      if (displayJoinQr) displayJoinQr.innerHTML = data.qrSvg;
     }
   } catch (err) {
     joinUrlCache = "";
     if (joinUrlEl) joinUrlEl.textContent = "";
-    if (joinErrorEl) {
-      joinErrorEl.hidden = false;
-      joinErrorEl.textContent = err.message || "Join code unavailable.";
+    if (displayJoinUrl) displayJoinUrl.textContent = "";
+    for (const errorEl of [joinErrorEl, displayJoinError]) {
+      if (!errorEl) continue;
+      errorEl.hidden = false;
+      errorEl.textContent = err.message || "Join code unavailable.";
     }
   }
 }
@@ -4727,19 +4925,32 @@ async function addToQueue(track, btn) {
       throw new Error(data.error || "Could not add song.");
     }
 
-    btn.textContent = data.promoted ? "Moved up" : "Added";
+    btn.textContent = data.alreadyRequested
+      ? "Already queued"
+      : data.promoted
+        ? "Moved up"
+        : "Added";
     btn.classList.add("added");
     if (data.closingTime) {
       setAutofillToggle(false);
       lastClosingShown = data.closingTimeAt || Date.now(); // don't re-toast on poll
       showPartyRecap(data.partyRecap);
     } else {
-      const msg = await buildAddToastMessage(track, data);
+      const msg = data.alreadyRequested
+        ? `"${track.name}" is already in the requested queue.`
+        : await buildAddToastMessage(track, data);
       // Optional dedicate — does not block Add. Toast action opens a short field.
-      showToast(msg, false, 5500, {
-        actionLabel: "Dedicate",
-        onAction: () => openDedicationModal(track),
-      });
+      showToast(
+        msg,
+        false,
+        5500,
+        data.alreadyRequested
+          ? {}
+          : {
+              actionLabel: "Dedicate",
+              onAction: () => openDedicationModal(track),
+            }
+      );
     }
     refreshSonos();
     // Keep Stats current if that page is open.
@@ -5068,6 +5279,14 @@ function updateTrackProgress() {
     position,
     duration
   );
+  paintTrackProgress(
+    displayProgress,
+    displayProgressFill,
+    displayProgressElapsed,
+    displayProgressDuration,
+    position,
+    duration
+  );
 }
 
 // Advance synced lyrics slightly to offset Sonos reporting, polling, ticker,
@@ -5384,6 +5603,12 @@ function paintNpReactions(data) {
     btn.classList.toggle("is-active", on);
     btn.setAttribute("aria-pressed", on ? "true" : "false");
   }
+  if (displayReactions) {
+    for (const el of displayReactions.querySelectorAll("[data-display-count]")) {
+      const kind = el.getAttribute("data-display-count");
+      el.textContent = String(npReactionCounts[kind] || 0);
+    }
+  }
 }
 
 async function syncMyReactions(trackId) {
@@ -5408,6 +5633,45 @@ async function syncMyReactions(trackId) {
   } catch {
     /* keep prior paint */
   }
+}
+
+function renderPartyDisplayNowPlaying(np, hasTrack) {
+  if (!displayTitle || !displayEmpty || !displayArt) return;
+  if (!hasTrack) {
+    displayArt.removeAttribute("src");
+    displayArt.alt = "";
+    displayEmpty.hidden = false;
+    displayEmpty.textContent = EMPTY_MESSAGE;
+    displayTitle.textContent = "";
+    if (displayArtist) displayArtist.textContent = "";
+    if (displayAlbum) displayAlbum.textContent = "";
+    if (displayState) displayState.hidden = true;
+    if (displayReactions) displayReactions.hidden = true;
+    return;
+  }
+
+  displayEmpty.hidden = true;
+  displayTitle.textContent = np.title || "";
+  if (displayArtist) displayArtist.textContent = np.artist || "";
+  if (displayAlbum) displayAlbum.textContent = np.album || "";
+  if (np.albumArt) {
+    if (displayArt.getAttribute("src") !== np.albumArt) {
+      displayArt.decoding = "async";
+      displayArt.src = np.albumArt;
+    }
+    displayArt.alt = np.album
+      ? `Album art for ${np.album}`
+      : `Artwork for ${np.title || "current track"}`;
+  } else {
+    displayArt.removeAttribute("src");
+    displayArt.alt = "";
+  }
+  if (displayState) {
+    displayState.hidden = false;
+    displayState.textContent = np.isPlaying ? "Playing" : "Paused";
+    displayState.classList.toggle("playing", !!np.isPlaying);
+  }
+  if (displayReactions) displayReactions.hidden = !!np.djVoice;
 }
 
 function renderNowPlaying(np) {
@@ -5521,6 +5785,7 @@ function renderNowPlaying(np) {
     if (npOverlayOpen) closeNpOverlay();
   }
 
+  renderPartyDisplayNowPlaying(np, hasTrack);
   syncNpOverlay(np);
   prefetchUpcomingAlbumArt(lastQueueTracks);
 }
@@ -5614,6 +5879,44 @@ async function loadNowPlaying() {
   }
 }
 
+function renderPartyDisplayQueue(tracks) {
+  if (!displayQueue || !displayQueueEmpty || !displayQueueCount) return;
+  const musicTracks = tracks.filter((track) => !track.djVoice);
+  const visible = musicTracks.slice(0, 6);
+  displayQueueCount.textContent = musicTracks.length
+    ? `${musicTracks.length} queued`
+    : "";
+  displayQueueEmpty.hidden = visible.length > 0;
+  displayQueueEmpty.textContent = "The queue is empty.";
+  displayQueue.innerHTML = "";
+
+  visible.forEach((track, index) => {
+    const row = document.createElement("li");
+    const number = document.createElement("span");
+    number.className = "party-display-queue-index";
+    number.textContent = String(index + 1);
+
+    const meta = document.createElement("div");
+    meta.className = "party-display-queue-meta";
+    const title = document.createElement("strong");
+    title.textContent = track.title || "Untitled";
+    const artist = document.createElement("span");
+    artist.textContent = track.artist || "";
+    meta.append(title, artist);
+
+    const requester = sanitizeDisplayName(track.requestedBy || "");
+    if (requester || track.discovered) {
+      const source = document.createElement("span");
+      source.className = "party-display-queue-source";
+      source.textContent = requester ? `Requested by ${requester}` : "Discover";
+      meta.appendChild(source);
+    }
+
+    row.append(number, meta);
+    displayQueue.appendChild(row);
+  });
+}
+
 function applyQueueTracks(tracks) {
   lastQueueTracks = tracks;
   queuedIdSet = new Set(tracks.map((t) => trackIdFromUri(t.uri)).filter(Boolean));
@@ -5625,19 +5928,28 @@ function applyQueueTracks(tracks) {
     tracks.filter((t) => t.searched).map((t) => songMatchKey(t.title, t.artist)).filter(Boolean)
   );
   renderQueue(tracks);
+  renderPartyDisplayQueue(tracks);
   updateResultsQueuedState();
   prefetchUpcomingAlbumArt(tracks);
 }
 
 async function loadQueue(force = false) {
-  // While editing, don't let the 5s poll rebuild the list under the user's
+  // While editing, don't let fallback HTTP rebuild the list under the user's
   // hands (it would interrupt a drag or wipe the delete buttons). Explicit
-  // calls (entering edit mode, after an edit) pass force=true.
+  // reconciliation calls pass force=true.
   if (queueEditMode && !force) return;
+  const requestId = ++queueHttpRequest;
+  const streamVersionAtStart = queueStreamVersion;
   try {
     const res = await fetch("/api/queue/list");
     if (!res.ok) return;
     const data = await res.json();
+    if (
+      requestId !== queueHttpRequest ||
+      queueStreamVersion !== streamVersionAtStart
+    ) {
+      return;
+    }
     const tracks = Array.isArray(data.tracks) ? data.tracks : [];
     applyQueueTracks(tracks);
   } catch {
@@ -5754,8 +6066,10 @@ function renderQueue(tracks) {
 }
 
 function refreshSonos() {
-  loadQueue();
-  loadGroups();
+  // App-owned mutations nudge the shared server monitor. HTTP remains the
+  // immediate path only when the queue stream is unavailable.
+  if (!queueStreamConnected) void loadQueue();
+  if (currentView !== "display") void loadGroups();
 }
 
 async function postControl(btn, endpoint, onOk) {
@@ -5910,7 +6224,13 @@ queueEditToggle.addEventListener("click", () => {
   queueEditToggle.setAttribute("aria-pressed", String(queueEditMode));
   queueEditToggle.textContent = queueEditMode ? "Done" : "Edit";
   queueEditHint.hidden = !queueEditMode;
-  loadQueue(true); // re-render with/without the edit affordances
+  if (!queueEditMode && pendingQueueStreamTracks) {
+    const tracks = pendingQueueStreamTracks;
+    pendingQueueStreamTracks = null;
+    applyQueueTracks(tracks);
+  } else {
+    loadQueue(true); // enter edit fresh, or reconcile when no event arrived
+  }
 });
 
 function songCount(n) {

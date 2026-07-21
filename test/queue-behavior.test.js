@@ -195,7 +195,7 @@ test("findUpcomingAnnouncePadIndices lists complete unplayed handoff blocks", ()
       Title: "PartyQueue Volume Ramp",
     },
     {
-      TrackUri: "http://10.10.20.35:8123/api/tts_proxy/abc.mp3",
+      TrackUri: "http://192.0.2.35:8123/api/tts_proxy/abc.mp3",
       Title: "Party DJ",
     },
     {
@@ -208,7 +208,7 @@ test("findUpcomingAnnouncePadIndices lists complete unplayed handoff blocks", ()
       Title: "PartyQueue Volume Ramp",
     },
     {
-      TrackUri: "http://10.10.20.35:8123/api/tts_proxy/def.mp3",
+      TrackUri: "http://192.0.2.35:8123/api/tts_proxy/def.mp3",
       Title: "Party DJ",
     },
     {
@@ -228,7 +228,7 @@ test("findUpcomingAnnouncePadIndices lists complete unplayed handoff blocks", ()
 test("findUpcomingAnnouncePadIndices skips the current track even if it is a pad", () => {
   const list = [
     {
-      TrackUri: "http://10.10.20.35:8123/api/tts_proxy/abc.mp3",
+      TrackUri: "http://192.0.2.35:8123/api/tts_proxy/abc.mp3",
       Title: "Party DJ",
     },
     { TrackUri: "spotify:track:s1", Title: "Req" },
@@ -333,7 +333,7 @@ test("findInsertPosition walks past DJ ramp/TTS pads to the request block", () =
       Artist: "PartyQueue",
     },
     {
-      TrackUri: "http://10.10.20.35:8123/api/tts_proxy/abc.mp3",
+      TrackUri: "http://192.0.2.35:8123/api/tts_proxy/abc.mp3",
       Title: "Party DJ",
       Artist: "PartyQueue",
     },
@@ -358,7 +358,7 @@ test("findInsertPosition ignores leading announce pads when only filler follows"
       Artist: "PartyQueue",
     },
     {
-      TrackUri: "http://10.10.20.35:8123/api/tts_proxy/abc.mp3",
+      TrackUri: "http://192.0.2.35:8123/api/tts_proxy/abc.mp3",
       Title: "Party DJ",
       Artist: "PartyQueue",
     },
@@ -383,7 +383,7 @@ test("findInsertPosition skips announce pads between searched songs", () => {
       Artist: "PartyQueue",
     },
     {
-      TrackUri: "http://10.10.20.35:8123/api/tts_proxy/abc.mp3",
+      TrackUri: "http://192.0.2.35:8123/api/tts_proxy/abc.mp3",
       Title: "Party DJ",
       Artist: "PartyQueue",
     },

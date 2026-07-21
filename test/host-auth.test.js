@@ -8,7 +8,12 @@ const TMP_PIN = path.join(
   os.tmpdir(),
   `pq-host-pin-${process.pid}-${Date.now()}.json`
 );
+const TMP_BOOTSTRAP = path.join(
+  os.tmpdir(),
+  `pq-host-bootstrap-${process.pid}-${Date.now()}.json`
+);
 process.env.PARTYQUEUE_HOST_PIN_FILE = TMP_PIN;
+process.env.PARTYQUEUE_HOST_BOOTSTRAP_FILE = TMP_BOOTSTRAP;
 
 const auth = await import("../src/host-auth.js");
 
@@ -19,6 +24,7 @@ beforeEach(() => {
   delete process.env.SETTINGS_PIN;
   try {
     fs.rmSync(TMP_PIN, { force: true });
+    fs.rmSync(TMP_BOOTSTRAP, { force: true });
   } catch {
     /* ignore */
   }
@@ -29,6 +35,7 @@ afterEach(() => {
   auth._resetHostBootstrapForTests();
   try {
     fs.rmSync(TMP_PIN, { force: true });
+    fs.rmSync(TMP_BOOTSTRAP, { force: true });
   } catch {
     /* ignore */
   }
@@ -46,6 +53,9 @@ test("first-time setup requires a short-lived bootstrap code", () => {
   const code = auth._hostBootstrapCodeForTests();
   assert.equal(status.bootstrapRequired, true);
   assert.equal(code.length, 6);
+  const stored = JSON.parse(fs.readFileSync(TMP_BOOTSTRAP, "utf8"));
+  assert.equal(stored.code, code);
+  assert.equal(stored.expiresAt, status.bootstrapExpiresAt);
   assert.equal(auth.verifyHostBootstrapCode("000000"), false);
   assert.equal(auth.verifyHostBootstrapCode(code), true);
 
@@ -53,6 +63,7 @@ test("first-time setup requires a short-lived bootstrap code", () => {
 
   assert.equal(auth.hostPinStatus().bootstrapRequired, false);
   assert.equal(auth.verifyHostBootstrapCode(code), false);
+  assert.equal(fs.existsSync(TMP_BOOTSTRAP), false);
 });
 
 test("setHostPin stores a hash and verifies", () => {
@@ -73,6 +84,11 @@ test("file PIN takes precedence over env", () => {
   auth.setHostPin("filepin1");
   assert.equal(auth.verifyHostPin("filepin1"), true);
   assert.equal(auth.verifyHostPin("envpin1"), false);
+});
+
+test("legacy configured PIN helper never returns the PIN", () => {
+  process.env.SETTINGS_PIN = "envpin1";
+  assert.equal(auth.getConfiguredPin(), "****");
 });
 
 test("clearHostPin removes file PIN", () => {

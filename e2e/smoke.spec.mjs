@@ -28,6 +28,101 @@ test.describe("PartyQueue browser smoke", () => {
     await expect(page.locator("#view-main")).toBeHidden();
   });
 
+  test("Party Display is a read-only deep-linked view", async ({ page }) => {
+    const nowPlaying = {
+      title: "Midnight City",
+      artist: "M83",
+      album: "Hurry Up, We're Dreaming",
+      albumArt: "",
+      uri: "spotify:track:display-test",
+      state: "PLAYING",
+      isPlaying: true,
+      queuePlaying: true,
+      durationSec: 240,
+      positionSec: 60,
+      positionObservedAt: Date.now(),
+      reactions: { heart: 3, party: 2 },
+      streamSession: "display-smoke",
+      streamSequence: 1,
+    };
+    await page.route("**/api/nowplaying/stream", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: ${JSON.stringify(nowPlaying)}\n\n`,
+      })
+    );
+    await page.route("**/api/nowplaying", (route) =>
+      route.fulfill({ status: 200, json: nowPlaying })
+    );
+    await page.route(/\/api\/reactions\?/, (route) =>
+      route.fulfill({
+        status: 200,
+        json: { heart: 3, party: 2, mine: null, micMine: false },
+      })
+    );
+    await page.route("**/api/queue/stream", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: ${JSON.stringify({
+          tracks: [
+            {
+              title: "Electric Feel",
+              artist: "MGMT",
+              position: 2,
+              requestedBy: "Alex",
+              searched: true,
+            },
+          ],
+          streamSession: "queue-display-smoke",
+          streamSequence: 1,
+        })}\n\n`,
+      })
+    );
+    await page.route("**/api/queue/list", (route) =>
+      route.fulfill({
+        status: 200,
+        json: {
+          tracks: [
+            {
+              title: "Fallback Song",
+              artist: "Fallback Artist",
+              position: 2,
+            },
+          ],
+        },
+      })
+    );
+    await page.route("**/api/join", (route) =>
+      route.fulfill({
+        status: 200,
+        json: {
+          url: "http://partyqueue.local",
+          qrSvg: '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+        },
+      })
+    );
+
+    await page.goto("/#/display");
+    await expect(page.locator("#view-display")).toBeVisible();
+    await expect(page.locator("#view-main")).toBeHidden();
+    await expect(page.locator("body")).toHaveClass(/party-display-active/);
+    await expect(page.locator("#display-title")).toBeAttached();
+    await expect(page.locator("#display-queue")).toBeAttached();
+    await expect(page.locator("#display-join-qr")).toBeAttached();
+    await expect(page.locator("#display-title")).toHaveText("Midnight City");
+    await expect(page.locator("#display-artist")).toHaveText("M83");
+    await expect(page.locator("#display-queue")).toContainText("Electric Feel");
+    await expect(page.locator("#display-queue")).toContainText("Requested by Alex");
+    await expect(page.locator('[data-display-count="heart"]')).toHaveText("3");
+    await expect(page.locator("#display-join-url")).toHaveText(
+      "http://partyqueue.local"
+    );
+    await expect(page.locator("#view-display button")).toHaveCount(0);
+    await expect(page.locator("#np-toggle")).toBeHidden();
+  });
+
   test("js modules are served as ES modules", async ({ request }) => {
     const main = await request.get("/js/main.js?v=smoke");
     expect(main.ok()).toBeTruthy();

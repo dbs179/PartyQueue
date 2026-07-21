@@ -5,13 +5,18 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createLogger } from "./logger.js";
+import { createLogger, redactString } from "./logger.js";
 import { softRateLimit } from "./rate-limit.js";
 import {
   nowPlayingMonitor,
   closeNowPlayingStreams,
   registerNowPlayingRoutes,
 } from "./now-playing-http.js";
+import {
+  queueMonitor,
+  closeQueueStreams,
+  registerQueueStreamRoutes,
+} from "./queue-http.js";
 import { registerApiRoutes } from "./routes/index.js";
 import { getBrandingSettings } from "./settings.js";
 import {
@@ -23,6 +28,7 @@ import { seedStarterDjIcons } from "./dj-icon.js";
 import {
   isHostPinConfigured,
   ensureHostBootstrapCode,
+  hostBootstrapFileName,
 } from "./host-auth.js";
 import { warmTrackPool } from "./spotify.js";
 import {
@@ -82,6 +88,19 @@ app.use((req, res, next) => {
       ms: Date.now() - started,
     });
   });
+  next();
+});
+
+// Last-line response guard: no API error may return a credential pattern even
+// when an upstream library embeds one in Error.message.
+app.use((req, res, next) => {
+  const sendJson = res.json.bind(res);
+  res.json = (body) => {
+    if (body && typeof body === "object" && typeof body.error === "string") {
+      return sendJson({ ...body, error: redactString(body.error) });
+    }
+    return sendJson(body);
+  };
   next();
 });
 
@@ -204,6 +223,7 @@ const transportLimit = softRateLimit({
 });
 
 registerNowPlayingRoutes(app);
+registerQueueStreamRoutes(app);
 registerApiRoutes(app, {
   VERSION,
   isListening: () => !!httpServer?.listening,
@@ -238,6 +258,7 @@ export function createApp() {
   return {
     app,
     nowPlayingMonitor,
+    queueMonitor,
     get listening() {
       return !!httpServer?.listening;
     },
@@ -262,9 +283,10 @@ function runListenStartup({ seed = true, warm = true } = {}) {
     `PartyQueue running on http://0.0.0.0:${httpServer.address()?.port || PORT}`
   );
   if (!isHostPinConfigured()) {
-    const bootstrapCode = ensureHostBootstrapCode();
+    ensureHostBootstrapCode();
     log.info(
-      `First-time host setup code: ${bootstrapCode} (expires in 2 hours; restart to issue a new code)`,
+      `First-time host setup code stored in data/${hostBootstrapFileName()} ` +
+        "(expires in 2 hours; restart to issue a new code)",
       { event: "setup-code" }
     );
   }
@@ -320,6 +342,7 @@ export function startServer(options = {}) {
       httpServer,
       port: httpServer.address()?.port,
       nowPlayingMonitor,
+      queueMonitor,
     };
   }
   shuttingDown = false;
@@ -348,6 +371,7 @@ export function startServer(options = {}) {
       return typeof addr === "object" && addr ? addr.port : port;
     },
     nowPlayingMonitor,
+    queueMonitor,
   };
 }
 
@@ -376,10 +400,12 @@ export async function shutdownServer({
 
   stopGenreWarm();
   closeNowPlayingStreams();
+  closeQueueStreams();
   const pendingShutdown = [
     stopAutoFillMonitor(),
     stopQueueMaintenance(),
     nowPlayingMonitor.stop(),
+    queueMonitor.stop(),
   ];
 
   if (httpServer?.listening) {

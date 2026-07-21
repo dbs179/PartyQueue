@@ -2107,9 +2107,7 @@ export async function generateDjSpeechFromPrompt(
     json = null;
   }
   if (!res.ok) {
-    throw new Error(
-      json?.message || `OpenAI conversation HTTP ${res.status}`
-    );
+    throw new Error(`OpenAI conversation failed (HTTP ${res.status}).`);
   }
   const speech =
     json?.service_response?.response?.speech?.plain?.speech ||
@@ -2579,9 +2577,7 @@ async function haFetch(pathName, { method = "GET", body } = {}) {
     json = { raw: text };
   }
   if (!res.ok) {
-    throw new Error(
-      json?.message || json?.error || `Home Assistant HTTP ${res.status}`
-    );
+    throw new Error(`Home Assistant request failed (HTTP ${res.status}).`);
   }
   return json;
 }
@@ -2901,7 +2897,8 @@ async function announceOnSonosUnlocked(
     }
     const clip = await saveTtsClip(String(message).trim());
     console.log(
-      `[dj-voice] saved ${clip.fileName} (${clip.bytes} bytes) â†’ ${clip.publicUrl}`
+      `[dj-voice] saved ${clip.fileName} (${clip.bytes} bytes; ` +
+        `${clip.publicUrl === clip.localUrl ? "local media" : "external TTS media"})`
     );
     // Pause before inserting when we're about to Play from the DJ clip.
     // Avoids Sonos auto-starting a shifted track, then Seek+Play restarting TTS.

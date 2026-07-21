@@ -48,3 +48,31 @@ test("saveSettings throws when the path is not writable", () => {
   assert.notEqual(loaded.songMemory, 7);
   fs.rmSync(STORE, { recursive: true, force: true });
 });
+
+test("request fairness defaults off and persists bounded controls", () => {
+  assert.deepEqual(settings.getRequestFairnessSettings(), {
+    requestFairnessEnabled: false,
+    requestFairnessUpcomingThreshold: 5,
+    requestFairnessUpcomingCap: 2,
+    requestFairnessRollingMax: 5,
+    requestFairnessWindowMinutes: 30,
+    requestFairnessHostBypass: false,
+  });
+
+  const saved = settings.setRequestFairnessSettings({
+    requestFairnessEnabled: true,
+    requestFairnessUpcomingThreshold: 500,
+    requestFairnessUpcomingCap: 0,
+    requestFairnessRollingMax: 500,
+    requestFairnessWindowMinutes: 15,
+    requestFairnessHostBypass: false,
+  });
+  assert.deepEqual(saved, {
+    requestFairnessEnabled: true,
+    requestFairnessUpcomingThreshold: 100,
+    requestFairnessUpcomingCap: 1,
+    requestFairnessRollingMax: 100,
+    requestFairnessWindowMinutes: 15,
+    requestFairnessHostBypass: false,
+  });
+});

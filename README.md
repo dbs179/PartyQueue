@@ -49,9 +49,10 @@ the public internet.
 
 **Optional host PIN:** set it under **DJ Booth → Settings → Connections → Host
 PIN** (stored hashed on the server), or use `SETTINGS_PIN` in `.env`. On a fresh
-install, enter the six-digit setup code printed in the PartyQueue server or
-Unraid logs before choosing the first PIN; it expires after two hours, and a
-restart issues a new one. The PIN locks the **DJ Booth** UI and host-only APIs
+install, enter the six-digit setup code stored in
+`data/host-bootstrap-code.json` before choosing the first PIN; it expires after
+two hours, is deleted after setup, and a restart issues a new one. The PIN locks
+the **DJ Booth** UI and host-only APIs
 (settings, credentials, resets, restart, guest admin, uploads). Party controls
 remain open by default; **Music Mix → Host-only controls** can also require the
 PIN for playback, queue editing, and Sonos grouping. Random requests remain
@@ -225,6 +226,10 @@ HA token: profile → **Long-lived access tokens** → Create → paste into Par
 3. **Random** draws from playlists/genres in **Music Mix**. **Never-Ending**
    tops up while music is already playing from the queue and running low — it
    will **not** seed an empty idle queue after boot, Stop, or Clear.
+   Optional **Request fairness** under **Settings → Queue** can cap each User's
+   upcoming songs after the shared request queue reaches a configurable size,
+   plus successful requests in a rolling time window. It is off by default;
+   queue aliases do not create extra quota.
 4. **Controls** — play/pause, skip, volume, clear (with confirm), etc.
 5. **Edit** on the queue — delete / drag-reorder when you need it; off by default.
 6. **Last call:** hand-adding the **End of night song** (default: Closing Time
@@ -247,8 +252,10 @@ npm run package:share
 ```
 
 Writes something like `PartyQueue-share-v<version>-….zip` under
-`PartyQueue-backups/`. Includes the MIT `LICENSE`. Recipients configure APIs in
-Settings after install. **Do not** zip the install folder by hand.
+`PartyQueue-backups/`. The script uses an explicit source allow-list and rejects
+credential stores, environment variants, diagnostics, traces, and nested
+archives. It includes the MIT `LICENSE`; recipients configure APIs in Settings
+after install. **Do not** zip the install folder by hand.
 
 ---
 
@@ -260,6 +267,7 @@ Settings after install. **Do not** zip the install folder by hand.
 | GET    | `/api/ready`           | Readiness for orchestrators (503 if stopping) |
 | GET    | `/api/rooms`           | List Sonos rooms PartyQueue can see           |
 | GET    | `/api/nowplaying/stream` | Shared live Now Playing event stream         |
+| GET    | `/api/queue/stream`    | Shared live queue event stream                 |
 | GET    | `/api/search`          | `?q=` Spotify track search                    |
 | POST   | `/api/queue`           | `{ "uri": "spotify:track:..." }` append (limited) |
 | POST   | `/api/queue/playlist`  | `{ "uri": "spotify:playlist:..." }` append    |

@@ -684,13 +684,15 @@ async function addTrackToQueueUnlocked(
   }
 
   let promoted = false;
+  const existingWasRequested =
+    !!existing?.id && originOf(existing.id) === "searched";
   const byOpts = { requestedBy, requestedByUser, dedication };
   if (existing) {
     // Already queued. If it's filler (Random / Never-Ending / discovery), move
     // that copy to the end of the searched block (just before the first filler)
     // and re-tag it as searched - no duplicate. If it's already searched, leave
     // it where it is (still no duplicate).
-    if (!existing.id || originOf(existing.id) !== "searched") {
+    if (!existingWasRequested) {
       let insertBefore = insertPos || items.length + 1;
       insertBefore = Math.max(1, Math.min(insertBefore, items.length + 1));
       if (insertBefore !== existing.pos && insertBefore !== existing.pos + 1) {
@@ -708,7 +710,12 @@ async function addTrackToQueueUnlocked(
       }
       promoted = true;
     }
-    if (existing.id) markOrigin([existing.id], "searched", byOpts);
+    // A repeated tap on an existing guest request is an idempotent no-op. Keep
+    // the original requester attribution instead of letting another guest take
+    // ownership of that queue slot.
+    if (existing.id && !existingWasRequested) {
+      markOrigin([existing.id], "searched", byOpts);
+    }
   } else {
     // Not already waiting in the queue -> insert a fresh copy ahead of filler.
     await enqueueMeta(m, meta, insertPos);
@@ -748,6 +755,8 @@ async function addTrackToQueueUnlocked(
     group: coordinator.GroupName,
     started,
     promoted,
+    requestCreated: !existing || promoted,
+    alreadyRequested: !!existing && !promoted,
     queueWasEmpty,
     deferredStart: deferStartForShout,
     queuePosition,

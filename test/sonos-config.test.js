@@ -8,7 +8,7 @@ import {
 
 describe("sonos-config cleaners", () => {
   it("accepts IPv4 hosts and simple hostnames", () => {
-    assert.equal(cleanSonosHost("10.10.20.196"), "10.10.20.196");
+    assert.equal(cleanSonosHost("192.0.2.196"), "192.0.2.196");
     assert.equal(cleanSonosHost(" 192.168.1.50 "), "192.168.1.50");
     assert.equal(cleanSonosHost("sonos-kitchen.local"), "sonos-kitchen.local");
     assert.equal(cleanSonosHost(""), null);

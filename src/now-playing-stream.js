@@ -24,8 +24,10 @@ export function nowPlayingSignature(snapshot = null) {
   return JSON.stringify(stableValue(meaningful));
 }
 
-export function createNowPlayingMonitor({
+export function createSnapshotMonitor({
   readSnapshot,
+  signatureFor = nowPlayingSignature,
+  monitorName = "Snapshot",
   intervalMs = DEFAULT_INTERVAL_MS,
   errorIntervalMs = DEFAULT_ERROR_INTERVAL_MS,
   now = Date.now,
@@ -37,7 +39,10 @@ export function createNowPlayingMonitor({
   logger = console,
 } = {}) {
   if (typeof readSnapshot !== "function") {
-    throw new Error("Now Playing monitor requires readSnapshot.");
+    throw new Error(`${monitorName} monitor requires readSnapshot.`);
+  }
+  if (typeof signatureFor !== "function") {
+    throw new Error(`${monitorName} monitor requires signatureFor.`);
   }
 
   const subscribers = new Set();
@@ -79,7 +84,7 @@ export function createNowPlayingMonitor({
     try {
       listener(snapshot);
     } catch (err) {
-      logger.warn?.("[now-playing-stream] subscriber failed:", err.message);
+      logger.warn?.(`[${monitorName}-stream] subscriber failed:`, err.message);
     }
   }
 
@@ -94,13 +99,16 @@ export function createNowPlayingMonitor({
       try {
         onStatusChange({ ...health });
       } catch (err) {
-        logger.warn?.("[now-playing-stream] status listener failed:", err.message);
+        logger.warn?.(
+          `[${monitorName}-stream] status listener failed:`,
+          err.message
+        );
       }
     }
   }
 
   function publish(snapshot, { force = false } = {}) {
-    const signature = nowPlayingSignature(snapshot);
+    const signature = signatureFor(snapshot);
     if (!force && signature === latestSignature) {
       // Position-only reads do not fan out to every connected browser, but keep
       // the retained snapshot fresh so a reconnect gets an accurate clock.
@@ -158,7 +166,7 @@ export function createNowPlayingMonitor({
             retryMs: errorIntervalMs,
           });
         }
-        logger.warn?.("[now-playing-stream] poll failed:", err.message);
+        logger.warn?.(`[${monitorName}-stream] poll failed:`, err.message);
         return null;
       })
       .finally(() => {
@@ -177,9 +185,9 @@ export function createNowPlayingMonitor({
   }
 
   function subscribe(listener) {
-    if (stopped) throw new Error("Now Playing monitor is stopped.");
+    if (stopped) throw new Error(`${monitorName} monitor is stopped.`);
     if (typeof listener !== "function") {
-      throw new Error("Now Playing subscriber must be a function.");
+      throw new Error(`${monitorName} subscriber must be a function.`);
     }
     subscribers.add(listener);
     if (latest) notify(listener, latest);
@@ -235,4 +243,11 @@ export function createNowPlayingMonitor({
       return { ...health };
     },
   };
+}
+
+export function createNowPlayingMonitor(options = {}) {
+  return createSnapshotMonitor({
+    monitorName: "now-playing",
+    ...options,
+  });
 }

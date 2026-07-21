@@ -111,6 +111,31 @@ describe("HTTP server harness", { concurrency: false }, () => {
     assert.match(body, /import\(/);
   });
 
+  test("Party Display assets and join QR are available without Sonos", async () => {
+    const page = await fetch(`${baseUrl}/`);
+    assert.equal(page.status, 200);
+    const html = await page.text();
+    assert.match(html, /id="view-display"/);
+    assert.match(html, /id="display-queue"/);
+
+    const join = await fetch(`${baseUrl}/api/join`);
+    assert.equal(join.status, 200);
+    const body = await join.json();
+    assert.match(body.url || "", /^https?:\/\//);
+    assert.match(body.qrSvg || "", /<svg[\s>]/i);
+  });
+
+  test("request fairness controls are present in Queue settings", async () => {
+    const page = await fetch(`${baseUrl}/`);
+    const html = await page.text();
+    assert.match(html, /id="set-request-fairness-enabled"/);
+    assert.match(html, /id="set-request-fairness-threshold"/);
+    assert.match(html, /id="set-request-fairness-upcoming"/);
+    assert.match(html, /id="set-request-fairness-rolling-max"/);
+    assert.match(html, /id="set-request-fairness-window"/);
+    assert.match(html, /id="set-request-fairness-host-bypass"/);
+  });
+
   test("GET /api/settings/pin-required reports whether a host PIN is set", async () => {
     const res = await fetch(`${baseUrl}/api/settings/pin-required`);
     assert.equal(res.status, 200);

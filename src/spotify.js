@@ -20,6 +20,13 @@ const AUTH_URL = "https://accounts.spotify.com/authorize";
 const SEARCH_URL = "https://api.spotify.com/v1/search";
 const API_BASE = "https://api.spotify.com/v1";
 
+function spotifyHttpError(operation, status) {
+  const err = new Error(`Spotify ${operation} failed (HTTP ${status}).`);
+  err.code = "SPOTIFY_HTTP_ERROR";
+  err.status = Number(status) || 502;
+  return err;
+}
+
 // Scopes needed to list the host's playlists, including private/collaborative.
 const USER_SCOPES = "playlist-read-private playlist-read-collaborative";
 
@@ -134,8 +141,7 @@ export async function exchangeCodeForTokens(code) {
   });
 
   if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`Spotify token exchange failed (${res.status}): ${detail}`);
+    throw spotifyHttpError("token exchange", res.status);
   }
 
   const data = await res.json();
@@ -188,8 +194,7 @@ async function getUserAccessToken() {
     });
 
     if (!res.ok) {
-      const detail = await res.text();
-      throw new Error(`Spotify token refresh failed (${res.status}): ${detail}`);
+      throw spotifyHttpError("token refresh", res.status);
     }
 
     const data = await res.json();
@@ -224,8 +229,7 @@ export async function listMyPlaylists(max = 200) {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) {
-      const detail = await res.text();
-      throw new Error(`Spotify playlists failed (${res.status}): ${detail}`);
+      throw spotifyHttpError("playlist list", res.status);
     }
     const data = await res.json();
     for (const p of data.items ?? []) {
@@ -261,8 +265,7 @@ export async function getPlaylistTracks(playlistId) {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) {
-      const detail = await res.text();
-      throw new Error(`Spotify playlist tracks failed (${res.status}): ${detail}`);
+      throw spotifyHttpError("playlist tracks", res.status);
     }
     const data = await res.json();
     for (const item of data.items ?? []) {
@@ -477,8 +480,7 @@ async function getAccessToken() {
     });
 
     if (!res.ok) {
-      const detail = await res.text();
-      throw new Error(`Spotify auth failed (${res.status}): ${detail}`);
+      throw spotifyHttpError("authentication", res.status);
     }
 
     const data = await res.json();
@@ -530,8 +532,7 @@ export async function searchTracks(query, limit = 20) {
   });
 
   if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`Spotify search failed (${res.status}): ${detail}`);
+    throw spotifyHttpError("search", res.status);
   }
 
   const data = await res.json();

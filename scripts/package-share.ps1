@@ -1,5 +1,5 @@
 # Build a share-safe zip of PartyQueue with NO credentials.
-# Excludes: .env, data/, node_modules/, logs, local backups, git metadata.
+# Uses an explicit allow-list: unexpected local files are never copied.
 #
 # Usage (from repo root or anywhere):
 #   powershell -ExecutionPolicy Bypass -File scripts\package-share.ps1
@@ -28,36 +28,70 @@ $staging = Join-Path ([System.IO.Path]::GetTempPath()) ("pq-share-" + [guid]::Ne
 New-Item -ItemType Directory -Force -Path $staging | Out-Null
 
 try {
-  $excludeDirs = @(
-    "node_modules",
-    "data",
-    ".git",
-    ".cursor"
+  $includeDirs = @(
+    ".github",
+    "e2e",
+    "public",
+    "scripts",
+    "src",
+    "test"
   )
-  $excludeFiles = @(
-    ".env",
-    "*.log",
-    "npm-debug.log*"
+  $includeFiles = @(
+    ".dockerignore",
+    ".env.example",
+    ".gitignore",
+    "docker-compose.yml",
+    "Dockerfile",
+    "LICENSE",
+    "package.json",
+    "package-lock.json",
+    "playwright.config.mjs",
+    "README.md"
   )
 
-  Get-ChildItem -Path $Root -Force | ForEach-Object {
-    $name = $_.Name
-    if ($excludeDirs -contains $name) { return }
-    if ($name -eq ".env") { return }
-    if ($name -like "*.log") { return }
-    Copy-Item -Path $_.FullName -Destination (Join-Path $staging $name) -Recurse -Force
+  foreach ($name in $includeDirs) {
+    $source = Join-Path $Root $name
+    if (Test-Path $source -PathType Container) {
+      Copy-Item -Path $source -Destination (Join-Path $staging $name) -Recurse -Force
+    }
   }
 
-  # Belt-and-suspenders: never ship secrets even if something slipped through.
-  $envCopy = Join-Path $staging ".env"
-  if (Test-Path $envCopy) { Remove-Item $envCopy -Force }
-  $dataCopy = Join-Path $staging "data"
-  if (Test-Path $dataCopy) { Remove-Item $dataCopy -Recurse -Force }
+  foreach ($name in $includeFiles) {
+    $source = Join-Path $Root $name
+    if (Test-Path $source -PathType Leaf) {
+      Copy-Item -Path $source -Destination (Join-Path $staging $name) -Force
+    }
+  }
 
-  # Ensure recipients get the example env, not a real one.
-  $example = Join-Path $Root ".env.example"
-  if (Test-Path $example) {
-    Copy-Item $example (Join-Path $staging ".env.example") -Force
+  # Fail closed if a future allow-listed directory contains a credential store
+  # or generated diagnostic artifact.
+  $forbiddenNames = @(
+    ".env",
+    ".env.*",
+    "*.env",
+    "*.env.*",
+    "data",
+    "node_modules",
+    ".git",
+    ".cursor",
+    "test-results",
+    "playwright-report",
+    ".tmp-*",
+    ".override-*",
+    "*.log",
+    "*.trace",
+    "*.zip"
+  )
+  $unsafe = Get-ChildItem -Path $staging -Force -Recurse | Where-Object {
+    $item = $_
+    if ($item.Name -eq ".env.example") { return $false }
+    $forbiddenNames | Where-Object { $item.Name -like $_ } | Select-Object -First 1
+  }
+  if ($unsafe) {
+    $relative = $unsafe | ForEach-Object {
+      $_.FullName.Substring($staging.Length).TrimStart("\", "/")
+    }
+    throw "Share package rejected forbidden path(s): $($relative -join ', ')"
   }
 
   if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
@@ -67,7 +101,7 @@ try {
   Write-Output "Share-safe package created:"
   Write-Output "  $zipPath"
   Write-Output "  size: ${sizeMb} MB"
-  Write-Output "  excluded: .env, data/, node_modules/, .git"
+  Write-Output "  policy: explicit source allow-list; credentials and diagnostics excluded"
   Write-Output "Recipients configure APIs in Settings (or copy .env.example -> .env)."
 }
 finally {

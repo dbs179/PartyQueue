@@ -142,6 +142,79 @@ export function setDiscoverySettings(partial = {}) {
   return getDiscoverySettings();
 }
 
+// Optional guest-request fairness. Disabled by default so upgrades preserve the
+// current unlimited behavior until the host explicitly enables it.
+export const REQUEST_FAIRNESS_DEFAULTS = {
+  requestFairnessEnabled: false,
+  requestFairnessUpcomingThreshold: 5,
+  requestFairnessUpcomingCap: 2,
+  requestFairnessRollingMax: 5,
+  requestFairnessWindowMinutes: 30,
+  requestFairnessHostBypass: false,
+};
+
+const REQUEST_FAIRNESS_BOUNDS = {
+  requestFairnessUpcomingThreshold: { min: 1, max: 100 },
+  requestFairnessUpcomingCap: { min: 1, max: 20 },
+  requestFairnessRollingMax: { min: 1, max: 100 },
+  requestFairnessWindowMinutes: { min: 1, max: 1440 },
+};
+
+export function getRequestFairnessSettings() {
+  const s = loadSettings();
+  return {
+    requestFairnessEnabled:
+      typeof s.requestFairnessEnabled === "boolean"
+        ? s.requestFairnessEnabled
+        : REQUEST_FAIRNESS_DEFAULTS.requestFairnessEnabled,
+    requestFairnessUpcomingThreshold: clampInt(
+      s.requestFairnessUpcomingThreshold,
+      REQUEST_FAIRNESS_DEFAULTS.requestFairnessUpcomingThreshold,
+      REQUEST_FAIRNESS_BOUNDS.requestFairnessUpcomingThreshold
+    ),
+    requestFairnessUpcomingCap: clampInt(
+      s.requestFairnessUpcomingCap,
+      REQUEST_FAIRNESS_DEFAULTS.requestFairnessUpcomingCap,
+      REQUEST_FAIRNESS_BOUNDS.requestFairnessUpcomingCap
+    ),
+    requestFairnessRollingMax: clampInt(
+      s.requestFairnessRollingMax,
+      REQUEST_FAIRNESS_DEFAULTS.requestFairnessRollingMax,
+      REQUEST_FAIRNESS_BOUNDS.requestFairnessRollingMax
+    ),
+    requestFairnessWindowMinutes: clampInt(
+      s.requestFairnessWindowMinutes,
+      REQUEST_FAIRNESS_DEFAULTS.requestFairnessWindowMinutes,
+      REQUEST_FAIRNESS_BOUNDS.requestFairnessWindowMinutes
+    ),
+    requestFairnessHostBypass:
+      typeof s.requestFairnessHostBypass === "boolean"
+        ? s.requestFairnessHostBypass
+        : REQUEST_FAIRNESS_DEFAULTS.requestFairnessHostBypass,
+  };
+}
+
+export function setRequestFairnessSettings(partial = {}) {
+  const next = { ...loadSettings() };
+  for (const key of Object.keys(REQUEST_FAIRNESS_BOUNDS)) {
+    if (partial[key] != null) {
+      next[key] = clampInt(
+        partial[key],
+        next[key] ?? REQUEST_FAIRNESS_DEFAULTS[key],
+        REQUEST_FAIRNESS_BOUNDS[key]
+      );
+    }
+  }
+  if (partial.requestFairnessEnabled != null) {
+    next.requestFairnessEnabled = !!partial.requestFairnessEnabled;
+  }
+  if (partial.requestFairnessHostBypass != null) {
+    next.requestFairnessHostBypass = !!partial.requestFairnessHostBypass;
+  }
+  saveSettings(next);
+  return getRequestFairnessSettings();
+}
+
 // DJ voice announcements (Home Assistant TTS between sets). Off by default.
 // Persona fields (name / icon / intro % / max words) live here too; the
 // enable toggle stays a Controls switch and is saved independently.

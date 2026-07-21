@@ -56,3 +56,26 @@ test("child loggers nest scopes", () => {
   log.error("failed");
   assert.deepEqual(sink.lines[0].args.slice(0, 2), ["[server/http]", "failed"]);
 });
+
+test("logger redacts credential values in messages and nested metadata", () => {
+  const sink = captureSink();
+  const log = createLogger("security", { sink, json: true });
+  log.warn("Authorization: Bearer live-token-value", {
+    clientSecret: "live-client-secret",
+    nested: {
+      token: "live-session-token",
+      safe: "visible",
+      tokenSet: true,
+    },
+    url: "https://example.test/path?api_key=live-query-key&limit=1",
+  });
+
+  const payload = JSON.parse(sink.lines[0].args[0]);
+  assert.equal(payload.msg.includes("live-token-value"), false);
+  assert.equal(payload.clientSecret, "[REDACTED]");
+  assert.equal(payload.nested.token, "[REDACTED]");
+  assert.equal(payload.nested.safe, "visible");
+  assert.equal(payload.nested.tokenSet, true);
+  assert.equal(payload.url.includes("live-query-key"), false);
+  assert.match(payload.url, /api_key=\[REDACTED\]/);
+});

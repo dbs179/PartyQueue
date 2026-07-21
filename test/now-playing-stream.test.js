@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  createSnapshotMonitor,
   createNowPlayingMonitor,
   nowPlayingSignature,
 } from "../src/now-playing-stream.js";
@@ -34,6 +35,34 @@ test("one Now Playing read serves every subscriber", async () => {
   assert.equal(first.length, 1);
   assert.equal(second.length, 1);
   assert.deepEqual(first[0], second[0]);
+  await monitor.stop();
+});
+
+test("generic snapshot monitor supports queue payload signatures", async () => {
+  let reads = 0;
+  const received = [];
+  const monitor = createSnapshotMonitor({
+    autoSchedule: false,
+    monitorName: "queue",
+    logger: { warn() {} },
+    signatureFor: (snapshot) => JSON.stringify(snapshot?.tracks || []),
+    readSnapshot: async () => {
+      reads += 1;
+      return {
+        tracks: [{ uri: "spotify:track:1", title: "One" }],
+      };
+    },
+  });
+  monitor.subscribe((snapshot) => received.push(snapshot));
+  monitor.subscribe(() => {});
+
+  await monitor.pollNow();
+  await monitor.pollNow();
+
+  assert.equal(reads, 2);
+  assert.equal(received.length, 1);
+  assert.equal(received[0].tracks[0].title, "One");
+  assert.equal(received[0].streamSequence, 1);
   await monitor.stop();
 });
 

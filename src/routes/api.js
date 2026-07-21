@@ -51,6 +51,7 @@ import {
 import {
   RANDOMNESS_DEFAULTS,
   DISCOVERY_DEFAULTS,
+  REQUEST_FAIRNESS_DEFAULTS,
   CONTENT_DEFAULTS,
   BRANDING_DEFAULTS,
   NEVER_ENDING_DEFAULT,
@@ -58,6 +59,8 @@ import {
   setRandomnessSettings,
   getDiscoverySettings,
   setDiscoverySettings,
+  getRequestFairnessSettings,
+  setRequestFairnessSettings,
   getContentSettings,
   setContentSettings,
   getBrandingSettings,
@@ -157,6 +160,10 @@ import {
   listDedications,
 } from "../request-log.js";
 import {
+  evaluateRequestFairness,
+  withRequestFairnessLock,
+} from "../request-fairness.js";
+import {
   getReactions,
   setReaction,
   listKaraokeTracks,
@@ -193,6 +200,7 @@ import {
   addTrackToQueue,
   getNowPlaying,
   getQueueList,
+  invalidateSonosSnapshots,
   groupAll,
   isKnownSonosHost,
   joinSpeakerToTarget,
@@ -344,28 +352,69 @@ export function registerApiRoutes(app, ctx) {
     }
     const note = sanitizeDedication(dedication);
     try {
-      const result = await addTrackToQueue(uri, {
-        name,
-        artist,
-        force: !!force,
-        requestedBy: badge,
-        requestedByUser: user,
-        dedication: note,
-      });
-  
-      // Log the guest request (a real search-and-add) for the Party Stats panel.
-      // Stats key on User; optional alias is audit-only.
-      const reqId = spotifyTrackId(uri);
-      if (reqId) {
-        recordRequest({
-          id: reqId,
+      const outcome = await withRequestFairnessLock(async () => {
+        const fairness = getRequestFairnessSettings();
+        const queueSnapshot = fairness.requestFairnessEnabled
+          ? await getQueueList()
+          : { tracks: [] };
+        const decision = evaluateRequestFairness({
+          settings: fairness,
+          user,
+          queue: Array.isArray(queueSnapshot)
+            ? queueSnapshot
+            : queueSnapshot?.tracks || [],
+          events: getRequests(),
+          target: { uri, name, artist },
+          force: !!force,
+          hostAuthenticated: isValidHostToken(extractHostToken(req)),
+        });
+        if (!decision.allowed) return { decision };
+
+        const added = await addTrackToQueue(uri, {
           name,
           artist,
-          requestedBy: user,
-          alias: alias && alias !== user ? alias : null,
+          force: !!force,
+          requestedBy: badge,
+          requestedByUser: user,
           dedication: note,
         });
+
+        // Only a newly-added or promoted queue slot consumes rolling fairness
+        // quota and Party Stats. Repeating an existing request is idempotent.
+        const reqId = spotifyTrackId(uri);
+        if (reqId && added.requestCreated !== false) {
+          recordRequest({
+            id: reqId,
+            name,
+            artist,
+            requestedBy: user,
+            alias: alias && alias !== user ? alias : null,
+            dedication: note,
+          });
+        }
+        return { result: added };
+      });
+
+      if (outcome.decision) {
+        const denied = outcome.decision;
+        if (denied.retryAfterSec) {
+          res.set("Retry-After", String(denied.retryAfterSec));
+        }
+        return res.status(denied.status || 429).json({
+          error: denied.error,
+          code: denied.code,
+          totalRequestedUpcoming: denied.totalRequestedUpcoming,
+          upcomingThreshold: denied.upcomingThreshold,
+          upcomingCount: denied.upcomingCount,
+          upcomingCap: denied.upcomingCap,
+          rollingCount: denied.rollingCount,
+          rollingMax: denied.rollingMax,
+          retryAt: denied.retryAt,
+        });
       }
+
+      const result = outcome.result;
+      const reqId = spotifyTrackId(uri);
   
       // House ritual: hand-adding the End of Night song signals last call. We
       // announce it to everyone (via the Now Playing poll) and, if the
@@ -373,7 +422,10 @@ export function registerApiRoutes(app, ctx) {
       // Optional Party Summary TTS is inserted immediately before that song.
       let closingTime = false;
       let partyRecap = null;
-      if (isEndOfNightTrack({ uri, name, artist })) {
+      if (
+        result.requestCreated !== false &&
+        isEndOfNightTrack({ uri, name, artist })
+      ) {
         if (getAutoFillState().enabled) setAutoFill(false);
         partyRecap = buildPartyRecap();
         markClosingTime(partyRecap);
@@ -390,6 +442,7 @@ export function registerApiRoutes(app, ctx) {
           );
         }
       } else if (
+        result.requestCreated !== false &&
         shouldShoutOnSearch({
           force: !!result.queueWasEmpty,
           requestedBy: user,
@@ -447,7 +500,11 @@ export function registerApiRoutes(app, ctx) {
             }
           }
         }
-      } else if (result.deferredStart && !result.started) {
+      } else if (
+        result.requestCreated !== false &&
+        result.deferredStart &&
+        !result.started
+      ) {
         // Shout was deferred-start but didn't fire (DJ not ready, etc.) — play song.
         void play({ trackNumber: 1 }).catch((err) =>
           console.error("[queue] deferred start failed:", err.message)
@@ -509,6 +566,7 @@ export function registerApiRoutes(app, ctx) {
         console.warn("[queue] dedication shout refresh skipped:", err.message);
       }
     }
+    invalidateSonosSnapshots();
   
     res.json({ ok: true, dedication: forWho });
   });
@@ -748,6 +806,7 @@ export function registerApiRoutes(app, ctx) {
     res.json({
       ...getRandomnessSettings(),
       ...getDiscoverySettings(),
+      ...getRequestFairnessSettings(),
       ...publicContentSettings(),
       ...getDjVoiceSettings(),
       ...getBrandingSettings(),
@@ -755,6 +814,7 @@ export function registerApiRoutes(app, ctx) {
       defaults: {
         ...RANDOMNESS_DEFAULTS,
         ...DISCOVERY_DEFAULTS,
+        ...REQUEST_FAIRNESS_DEFAULTS,
         ...CONTENT_DEFAULTS,
         ...DJ_VOICE_DEFAULTS,
         ...BRANDING_DEFAULTS,
@@ -784,6 +844,7 @@ export function registerApiRoutes(app, ctx) {
       delete body.kidsLockSnapshot;
       setRandomnessSettings(body);
       setDiscoverySettings(body);
+      setRequestFairnessSettings(body);
       setContentSettings(body);
       setDjVoiceSettings(body);
       setBrandingSettings(body);
@@ -792,6 +853,7 @@ export function registerApiRoutes(app, ctx) {
         ok: true,
         ...getRandomnessSettings(),
         ...getDiscoverySettings(),
+        ...getRequestFairnessSettings(),
         ...publicContentSettings(),
         ...getDjVoiceSettings(),
         ...getBrandingSettings(),
@@ -799,6 +861,7 @@ export function registerApiRoutes(app, ctx) {
         defaults: {
           ...RANDOMNESS_DEFAULTS,
           ...DISCOVERY_DEFAULTS,
+          ...REQUEST_FAIRNESS_DEFAULTS,
           ...CONTENT_DEFAULTS,
           ...DJ_VOICE_DEFAULTS,
           ...BRANDING_DEFAULTS,
@@ -1261,10 +1324,10 @@ export function registerApiRoutes(app, ctx) {
     res.json(hostPinStatus());
   });
   
-  // Verify a candidate PIN. Lockout blunts LAN brute force. On success issues a
-  // host session (HttpOnly cookie + token for X-PartyQueue-Host).
+  // Verify a candidate PIN. Lockout blunts LAN brute force. On success issues
+  // an HttpOnly host-session cookie; the token is never exposed to JavaScript.
   app.post("/api/settings/verify-pin", (req, res) => {
-    if (!isHostPinConfigured()) return res.json({ ok: true, token: null });
+    if (!isHostPinConfigured()) return res.json({ ok: true });
   
     const key = pinClientKey(req);
     const now = Date.now();
@@ -1281,7 +1344,7 @@ export function registerApiRoutes(app, ctx) {
       pinAttempts.delete(key);
       const token = createHostSession();
       setHostSessionCookie(res, token);
-      return res.json({ ok: true, token });
+      return res.json({ ok: true });
     }
   
     rec.fails += 1;
@@ -1294,7 +1357,7 @@ export function registerApiRoutes(app, ctx) {
   });
   
   // Set or change host PIN (stored hashed in data/host-pin.json).
-  // First-time set requires the short-lived bootstrap code printed at startup.
+  // First-time set requires the short-lived bootstrap code in the data volume.
   // Change requires the current PIN or a valid host session.
   app.post("/api/settings/pin", (req, res) => {
     const nextPin = typeof req.body?.pin === "string" ? req.body.pin : "";
@@ -1334,7 +1397,7 @@ export function registerApiRoutes(app, ctx) {
         pinAttempts.set(key, rec);
         return res.status(401).json({
           ok: false,
-          error: "Enter the setup code shown in the PartyQueue server logs.",
+          error: "Enter the setup code from data/host-bootstrap-code.json.",
           bootstrapRequired: true,
         });
       }
@@ -1354,7 +1417,7 @@ export function registerApiRoutes(app, ctx) {
     }
     const token = createHostSession();
     setHostSessionCookie(res, token);
-    res.json({ ok: true, ...hostPinStatus(), token });
+    res.json({ ok: true, ...hostPinStatus() });
   });
   
   // Clear file-based PIN. Env SETTINGS_PIN must be removed from .env separately.
@@ -1863,7 +1926,9 @@ export function registerApiRoutes(app, ctx) {
       );
     } catch (err) {
       console.error("[auth/callback]", err.message);
-      res.status(502).send(`Could not connect Spotify: ${err.message}`);
+      res
+        .status(502)
+        .send("Could not connect Spotify. Check the PartyQueue server log for details.");
     }
   });
   

@@ -7,7 +7,7 @@
     <title></title>
     <link rel="icon" href="icon.png" />
     <link rel="apple-touch-icon" href="icon.png" />
-    <link rel="stylesheet" href="styles.css?v=6.8.0" />
+    <link rel="stylesheet" href="styles.css?v=6.8.0-display" />
     <style>
       /* Hide until branding is applied (server JSON or last localStorage). */
       #hero:not([data-ready]),
@@ -273,17 +273,99 @@
             <span class="chevron" aria-hidden="true">&#9662;</span>
           </h2>
           <div class="controls" aria-label="Tools">
-            <div class="toolbar-grid toolbar-grid-5">
+            <div class="toolbar-grid toolbar-grid-6">
               <button id="toolbar-sonos" type="button" class="pill-btn" title="Open Sonos Group">Sonos Group</button>
               <button id="toolbar-mood" type="button" class="pill-btn" title="Open Music Mix">Music Mix</button>
-              <button id="toolbar-booth" type="button" class="pill-btn" title="Open DJ Booth">DJ Booth</button>
               <button id="toolbar-stats" type="button" class="pill-btn" title="Open Stats">Stats</button>
+              <button id="toolbar-booth" type="button" class="pill-btn" title="Open DJ Booth">DJ Booth</button>
               <button id="toolbar-join" type="button" class="pill-btn" title="Open Join Code QR">Join Code</button>
+              <button id="toolbar-display" type="button" class="pill-btn" title="Open read-only Party Display">Party Display</button>
             </div>
           </div>
         </section>
 
 
+      </div>
+
+      <!-- PARTY DISPLAY — read-only, across-the-room TV/projector view -->
+      <div id="view-display" class="view party-display-view" hidden>
+        <div class="party-display-shell">
+          <div class="party-display-topline">
+            <div>
+              <p class="party-display-kicker">Party Display</p>
+              <h2 id="display-event-name" class="party-display-event">PartyQueue</h2>
+            </div>
+            <a href="#/" class="party-display-back">Back to PartyQueue</a>
+          </div>
+
+          <p
+            id="display-connection-status"
+            class="party-display-status"
+            role="status"
+            aria-live="polite"
+            hidden
+          >
+            Sonos reconnecting — showing the last update.
+          </p>
+
+          <div class="party-display-layout">
+            <section class="party-display-now" aria-labelledby="display-now-label">
+              <p id="display-now-label" class="party-display-label">Now Playing</p>
+              <div class="party-display-hero">
+                <div class="party-display-art-wrap">
+                  <img id="display-art" class="party-display-art" alt="" />
+                  <p id="display-empty" class="party-display-empty">Connecting…</p>
+                </div>
+                <div class="party-display-meta">
+                  <span id="display-state" class="party-display-state" hidden></span>
+                  <h3 id="display-title" class="party-display-title"></h3>
+                  <p id="display-artist" class="party-display-artist"></p>
+                  <p id="display-album" class="party-display-album"></p>
+                  <div id="display-progress" class="np-progress party-display-progress" hidden>
+                    <div class="np-progress-track" role="progressbar" aria-label="Track progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                      <span id="display-progress-fill" class="np-progress-fill"></span>
+                    </div>
+                    <div class="np-progress-times" aria-hidden="true">
+                      <span id="display-progress-elapsed">0:00</span>
+                      <span id="display-progress-duration">0:00</span>
+                    </div>
+                  </div>
+                  <div id="display-reactions" class="party-display-reactions" aria-label="Current reactions" hidden>
+                    <span title="Thumbs up">&#128077; <strong data-display-count="up">0</strong></span>
+                    <span title="Thumbs down">&#128078; <strong data-display-count="down">0</strong></span>
+                    <span title="Love">&#10084;&#65039; <strong data-display-count="heart">0</strong></span>
+                    <span title="Fire">&#128293; <strong data-display-count="fire">0</strong></span>
+                    <span title="Funny">&#128514; <strong data-display-count="laugh">0</strong></span>
+                    <span title="Nope">&#129326; <strong data-display-count="vomit">0</strong></span>
+                    <span title="Party">&#127881; <strong data-display-count="party">0</strong></span>
+                    <span title="Karaoke">&#127908; <strong data-display-count="mic">0</strong></span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <aside class="party-display-side" aria-label="Upcoming songs and join code">
+              <section class="party-display-queue">
+                <div class="party-display-section-head">
+                  <p class="party-display-label">Up Next</p>
+                  <span id="display-queue-count" class="party-display-queue-count"></span>
+                </div>
+                <ol id="display-queue" class="party-display-queue-list"></ol>
+                <p id="display-queue-empty" class="party-display-side-empty">Connecting…</p>
+              </section>
+
+              <section class="party-display-join" aria-label="Join PartyQueue">
+                <div id="display-join-qr" class="party-display-qr" aria-hidden="true"></div>
+                <div class="party-display-join-copy">
+                  <p class="party-display-label">Join the Queue</p>
+                  <p>Scan on the same Wi-Fi</p>
+                  <p id="display-join-url" class="party-display-url"></p>
+                  <p id="display-join-error" class="party-display-side-empty" hidden></p>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </div>
       </div>
 
       <!-- JOIN CODE VIEW — QR anyone in the app can open for others to scan -->
@@ -617,7 +699,49 @@
             </span>
           </label>
 
-          <div class="settings-actions settings-actions-sticky">
+          <div class="controls-divider" aria-hidden="true"></div>
+          <p class="section-label settings-banner-label">Request fairness</p>
+          <p class="settings-intro">Optional per-User limits for searched song requests. Limits are off until enabled.</p>
+          <label class="autofill" title="Prevent one guest from filling the searched queue">
+            <input type="checkbox" id="set-request-fairness-enabled" class="autofill-input" />
+            <span class="autofill-switch" aria-hidden="true"></span>
+            <span class="autofill-text">
+              <span class="autofill-label">Enable request fairness</span>
+              <span class="autofill-hint">Uses each guest&apos;s User name, not their optional queue alias</span>
+            </span>
+          </label>
+          <div id="request-fairness-fields">
+            <div class="setting-row">
+              <label class="setting-label" for="set-request-fairness-threshold">Limit starts at</label>
+              <input type="number" id="set-request-fairness-threshold" class="setting-input" min="1" max="100" step="1" inputmode="numeric" />
+              <span class="setting-hint">total requested songs waiting; below this, guests may add freely (default 5)</span>
+            </div>
+            <div class="setting-row">
+              <label class="setting-label" for="set-request-fairness-upcoming">Upcoming limit</label>
+              <input type="number" id="set-request-fairness-upcoming" class="setting-input" min="1" max="20" step="1" inputmode="numeric" />
+              <span class="setting-hint">maximum searched songs waiting per User (default 2)</span>
+            </div>
+            <div class="setting-row">
+              <label class="setting-label" for="set-request-fairness-rolling-max">Request limit</label>
+              <input type="number" id="set-request-fairness-rolling-max" class="setting-input" min="1" max="100" step="1" inputmode="numeric" />
+              <span class="setting-hint">successful requests allowed within the rolling window (default 5)</span>
+            </div>
+            <div class="setting-row">
+              <label class="setting-label" for="set-request-fairness-window">Rolling window</label>
+              <input type="number" id="set-request-fairness-window" class="setting-input" min="1" max="1440" step="1" inputmode="numeric" />
+              <span class="setting-hint">minutes before an older request stops counting (default 30)</span>
+            </div>
+            <label class="autofill" title="Let a signed-in host add songs without fairness limits">
+              <input type="checkbox" id="set-request-fairness-host-bypass" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Host bypass</span>
+                <span class="autofill-hint">Requires an active host PIN session</span>
+              </span>
+            </label>
+          </div>
+
+          <div class="settings-actions">
             <button id="settings-save" type="button" class="pill-btn success">Save</button>
             <button id="settings-reset" type="button" class="pill-btn">Defaults</button>
           </div>
@@ -1032,7 +1156,7 @@
           </div>
           <div class="setting-row-text" id="host-pin-bootstrap-row" hidden>
             <label class="setting-label" for="host-pin-bootstrap">Setup code</label>
-            <input type="text" id="host-pin-bootstrap" class="setting-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="Code from server logs" />
+            <input type="text" id="host-pin-bootstrap" class="setting-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="Code from data file" />
           </div>
           <div class="setting-row-text">
             <label class="setting-label" for="host-pin-new">New PIN</label>
@@ -1388,8 +1512,8 @@
     <div id="pin-setup-overlay" class="modal-overlay" hidden>
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pin-setup-title">
         <p id="pin-setup-title" class="modal-message">Protect the DJ Booth?</p>
-        <p class="modal-hint">Enter the six-digit setup code shown in the PartyQueue server or Unraid logs, then choose a host PIN. The code prevents another LAN guest from claiming the DJ Booth first. Skip anytime; set it later under DJ Booth → Settings → Connections.</p>
-        <input id="pin-setup-bootstrap" class="setting-input modal-input" type="text" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="Setup code from server logs" aria-label="First-time setup code" />
+        <p class="modal-hint">Enter the six-digit setup code stored in data/host-bootstrap-code.json, then choose a host PIN. The code prevents another LAN guest from claiming the DJ Booth first. Skip anytime; set it later under DJ Booth → Settings → Connections.</p>
+        <input id="pin-setup-bootstrap" class="setting-input modal-input" type="text" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="Setup code from data file" aria-label="First-time setup code" />
         <input id="pin-setup-input" class="setting-input modal-input" type="password" inputmode="numeric" autocomplete="new-password" placeholder="New PIN (4–32 characters)" aria-label="New host PIN" />
         <input id="pin-setup-confirm" class="setting-input modal-input" type="password" inputmode="numeric" autocomplete="new-password" placeholder="Confirm PIN" aria-label="Confirm host PIN" />
         <p id="pin-setup-error" class="modal-error" hidden></p>
@@ -1430,6 +1554,6 @@
     </div>
 
     <script src="vendor/sortable.min.js"></script>
-    <script type="module" src="js/main.js?v=6.8.0"></script>
+    <script type="module" src="js/main.js?v=6.8.0-display"></script>
   </body>
 </html>

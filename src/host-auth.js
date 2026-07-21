@@ -13,6 +13,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PIN_FILE =
   process.env.PARTYQUEUE_HOST_PIN_FILE ||
   path.join(__dirname, "..", "data", "host-pin.json");
+const BOOTSTRAP_FILE =
+  process.env.PARTYQUEUE_HOST_BOOTSTRAP_FILE ||
+  path.join(__dirname, "..", "data", "host-bootstrap-code.json");
 
 const COOKIE_NAME = "pq_host";
 const HEADER_NAME = "x-partyqueue-host";
@@ -88,16 +91,38 @@ export function isHostPinConfigured() {
 
 export function ensureHostBootstrapCode() {
   if (isHostPinConfigured()) return "";
+  if (bootstrapCode && Date.now() > bootstrapExpiresAt) {
+    clearHostBootstrapCode();
+  }
   if (!bootstrapCode) {
     bootstrapCode = String(crypto.randomInt(100000, 1000000));
     bootstrapExpiresAt = Date.now() + BOOTSTRAP_TTL_MS;
+    writeFileAtomic(
+      BOOTSTRAP_FILE,
+      JSON.stringify(
+        {
+          code: bootstrapCode,
+          expiresAt: bootstrapExpiresAt,
+        },
+        null,
+        2
+      )
+    );
+    try {
+      fs.chmodSync(BOOTSTRAP_FILE, 0o600);
+    } catch {
+      /* Windows and some mounted filesystems do not support POSIX modes. */
+    }
   }
   return bootstrapCode;
 }
 
 export function verifyHostBootstrapCode(candidate) {
   if (isHostPinConfigured() || !bootstrapCode) return false;
-  if (Date.now() > bootstrapExpiresAt) return false;
+  if (Date.now() > bootstrapExpiresAt) {
+    clearHostBootstrapCode();
+    return false;
+  }
   const cleaned = String(candidate || "").trim();
   const actual = Buffer.from(cleaned);
   const expected = Buffer.from(bootstrapCode);
@@ -108,15 +133,20 @@ export function verifyHostBootstrapCode(candidate) {
 export function clearHostBootstrapCode() {
   bootstrapCode = "";
   bootstrapExpiresAt = 0;
+  try {
+    fs.rmSync(BOOTSTRAP_FILE, { force: true });
+  } catch {
+    /* best-effort cleanup */
+  }
+}
+
+export function hostBootstrapFileName() {
+  return path.basename(BOOTSTRAP_FILE);
 }
 
 /** @deprecated use verifyHostPin — kept for older call sites */
 export function getConfiguredPin() {
-  // Never expose the real PIN; length hint only for legacy callers.
-  const source = hostPinSource();
-  if (source === "env") return envPin();
-  if (source === "file") return "****";
-  return "";
+  return hostPinSource() ? "****" : "";
 }
 
 function scryptHash(pin, saltBuf) {
