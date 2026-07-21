@@ -181,6 +181,12 @@ test.describe("PartyQueue browser smoke", () => {
         json: {
           found: true,
           syncedLyrics: "[01:00.00]Recovered lyrics",
+          provider: "unison",
+          syncKind: "line",
+          attribution: {
+            text: "Lyrics from Unison",
+            url: "https://unisonlyrics.org",
+          },
         },
       });
     });
@@ -202,6 +208,13 @@ test.describe("PartyQueue browser smoke", () => {
     await expect(page.locator(".np-fs-line")).toContainText(
       "Recovered lyrics",
       { timeout: 3_000 }
+    );
+    await expect(page.locator(".np-fs-lyrics-attribution a")).toHaveText(
+      "Lyrics from Unison"
+    );
+    await expect(page.locator(".np-fs-lyrics-attribution a")).toHaveAttribute(
+      "href",
+      "https://unisonlyrics.org"
     );
     expect(lyricsRequests).toBe(2);
   });

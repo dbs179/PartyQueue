@@ -5207,6 +5207,27 @@ function renderSyncedLyrics(lines) {
   updateSyncedHighlight(true);
 }
 
+function renderLyricsAttribution(data) {
+  if (!npFsLyrics || !data) return;
+  const isPlain = data.syncKind === "plain" || !data.syncedLyrics;
+  const attribution = data.provider === "unison" ? data.attribution : null;
+  if (!isPlain && !attribution) return;
+
+  const note = document.createElement("p");
+  note.className = "np-fs-lyrics-attribution";
+  if (isPlain) note.append("Plain lyrics");
+  if (attribution?.url) {
+    if (isPlain) note.append(" · ");
+    const link = document.createElement("a");
+    link.href = attribution.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = attribution.text || "Lyrics from Unison";
+    note.appendChild(link);
+  }
+  npFsLyrics.prepend(note);
+}
+
 function estimatedPositionSec() {
   let pos = npPositionBase;
   if (npIsPlayingOverlay && npPositionAt) {
@@ -5448,9 +5469,11 @@ async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
     const synced = parseSyncedLyrics(data.syncedLyrics);
     if (synced) {
       renderSyncedLyrics(synced);
+      renderLyricsAttribution(data);
       startLyricTicker();
     } else if (data.plainLyrics) {
       renderPlainLyrics(data.plainLyrics);
+      renderLyricsAttribution(data);
     } else {
       setNpFsLyricsStatus("No lyrics found");
     }

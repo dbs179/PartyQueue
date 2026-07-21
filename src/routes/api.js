@@ -1564,8 +1564,8 @@ export function registerApiRoutes(app, ctx) {
     res.json({ ok: true, name: sanitizeDisplayName(name), guests: listGuestProfiles() });
   });
   
-  // Lyrics via LRClib (title/artist/album/duration). Cached server-side so guest
-  // phones share one lookup per track.
+  // Lyrics via LRClib with a bounded Unison fallback. Cached server-side so
+  // guest phones share one lookup per track.
   app.get("/api/lyrics", async (req, res) => {
     const title = String(req.query.title || "").trim();
     const artist = String(req.query.artist || "").trim();

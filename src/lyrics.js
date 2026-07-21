@@ -5,12 +5,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "./atomic-write.js";
+import {
+  lookupUnisonLyrics,
+  UnisonUnavailableError,
+} from "./unison-lyrics.js";
 
 const LRCLIB_BASE = "https://lrclib.net";
 const FOUND_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MISS_CACHE_TTL_MS = 30 * 60 * 1000;
 const CACHE_MAX = 200;
 const LOOKUP_BUDGET_MS = 8_000;
+const LRCLIB_BUDGET_MS = 5_000;
 const PROVIDER_BACKOFF_MS = 10_000;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -34,7 +39,8 @@ const USER_AGENT = `PartyQueue/${appVersion}`;
 const cache = new Map();
 /** @type {Map<string, Promise<object>>} */
 const inFlight = new Map();
-let providerBackoffUntil = 0;
+let lrclibBackoffUntil = 0;
+let unisonBackoffUntil = 0;
 
 function loadPersistentCache() {
   if (!CACHE_FILE) return;
@@ -116,7 +122,7 @@ function writeCache(key, value) {
   persistCache();
 }
 
-function normalizeRecord(rec) {
+function normalizeRecord(rec, provider = "lrclib") {
   if (!rec || typeof rec !== "object") {
     return { found: false };
   }
@@ -124,7 +130,14 @@ function normalizeRecord(rec) {
   const synced = typeof rec.syncedLyrics === "string" ? rec.syncedLyrics : "";
   const instrumental = !!rec.instrumental;
   if (instrumental && !plain && !synced) {
-    return { found: true, instrumental: true, plainLyrics: "", syncedLyrics: "" };
+    return {
+      found: true,
+      instrumental: true,
+      plainLyrics: "",
+      syncedLyrics: "",
+      provider,
+      syncKind: "instrumental",
+    };
   }
   if (!plain && !synced) return { found: false };
   return {
@@ -134,6 +147,8 @@ function normalizeRecord(rec) {
     syncedLyrics: synced,
     trackName: rec.trackName || null,
     artistName: rec.artistName || null,
+    provider,
+    syncKind: synced ? "line" : "plain",
   };
 }
 
@@ -187,6 +202,61 @@ function pickBestSearchHit(results, duration) {
  * Look up lyrics for a track. Duration (seconds) improves LRClib matching.
  * @param {{ title?: string, artist?: string, album?: string, duration?: number|null }} q
  */
+async function lookupLrclib(query, deadline) {
+  const { title, artist, album, duration } = query;
+  let record = null;
+  let unavailable = false;
+
+  if (duration != null && duration > 0 && album) {
+    const params = new URLSearchParams({
+      track_name: title,
+      artist_name: artist,
+      album_name: album,
+      duration: String(Math.round(duration)),
+    });
+    try {
+      record = await lrclibFetch(`/api/get?${params}`, deadline);
+    } catch (err) {
+      unavailable = true;
+      console.error("[lyrics] LRClib get failed:", err.message);
+    }
+  }
+
+  if (!record || !record.syncedLyrics) {
+    const params = new URLSearchParams({
+      track_name: title,
+      artist_name: artist,
+    });
+    if (album) params.set("album_name", album);
+    try {
+      const results = await lrclibFetch(`/api/search?${params}`, deadline);
+      unavailable = false;
+      const hit = pickBestSearchHit(results, duration);
+      if (
+        hit &&
+        (!record ||
+          (hit.syncedLyrics && !record.syncedLyrics) ||
+          (!record.plainLyrics && hit.plainLyrics))
+      ) {
+        record = hit;
+      }
+    } catch (err) {
+      unavailable = true;
+      console.error("[lyrics] LRClib search failed:", err.message);
+    }
+  }
+
+  return { result: normalizeRecord(record), unavailable };
+}
+
+function retryDelay(...deadlines) {
+  const now = Date.now();
+  const delays = deadlines
+    .filter((value) => value > now)
+    .map((value) => value - now);
+  return delays.length ? Math.min(...delays) : PROVIDER_BACKOFF_MS;
+}
+
 export async function lookupLyrics(q = {}) {
   const title = String(q.title || "").trim();
   const artist = String(q.artist || "").trim();
@@ -199,68 +269,68 @@ export async function lookupLyrics(q = {}) {
     durationRaw != null && Number.isFinite(Number(durationRaw))
       ? Number(durationRaw)
       : null;
+  const query = { title, artist, album, duration };
 
-  const key = cacheKey({ title, artist, album, duration });
+  const key = cacheKey(query);
   const cached = readCache(key);
   if (cached) return { ...cached, cached: true };
   const pending = inFlight.get(key);
   if (pending) return pending;
-  if (Date.now() < providerBackoffUntil) {
-    throw new LyricsUnavailableError(providerBackoffUntil - Date.now());
-  }
 
   const request = (async () => {
-    const deadline = Date.now() + LOOKUP_BUDGET_MS;
-    let record = null;
+    const startedAt = Date.now();
+    const deadline = startedAt + LOOKUP_BUDGET_MS;
+    let lrclibResult = { found: false };
+    let lrclibResponded = false;
+    let unisonResponded = false;
 
-    if (duration != null && duration > 0 && album) {
-      const params = new URLSearchParams({
-        track_name: title,
-        artist_name: artist,
-        album_name: album,
-        duration: String(Math.round(duration)),
-      });
-      try {
-        record = await lrclibFetch(`/api/get?${params}`, deadline);
-      } catch (err) {
-        console.error("[lyrics] get failed:", err.message);
+    if (startedAt >= lrclibBackoffUntil) {
+      const primary = await lookupLrclib(
+        query,
+        Math.min(deadline, startedAt + LRCLIB_BUDGET_MS)
+      );
+      lrclibResult = primary.result;
+      if (primary.unavailable) {
+        lrclibBackoffUntil = Date.now() + PROVIDER_BACKOFF_MS;
+      } else {
+        lrclibBackoffUntil = 0;
+        lrclibResponded = true;
       }
     }
 
-    // Search when /get missed synced lyrics. Both attempts share one deadline,
-    // so an overloaded provider cannot make the overlay wait twice.
-    if (!record || !record.syncedLyrics) {
-      const params = new URLSearchParams({
-        track_name: title,
-        artist_name: artist,
-      });
-      if (album) params.set("album_name", album);
+    if (lrclibResult.instrumental || lrclibResult.syncedLyrics) {
+      writeCache(key, lrclibResult);
+      return lrclibResult;
+    }
+
+    let unisonResult = { found: false };
+    if (Date.now() >= unisonBackoffUntil && Date.now() < deadline) {
       try {
-        const results = await lrclibFetch(`/api/search?${params}`, deadline);
-        const hit = pickBestSearchHit(results, duration);
-        if (
-          hit &&
-          (!record ||
-            (hit.syncedLyrics && !record.syncedLyrics) ||
-            (!record.plainLyrics && hit.plainLyrics))
-        ) {
-          record = hit;
-        }
+        unisonResult = await lookupUnisonLyrics(query, {
+          deadline,
+          userAgent: USER_AGENT,
+        });
+        unisonBackoffUntil = 0;
+        unisonResponded = true;
       } catch (err) {
-        if (record) {
-          console.error("[lyrics] search failed:", err.message);
-        } else {
-          providerBackoffUntil = Date.now() + PROVIDER_BACKOFF_MS;
-          console.error("[lyrics] search failed:", err.message);
-          throw new LyricsUnavailableError();
-        }
+        if (!(err instanceof UnisonUnavailableError)) throw err;
+        unisonBackoffUntil = Date.now() + PROVIDER_BACKOFF_MS;
+        console.error("[lyrics] Unison failed:", err.message);
       }
     }
 
-    providerBackoffUntil = 0;
-    const out = normalizeRecord(record);
-    writeCache(key, out);
-    return out;
+    const out = unisonResult.syncedLyrics
+      ? unisonResult
+      : lrclibResult.found
+        ? lrclibResult
+        : unisonResult;
+    if (out.found || (lrclibResponded && unisonResponded)) {
+      writeCache(key, out);
+      return out;
+    }
+    throw new LyricsUnavailableError(
+      retryDelay(lrclibBackoffUntil, unisonBackoffUntil)
+    );
   })();
   inFlight.set(key, request);
   try {
@@ -288,4 +358,12 @@ export function warmLyrics(q = {}) {
   lookupLyrics({ title, artist, album, duration }).catch((err) => {
     console.error("[lyrics] warm failed:", err.message);
   });
+}
+
+/** Reset module state for isolated unit tests. */
+export function resetLyricsStateForTests() {
+  cache.clear();
+  inFlight.clear();
+  lrclibBackoffUntil = 0;
+  unisonBackoffUntil = 0;
 }

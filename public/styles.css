@@ -2353,6 +2353,17 @@ button.guest-name:focus-visible {
   margin: 24px 0;
 }
 
+.np-fs-lyrics-attribution {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin: 4px 0 10px;
+}
+
+.np-fs-lyrics-attribution a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .np-fs-lyrics-plain {
   white-space: pre-wrap;
   font-size: 1.05rem;
