@@ -9,6 +9,7 @@ import {
 } from "../src/lyrics.js";
 import { lookupUnisonLyrics } from "../src/unison-lyrics.js";
 import { lookupOvhLyrics } from "../src/ovh-lyrics.js";
+import { artistLookupVariants } from "../src/lyrics-variants.js";
 
 it("normalizes common LRC timestamp and enhanced-word variants", () => {
   assert.equal(
@@ -211,6 +212,14 @@ describe("lookupLyrics", () => {
       });
       assert.equal(out.found, false);
       assert.equal(out.degraded, true);
+      assert.equal(out.cached, undefined);
+      const again = await lookupLyrics({
+        title: "Missing Everywhere",
+        artist: "PartyQueue",
+        album: "Tests",
+        duration: 180,
+      });
+      assert.equal(again.cached, undefined, "degraded misses must not be cached");
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -452,6 +461,19 @@ describe("lookupUnisonLyrics", () => {
   });
 });
 
+describe("artistLookupVariants", () => {
+  it("expands punctuated band names providers often rewrite", () => {
+    const variants = artistLookupVariants("Sixx:A.M.");
+    assert.equal(variants[0], "Sixx:A.M.");
+    assert.ok(variants.includes("Sixx A.M."));
+    assert.ok(variants.includes("Sixx AM"));
+    assert.ok(
+      variants.indexOf("Sixx AM") < variants.indexOf("SixxAM"),
+      "spaced cleanup should be tried before compacted forms"
+    );
+  });
+});
+
 describe("lookupOvhLyrics", () => {
   it("returns plain lyrics", async () => {
     const originalFetch = globalThis.fetch;
@@ -465,6 +487,30 @@ describe("lookupOvhLyrics", () => {
       assert.equal(out.found, true);
       assert.equal(out.plainLyrics, "Line one\nLine two");
       assert.equal(out.provider, "lyrics.ovh");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("retries artist punctuation variants after a miss", async () => {
+    const originalFetch = globalThis.fetch;
+    const seen = [];
+    globalThis.fetch = async (url) => {
+      seen.push(String(url));
+      if (String(url).includes("Sixx%20AM")) {
+        return jsonResponse({ lyrics: "Then everything went to hell" });
+      }
+      return jsonResponse({ error: "No lyrics found" });
+    };
+    try {
+      const out = await lookupOvhLyrics(
+        { title: "Everything Went To Hell", artist: "Sixx:A.M." },
+        { deadline: Date.now() + 5_000 }
+      );
+      assert.equal(out.found, true);
+      assert.match(out.plainLyrics, /everything went to hell/i);
+      assert.ok(seen.length >= 2);
+      assert.ok(seen.some((url) => url.includes("Sixx%20AM")));
     } finally {
       globalThis.fetch = originalFetch;
     }

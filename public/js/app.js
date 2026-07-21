@@ -5788,7 +5788,7 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
     displayState.textContent = updating
       ? "Updating"
       : playing
-        ? "Playing"
+        ? "Now Playing"
         : "Paused";
     displayState.classList.toggle("playing", playing && !updating);
   }

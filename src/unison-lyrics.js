@@ -3,6 +3,7 @@
 // timestamps, so this adapter accepts LRC-like and plain text payloads.
 
 const UNISON_BASE = "https://unison.boidu.dev";
+const UNISON_CALL_MS = 2_500;
 export const UNISON_ATTRIBUTION = {
   text: "Lyrics from Unison",
   url: "https://unisonlyrics.org",
@@ -142,8 +143,13 @@ function normalizeRecord(record, fallback = null) {
  * @returns {Promise<{ data: any, notFound?: boolean }>}
  */
 async function unisonFetch(path, deadline, userAgent) {
-  const remainingMs = deadline - Date.now();
-  if (remainingMs <= 0) throw new UnisonUnavailableError("Unison lookup timed out.");
+  const remainingMs = Math.max(
+    1,
+    Math.min(UNISON_CALL_MS, deadline - Date.now())
+  );
+  if (deadline - Date.now() <= 0) {
+    throw new UnisonUnavailableError("Unison lookup timed out.");
+  }
   let response;
   try {
     response = await fetch(`${UNISON_BASE}${path}`, {

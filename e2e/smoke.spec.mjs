@@ -131,8 +131,10 @@ test.describe("PartyQueue browser smoke", () => {
     await expect(page.locator("body")).toHaveClass(/party-display-active/);
     await expect(page.locator(".party-display-kicker")).toHaveCount(0);
     await expect(page.locator("#display-event-name")).toHaveClass(
-      /party-display-label/
+      /party-display-event/
     );
+    await expect(page.locator("#display-now-label")).toHaveCount(0);
+    await expect(page.locator("#display-state")).toHaveText("Now Playing");
     const brandedTitle =
       (await page.locator("#event-name").textContent()) || "PartyQueue";
     await expect(page.locator("#display-event-name")).toHaveText(

@@ -2642,6 +2642,12 @@ body.party-display-active > .container {
 
 .party-display-event {
   margin: 0;
+  color: var(--accent);
+  font-size: clamp(2.25rem, 4vw, 4.5rem);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: normal;
+  text-transform: uppercase;
 }
 
 .party-display-back {
@@ -2671,6 +2677,7 @@ body.party-display-active > .container {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 2.15fr) minmax(300px, 0.85fr);
+  align-items: start;
   gap: clamp(20px, 3vw, 46px);
 }
 
@@ -2691,7 +2698,7 @@ body.party-display-active > .container {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(260px, 0.95fr) minmax(300px, 1.15fr);
-  align-items: center;
+  align-items: start;
   gap: clamp(24px, 4vw, 64px);
 }
 
@@ -2700,7 +2707,7 @@ body.party-display-active > .container {
   width: 100%;
   max-height: min(72dvh, 760px);
   aspect-ratio: 1;
-  align-self: center;
+  align-self: start;
   border-radius: clamp(16px, 2vw, 28px);
   overflow: hidden;
   background: var(--surface);
@@ -2795,9 +2802,12 @@ body.party-display-active > .container {
 
 .party-display-reactions {
   margin-top: clamp(18px, 2.5vw, 34px);
+  width: 100%;
   display: flex;
-  flex-wrap: wrap;
-  gap: 9px;
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px;
 }
 
 .party-display-reactions[hidden] {
@@ -2805,10 +2815,13 @@ body.party-display-active > .container {
 }
 
 .party-display-reactions > span {
+  flex: 1 1 0;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 11px;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
   background: var(--surface);
   border-radius: 999px;
   font-size: clamp(0.95rem, 1.35vw, 1.35rem);

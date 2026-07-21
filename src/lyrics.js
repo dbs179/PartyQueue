@@ -17,6 +17,8 @@ const MISS_CACHE_TTL_MS = 30 * 60 * 1000;
 const CACHE_MAX = 200;
 const LOOKUP_BUDGET_MS = 10_000;
 const LRCLIB_CALL_MS = 2_500;
+/** Keep enough budget for lyrics.ovh artist-variant fallbacks. */
+const OVH_RESERVE_MS = 3_500;
 const PROVIDER_BACKOFF_MS = 10_000;
 const PERSIST_DEBOUNCE_MS = 250;
 
@@ -364,6 +366,10 @@ export async function lookupLyrics(q = {}) {
   const request = (async () => {
     const startedAt = Date.now();
     const deadline = startedAt + LOOKUP_BUDGET_MS;
+    const primaryDeadline = Math.max(
+      startedAt + 1_000,
+      deadline - OVH_RESERVE_MS
+    );
     let lrclibResult = { found: false };
     let unisonResult = { found: false };
     let ovhResult = { found: false };
@@ -375,7 +381,7 @@ export async function lookupLyrics(q = {}) {
 
     if (startedAt >= lrclibBackoffUntil) {
       jobs.push(
-        lookupLrclib(query, deadline).then((primary) => {
+        lookupLrclib(query, primaryDeadline).then((primary) => {
           lrclibResult = primary.result;
           lrclibResponded = primary.responded;
           if (primary.unavailable) {
@@ -390,7 +396,7 @@ export async function lookupLyrics(q = {}) {
     if (startedAt >= unisonBackoffUntil) {
       jobs.push(
         lookupUnisonLyrics(query, {
-          deadline,
+          deadline: primaryDeadline,
           userAgent: USER_AGENT,
         })
           .then((result) => {
@@ -447,7 +453,9 @@ export async function lookupLyrics(q = {}) {
         found: false,
         ...(degraded ? { degraded: true } : {}),
       };
-      writeCache(key, miss);
+      // Degraded misses often clear when LRClib recovers or a punctuation
+      // variant hits a backup — don't pin guests to a 30-minute empty overlay.
+      if (!degraded) writeCache(key, miss);
       return miss;
     }
 
