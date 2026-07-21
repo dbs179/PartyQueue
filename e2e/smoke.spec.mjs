@@ -1,5 +1,20 @@
 import { test, expect } from "@playwright/test";
 
+const ONE_PX_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64"
+);
+
+async function mockCover(page, pathLiteral) {
+  await page.route(`**${pathLiteral}`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: ONE_PX_PNG,
+    })
+  );
+}
+
 test.describe("PartyQueue browser smoke", () => {
   test("main view loads the ESM UI and sticky search", async ({ page }) => {
     await page.goto("/");
@@ -40,6 +55,7 @@ test.describe("PartyQueue browser smoke", () => {
       queuePlaying: true,
       durationSec: 240,
       positionSec: 60,
+      positionAgeSec: 0.25,
       positionObservedAt: Date.now(),
       reactions: { heart: 3, party: 2 },
       streamSession: "display-smoke",
@@ -49,7 +65,12 @@ test.describe("PartyQueue browser smoke", () => {
       route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: `data: ${JSON.stringify(nowPlaying)}\n\n`,
+        body:
+          `event: sonos-status\ndata: ${JSON.stringify({
+            status: "connected",
+            consecutiveFailures: 0,
+            lastSuccessAt: Date.now(),
+          })}\n\n` + `data: ${JSON.stringify(nowPlaying)}\n\n`,
       })
     );
     await page.route("**/api/nowplaying", (route) =>
@@ -129,19 +150,23 @@ test.describe("PartyQueue browser smoke", () => {
       "http://partyqueue.local"
     );
     await expect(page.locator("#display-progress")).toBeVisible();
-    const displayBefore = await page
-      .locator("#display-progress-elapsed")
-      .textContent();
-    await page.waitForTimeout(1_100);
-    const displayAfter = await page
-      .locator("#display-progress-elapsed")
-      .textContent();
     const toSeconds = (value) =>
       String(value)
         .split(":")
         .map(Number)
         .reduce((total, part) => total * 60 + part, 0);
-    expect(toSeconds(displayAfter)).toBeGreaterThan(toSeconds(displayBefore));
+    const displayBefore = toSeconds(
+      await page.locator("#display-progress-elapsed").textContent()
+    );
+    await expect
+      .poll(
+        async () =>
+          toSeconds(
+            await page.locator("#display-progress-elapsed").textContent()
+          ),
+        { timeout: 4_000 }
+      )
+      .toBeGreaterThan(displayBefore);
     await expect(page.locator("#view-display button")).toHaveCount(0);
     await expect(page.locator("#np-toggle")).toBeHidden();
   });
@@ -242,75 +267,200 @@ test.describe("PartyQueue browser smoke", () => {
     expect(lyricsRequests).toBe(2);
   });
 
-  test("metadata-pending transition never paints stale art or lyrics", async ({
+  test("pending transition keeps prior art and never blanks to Changing track", async ({
     page,
   }) => {
-    const pending = {
-      queueTrack: 2,
-      title: "Previous Song",
-      artist: "Previous Artist",
-      album: "Previous Album",
-      albumArt: "/stale-cover.jpg",
-      uri: "spotify:track:previous",
-      metadataPending: true,
+    const confirmed = {
+      queueTrack: 1,
+      title: "Live Song",
+      artist: "Live Artist",
+      album: "Live Album",
+      albumArt: "/live-cover.jpg",
+      uri: "spotify:track:live",
+      metadataPending: false,
       isPlaying: true,
       queuePlaying: true,
-      positionSec: 0,
+      positionSec: 42,
       durationSec: 180,
       reactions: {},
       streamSession: "pending-smoke",
       streamSequence: 1,
     };
+    const pending = {
+      ...confirmed,
+      queueTrack: 2,
+      metadataPending: true,
+      positionSec: 0,
+      streamSequence: 2,
+    };
+    await mockCover(page, "/live-cover.jpg");
+    await mockCover(page, "/next-cover.jpg");
     await page.route("**/api/nowplaying/stream", (route) =>
       route.fulfill({
         status: 200,
         contentType: "text/event-stream",
-        body: `data: ${JSON.stringify(pending)}\n\n`,
+        body:
+          `data: ${JSON.stringify(confirmed)}\n\n` +
+          `data: ${JSON.stringify(pending)}\n\n`,
       })
     );
+    // Initial HTTP fetch must also be confirmed so lastConfirmed is seeded
+    // before the pending SSE event arrives.
     await page.route("**/api/nowplaying", (route) =>
-      route.fulfill({ status: 200, json: pending })
+      route.fulfill({ status: 200, json: confirmed })
     );
     await page.route("**/api/queue/stream", (route) =>
       route.fulfill({
         status: 200,
         contentType: "text/event-stream",
         body: `data: ${JSON.stringify({
-          tracks: [],
+          tracks: [
+            {
+              position: 2,
+              title: "Next Song",
+              artist: "Next Artist",
+              albumArt: "/next-cover.jpg",
+              uri: "spotify:track:next",
+            },
+          ],
           streamSession: "pending-queue",
           streamSequence: 1,
         })}\n\n`,
       })
     );
     await page.route("**/api/queue/list", (route) =>
-      route.fulfill({ status: 200, json: { tracks: [] } })
+      route.fulfill({
+        status: 200,
+        json: {
+          tracks: [
+            {
+              position: 2,
+              title: "Next Song",
+              artist: "Next Artist",
+              albumArt: "/next-cover.jpg",
+              uri: "spotify:track:next",
+            },
+          ],
+        },
+      })
     );
-    let lyricsRequests = 0;
+    const lyricsUrls = [];
     await page.route(/\/api\/lyrics\?/, (route) => {
-      lyricsRequests += 1;
-      return route.abort();
+      lyricsUrls.push(route.request().url());
+      return route.fulfill({
+        status: 200,
+        json: {
+          found: true,
+          syncedLyrics: "[00:01.00]Kept lyrics",
+          plainLyrics: "Kept lyrics",
+          provider: "lrclib",
+        },
+      });
     });
 
     await page.goto("/");
-    await expect(page.locator("#np-title")).toHaveText("Changing track…");
-    await expect(page.locator("#np-art")).not.toHaveAttribute("src", /.+/);
+    await expect(page.locator("#np-title")).toHaveText("Live Song");
+    await expect(page.locator("#np-title")).not.toHaveText("Changing track…");
+    await expect(page.locator("#np-art")).toHaveAttribute("src", /live-cover/);
+    await expect(page.locator("#np-state")).toHaveText("Updating");
+    await expect(page.locator("#np-progress")).toBeVisible();
+
     await page.locator("#np-card").click();
-    await expect(page.locator("#np-fs-title")).toHaveText("Changing track…");
-    await expect(page.locator(".np-fs-lyrics-status")).toHaveText(
+    await expect(page.locator("#np-fs-title")).toHaveText("Live Song");
+    await expect(page.locator(".np-fs-lyrics-status")).not.toHaveText(
       "Changing track…"
     );
-    expect(lyricsRequests).toBe(0);
+    await expect(page.locator(".np-fs-line")).toContainText("Kept lyrics");
+    const decodedLyricsUrls = lyricsUrls.map((url) =>
+      decodeURIComponent(String(url).replace(/\+/g, "%20"))
+    );
+    expect(decodedLyricsUrls.some((url) => url.includes("Live Song"))).toBeTruthy();
+    expect(decodedLyricsUrls.some((url) => url.includes("Previous"))).toBeFalsy();
 
     await page.keyboard.press("Escape");
     await page.evaluate(() => {
       location.hash = "#/display";
     });
     await expect(page.locator("#view-display")).toBeVisible();
-    await expect(page.locator("#display-title")).toHaveText("Changing track…");
-    await expect(page.locator("#display-state")).toHaveText("Changing");
-    await expect(page.locator("#display-art")).not.toHaveAttribute("src", /.+/);
-    await expect(page.locator("#display-progress")).toBeHidden();
-    await expect(page.locator("#display-reactions")).toBeHidden();
+    await expect(page.locator("#display-title")).toHaveText("Live Song");
+    await expect(page.locator("#display-state")).toHaveText("Updating");
+    await expect(page.locator("#display-art")).toHaveAttribute(
+      "src",
+      /live-cover/
+    );
+    await expect(page.locator("#display-progress")).toBeVisible();
+  });
+
+  test("host skip paints optimistic next cover without Changing track", async ({
+    page,
+  }) => {
+    const nowPlaying = {
+      queueTrack: 1,
+      title: "Current Song",
+      artist: "Current Artist",
+      album: "Current Album",
+      albumArt: "/current-cover.jpg",
+      uri: "spotify:track:current",
+      metadataPending: false,
+      isPlaying: true,
+      queuePlaying: true,
+      positionSec: 20,
+      durationSec: 200,
+      reactions: {},
+      streamSession: "skip-smoke",
+      streamSequence: 1,
+    };
+    const queueTracks = [
+      {
+        position: 2,
+        title: "Queued Next",
+        artist: "Queued Artist",
+        albumArt: "/queued-cover.jpg",
+        uri: "spotify:track:queued",
+      },
+    ];
+    await mockCover(page, "/current-cover.jpg");
+    await mockCover(page, "/queued-cover.jpg");
+    await page.route("**/api/nowplaying/stream", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: ${JSON.stringify(nowPlaying)}\n\n`,
+      })
+    );
+    await page.route("**/api/nowplaying", (route) =>
+      route.fulfill({ status: 200, json: nowPlaying })
+    );
+    await page.route("**/api/queue/stream", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: ${JSON.stringify({
+          tracks: queueTracks,
+          streamSession: "skip-queue",
+          streamSequence: 1,
+        })}\n\n`,
+      })
+    );
+    await page.route("**/api/queue/list", (route) =>
+      route.fulfill({ status: 200, json: { tracks: queueTracks } })
+    );
+    await page.route("**/api/next", (route) =>
+      route.fulfill({ status: 200, json: { ok: true } })
+    );
+    await page.route(/\/api\/lyrics\?/, (route) =>
+      route.fulfill({ status: 200, json: { found: false } })
+    );
+
+    await page.goto("/");
+    await expect(page.locator("#np-title")).toHaveText("Current Song");
+    await page.locator("#controls-toggle").click();
+    await expect(page.locator("#next-btn")).toBeVisible();
+    await page.locator("#next-btn").click();
+    await expect(page.locator("#np-title")).toHaveText("Queued Next");
+    await expect(page.locator("#np-title")).not.toHaveText("Changing track…");
+    await expect(page.locator("#np-art")).toHaveAttribute("src", /queued-cover/);
+    await expect(page.locator("#np-state")).toHaveText("Updating");
   });
 
   test("js modules are served as ES modules", async ({ request }) => {

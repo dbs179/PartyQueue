@@ -48,10 +48,15 @@ export function parseSyncedLyrics(raw) {
   return lines.length ? lines : null;
 }
 
+/**
+ * Advance a Sonos position anchor by server-computed snapshot age.
+ * Display models should already strip transition pending flags; callers that
+ * still pass transport snapshots can opt into advancing during pending.
+ */
 export function serverPlaybackPosition(np, maxAgeSec = 10) {
   const position = Number(np?.positionSec);
   if (!Number.isFinite(position)) return null;
-  const playing = !!(np?.isPlaying && !np?.djVoice && !np?.metadataPending);
+  const playing = !!(np?.isPlaying && !np?.djVoice);
   const age = Number(np?.positionAgeSec);
   return (
     position +
@@ -59,4 +64,131 @@ export function serverPlaybackPosition(np, maxAgeSec = 10) {
       ? Math.max(0, Math.min(maxAgeSec, age))
       : 0)
   );
+}
+
+/** Build a Now Playing-shaped object from a queue list row (optimistic skip). */
+export function queueTrackAsNowPlaying(track, extras = {}) {
+  if (!track) return null;
+  return {
+    title: track.title || "",
+    artist: track.artist || "",
+    album: track.album || "",
+    albumArt: track.albumArt || null,
+    uri: track.uri || null,
+    djVoice: !!track.djVoice,
+    positionSec: 0,
+    positionAgeSec: 0,
+    durationSec: Number.isFinite(Number(track.durationSec))
+      ? Number(track.durationSec)
+      : null,
+    isPlaying: true,
+    queuePlaying: true,
+    queueTrack: Number(track.position) || 0,
+    metadataPending: false,
+    optimistic: true,
+    reactions: {},
+    ...extras,
+  };
+}
+
+/**
+ * Choose what the UI paints. Never blank art for Sonos metadata lag — keep the
+ * last confirmed track or an optimistic next-queue row until transport confirms.
+ */
+export function resolveNowPlayingDisplay({
+  transport = null,
+  lastConfirmed = null,
+  optimistic = null,
+} = {}) {
+  if (!transport && !lastConfirmed && !optimistic) {
+    return { display: null, mode: "empty", confirmed: null };
+  }
+
+  const transportMedia = mediaIdentity(transport);
+  const optimisticMedia = mediaIdentity(optimistic);
+  const confirmedMedia = mediaIdentity(lastConfirmed);
+
+  if (optimistic && (optimistic.title || optimistic.artist || optimistic.albumArt)) {
+    const transportMatchesOptimistic =
+      !!transportMedia && !!optimisticMedia && transportMedia === optimisticMedia;
+    if (transportMatchesOptimistic && !transport.metadataPending) {
+      return {
+        display: { ...transport, metadataPending: false, updating: false },
+        mode: "confirmed",
+        confirmed: transport,
+      };
+    }
+
+    const transportStillPrior =
+      !transport ||
+      !!transport.metadataPending ||
+      !transportMedia ||
+      (!!confirmedMedia && transportMedia === confirmedMedia);
+
+    if (transportStillPrior) {
+      return {
+        display: {
+          ...optimistic,
+          metadataPending: false,
+          updating: true,
+          optimistic: true,
+          muted: transport?.muted,
+          shuffle: transport?.shuffle,
+          state: transport?.state,
+          room: transport?.room ?? optimistic.room,
+          isPlaying: transport?.isPlaying ?? true,
+          queuePlaying: transport?.queuePlaying ?? true,
+        },
+        mode: "optimistic",
+        confirmed: lastConfirmed,
+      };
+    }
+
+    // Sonos landed on a different confirmed track than the optimistic guess.
+    return {
+      display: { ...transport, metadataPending: false, updating: false },
+      mode: "confirmed",
+      confirmed: transport,
+    };
+  }
+
+  if (transport && !transport.metadataPending) {
+    return {
+      display: { ...transport, metadataPending: false, updating: false },
+      mode: "confirmed",
+      confirmed: transport,
+    };
+  }
+
+  if (lastConfirmed && (lastConfirmed.title || lastConfirmed.artist || lastConfirmed.albumArt)) {
+    return {
+      display: {
+        ...lastConfirmed,
+        metadataPending: false,
+        updating: true,
+        muted: transport?.muted ?? lastConfirmed.muted,
+        shuffle: transport?.shuffle ?? lastConfirmed.shuffle,
+        isPlaying: transport?.isPlaying ?? lastConfirmed.isPlaying,
+        queuePlaying: transport?.queuePlaying ?? lastConfirmed.queuePlaying,
+        state: transport?.state ?? lastConfirmed.state,
+        // Keep the local playhead advancing from the confirmed anchor.
+        positionSec: lastConfirmed.positionSec,
+        positionAgeSec: lastConfirmed.positionAgeSec,
+        durationSec: lastConfirmed.durationSec,
+      },
+      mode: "converging",
+      confirmed: lastConfirmed,
+    };
+  }
+
+  // First paint mid-transition with no history: keep Sonos fields visible.
+  if (transport) {
+    return {
+      display: { ...transport, metadataPending: false, updating: true },
+      mode: "converging",
+      confirmed: null,
+    };
+  }
+
+  return { display: null, mode: "empty", confirmed: null };
 }

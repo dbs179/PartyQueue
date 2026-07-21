@@ -15,8 +15,11 @@ import {
   guestIdentityPayload as guestIdentityPayloadFrom,
 } from "./guest.js";
 import {
+  mediaIdentity,
   playbackIdentity,
   parseSyncedLyrics,
+  queueTrackAsNowPlaying,
+  resolveNowPlayingDisplay,
   serverPlaybackPosition,
 } from "./now-playing-utils.js";
 
@@ -4243,10 +4246,9 @@ function openNowPlayingStream() {
   source.onerror = () => {
     if (nowPlayingSource !== source) return;
     nowPlayingStreamConnected = false;
-    setNowPlayingConnectionStatus(
-      "disconnected",
-      "Live updates reconnecting — showing the last update."
-    );
+    // Transport reconnects are normal when an SSE response ends. Keep the local
+    // playhead moving — only server sonos-status "disconnected" means Sonos
+    // itself is unreachable and should freeze the clock.
     startNowPlayingFallback();
   };
 }
@@ -5110,7 +5112,16 @@ clearBtn.addEventListener("click", async () => {
 });
 
 // ---- Full-screen Now Playing + lyrics ------------------------------------
+/** Latest transport snapshot from SSE/HTTP (may include metadataPending). */
+let lastTransportNp = null;
+/** What the card/overlay/display paint (confirmed or optimistic). */
 let lastNowPlaying = null;
+/** Last coherent non-pending track used while Sonos metadata lags. */
+let lastConfirmedNp = null;
+/** Optimistic next-queue paint after host Skip, until transport confirms. */
+let optimisticNp = null;
+/** confirmed | optimistic | converging | empty */
+let nowPlayingDisplayMode = "empty";
 let lastQueueTracks = [];
 let nowPlayingHttpRequest = 0;
 // Queue editing (delete + drag-reorder). Off by default.
@@ -5264,7 +5275,9 @@ function paintTrackProgress(container, fill, elapsed, total, position, duration)
 function updateTrackProgress() {
   const isAnnouncement =
     !!lastNowPlaying?.djVoice || !!lastNowPlaying?.djSilence;
-  const duration = isAnnouncement || lastNowPlaying?.metadataPending
+  // Keep the bar visible during transitions; duration may be unknown for
+  // optimistic queue rows until Sonos confirms.
+  const duration = isAnnouncement
     ? Number.NaN
     : Number(lastNowPlaying?.durationSec);
   const position = estimatedPositionSec();
@@ -5305,7 +5318,9 @@ const LYRICS_LEAD_SEC = 0.75;
  */
 function applyPlaybackClock(np, { force = false } = {}) {
   const clockNow = playbackClockNow();
-  const playing = !!(np && np.isPlaying && !np.djVoice && !np.metadataPending);
+  // Display models already strip metadataPending; keep the playhead moving
+  // through converging/optimistic phases.
+  const playing = !!(np && np.isPlaying && !np.djVoice);
   // Snapshot age is calculated server-side; never compare server wall time with
   // the phone clock.
   const serverPos = serverPlaybackPosition(np);
@@ -5331,7 +5346,14 @@ function applyPlaybackClock(np, { force = false } = {}) {
 
   const drift = Math.abs(serverPos - estimated);
   const playChanged = playing !== npIsPlayingOverlay;
-  if (playChanged || !playing || drift > 1.5) {
+  // Replayed SSE anchors (reconnect / retained snapshot) can be older than the
+  // local playhead. Never yank time backward for the same track — only snap on
+  // pause/play changes, forward seeks, or large forward drift.
+  const staleReplay = playing && !playChanged && serverPos + 0.75 < estimated;
+  if (playChanged || !playing) {
+    npPositionBase = hasServer ? serverPos : estimated;
+    npPositionAt = clockNow;
+  } else if (!staleReplay && drift > 1.5) {
     npPositionBase = serverPos;
     npPositionAt = clockNow;
   }
@@ -5409,18 +5431,21 @@ const artworkRequests = new WeakMap();
 
 function bindNowPlayingArtwork(img, np) {
   if (!img) return;
-  const key = playbackIdentity(np);
-  const url = np?.metadataPending ? "" : String(np?.albumArt || "");
+  const key = playbackIdentity(np) || mediaIdentity(np);
+  const url = String(np?.albumArt || "");
   const alt = np?.album
     ? `Album art for ${np.album}`
     : np?.title
       ? `Artwork for ${np.title}`
       : "";
   if (!url) {
-    artworkRequests.delete(img);
-    img.removeAttribute("src");
-    img.alt = "";
-    delete img.dataset.artIdentity;
+    // Keep prior pixels when the next cover is unknown; only clear on empty UI.
+    if (!np || !(np.title || np.artist)) {
+      artworkRequests.delete(img);
+      img.removeAttribute("src");
+      img.alt = "";
+      delete img.dataset.artIdentity;
+    }
     return;
   }
   if (img.dataset.artIdentity === key && img.getAttribute("src") === url) {
@@ -5430,10 +5455,8 @@ function bindNowPlayingArtwork(img, np) {
 
   const request = { key, url };
   artworkRequests.set(img, request);
-  // Hide old pixels while the replacement decodes. This prevents metadata for
-  // one track appearing beside artwork from another.
-  img.removeAttribute("src");
-  img.alt = "";
+  // Keep current pixels visible until the replacement decodes so track changes
+  // never flash an empty art frame.
   const preload = new Image();
   preload.decoding = "async";
   preload.src = url;
@@ -5456,35 +5479,31 @@ function bindNowPlayingArtwork(img, np) {
     })
     .catch(() => {
       if (artworkRequests.get(img) !== request) return;
-      img.removeAttribute("src");
-      img.alt = "";
-      delete img.dataset.artIdentity;
+      // Keep prior pixels on failure. If nothing is showing yet, still bind the
+      // URL so the browser can retry / show a broken-image affordance.
+      if (!img.getAttribute("src")) {
+        img.src = url;
+        img.alt = alt;
+        img.dataset.artIdentity = key;
+      }
     });
 }
 
 function fillNpOverlayMeta(np) {
   if (!npFsTitle) return;
   const hasTrack = np && (np.title || np.artist);
-  npFsTitle.textContent = np?.metadataPending
-    ? "Changing track…"
-    : hasTrack
-      ? np.title || ""
-      : "";
-  npFsArtist.textContent = np?.metadataPending ? "" : hasTrack ? np.artist || "" : "";
-  npFsAlbum.textContent = np?.metadataPending ? "" : hasTrack ? np.album || "" : "";
+  npFsTitle.textContent = hasTrack ? np.title || "" : "";
+  npFsArtist.textContent = hasTrack ? np.artist || "" : "";
+  npFsAlbum.textContent = hasTrack ? np.album || "" : "";
   bindNowPlayingArtwork(npFsArt, np);
 }
 
 async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
   clearLyricsRetry();
   const fetchId = ++npLyricsFetchId;
-  if (!np || np.metadataPending || np.djVoice || !(np.title && np.artist)) {
+  if (!np || np.djVoice || !(np.title && np.artist)) {
     setNpFsLyricsStatus(
-      np?.metadataPending
-        ? "Changing track…"
-        : np?.djVoice
-          ? "DJ Voice — no lyrics"
-          : "No lyrics for this track"
+      np?.djVoice ? "DJ Voice — no lyrics" : "No lyrics for this track"
     );
     return;
   }
@@ -5741,57 +5760,125 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
   }
 
   displayEmpty.hidden = true;
-  displayTitle.textContent = np.metadataPending ? "Changing track…" : np.title || "";
-  if (displayArtist) displayArtist.textContent = np.metadataPending ? "" : np.artist || "";
-  if (displayAlbum) displayAlbum.textContent = np.metadataPending ? "" : np.album || "";
+  displayTitle.textContent = np.title || "";
+  if (displayArtist) displayArtist.textContent = np.artist || "";
+  if (displayAlbum) displayAlbum.textContent = np.album || "";
   bindNowPlayingArtwork(displayArt, np);
   if (displayState) {
     displayState.hidden = false;
-    const playing = !!np.isPlaying && !np.metadataPending;
-    displayState.textContent = np.metadataPending
-      ? "Changing"
+    const playing = !!np.isPlaying;
+    const updating = !!np.updating || nowPlayingDisplayMode === "optimistic";
+    displayState.textContent = updating
+      ? "Updating"
       : playing
         ? "Playing"
         : "Paused";
-    displayState.classList.toggle("playing", playing);
+    displayState.classList.toggle("playing", playing && !updating);
   }
   if (displayReactions) {
-    displayReactions.hidden = !!np.djVoice || !!np.metadataPending;
+    displayReactions.hidden = !!np.djVoice || !!np.updating;
   }
 }
 
-function renderNowPlaying(np) {
-  lastNowPlaying = np;
-  if (np) {
-    syncAutoFillFromServer(np.neverEnding);
-    if (np.requestsPaused != null) setRequestsPausedUi(!!np.requestsPaused);
-    if (np.hostControlsOnly != null) {
-      hostControlsOnly = !!np.hostControlsOnly;
+function beginOptimisticSkipFromQueue() {
+  const next =
+    (Array.isArray(lastQueueTracks) ? lastQueueTracks : []).find(
+      (t) => t && !t.djVoice && (t.title || t.artist || t.albumArt)
+    ) || null;
+  if (!next) return false;
+  optimisticNp = queueTrackAsNowPlaying(next, {
+    room: lastConfirmedNp?.room || lastTransportNp?.room || null,
+    neverEnding: lastTransportNp?.neverEnding,
+    requestsPaused: lastTransportNp?.requestsPaused,
+    hostControlsOnly: lastTransportNp?.hostControlsOnly,
+  });
+  if (lastTransportNp) renderNowPlaying(lastTransportNp);
+  else {
+    renderNowPlaying({
+      metadataPending: true,
+      isPlaying: true,
+      queuePlaying: true,
+      muted: false,
+      shuffle: false,
+    });
+  }
+  return true;
+}
+
+function adoptTransportConfirmation(transport) {
+  if (!transport) return;
+  if (transport.metadataPending) return;
+  const hasTrack = !!(transport.title || transport.artist || transport.uri);
+  if (!hasTrack) {
+    lastConfirmedNp = null;
+    optimisticNp = null;
+    return;
+  }
+
+  if (optimisticNp) {
+    const transportMedia = mediaIdentity(transport);
+    const optimisticMedia = mediaIdentity(optimisticNp);
+    const confirmedMedia = mediaIdentity(lastConfirmedNp);
+    if (transportMedia && optimisticMedia && transportMedia === optimisticMedia) {
+      optimisticNp = null;
+      lastConfirmedNp = transport;
+      return;
+    }
+    // Skip not reflected yet — keep optimistic paint over the prior track.
+    if (transportMedia && confirmedMedia && transportMedia === confirmedMedia) {
+      return;
+    }
+    // Landed on an unexpected track; trust Sonos.
+    optimisticNp = null;
+  }
+  lastConfirmedNp = transport;
+}
+
+function renderNowPlaying(transport) {
+  lastTransportNp = transport || null;
+  if (transport) {
+    syncAutoFillFromServer(transport.neverEnding);
+    if (transport.requestsPaused != null) {
+      setRequestsPausedUi(!!transport.requestsPaused);
+    }
+    if (transport.hostControlsOnly != null) {
+      hostControlsOnly = !!transport.hostControlsOnly;
       if (hostControlsInput) hostControlsInput.checked = hostControlsOnly;
       syncHostControlsVisibility();
     }
-    maybeAnnounceClosingTime(np.closingTimeAt, np.partyRecap);
+    maybeAnnounceClosingTime(transport.closingTimeAt, transport.partyRecap);
   }
-  const hasTrack = np && (np.metadataPending || np.title || np.artist);
+
+  adoptTransportConfirmation(transport);
+  const resolved = resolveNowPlayingDisplay({
+    transport,
+    lastConfirmed: lastConfirmedNp,
+    optimistic: optimisticNp,
+  });
+  nowPlayingDisplayMode = resolved.mode;
+  if (resolved.confirmed) lastConfirmedNp = resolved.confirmed;
+  const np = resolved.display;
+  lastNowPlaying = np;
+
+  const hasTrack = !!(np && (np.title || np.artist || np.albumArt));
   const progressClockKey = lyricsTrackKey(np);
   applyPlaybackClock(np, {
     force: progressClockKey !== npProgressClockKey,
   });
   npProgressClockKey = progressClockKey;
   updateTrackProgress();
-  // Show Pause only when the QUEUE itself is playing. If something else is on
-  // (SiriusXM, radio, etc.) or nothing is playing, show Play so a tap takes
-  // over and starts the queue.
-  npIsPlaying = !!(np && np.queuePlaying);
+  // Transport owns play/pause affordances so Skip optimism cannot hide Pause.
+  npIsPlaying = !!(transport && transport.queuePlaying);
   npToggle.textContent = npIsPlaying ? "\u23F8\uFE0F" : "\u25B6\uFE0F";
-  const muted = !!(np && np.muted);
+  const muted = !!(transport && transport.muted);
   muteBtn.textContent = muted ? "\u{1F507}" : "\u{1F508}";
   muteBtn.setAttribute("aria-label", muted ? "Unmute" : "Mute");
-  const shuffling = !!(np && np.shuffle);
+  const shuffling = !!(transport && transport.shuffle);
   shuffleBtn.classList.toggle("active", shuffling);
   shuffleBtn.setAttribute("aria-pressed", shuffling ? "true" : "false");
 
-  const nextNpId = hasTrack && !np.metadataPending ? trackIdFromUri(np.uri) : null;
+  const updating = !!np?.updating || nowPlayingDisplayMode === "optimistic";
+  const nextNpId = hasTrack && !updating ? trackIdFromUri(np.uri) : null;
   if (nextNpId !== npReactionsSyncedFor) {
     npMyMood = null;
     npMyMic = false;
@@ -5805,17 +5892,17 @@ function renderNowPlaying(np) {
   if (npPills) npPills.hidden = !hasTrack;
   npState.hidden = !hasTrack;
   if (hasTrack) {
-    const transportPlaying = !!np.isPlaying && !np.metadataPending;
-    npState.textContent = np.metadataPending
-      ? "Changing"
+    const transportPlaying = !!(transport?.isPlaying ?? np.isPlaying);
+    npState.textContent = updating
+      ? "Updating"
       : transportPlaying
         ? "Playing"
         : "Paused";
-    npState.classList.toggle("playing", transportPlaying);
-    npState.classList.toggle("paused", !transportPlaying);
+    npState.classList.toggle("playing", transportPlaying && !updating);
+    npState.classList.toggle("paused", !transportPlaying || updating);
   }
   if (npOrigin) {
-    const origin = nowPlayingOriginLabel(np, hasTrack);
+    const origin = nowPlayingOriginLabel(np, hasTrack && !updating);
     if (origin) {
       npOrigin.hidden = false;
       npOrigin.textContent = origin.text;
@@ -5839,11 +5926,11 @@ function renderNowPlaying(np) {
     npTitle.hidden = false;
     npArtist.hidden = false;
     npAlbum.hidden = false;
-    npTitle.textContent = np.metadataPending ? "Changing track…" : np.title || "";
-    npArtist.textContent = np.metadataPending ? "" : np.artist || "";
-    npAlbum.textContent = np.metadataPending ? "" : np.album || "";
+    npTitle.textContent = np.title || "";
+    npArtist.textContent = np.artist || "";
+    npAlbum.textContent = np.album || "";
     bindNowPlayingArtwork(npArt, np);
-    if (npReactions) npReactions.hidden = !!np.metadataPending;
+    if (npReactions) npReactions.hidden = updating;
     if (np?.reactions) {
       // Poll has counts only; keep local mine/micMine until sync finishes.
       paintNpReactions({
@@ -5852,7 +5939,7 @@ function renderNowPlaying(np) {
         micMine: npMyMic,
       });
     }
-    if (!np.metadataPending) void syncMyReactions(nowPlayingId);
+    if (!updating) void syncMyReactions(nowPlayingId);
   } else {
     npCard.classList.add("is-empty");
     npTitle.hidden = true;
@@ -6184,10 +6271,13 @@ shuffleBtn.addEventListener("click", () => {
 });
 
 prevBtn.addEventListener("click", () => {
+  // No reliable previous row in the upcoming queue list — keep last confirmed
+  // paint until Sonos confirms (never blank art).
   postControl(prevBtn, "/api/previous");
 });
 
 nextBtn.addEventListener("click", () => {
+  beginOptimisticSkipFromQueue();
   postControl(nextBtn, "/api/next", (d) => {
     if (d.skipped) showToast("Skipped — remembered for the DJ");
   });

@@ -5,6 +5,10 @@ import { getContentSettings } from "./settings.js";
 import { getReactions } from "./reactions.js";
 import { spotifyTrackId } from "./sampler.js";
 import {
+  createNowPlayingTransitionTracker,
+  TRANSITION_CONFIRM_MS,
+} from "./now-playing-transition.js";
+import {
   getNowPlaying,
   getNowPlayingFresh,
   getQueueList,
@@ -41,6 +45,7 @@ export function addPositionAge(np, sentAt = Date.now()) {
 }
 
 const nowPlayingReadCounters = { regular: 0, fresh: 0 };
+const transitionTracker = createNowPlayingTransitionTracker();
 
 export async function readNowPlayingPayload({ fresh = false } = {}) {
   nowPlayingReadCounters[fresh ? "fresh" : "regular"] += 1;
@@ -51,51 +56,23 @@ export async function readNowPlayingPayload({ fresh = false } = {}) {
 const nowPlayingStreamClients = new Map();
 let monitorFreshReadsPending = 0;
 let transitionConfirmTimer = null;
-let pendingTransitionMetadata = null;
 
-function sameTrackMetadata(a, b) {
-  return (
-    String(a?.uri || "") === String(b?.uri || "") &&
-    String(a?.title || "") === String(b?.title || "") &&
-    String(a?.artist || "") === String(b?.artist || "") &&
-    String(a?.album || "") === String(b?.album || "") &&
-    String(a?.albumArt || "") === String(b?.albumArt || "")
-  );
+/** Apply shared transition state so HTTP and SSE agree on metadataPending. */
+export async function readNowPlayingWithTransition({ fresh = false } = {}) {
+  const snapshot = await readNowPlayingPayload({ fresh });
+  const previous = nowPlayingMonitor?.latest;
+  return transitionTracker.resolve(previous, snapshot);
 }
 
 async function readNowPlayingMonitorPayload() {
   const fresh = monitorFreshReadsPending > 0;
   if (fresh) monitorFreshReadsPending -= 1;
-  const snapshot = await readNowPlayingPayload({ fresh });
-  const previous = nowPlayingMonitor?.latest;
-  const queueChanged =
-    Number(previous?.queueTrack) > 0 &&
-    Number(snapshot?.queueTrack) > 0 &&
-    Number(previous.queueTrack) !== Number(snapshot.queueTrack);
-  if (queueChanged && sameTrackMetadata(previous, snapshot)) {
-    pendingTransitionMetadata = {
-      queueTrack: Number(snapshot.queueTrack),
-      uri: snapshot.uri,
-      title: snapshot.title,
-      artist: snapshot.artist,
-      album: snapshot.album,
-      albumArt: snapshot.albumArt,
-    };
-  }
-  const metadataPending =
-    Number(pendingTransitionMetadata?.queueTrack) === Number(snapshot.queueTrack) &&
-    sameTrackMetadata(pendingTransitionMetadata, snapshot);
-  if (pendingTransitionMetadata && !metadataPending) {
-    pendingTransitionMetadata = null;
-  }
-  if (fresh && !metadataPending && transitionConfirmTimer) {
+  const resolved = await readNowPlayingWithTransition({ fresh });
+  if (fresh && !resolved.metadataPending && transitionConfirmTimer) {
     clearTimeout(transitionConfirmTimer);
     transitionConfirmTimer = null;
   }
-  return {
-    ...snapshot,
-    metadataPending,
-  };
+  return resolved;
 }
 
 function writeNowPlayingStreamEvent(res, eventName, payload, id = null) {
@@ -128,18 +105,14 @@ export function nudgeNowPlayingStream() {
   nowPlayingMonitor.nudge();
 }
 
+/**
+ * Host next/previous: record the pre-command identity and schedule bounded
+ * fresh reads. Does not mark metadataPending until Sonos advances the index
+ * while still reporting the old media fields.
+ */
 export function nudgeNowPlayingTransition(previousSnapshot = null) {
   const current = previousSnapshot || nowPlayingMonitor.latest;
-  if (current) {
-    pendingTransitionMetadata = {
-      queueTrack: Number(current.queueTrack),
-      uri: current.uri,
-      title: current.title,
-      artist: current.artist,
-      album: current.album,
-      albumArt: current.albumArt,
-    };
-  }
+  transitionTracker.nudge(current);
   monitorFreshReadsPending = Math.max(monitorFreshReadsPending, 1);
   nowPlayingMonitor.nudge();
   if (transitionConfirmTimer) clearTimeout(transitionConfirmTimer);
@@ -147,16 +120,21 @@ export function nudgeNowPlayingTransition(previousSnapshot = null) {
     transitionConfirmTimer = null;
     monitorFreshReadsPending = Math.max(monitorFreshReadsPending, 1);
     nowPlayingMonitor.nudge();
-  }, 1200);
+  }, TRANSITION_CONFIRM_MS);
   transitionConfirmTimer.unref?.();
 }
 
 export function nowPlayingDiagnostics() {
+  const transition = transitionTracker.diagnostics();
   return {
     subscribers: nowPlayingMonitor.subscriberCount,
     lastSuccessAt: nowPlayingMonitor.health.lastSuccessAt || 0,
     reads: { ...nowPlayingReadCounters },
     transitionFreshReadsPending: monitorFreshReadsPending,
+    pendingAgeMs: transition.pendingAgeMs,
+    lastClearReason: transition.lastClearReason,
+    expectedFrom: transition.expectedFrom,
+    pendingStale: transition.pendingStale,
   };
 }
 
@@ -174,7 +152,7 @@ export function closeNowPlayingStreams() {
     clearTimeout(transitionConfirmTimer);
     transitionConfirmTimer = null;
   }
-  pendingTransitionMetadata = null;
+  transitionTracker.reset();
   for (const res of [...nowPlayingStreamClients.keys()]) {
     removeNowPlayingStreamClient(res);
     try {
@@ -192,7 +170,8 @@ export function registerNowPlayingRoutes(app) {
   app.get("/api/nowplaying", async (_req, res) => {
     try {
       res.setHeader("Cache-Control", "no-store");
-      res.json(await readNowPlayingPayload());
+      // Same transition-aware payload as SSE so fallback polling cannot diverge.
+      res.json(await readNowPlayingWithTransition());
     } catch (err) {
       res.status(502).json({ error: err.message });
     }

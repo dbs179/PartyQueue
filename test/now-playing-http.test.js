@@ -47,8 +47,20 @@ test("transport fresh reads are private, bounded, and shared through SSE", () =>
   assert.match(src, /getNowPlayingFresh/);
   assert.match(src, /nudgeNowPlayingTransition/);
   assert.match(src, /monitorFreshReadsPending/);
+  assert.match(src, /readNowPlayingWithTransition/);
   assert.doesNotMatch(src, /req\.query\.fresh/);
   assert.match(src, /Cache-Control", "no-store"/);
+});
+
+test("HTTP nowplaying route uses transition-aware reader for SSE parity", () => {
+  const src = fs.readFileSync(
+    path.join(here, "..", "src", "now-playing-http.js"),
+    "utf8"
+  );
+  assert.match(
+    src,
+    /app\.get\("\/api\/nowplaying"[\s\S]*?readNowPlayingWithTransition\(\)/
+  );
 });
 
 test("transport convergence uses the snapshot captured before the Sonos command", () => {
