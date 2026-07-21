@@ -10,7 +10,11 @@
 // adapts to how many songs are left, so we only check often as the queue nears
 // empty and back off to once a minute when there's plenty queued.
 
-import { getQueueStatus, addRandomFromPlaylists } from "./sonos.js";
+import {
+  getQueueStatus,
+  addRandomFromPlaylists,
+  clearQueue,
+} from "./sonos.js";
 import {
   loadSettings,
   saveSettings,
@@ -61,6 +65,7 @@ let timer = null;
 let filling = false;
 let stopping = false;
 let activeTick = null;
+let queueClearPauseCount = 0;
 
 function clearTimer() {
   if (timer) {
@@ -71,7 +76,7 @@ function clearTimer() {
 
 function schedule(ms) {
   clearTimer();
-  if (!enabled || stopping) return;
+  if (!enabled || stopping || queueClearPauseCount > 0) return;
   timer = setTimeout(() => {
     timer = null;
     const running = tick();
@@ -128,7 +133,7 @@ export function autofillNextDelayMs(status, threshold = REFILL_THRESHOLD) {
 }
 
 async function tick() {
-  if (!enabled) return;
+  if (!enabled || queueClearPauseCount > 0) return;
   try {
     const status = await getQueueStatus();
 
@@ -151,11 +156,6 @@ async function tick() {
         const { endlessQueueCount } = getRandomnessSettings();
         // Current track is the last song of the active set; announce after it.
         const boundaryTrack = status.track;
-        if (!status.isPlaying) {
-          console.log(
-            `[autofill] recovering idle queue (upcoming=${status.upcoming}, total=${status.total}, fromQueue=${!!status.playingFromQueue})`
-          );
-        }
         const res = await addRandomFromPlaylists(
           endlessQueueCount,
           playlistIds,
@@ -207,9 +207,40 @@ export function getAutoFillState() {
 
 /** Re-check soon after a skip/drain so Never-Ending can't lag behind Next. */
 export function nudgeAutoFill() {
-  if (!enabled || filling || stopping) return false;
+  if (!enabled || filling || stopping || queueClearPauseCount > 0) return false;
   schedule(NUDGE_MS);
   return true;
+}
+
+/**
+ * Clear the Sonos queue without allowing an already-approved Never-Ending
+ * refill to land afterward. Stop new ticks, let the current one finish, then
+ * clear last so any songs it added are removed. Monitoring resumes afterward
+ * and the normal total=0 guard keeps the empty queue quiet.
+ *
+ * `options` exists for deterministic race tests; production callers omit it.
+ * @param {{
+ *   pendingTick?: Promise<unknown>|null,
+ *   clear?: () => Promise<unknown>,
+ * }} [options]
+ */
+export async function clearQueueWithoutAutoRefill(options = {}) {
+  queueClearPauseCount += 1;
+  clearTimer();
+  try {
+    const pendingTick =
+      Object.hasOwn(options, "pendingTick") ? options.pendingTick : activeTick;
+    if (pendingTick) await pendingTick;
+    // A finishing tick may have attempted to schedule its next check.
+    clearTimer();
+    const clear = options.clear || clearQueue;
+    return await clear();
+  } finally {
+    queueClearPauseCount = Math.max(0, queueClearPauseCount - 1);
+    if (queueClearPauseCount === 0 && enabled && !stopping) {
+      schedule(CRITICAL_MS);
+    }
+  }
 }
 
 /** Stop the monitor without changing the persisted Never-Ending setting. */

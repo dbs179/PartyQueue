@@ -249,6 +249,31 @@ test("retries a failed post-silence advance without wrapping to the DJ", async (
   assert.equal(run.getVolume(), 10);
 });
 
+test("failed restore retries continue downward from the live volume", async () => {
+  let failedBaselineWrites = 0;
+  const run = fakeHandoff({
+    timeline: [PRE, DJ, POST, POST, MUSIC],
+    setVolume: async (level) => {
+      if (level === 10 && failedBaselineWrites < 4) {
+        failedBaselineWrites += 1;
+        return { apply: false, result: { locked: false } };
+      }
+      return { result: { locked: true } };
+    },
+  });
+
+  await run.handoff.start();
+
+  const baselineWriteIndexes = run.writes
+    .map((level, index) => (level === 10 ? index : -1))
+    .filter((index) => index >= 0);
+  const afterFailedPass = run.writes.slice(baselineWriteIndexes[3] + 1);
+  assert.equal(failedBaselineWrites, 4);
+  assert.ok(afterFailedPass.length > 0);
+  assert.equal(Math.max(...afterFailedPass) <= 13, true);
+  assert.equal(run.getVolume(), 10);
+});
+
 test("absolute deadline restores even while still on an announce pad", async () => {
   let currentTime = 0;
   const run = fakeHandoff({
@@ -288,6 +313,49 @@ test("supersede cancellation restores the immutable pre-DJ baseline", async () =
   assert.equal(await cancelled, true);
   assert.equal(run.getVolume(), 10);
   assert.equal(run.handoff.snapshot().phase, "cancelled");
+});
+
+test("failed supersede restore preserves the original baseline", async () => {
+  let releaseSleep;
+  let blockFirstSleep = true;
+  let failBaselineRestore = false;
+  const previous = fakeHandoff({
+    timeline: [PRE, DJ],
+    sleep: () => {
+      if (!blockFirstSleep) return Promise.resolve();
+      blockFirstSleep = false;
+      return new Promise((resolve) => {
+        releaseSleep = resolve;
+      });
+    },
+    setVolume: async (level) => {
+      if (failBaselineRestore && level === 10) {
+        return { apply: false, result: { locked: false } };
+      }
+      return { result: { locked: true } };
+    },
+  });
+  const active = await beginDjVolumeHandoff(previous.options);
+  active.start();
+
+  for (let i = 0; i < 100 && !releaseSleep; i++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(typeof releaseSleep, "function");
+  assert.equal(previous.getVolume(), 30);
+
+  failBaselineRestore = true;
+  const nextRun = fakeHandoff({
+    timeline: [PRE, DJ, POST, MUSIC],
+    baseline: 40,
+  });
+  const nextPromise = beginDjVolumeHandoff(nextRun.options);
+  releaseSleep();
+  const next = await nextPromise;
+  const result = await next.start();
+
+  assert.equal(result.baselineVolume, 10);
+  assert.equal(nextRun.getVolume(), 10);
 });
 
 test("terminal handoff releases global ownership", async () => {

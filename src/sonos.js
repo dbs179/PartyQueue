@@ -1363,25 +1363,38 @@ function albumArtUrl(albumArtUri, host) {
 export const NOW_PLAYING_TTL_MS = 1000;
 export const SNAPSHOT_TTL_MS = 3000;
 
-function makeCachedReader(fn, ttlMs) {
+export function makeCachedReader(fn, ttlMs) {
   let cache = { at: 0, value: null };
   let inFlight = null;
+  let generation = 0;
   const read = async () => {
     if (cache.value && Date.now() - cache.at < ttlMs) return cache.value;
     if (inFlight) return inFlight; // collapse concurrent callers into one read
-    inFlight = (async () => {
+    const readGeneration = generation;
+    const request = (async () => {
       try {
         const value = await fn();
-        cache = { at: Date.now(), value };
+        // A mutation may have invalidated snapshots while this request was in
+        // flight. Return its result to the original caller, but never let that
+        // stale result repopulate the shared cache.
+        if (readGeneration === generation) {
+          cache = { at: Date.now(), value };
+        }
         return value;
       } finally {
-        inFlight = null;
+        // Do not let an older invalidated request clear a newer in-flight read.
+        if (inFlight === request) inFlight = null;
       }
     })();
-    return inFlight;
+    inFlight = request;
+    return request;
   };
   read.bust = () => {
+    generation += 1;
     cache = { at: 0, value: null };
+    // New callers must start a post-mutation read instead of joining an older
+    // request. The original caller may still finish, guarded by generation.
+    inFlight = null;
   };
   return read;
 }
@@ -1676,6 +1689,10 @@ export function onSonosSnapshotsInvalidated(listener) {
 export function invalidateSonosSnapshots() {
   getNowPlaying.bust();
   getQueueList.bust();
+  // Never-Ending reads getQueueStatus — must bust on Clear/mutations or a
+  // stale "playing + upcoming≤1" snapshot can refill an empty queue.
+  getQueueStatus.bust();
+  listGroups.bust();
   for (const listener of [...snapshotInvalidationListeners]) {
     try {
       listener();

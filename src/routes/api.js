@@ -21,6 +21,7 @@ import {
   nudgeAutoFill,
   setAutoFill,
   savePickerSelection,
+  clearQueueWithoutAutoRefill,
 } from "../autofill.js";
 import {
   isEndOfNightTrack,
@@ -190,7 +191,6 @@ import {
   addPlaylistToQueue,
   addRandomFromPlaylists,
   addTrackToQueue,
-  clearQueue,
   getNowPlaying,
   getQueueList,
   groupAll,
@@ -1818,7 +1818,7 @@ export function registerApiRoutes(app, ctx) {
   
   app.post("/api/queue/clear", destructiveLimit, requireHostControls, async (_req, res) => {
     try {
-      const result = await clearQueue();
+      const result = await clearQueueWithoutAutoRefill();
       res.json({ ok: true, ...result });
     } catch (err) {
       console.error("[clear]", err.message);

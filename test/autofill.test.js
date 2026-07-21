@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   shouldAutofillRefill,
   autofillNextDelayMs,
+  clearQueueWithoutAutoRefill,
 } from "../src/autofill.js";
 
 test("shouldAutofillRefill while playing near the end", () => {
@@ -77,6 +78,17 @@ test("shouldAutofillRefill never seeds empty queue after Clear or boot", () => {
     }),
     false
   );
+  // Stale pre-Clear snapshot shape (playing + low upcoming) must still not
+  // refill once total is known empty — pairs with getQueueStatus cache bust.
+  assert.equal(
+    shouldAutofillRefill({
+      playingFromQueue: true,
+      isPlaying: true,
+      upcoming: 1,
+      total: 0,
+    }),
+    false
+  );
 });
 
 test("shouldAutofillRefill skips deep queues and external sources with leftovers", () => {
@@ -132,4 +144,30 @@ test("autofillNextDelayMs tightens while playing near the end", () => {
   });
   assert.equal(near, 5_000);
   assert.ok(deep > near);
+});
+
+test("Clear waits for an active refill, then clears last", async () => {
+  let finishRefill;
+  const events = [];
+  const pendingTick = new Promise((resolve) => {
+    finishRefill = () => {
+      events.push("refill-finished");
+      resolve();
+    };
+  });
+
+  const clearing = clearQueueWithoutAutoRefill({
+    pendingTick,
+    clear: async () => {
+      events.push("queue-cleared");
+      return { ok: true };
+    },
+  });
+
+  await Promise.resolve();
+  assert.deepEqual(events, [], "Clear must wait while autofill is active");
+
+  finishRefill();
+  assert.deepEqual(await clearing, { ok: true });
+  assert.deepEqual(events, ["refill-finished", "queue-cleared"]);
 });

@@ -71,6 +71,7 @@ export function createDjVolumeHandoff({
   silenceSec = 3,
   ttsPosition = null,
   musicPosition = null,
+  baselineOverride = null,
   calculateTarget,
   adapter = null,
   sleep = sleepDefault,
@@ -99,6 +100,8 @@ export function createDjVolumeHandoff({
   let advancedFromRestore = false;
   let restoreHeldAt = null;
   let deadlineHandled = false;
+  const preservedBaseline =
+    baselineOverride == null ? null : clampVolume(baselineOverride);
 
   const getAdapter = async () => {
     if (!resolvedAdapter) resolvedAdapter = await defaultAdapter();
@@ -124,7 +127,10 @@ export function createDjVolumeHandoff({
   const captureBaseline = async () => {
     if (baselineVolume != null) return baselineVolume;
     const io = await getAdapter();
-    baselineVolume = clampVolume(await io.getVolume());
+    baselineVolume =
+      preservedBaseline == null
+        ? clampVolume(await io.getVolume())
+        : preservedBaseline;
     announceVolume = clampVolume(calculateTarget(baselineVolume));
     volumeLocked = true;
     deadlineAt =
@@ -133,7 +139,9 @@ export function createDjVolumeHandoff({
       Math.round(Number(silenceSec || 3) * 2000) +
       DEADLINE_SLACK_MS;
     logger.info(
-      `captured baseline ${baselineVolume}; announce target ${announceVolume}`
+      `captured baseline ${baselineVolume}; announce target ${announceVolume}${
+        preservedBaseline == null ? "" : " (preserved)"
+      }`
     );
     return baselineVolume;
   };
@@ -318,7 +326,11 @@ export function createDjVolumeHandoff({
             restoreHeldAt = now();
             await holdPad(state, "post-silence");
             setPhase("ramping-down");
-            await ramp(announceVolume, baselineVolume);
+            // A previous restore pass may have partially lowered the group.
+            // Always continue from the live level; restarting from the stored
+            // announce target would raise it again before another retry.
+            const currentVolume = clampVolume(await io.getVolume());
+            await ramp(currentVolume, baselineVolume);
             const restored = await restoreExact("post-silence");
             if (!restored) {
               try {
@@ -439,13 +451,23 @@ export function createDjVolumeHandoff({
 let activeHandoff = null;
 
 export async function beginDjVolumeHandoff(options = {}) {
+  let preservedBaseline = null;
   if (activeHandoff) {
-    const previousPhase = activeHandoff.snapshot().phase;
+    const previous = activeHandoff.snapshot();
+    const previousPhase = previous.phase;
     if (previousPhase !== "complete" && previousPhase !== "cancelled") {
-      await activeHandoff.cancelAndRestore("superseded announce");
+      const restored = await activeHandoff.cancelAndRestore("superseded announce");
+      if (!restored && previous.baselineVolume != null) {
+        // Never let a failed restore ratchet the next announce upward by
+        // capturing the still-elevated live volume as its new baseline.
+        preservedBaseline = previous.baselineVolume;
+      }
     }
   }
-  const handoff = createDjVolumeHandoff(options);
+  const handoff = createDjVolumeHandoff({
+    ...options,
+    baselineOverride: options.baselineOverride ?? preservedBaseline,
+  });
   const start = handoff.start.bind(handoff);
   handoff.start = () => {
     const running = start();
