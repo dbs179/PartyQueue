@@ -88,6 +88,11 @@ import {
   getPublicBaseUrl,
 } from "../dj-voice.js";
 import {
+  armDjNextSet,
+  clearDjNextSet,
+  getDjNextSetState,
+} from "../dj-set-packs.js";
+import {
   getHaStatus,
   setHaSettings,
   clearHaSettings,
@@ -988,6 +993,35 @@ export function registerApiRoutes(app, ctx) {
       prompt: buildDjEffectivePromptPreview(),
       coreRulesLocked: true,
     });
+  });
+
+  // One-shot next-set DJ pack (Node-RED / Home Assistant). Consumed by the
+  // next refill/set announce, then normal banks resume.
+  app.get("/api/dj-voice/next-set", requireHost, (_req, res) => {
+    res.json({ ok: true, ...getDjNextSetState() });
+  });
+
+  app.post("/api/dj-voice/next-set", requireHost, (req, res) => {
+    try {
+      const packId = String(req.body?.pack || "").trim();
+      if (!packId) {
+        return res.status(400).json({
+          error: 'Missing "pack" id.',
+          ...getDjNextSetState(),
+        });
+      }
+      const state = armDjNextSet(packId);
+      res.json({ ok: true, ...state });
+    } catch (err) {
+      res.status(400).json({
+        error: err.message || "Could not arm DJ set pack.",
+        ...getDjNextSetState(),
+      });
+    }
+  });
+
+  app.delete("/api/dj-voice/next-set", requireHost, (_req, res) => {
+    res.json({ ok: true, ...clearDjNextSet() });
   });
   
   // DJ Voice icons: list + active, upload (newest becomes active), select, delete.

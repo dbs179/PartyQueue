@@ -46,6 +46,10 @@ import {
   filterIntrosByContext,
 } from "./dj-phrase-bank.js";
 import {
+  consumeDjNextSet,
+  pickDjNextSetLines,
+} from "./dj-set-packs.js";
+import {
   getRecentDjAnnounceScripts,
   rememberDjAnnounceScript,
   reserveDjPhrase,
@@ -2204,7 +2208,7 @@ export async function writeSetScript(summary = {}) {
       genres: summary.genres ?? enabledGenresFromSettings(),
       highlights,
     });
-  const characterKnobs =
+  let characterKnobs =
     summary.characterKnobs || resolveDjCharacterKnobs(summary, dj);
   announceOrdinal += 1;
   const saltHint =
@@ -2255,7 +2259,49 @@ export async function writeSetScript(summary = {}) {
     };
   }
   const pack = getDjMoodVoicePack(moodContext.mood);
+  const nextSetLines =
+    summary.skipNextSetPack || summary.announceShape
+      ? null
+      : pickDjNextSetLines({ salt: saltHint + 41 });
+  if (nextSetLines) {
+    const { pack: nextPack, intro, blurb, outro } = nextSetLines;
+    if (intro) {
+      announceShape = {
+        ...announceShape,
+        introPhraseId: `set-pack-${nextPack.id}-intro`,
+        introPhrase: intro,
+      };
+    }
+    if (outro) {
+      announceShape = {
+        ...announceShape,
+        outroId: `set-pack-${nextPack.id}-outro`,
+        outro: fillEventName(outro),
+        includeOutro: true,
+      };
+    }
+    characterKnobs = {
+      ...characterKnobs,
+      alwaysInstructions: [
+        characterKnobs.alwaysInstructions,
+        nextPack.alwaysInstructions,
+        blurb ? `Hit this set beat once, naturally: ${blurb}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      neverInstructions: [
+        characterKnobs.neverInstructions,
+        nextPack.neverInstructions,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    };
+    console.log(
+      `[dj-voice] using one-shot next-set pack "${nextPack.id}" for this announce`
+    );
+  }
   if (
+    !announceShape.introPhrase &&
     !summary.announceShape &&
     ["name_intro", "cold_open"].includes(announceShape.openerShape)
   ) {
@@ -2269,6 +2315,7 @@ export async function writeSetScript(summary = {}) {
     }
   }
   if (
+    !announceShape.outro &&
     announceShape.includeOutro !== false &&
     !summary.announceShape &&
     !(summary.outro != null && String(summary.outro).trim())
@@ -2305,26 +2352,30 @@ export async function writeSetScript(summary = {}) {
   };
 
   try {
-    const line = await generateScriptWithLlm(payload);
-    recordAnnounceShape({
-      openerShape: announceShape.openerShape,
-      bodyShape: announceShape.bodyShape,
-      beatFocus: announceShape.beatFocus,
-      outro: announceShape.outro,
-      openerLine: announceShape.openerShape,
-    });
-    const bitKind = characterBitKind(
-      characterMoment,
-      characterKnobs.catchphrase
-    );
-    console.log(
-      `[dj-voice] script via OpenAI conversation (nameIntro=${announceShape.nameIntro}, dj=${payload.djName}, mood=${moodContext.mood}, intensity=${characterKnobs.intensity}, opener=${announceShape.openerShape}, body=${announceShape.bodyShape}, beat=${announceShape.beatFocus}, bit=${bitKind})`
-    );
-    rememberDjAnnounceScript(line);
-    return line;
-  } catch (err) {
-    console.error("[dj-voice] LLM script failed, using template:", err.message);
-    return buildSetScript(payload);
+    try {
+      const line = await generateScriptWithLlm(payload);
+      recordAnnounceShape({
+        openerShape: announceShape.openerShape,
+        bodyShape: announceShape.bodyShape,
+        beatFocus: announceShape.beatFocus,
+        outro: announceShape.outro,
+        openerLine: announceShape.openerShape,
+      });
+      const bitKind = characterBitKind(
+        characterMoment,
+        characterKnobs.catchphrase
+      );
+      console.log(
+        `[dj-voice] script via OpenAI conversation (nameIntro=${announceShape.nameIntro}, dj=${payload.djName}, mood=${moodContext.mood}, intensity=${characterKnobs.intensity}, opener=${announceShape.openerShape}, body=${announceShape.bodyShape}, beat=${announceShape.beatFocus}, bit=${bitKind})`
+      );
+      rememberDjAnnounceScript(line);
+      return line;
+    } catch (err) {
+      console.error("[dj-voice] LLM script failed, using template:", err.message);
+      return buildSetScript(payload);
+    }
+  } finally {
+    if (nextSetLines) consumeDjNextSet();
   }
 }
 
