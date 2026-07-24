@@ -6,6 +6,7 @@ import {
   createByteLruCache,
   createInFlightCoalescer,
 } from "../byte-lru-cache.js";
+import { asyncHandler } from "../http/async-handler.js";
 import {
   queueWorkGeneration,
   queueWorkWasPreempted,
@@ -304,25 +305,25 @@ export function registerApiRoutes(app, ctx) {
   });
   
   // Optional helper: see which rooms PartyQueue can see (useful for setup).
-  app.get("/api/rooms", async (_req, res) => {
+  app.get("/api/rooms", asyncHandler(async (_req, res) => {
     try {
       res.json({ rooms: await listRooms() });
     } catch (err) {
       res.status(503).json({ error: err.message });
     }
-  });
+  }));
   
   // Current Sonos zone groups for the target picker (which group's queue to use).
-  app.get("/api/groups", async (_req, res) => {
+  app.get("/api/groups", asyncHandler(async (_req, res) => {
     try {
       res.json(await listGroups());
     } catch (err) {
       console.error("[groups]", err.message);
       res.status(503).json({ error: err.message });
     }
-  });
+  }));
   
-  app.post("/api/groups/select", requireHostControls, async (req, res) => {
+  app.post("/api/groups/select", requireHostControls, asyncHandler(async (req, res) => {
     const { room } = req.body ?? {};
     if (!room) {
       return res.status(400).json({ error: "Missing room." });
@@ -333,9 +334,9 @@ export function registerApiRoutes(app, ctx) {
       console.error("[groups/select]", err.message);
       res.status(400).json({ error: err.message || "Could not select group." });
     }
-  });
+  }));
   
-  app.get("/api/search", async (req, res) => {
+  app.get("/api/search", asyncHandler(async (req, res) => {
     const query = req.query.q;
     if (!query || !String(query).trim()) {
       return res.json({ tracks: [] });
@@ -351,9 +352,9 @@ export function registerApiRoutes(app, ctx) {
       console.error("[search]", err.message);
       res.status(502).json({ error: "Spotify search failed. Check your credentials." });
     }
-  });
+  }));
   
-  app.post("/api/queue", queueBurstLimit, queueSustainedLimit, async (req, res) => {
+  app.post("/api/queue", queueBurstLimit, queueSustainedLimit, asyncHandler(async (req, res) => {
     const preemptGeneration = queueWorkGeneration();
     const { uri, name, artist, force, requestedBy, requestedByUser, dedication } =
       req.body ?? {};
@@ -555,12 +556,12 @@ export function registerApiRoutes(app, ctx) {
       console.error("[queue]", err.message);
       res.status(502).json({ error: err.message || "Could not add to Sonos queue." });
     }
-  });
+  }));
   
   // Optional post-Add dedication (toast chip). Guest-accessible; only updates
   // searched origins. If a mid-queue shout pad is still upcoming, supersede it
   // so the DJ can say “goes out to …”.
-  app.post("/api/queue/dedication", async (req, res) => {
+  app.post("/api/queue/dedication", asyncHandler(async (req, res) => {
     const preemptGeneration = queueWorkGeneration();
     const { uri, dedication, name, artist } = req.body ?? {};
     const id = spotifyTrackId(uri);
@@ -579,7 +580,7 @@ export function registerApiRoutes(app, ctx) {
     if (forWho && isDjVoiceReady() && name) {
       const by = requestedByUserOf(id) || requestedByOf(id);
       try {
-        const { findUpcomingTrackPosition } = await import("./sonos.js");
+        const { findUpcomingTrackPosition } = await import("../sonos.js");
         const pos = await findUpcomingTrackPosition({ name, artist });
         if (pos != null && pos >= 1) {
           void announceRequestShout({
@@ -603,9 +604,9 @@ export function registerApiRoutes(app, ctx) {
     invalidateSonosSnapshots();
   
     res.json({ ok: true, dedication: forWho });
-  });
+  }));
   
-  app.post("/api/queue/playlist", queueBurstLimit, queueSustainedLimit, async (req, res) => {
+  app.post("/api/queue/playlist", queueBurstLimit, queueSustainedLimit, asyncHandler(async (req, res) => {
     const { uri } = req.body ?? {};
     if (!uri) {
       return res.status(400).json({ error: "Missing playlist uri." });
@@ -617,7 +618,7 @@ export function registerApiRoutes(app, ctx) {
       console.error("[queue/playlist]", err.message);
       res.status(502).json({ error: err.message || "Could not add playlist to Sonos queue." });
     }
-  });
+  }));
   
   function parseCount(raw) {
     const n = Math.round(Number(raw));
@@ -625,7 +626,7 @@ export function registerApiRoutes(app, ctx) {
     return Math.min(100, n);
   }
 
-  app.post("/api/queue/random", destructiveLimit, async (req, res) => {
+  app.post("/api/queue/random", destructiveLimit, asyncHandler(async (req, res) => {
     const preemptGeneration = queueWorkGeneration();
     if (!isUserConnected()) {
       return res.status(400).json({ error: "Connect your Spotify account first." });
@@ -644,7 +645,7 @@ export function registerApiRoutes(app, ctx) {
       let clearForDj = false;
       if (djReady) {
         try {
-          const { getQueueStatus } = await import("./sonos.js");
+          const { getQueueStatus } = await import("../sonos.js");
           const status = await getQueueStatus();
           clearForDj = shouldClearQueueForRandomDj(status);
           if (!clearForDj && status.total > 0) {
@@ -661,7 +662,7 @@ export function registerApiRoutes(app, ctx) {
       if (djReady && clearForDj) {
         try {
           console.log("[queue/random] clearing empty queue for DJ fresh-set start");
-          const { clearQueue } = await import("./sonos.js");
+          const { clearQueue } = await import("../sonos.js");
           await clearQueue();
         } catch (err) {
           console.error("[queue/random] DJ clear failed:", err.message);
@@ -753,13 +754,13 @@ export function registerApiRoutes(app, ctx) {
       console.error("[queue/random]", err.message);
       res.status(502).json({ error: err.message || "Could not add random songs." });
     }
-  });
+  }));
   
   // Available genre buckets plus how many pool songs fall in each, for the UI's
   // genre toggles. `enabled` reports whether a Last.fm key is configured (when
   // off, every song is "Other" and filtering is effectively a no-op).
   // Optional `?playlistIds=a,b,c` scopes chip counts to the host's selection.
-  app.get("/api/genres", async (req, res) => {
+  app.get("/api/genres", asyncHandler(async (req, res) => {
     try {
       const raw = req.query?.playlistIds;
       const playlistIds =
@@ -775,12 +776,12 @@ export function registerApiRoutes(app, ctx) {
       console.error("[genres]", err.message);
       res.status(500).json({ error: err.message || "Could not load genres." });
     }
-  });
+  }));
   
   // How many unique tracks Random would draw from with the given filters. Powers
   // the pool-size hint under the genre chips. Also returns per-genre counts for
   // the same playlist scope so chip numbers stay in sync with the selection.
-  app.post("/api/pool-size", async (req, res) => {
+  app.post("/api/pool-size", asyncHandler(async (req, res) => {
     try {
       const { playlistIds, genres } = req.body ?? {};
       const ids = Array.isArray(playlistIds) ? playlistIds : null;
@@ -803,7 +804,7 @@ export function registerApiRoutes(app, ctx) {
       console.error("[pool-size]", err.message);
       res.status(500).json({ error: err.message || "Could not measure pool size." });
     }
-  });
+  }));
   
   // "Never-Ending Queue": auto-tops up the queue with random songs when it runs
   // low. State is server-side so it works with no browser open.
@@ -972,7 +973,7 @@ export function registerApiRoutes(app, ctx) {
   });
   
   // Preview the selected (or requested) HA TTS voice in the browser.
-  app.post("/api/dj-voice/preview", requireHost, async (req, res) => {
+  app.post("/api/dj-voice/preview", requireHost, asyncHandler(async (req, res) => {
     try {
       const result = await previewTtsVoice(
         req.body?.voice ?? null,
@@ -986,7 +987,7 @@ export function registerApiRoutes(app, ctx) {
         error: err.message || "Could not preview that voice.",
       });
     }
-  });
+  }));
   
   app.get("/api/dj-voice/prompt-preview", requireHost, (_req, res) => {
     res.json({
@@ -1092,7 +1093,7 @@ export function registerApiRoutes(app, ctx) {
   // The recently-played "memory" that powers repeat-avoidance, newest first.
   // Entries store a title when available; older ones are backfilled from Spotify
   // (title + album art) best-effort so the list always reads nicely.
-  app.get("/api/history", requireHost, async (_req, res) => {
+  app.get("/api/history", requireHost, asyncHandler(async (_req, res) => {
     try {
       const entries = getHistory();
       const needLookup = entries.filter((e) => !e.name).map((e) => e.id);
@@ -1131,11 +1132,11 @@ export function registerApiRoutes(app, ctx) {
       console.error("[history]", err.message);
       res.status(500).json({ error: err.message || "Could not load memory." });
     }
-  });
+  }));
   
   // Party Stats: most-requested songs/artists/requesters from guest search-and-adds,
   // for both "tonight" (a rolling window) and all-time. Lazy-loaded by the UI panel.
-  app.get("/api/stats", async (_req, res) => {
+  app.get("/api/stats", asyncHandler(async (_req, res) => {
     try {
       const events = getRequests();
       const sinceTonight = Date.now() - STATS_WINDOW_HOURS * 60 * 60_000;
@@ -1196,7 +1197,7 @@ export function registerApiRoutes(app, ctx) {
       console.error("[stats]", err.message);
       res.status(500).json({ error: err.message || "Could not load stats." });
     }
-  });
+  }));
   
   const reactionLimit = softRateLimit({
     windowMs: 1500,
@@ -1525,7 +1526,7 @@ export function registerApiRoutes(app, ctx) {
   
 
   // Join Code: public LAN URL + QR SVG so guests can scan into the queue app.
-  app.get("/api/join", async (_req, res) => {
+  app.get("/api/join", asyncHandler(async (_req, res) => {
     try {
       const url = getPublicBaseUrl();
       const qrSvg = await QRCode.toString(url, {
@@ -1543,7 +1544,7 @@ export function registerApiRoutes(app, ctx) {
           "Could not build join URL. Set PUBLIC_BASE_URL=http://<this-pc-ip>:8088",
       });
     }
-  });
+  }));
   
   // Booth status: resolved Sonos-reachable base URL (silence bridge + Join).
   app.get("/api/media-base", (_req, res) => {
@@ -1642,7 +1643,7 @@ export function registerApiRoutes(app, ctx) {
   
   // Lyrics via LRClib with a bounded Unison fallback. Cached server-side so
   // guest phones share one lookup per track.
-  app.get("/api/lyrics", async (req, res) => {
+  app.get("/api/lyrics", asyncHandler(async (req, res) => {
     const title = String(req.query.title || "").trim();
     const artist = String(req.query.artist || "").trim();
     if (!title || !artist) {
@@ -1680,17 +1681,17 @@ export function registerApiRoutes(app, ctx) {
       }
       res.status(502).json({ error: err.message || "Could not fetch lyrics." });
     }
-  });
+  }));
   
-  app.get("/api/queue/list", async (_req, res) => {
+  app.get("/api/queue/list", asyncHandler(async (_req, res) => {
     try {
       res.json({ tracks: await getQueueList() });
     } catch (err) {
       res.status(502).json({ error: err.message });
     }
-  });
+  }));
   
-  app.post("/api/queue/remove", destructiveLimit, requireHostControls, async (req, res) => {
+  app.post("/api/queue/remove", destructiveLimit, requireHostControls, asyncHandler(async (req, res) => {
     const { uri, position } = req.body ?? {};
     if (!uri) return res.status(400).json({ error: "Missing track uri." });
     try {
@@ -1699,9 +1700,9 @@ export function registerApiRoutes(app, ctx) {
       console.error("[queue/remove]", err.message);
       res.status(502).json({ error: err.message || "Could not remove the song." });
     }
-  });
+  }));
   
-  app.post("/api/queue/reorder", destructiveLimit, requireHostControls, async (req, res) => {
+  app.post("/api/queue/reorder", destructiveLimit, requireHostControls, asyncHandler(async (req, res) => {
     const { uri, fromPosition, beforeUri, beforePosition } = req.body ?? {};
     if (!uri) return res.status(400).json({ error: "Missing track uri." });
     try {
@@ -1713,7 +1714,7 @@ export function registerApiRoutes(app, ctx) {
       console.error("[queue/reorder]", err.message);
       res.status(502).json({ error: err.message || "Could not move the song." });
     }
-  });
+  }));
   
   // Proxy album art from the Sonos speakers (port 1400) to avoid exposing
   // speaker IPs to clients and to work across subnets.
@@ -1798,7 +1799,7 @@ export function registerApiRoutes(app, ctx) {
     return { body, type };
   }
   
-  app.get("/api/albumart", async (req, res) => {
+  app.get("/api/albumart", asyncHandler(async (req, res) => {
     const u = req.query.u;
     if (!u) return res.status(400).end();
     const key = String(u);
@@ -1814,30 +1815,30 @@ export function registerApiRoutes(app, ctx) {
     } catch (err) {
       res.status(err.status || 502).end();
     }
-  });
+  }));
   
   // Transport / volume / queue editing and grouping are open by default. Hosts
   // can optionally require their PIN for these controls; rate limits still blunt
   // spam and Clear Queue keeps a double confirmation in the UI.
-  app.post("/api/play", transportLimit, requireHostControls, async (_req, res) => {
+  app.post("/api/play", transportLimit, requireHostControls, asyncHandler(async (_req, res) => {
     try {
       res.json({ ok: true, ...(await play()) });
     } catch (err) {
       console.error("[play]", err.message);
       res.status(502).json({ error: err.message || "Could not start playback." });
     }
-  });
+  }));
   
-  app.post("/api/pause", transportLimit, requireHostControls, async (_req, res) => {
+  app.post("/api/pause", transportLimit, requireHostControls, asyncHandler(async (_req, res) => {
     try {
       res.json({ ok: true, ...(await pause()) });
     } catch (err) {
       console.error("[pause]", err.message);
       res.status(502).json({ error: err.message || "Could not pause playback." });
     }
-  });
+  }));
   
-  app.post("/api/next", transportLimit, requireHostControls, async (_req, res) => {
+  app.post("/api/next", transportLimit, requireHostControls, asyncHandler(async (_req, res) => {
     const transitionFrom = nowPlayingMonitor.latest;
     try {
       const result = await next();
@@ -1849,9 +1850,9 @@ export function registerApiRoutes(app, ctx) {
       console.error("[next]", err.message);
       res.status(502).json({ error: err.message || "Could not skip track." });
     }
-  });
+  }));
   
-  app.post("/api/previous", transportLimit, requireHostControls, async (_req, res) => {
+  app.post("/api/previous", transportLimit, requireHostControls, asyncHandler(async (_req, res) => {
     const transitionFrom = nowPlayingMonitor.latest;
     try {
       const result = await previous();
@@ -1861,7 +1862,7 @@ export function registerApiRoutes(app, ctx) {
       console.error("[previous]", err.message);
       res.status(502).json({ error: err.message || "Could not go to previous track." });
     }
-  });
+  }));
   
   function blockVolumeDuringDj(_req, res, next) {
     if (isDjVolumeHandoffActive()) {
@@ -1872,7 +1873,7 @@ export function registerApiRoutes(app, ctx) {
     return next();
   }
   
-  app.post("/api/mute", transportLimit, requireHostControls, blockVolumeDuringDj, async (_req, res) => {
+  app.post("/api/mute", transportLimit, requireHostControls, blockVolumeDuringDj, asyncHandler(async (_req, res) => {
     try {
       res.json({ ok: true, ...(await toggleMute()) });
     } catch (err) {
@@ -1881,16 +1882,16 @@ export function registerApiRoutes(app, ctx) {
         .status(err.statusCode || 502)
         .json({ error: err.message || "Could not toggle mute." });
     }
-  });
+  }));
   
-  app.post("/api/shuffle", transportLimit, requireHostControls, async (_req, res) => {
+  app.post("/api/shuffle", transportLimit, requireHostControls, asyncHandler(async (_req, res) => {
     try {
       res.json({ ok: true, ...(await toggleShuffle()) });
     } catch (err) {
       console.error("[shuffle]", err.message);
       res.status(502).json({ error: err.message || "Could not toggle shuffle." });
     }
-  });
+  }));
   
   // Clamp an optional ?step to a sane whole number (1..100), defaulting to 1.
   function parseStep(raw) {
@@ -1899,7 +1900,7 @@ export function registerApiRoutes(app, ctx) {
     return Math.min(100, n);
   }
   
-  app.post("/api/volume/up", transportLimit, requireHostControls, blockVolumeDuringDj, async (req, res) => {
+  app.post("/api/volume/up", transportLimit, requireHostControls, blockVolumeDuringDj, asyncHandler(async (req, res) => {
     try {
       res.json({ ok: true, ...(await volumeUp(parseStep(req.query.step))) });
     } catch (err) {
@@ -1908,9 +1909,9 @@ export function registerApiRoutes(app, ctx) {
         .status(err.statusCode || 502)
         .json({ error: err.message || "Could not change volume." });
     }
-  });
+  }));
   
-  app.post("/api/volume/down", transportLimit, requireHostControls, blockVolumeDuringDj, async (req, res) => {
+  app.post("/api/volume/down", transportLimit, requireHostControls, blockVolumeDuringDj, asyncHandler(async (req, res) => {
     try {
       res.json({ ok: true, ...(await volumeDown(parseStep(req.query.step))) });
     } catch (err) {
@@ -1919,10 +1920,10 @@ export function registerApiRoutes(app, ctx) {
         .status(err.statusCode || 502)
         .json({ error: err.message || "Could not change volume." });
     }
-  });
+  }));
   
   // Read current target-group volume (max across members) — used for DJ boost monitoring.
-  app.get("/api/volume", async (_req, res) => {
+  app.get("/api/volume", asyncHandler(async (_req, res) => {
     try {
       const volume = await getGroupVolume();
       res.json({ ok: true, volume });
@@ -1930,9 +1931,9 @@ export function registerApiRoutes(app, ctx) {
       console.error("[volume]", err.message);
       res.status(502).json({ error: err.message || "Could not read volume." });
     }
-  });
+  }));
   
-  app.post("/api/group-all", destructiveLimit, requireHostControls, blockVolumeDuringDj, async (_req, res) => {
+  app.post("/api/group-all", destructiveLimit, requireHostControls, blockVolumeDuringDj, asyncHandler(async (_req, res) => {
     try {
       res.json({ ok: true, ...(await groupAll()) });
     } catch (err) {
@@ -1941,9 +1942,9 @@ export function registerApiRoutes(app, ctx) {
         .status(err.statusCode || 502)
         .json({ error: err.message || "Could not group speakers." });
     }
-  });
+  }));
   
-  app.post("/api/groups/join", destructiveLimit, requireHostControls, async (req, res) => {
+  app.post("/api/groups/join", destructiveLimit, requireHostControls, asyncHandler(async (req, res) => {
     try {
       const room = req.body?.room;
       res.json({ ok: true, ...(await joinSpeakerToTarget(room)) });
@@ -1951,9 +1952,9 @@ export function registerApiRoutes(app, ctx) {
       console.error("[groups/join]", err.message);
       res.status(400).json({ error: err.message || "Could not join speaker." });
     }
-  });
+  }));
   
-  app.post("/api/groups/leave", destructiveLimit, requireHostControls, async (req, res) => {
+  app.post("/api/groups/leave", destructiveLimit, requireHostControls, asyncHandler(async (req, res) => {
     try {
       const room = req.body?.room;
       res.json({ ok: true, ...(await leaveSpeakerGroup(room)) });
@@ -1961,18 +1962,18 @@ export function registerApiRoutes(app, ctx) {
       console.error("[groups/leave]", err.message);
       res.status(400).json({ error: err.message || "Could not ungroup speaker." });
     }
-  });
+  }));
   
-  app.post("/api/groups/ungroup-all", destructiveLimit, requireHostControls, async (_req, res) => {
+  app.post("/api/groups/ungroup-all", destructiveLimit, requireHostControls, asyncHandler(async (_req, res) => {
     try {
       res.json({ ok: true, ...(await ungroupAll()) });
     } catch (err) {
       console.error("[groups/ungroup-all]", err.message);
       res.status(502).json({ error: err.message || "Could not ungroup speakers." });
     }
-  });
+  }));
   
-  app.post("/api/queue/clear", destructiveLimit, requireHostControls, async (_req, res) => {
+  app.post("/api/queue/clear", destructiveLimit, requireHostControls, asyncHandler(async (_req, res) => {
     try {
       const result = await clearQueueWithoutAutoRefill();
       res.json({ ok: true, ...result });
@@ -1980,7 +1981,7 @@ export function registerApiRoutes(app, ctx) {
       console.error("[clear]", err.message);
       res.status(502).json({ error: err.message || "Could not clear the Sonos queue." });
     }
-  });
+  }));
   
   // ---- Spotify account connection (one-time host login) ----
   // Pending OAuth states for CSRF protection, with a short TTL.
@@ -1997,7 +1998,7 @@ export function registerApiRoutes(app, ctx) {
     res.redirect(getAuthorizeUrl(state));
   });
   
-  app.get("/auth/callback", async (req, res) => {
+  app.get("/auth/callback", asyncHandler(async (req, res) => {
     const { code, state, error } = req.query;
     if (error) {
       return res.status(400).send(`Spotify authorization failed: ${error}`);
@@ -2023,9 +2024,9 @@ export function registerApiRoutes(app, ctx) {
         .status(502)
         .send("Could not connect Spotify. Check the PartyQueue server log for details.");
     }
-  });
+  }));
   
-  app.get("/api/playlists", async (_req, res) => {
+  app.get("/api/playlists", asyncHandler(async (_req, res) => {
     if (!isUserConnected()) {
       return res.status(200).json({ connected: false, playlists: [] });
     }
@@ -2036,7 +2037,7 @@ export function registerApiRoutes(app, ctx) {
       console.error("[playlists]", err.message);
       res.status(502).json({ error: err.message || "Could not load playlists." });
     }
-  });
+  }));
   
   // Lightweight Spotify status for the Settings indicator. Reads only local state
   // (no Spotify calls), so it's safe to poll even during a rate-limit cooldown.
@@ -2078,7 +2079,7 @@ export function registerApiRoutes(app, ctx) {
     res.json({ ok: true, ...clearSpotifyAppSettings() });
   });
   
-  app.post("/api/spotify/app/test", requireHost, async (_req, res) => {
+  app.post("/api/spotify/app/test", requireHost, asyncHandler(async (_req, res) => {
     try {
       const result = await testSpotifyAppConnection();
       if (!result.ok) return res.status(400).json(result);
@@ -2087,7 +2088,7 @@ export function registerApiRoutes(app, ctx) {
       console.error("[spotify/app/test]", err.message);
       res.status(502).json({ ok: false, error: err.message || "Could not reach Spotify." });
     }
-  });
+  }));
   
   // Sonos speaker IP + room (Settings → Connections). Helps when SSDP discovery
   // fails across VLANs/VPNs. Saves to data/sonos.json + .env.
@@ -2124,7 +2125,7 @@ export function registerApiRoutes(app, ctx) {
     res.json({ ok: true, ...status });
   });
   
-  app.post("/api/sonos/connection/test", requireHost, async (_req, res) => {
+  app.post("/api/sonos/connection/test", requireHost, asyncHandler(async (_req, res) => {
     try {
       const result = await testSonosConnection();
       if (!result.ok) return res.status(400).json(result);
@@ -2135,7 +2136,7 @@ export function registerApiRoutes(app, ctx) {
         .status(502)
         .json({ ok: false, error: err.message || "Could not reach Sonos." });
     }
-  });
+  }));
   
   // Last.fm API key for genre tagging + Discover Similar. Status never includes
   // the key; POST saves to data/lastfm.json (env can override).
@@ -2161,7 +2162,7 @@ export function registerApiRoutes(app, ctx) {
     res.json({ ok: true, ...clearLastfmSettings() });
   });
   
-  app.post("/api/lastfm/test", requireHost, async (_req, res) => {
+  app.post("/api/lastfm/test", requireHost, asyncHandler(async (_req, res) => {
     try {
       const result = await testLastfmConnection();
       if (!result.ok) return res.status(400).json(result);
@@ -2170,7 +2171,7 @@ export function registerApiRoutes(app, ctx) {
       console.error("[lastfm/test]", err.message);
       res.status(502).json({ ok: false, error: err.message || "Could not reach Last.fm." });
     }
-  });
+  }));
   
   // Home Assistant credentials for DJ voice announcements. Status never includes
   // the token; POST saves URL/token to data/home-assistant.json (env can override).
@@ -2197,7 +2198,7 @@ export function registerApiRoutes(app, ctx) {
     res.json({ ok: true, ...clearHaSettings() });
   });
   
-  app.post("/api/homeassistant/test", requireHost, async (_req, res) => {
+  app.post("/api/homeassistant/test", requireHost, asyncHandler(async (_req, res) => {
     try {
       const result = await testHaConnection();
       if (!result.ok) return res.status(400).json(result);
@@ -2206,11 +2207,11 @@ export function registerApiRoutes(app, ctx) {
       console.error("[homeassistant/test]", err.message);
       res.status(502).json({ ok: false, error: err.message || "Could not reach Home Assistant." });
     }
-  });
+  }));
   
   // Host-triggered re-warm of the cached playlist list + track pool + genre tags.
   // Use this after adding/removing playlists rather than refetching on every load.
-  app.post("/api/cache/refresh", requireHost, async (_req, res) => {
+  app.post("/api/cache/refresh", requireHost, asyncHandler(async (_req, res) => {
     if (!isUserConnected()) {
       return res.status(400).json({ error: "Connect your Spotify account first." });
     }
@@ -2230,7 +2231,7 @@ export function registerApiRoutes(app, ctx) {
           : err.message || "Could not refresh the cache.",
       });
     }
-  });
+  }));
 
   app.post("/api/restart", requireHost, destructiveLimit, (_req, res) => {
     res.json({ ok: true, restarting: true });

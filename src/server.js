@@ -42,6 +42,7 @@ import {
   stopQueueMaintenance,
 } from "./queue-maintenance.js";
 import { flushHistoryPersist } from "./play-history.js";
+import { flushLyricsPersist } from "./lyrics.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -237,10 +238,29 @@ registerApiRoutes(app, {
   },
 });
 
+// Terminal error handler: sync throws and next(err) become JSON instead of
+// Express's default HTML error page. (Async rejections are converted upstream
+// by asyncHandler.) The res.json wrapper above redacts credential patterns.
+// eslint-disable-next-line no-unused-vars -- Express requires 4 args here
+app.use((err, req, res, _next) => {
+  httpLog.error("unhandled route error", {
+    requestId: req.requestId,
+    method: req.method,
+    path: req.path,
+    err,
+  });
+  if (res.headersSent) return res.end();
+  const status = Number(err?.statusCode || err?.status);
+  const safe =
+    Number.isFinite(status) && status >= 400 && status < 600 ? status : 500;
+  res.status(safe).json({ error: err?.message || "Internal server error." });
+});
+
 function flushShutdownStores() {
   for (const [name, flush] of [
     ["history", flushHistoryPersist],
     ["genres", flushGenrePersist],
+    ["lyrics", flushLyricsPersist],
   ]) {
     try {
       flush();
@@ -276,6 +296,15 @@ function registerSignalHandlers() {
       void shutdownServer({ reason: signal });
     });
   }
+  // Keep the music playing: a stray unhandled rejection would otherwise kill
+  // the process on Node 20+. Log it loudly instead. Uncaught synchronous
+  // exceptions still crash (state may be corrupt; Docker restarts us).
+  process.on("unhandledRejection", (reason) => {
+    log.error("unhandled promise rejection", {
+      event: "unhandled-rejection",
+      err: reason instanceof Error ? reason : new Error(String(reason)),
+    });
+  });
 }
 
 function runListenStartup({ seed = true, warm = true } = {}) {

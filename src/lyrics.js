@@ -89,6 +89,14 @@ function persistCache() {
   persistTimer.unref?.();
 }
 
+/** Flush a pending debounced cache write (shutdown / tests). */
+export function flushLyricsPersist() {
+  if (!persistTimer) return;
+  clearTimeout(persistTimer);
+  persistTimer = null;
+  persistCacheNow();
+}
+
 loadPersistentCache();
 
 export class LyricsUnavailableError extends Error {

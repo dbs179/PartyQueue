@@ -1,4 +1,4 @@
-import { beforeEach, describe, it } from "node:test";
+import { after, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -18,12 +18,35 @@ import {
   writeSetScript,
 } from "../src/dj-voice.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const apiSrc = fs.readFileSync(
-  path.join(path.dirname(fileURLToPath(import.meta.url)), "../src/routes/api.js"),
+  path.join(__dirname, "../src/routes/api.js"),
   "utf8"
 );
 
+// writeSetScript must exercise the offline template path, never a live
+// Home Assistant / LLM call: stash real credentials for the duration.
+// getHaCredentials() reads env + store lazily, so this is safe post-import.
+const HA_STORE = path.join(__dirname, "..", "data", "home-assistant.json");
+const HA_STORE_BAK = HA_STORE + ".testbak";
+let savedHaUrl;
+let savedHaToken;
+
 describe("dj-set-packs", () => {
+  before(() => {
+    savedHaUrl = process.env.HA_URL;
+    savedHaToken = process.env.HA_TOKEN;
+    delete process.env.HA_URL;
+    delete process.env.HA_TOKEN;
+    if (fs.existsSync(HA_STORE)) fs.renameSync(HA_STORE, HA_STORE_BAK);
+  });
+
+  after(() => {
+    if (savedHaUrl != null) process.env.HA_URL = savedHaUrl;
+    if (savedHaToken != null) process.env.HA_TOKEN = savedHaToken;
+    if (fs.existsSync(HA_STORE_BAK)) fs.renameSync(HA_STORE_BAK, HA_STORE);
+  });
+
   beforeEach(() => {
     resetDjSetPacksForTests();
     resetDjAnnounceOrdinal();

@@ -11,7 +11,9 @@ const files = fs
 
 const result = spawnSync(
   process.execPath,
-  ["--test", "--test-force-exit", "--test-concurrency=1", ...files],
+  // No --test-force-exit: tests must release their handles (a leak shows up
+  // as a hang here instead of being masked).
+  ["--test", "--test-concurrency=1", ...files],
   { stdio: "inherit" }
 );
 process.exit(result.status ?? 1);
