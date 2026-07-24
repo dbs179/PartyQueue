@@ -707,20 +707,25 @@ button.guest-name:focus-visible {
 }
 
 .np-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  /* inline-block (not flex): text-overflow only ellipsizes block text. */
+  display: inline-block;
   box-sizing: border-box;
-  width: 5.75rem;
-  min-height: 1.65rem;
+  /* Grow with the label (long requester names) but never past the card;
+     overflow ellipsizes and the full text lives in the title tooltip. */
+  min-width: 5.75rem;
+  max-width: min(13rem, 38vw);
   padding: 0.25rem 0.7rem;
   border-radius: 999px;
   font-size: 0.72rem;
   font-weight: 700;
+  text-align: center;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   white-space: nowrap;
-  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* 0.25rem padding x2 + 1.15rem line box = the old 1.65rem pill height. */
+  line-height: 1.15rem;
 }
 
 .np-state[hidden],
@@ -846,8 +851,8 @@ button.guest-name:focus-visible {
    so it reads as one card like Now Playing (not boxes within a box). */
 #queue.results {
   gap: 0;
-  /* ~3 queue rows visible; scroll for the rest */
-  max-height: 11.25rem;
+  /* ~3 queue rows visible (title + artist + tag line each); scroll for the rest */
+  max-height: 15.5rem;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -1223,6 +1228,16 @@ button.guest-name:focus-visible {
   white-space: nowrap;
   color: #fff;
   background: linear-gradient(135deg, #3a8dde, #2f6fd0);
+}
+
+/* Up next rows: the origin badge gets its own line under the artist so long
+   song titles can't push it out of view. */
+.queue-tag {
+  margin-top: 3px;
+}
+
+.queue-tag > span {
+  margin-left: 0;
 }
 
 /* Memory list: skipped while playing. */

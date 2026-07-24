@@ -3558,6 +3558,7 @@ const displayConnectionStatus = document.getElementById(
 const displayArt = document.getElementById("display-art");
 const displayEmpty = document.getElementById("display-empty");
 const displayState = document.getElementById("display-state");
+const displayOriginPill = document.getElementById("display-origin");
 const displayTitle = document.getElementById("display-title");
 const displayArtist = document.getElementById("display-artist");
 const displayAlbum = document.getElementById("display-album");
@@ -5777,6 +5778,7 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
     if (displayArtist) displayArtist.textContent = "";
     if (displayAlbum) displayAlbum.textContent = "";
     if (displayState) displayState.hidden = true;
+    if (displayOriginPill) displayOriginPill.hidden = true;
     if (displayReactions) displayReactions.hidden = true;
     return;
   }
@@ -5799,6 +5801,12 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
   }
   if (displayReactions) {
     displayReactions.hidden = !!np.djVoice || !!np.updating;
+  }
+  if (displayOriginPill) {
+    // Same "how it got here" tag as the Up Next rows; DJ clips aren't songs.
+    const hide = !!np.djVoice || !!np.updating;
+    displayOriginPill.hidden = hide;
+    if (!hide) displayOriginPill.textContent = displayOriginLabel(np);
   }
 }
 
@@ -6071,6 +6079,24 @@ async function loadNowPlaying() {
   }
 }
 
+/**
+ * "How it got here" label shared by the Party Display's Now Playing pill and
+ * Up Next rows: dedication > requested > era hit > Discover > Random. Works
+ * for both queue tracks and the Now Playing payload (same origin fields).
+ */
+function displayOriginLabel(track) {
+  const requester = sanitizeDisplayName(track.requestedBy || "");
+  const dedication = sanitizeDedication(track.dedication || "");
+  if (dedication) return dedicationDisplayLabel(dedication, requester);
+  if (track.searched) return requester ? `Requested by ${requester}` : "Requested";
+  if (track.moodPick) {
+    const era = activeEraLabel();
+    return era ? `${era} Hit` : "Era Hit";
+  }
+  if (track.discovered) return "Discover";
+  return "Random";
+}
+
 function renderPartyDisplayQueue(tracks) {
   if (!displayQueue || !displayQueueEmpty || !displayQueueCount) return;
   const musicTracks = tracks.filter((track) => !track.djVoice);
@@ -6098,22 +6124,9 @@ function renderPartyDisplayQueue(tracks) {
 
     // Tag every row with how it got here (same precedence as the main queue
     // badges): dedication > requested > era hit > Discover > Random.
-    const requester = sanitizeDisplayName(track.requestedBy || "");
-    const dedication = sanitizeDedication(track.dedication || "");
     const source = document.createElement("span");
     source.className = "party-display-queue-source";
-    if (dedication) {
-      source.textContent = dedicationDisplayLabel(dedication, requester);
-    } else if (track.searched) {
-      source.textContent = requester ? `Requested by ${requester}` : "Requested";
-    } else if (track.moodPick) {
-      const era = activeEraLabel();
-      source.textContent = era ? `${era} Hit` : "Era Hit";
-    } else if (track.discovered) {
-      source.textContent = "Discover";
-    } else {
-      source.textContent = "Random";
-    }
+    source.textContent = displayOriginLabel(track);
     meta.appendChild(source);
 
     row.append(number, meta);
@@ -6216,8 +6229,9 @@ function fillQueueRow(li, track, index) {
   li.innerHTML = `
       <span class="queue-index">${index + 1}</span>
       <div class="meta">
-        <div class="title">${escapeHtml(track.title)}${badge}</div>
+        <div class="title">${escapeHtml(track.title)}</div>
         <div class="artist">${escapeHtml(track.artist)}</div>
+        ${badge ? `<div class="queue-tag">${badge}</div>` : ""}
       </div>
       ${del}
     `;
