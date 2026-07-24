@@ -1117,6 +1117,21 @@ button.guest-name:focus-visible {
   background: linear-gradient(135deg, #7c5cff, #b14cff);
 }
 
+/* Era hit added by the Decades mood (outside the host's playlists). */
+.mood-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  white-space: nowrap;
+  color: #fff;
+  background: linear-gradient(135deg, #ff8a3d, #ff4d7d);
+}
+
 /* "In queue" badge on search results whose song is already queued/playing. */
 .in-queue-badge {
   display: inline-block;

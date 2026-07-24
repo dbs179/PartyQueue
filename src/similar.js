@@ -13,9 +13,18 @@
 import { findTrackUri } from "./spotify.js";
 import { bucketsForArtist } from "./genres.js";
 import { fitsLane } from "./genre-flow.js";
-import { shuffled, primaryArtist } from "./sampler.js";
+import {
+  shuffled,
+  primaryArtist,
+  artistUnderBudget,
+  spendArtistBudget,
+} from "./sampler.js";
 import { getLastfmApiKey } from "./lastfm.js";
 import { isClosingTime } from "./closing-time.js";
+
+// Re-exported from sampler.js (moved there so era Moods can share them without
+// an import cycle); kept here for existing consumers and unit tests.
+export { artistUnderBudget, spendArtistBudget };
 
 const LASTFM_URL = "https://ws.audioscrobbler.com/2.0/";
 const REQ_GAP_MS = 250; // throttle Last.fm (well under their ~5 req/sec)
@@ -28,24 +37,6 @@ function apiKey() {
 
 export function isDiscoveryAvailable() {
   return !!apiKey();
-}
-
-// Pure: whether a candidate artist is still under the shared Random artist budget.
-// Exported for unit tests so we don't need to mock Last.fm / Spotify.
-export function artistUnderBudget(artist, artistCount, artistCap) {
-  const a = primaryArtist(artist);
-  if (!a) return true;
-  const cap =
-    Number.isFinite(artistCap) && artistCap > 0 ? artistCap : Infinity;
-  return (artistCount.get(a) ?? 0) < cap;
-}
-
-// Pure: bump the in-batch artist count after accepting a discovery.
-export function spendArtistBudget(artist, artistCount) {
-  const a = primaryArtist(artist);
-  if (!a) return null;
-  artistCount.set(a, (artistCount.get(a) ?? 0) + 1);
-  return a;
 }
 
 async function lastfm(params) {

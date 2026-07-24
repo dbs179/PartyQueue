@@ -35,6 +35,7 @@ import {
   djSilenceLabel,
 } from "./settings.js";
 import { GENRE_BUCKETS, bucketsForArtistSync } from "./genres.js";
+import { moodLabel as eraMoodLabel } from "./moods.js";
 import { beginDjVolumeHandoff } from "./dj-volume-handoff.js";
 import {
   queueWorkGeneration,
@@ -1483,9 +1484,12 @@ function energySignatureFromBuckets(bucketCounts) {
 
 // Resolve host mood/genre selection + a short energy read of the upcoming block.
 // Pure enough to unit-test; genres null/empty = all genres enabled.
+// `eraMood` = active Decades mood id ("80s", ...) or null; adds an era label
+// so announces can nod to the decade ("more 80's heat coming up").
 export function resolveDjMoodContext({
   genres = null,
   highlights = [],
+  eraMood = null,
 } = {}) {
   const allIds = GENRE_BUCKETS.map((b) => b.id);
   let enabled =
@@ -1519,6 +1523,7 @@ export function resolveDjMoodContext({
     genreLabels,
     energyBuckets: bucketCounts.slice(0, 5),
     energySignature: energySignatureFromBuckets(bucketCounts),
+    eraLabel: eraMoodLabel(eraMood),
   };
 }
 
@@ -1527,7 +1532,12 @@ function moodLine(artists, salt, moodContext = null) {
     return "a festive detour that still knows how to throw down";
   }
   const pack = getDjMoodVoicePack(moodContext?.mood || "all");
-  const energy = moodContext?.energySignature || "mixed energy";
+  // Era mood folds into the energy read so template lines mention the decade
+  // ("80's mostly Rock") without needing their own era-aware templates.
+  const baseEnergy = moodContext?.energySignature || "mixed energy";
+  const energy = moodContext?.eraLabel
+    ? `${moodContext.eraLabel} ${baseEnergy}`
+    : baseEnergy;
   const bank = (pack.vibeLines || []).map((line) =>
     fillEnergyTemplate(line, energy)
   );
@@ -2070,7 +2080,8 @@ export function buildLlmPrompt(summary) {
 
 Playlist block:
 - Event: ${event === "session_refill" ? "refill / next set while the party is already going" : "fresh set start"}
-- Selected mood: ${mood.moodLabel}
+- Selected mood: ${mood.moodLabel}${mood.eraLabel ? `
+- Era mood: ${mood.eraLabel} night — the set leans ${mood.eraLabel} hits; a quick nod to the decade is welcome (never recite years)` : ""}
 - Enabled genres (context only — do not read aloud as a list): ${genreLine}
 - Set energy signature: ${mood.energySignature}
 - Track count: ${count}
@@ -2090,6 +2101,7 @@ export function buildDjEffectivePromptPreview() {
   const moodContext = resolveDjMoodContext({
     genres: enabledGenresFromSettings(),
     highlights: [],
+    eraMood: loadSettings()?.mood ?? null,
   });
   const announceShape = resolveAnnounceShape({
     nameIntroForced: false,
@@ -2203,6 +2215,7 @@ export async function writeSetScript(summary = {}) {
     resolveDjMoodContext({
       genres: summary.genres ?? enabledGenresFromSettings(),
       highlights,
+      eraMood: summary.eraMood ?? loadSettings()?.mood ?? null,
     });
   let characterKnobs =
     summary.characterKnobs || resolveDjCharacterKnobs(summary, dj);

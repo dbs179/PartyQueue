@@ -28,6 +28,7 @@ import {
   eligiblePoolSize,
   isGenreDataEnabled,
 } from "../genres.js";
+import { normalizeMood, moodPack } from "../moods.js";
 import {
   getRandomnessSettings,
   getDiscoverySettings,
@@ -377,9 +378,10 @@ export function registerQueueRoutes(app, ctx) {
     if (!isUserConnected()) {
       return res.status(400).json({ error: "Connect your Spotify account first." });
     }
-    const { playlistIds, count, genres } = req.body ?? {};
+    const { playlistIds, count, genres, mood } = req.body ?? {};
     const ids = Array.isArray(playlistIds) ? playlistIds : null;
     const genreIds = Array.isArray(genres) ? genres : null;
+    const moodId = normalizeMood(mood);
     const { discoverEnabled, similarCount } = getDiscoverySettings();
     const { filterExplicit } = getContentSettings();
     const djReady = isDjVoiceReady();
@@ -420,6 +422,7 @@ export function registerQueueRoutes(app, ctx) {
         filterExplicit,
         deferAutoStart: djReady,
         preemptGeneration,
+        mood: moodId,
       });
 
       // Fresh idle Random: set announce at #1 + Play. Mid-party Random: set
@@ -529,11 +532,12 @@ export function registerQueueRoutes(app, ctx) {
   // the same playlist scope so chip numbers stay in sync with the selection.
   app.post("/api/pool-size", asyncHandler(async (req, res) => {
     try {
-      const { playlistIds, genres } = req.body ?? {};
+      const { playlistIds, genres, mood } = req.body ?? {};
       const ids = Array.isArray(playlistIds) ? playlistIds : null;
       const size = await eligiblePoolSize({
         playlistIds: ids,
         genres: Array.isArray(genres) ? genres : null,
+        years: moodPack(mood)?.years ?? null,
       });
       const counts = await genreCounts({ playlistIds: ids });
       const { songMemory } = getRandomnessSettings();
@@ -560,13 +564,14 @@ export function registerQueueRoutes(app, ctx) {
 
   app.post("/api/autofill", (req, res) => {
     try {
-      const { enabled, playlistIds, genres } = req.body ?? {};
+      const { enabled, playlistIds, genres, mood } = req.body ?? {};
       if (enabled && !isUserConnected()) {
         return res.status(400).json({ error: "Connect your Spotify account first." });
       }
       const ids = Array.isArray(playlistIds) ? playlistIds : undefined;
       const genreIds = Array.isArray(genres) ? genres : undefined;
-      const state = setAutoFill(!!enabled, ids, genreIds);
+      // `mood` absent = unchanged; null (or unknown id) = clear.
+      const state = setAutoFill(!!enabled, ids, genreIds, mood);
       nudgeNowPlayingStream();
       res.json({ ok: true, ...state });
     } catch (err) {
@@ -579,10 +584,10 @@ export function registerQueueRoutes(app, ctx) {
   // monitor is off, so every phone and the server share one host selection.
   app.post("/api/selection", (req, res) => {
     try {
-      const { playlistIds, genres } = req.body ?? {};
+      const { playlistIds, genres, mood } = req.body ?? {};
       const ids = Array.isArray(playlistIds) ? playlistIds : undefined;
       const genreIds = Array.isArray(genres) ? genres : undefined;
-      res.json({ ok: true, ...savePickerSelection(ids, genreIds) });
+      res.json({ ok: true, ...savePickerSelection(ids, genreIds, mood) });
     } catch (err) {
       console.error("[selection]", err.message);
       res.status(500).json({ error: err.message || "Could not save selection." });

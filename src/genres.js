@@ -333,9 +333,16 @@ export async function genreCounts({ playlistIds = null } = {}) {
 }
 
 // How many unique tracks Random would draw from given the current playlist +
-// genre filters. Used by the UI to warn when the pool is too small for the
-// song-memory / anti-repeat settings. Dedupes by Spotify track id.
-export async function eligiblePoolSize({ playlistIds = null, genres = null } = {}) {
+// genre + era filters. Used by the UI to warn when the pool is too small for
+// the song-memory / anti-repeat settings. Dedupes by Spotify track id.
+// `years` = [from, to] release-year window (era Mood), or null. Passed as a
+// plain range (not a mood id) so this module stays clear of moods.js — that
+// import chain would cycle back here through sampler/genre-flow.
+export async function eligiblePoolSize({
+  playlistIds = null,
+  genres = null,
+  years = null,
+} = {}) {
   let playlists = [];
   try {
     playlists = await buildPlaylistPool();
@@ -349,11 +356,17 @@ export async function eligiblePoolSize({ playlistIds = null, genres = null } = {
   }
   const enabled =
     Array.isArray(genres) && genres.length ? new Set(genres) : null;
+  const range =
+    Array.isArray(years) && years.length === 2 ? years : null;
   const ids = new Set();
   for (const pl of usable) {
     for (const t of pl.tracks || []) {
       const id = (t.uri || "").match(/spotify:track:([A-Za-z0-9]+)/)?.[1];
       if (!id) continue;
+      if (range) {
+        const y = Number(t.year);
+        if (!Number.isFinite(y) || y < range[0] || y > range[1]) continue;
+      }
       if (enabled) {
         let buckets = bucketsForArtistSync(t.artist);
         if (!buckets.length) buckets = ["other"];

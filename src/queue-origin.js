@@ -7,6 +7,8 @@
 //                  to the bottom of the queue).
 //   "discovered" - a "Songs Like" discovery (also filler for ordering, but shown
 //                  with its own "Songs Like" badge).
+//   "mood"       - an era Mood chart hit pulled from outside the library
+//                  (filler for ordering; badged with the era).
 //
 // Sonos has nowhere to stash this, so we keep a small, bounded, JSON-backed map
 // of Spotify track IDs -> { source, requestedBy?, requestedByUser?, dedication? }
@@ -31,7 +33,7 @@ const LEGACY_DISCOVERED_FILE = path.join(__dirname, "..", "data", "discovered.js
 
 // Cap so the map can't grow without bound; far more than any queue holds.
 const MAX = 1000;
-const VALID = new Set(["searched", "filler", "discovered"]);
+const VALID = new Set(["searched", "filler", "discovered", "mood"]);
 
 let entries = null; // [{ id, source, requestedBy?, requestedByUser?, dedication? }]
 /** @type {Map<string, { source: string, requestedBy: string|null, requestedByUser: string|null, dedication: string|null }>|null} */
@@ -218,10 +220,10 @@ export function setDedication(id, dedication) {
 }
 
 // Filler = anything that should sink below real requests (random/never-ending
-// picks and discoveries).
+// picks, discoveries, and era mood hits).
 export function isFiller(id) {
   const s = originOf(id);
-  return s === "filler" || s === "discovered";
+  return s === "filler" || s === "discovered" || s === "mood";
 }
 
 export function isSearched(id) {

@@ -3024,6 +3024,11 @@ function memorySourceBadge(source, skipped, requestedBy) {
         `<span class="songs-like-badge" title="Added by Discover">\u2728 Discover</span>`
       );
       break;
+    case "mood":
+      parts.push(
+        `<span class="mood-badge" title="Era hit added by the Decades mood">\u{1F4FC} Era Hit</span>`
+      );
+      break;
     case "filler":
       parts.push(
         `<span class="memory-random-badge" title="Added by Random / Never-Ending">\u{1F3B2} Random</span>`
@@ -6149,6 +6154,7 @@ function queueTrackSig(track) {
     track.position || "",
     track.searched ? 1 : 0,
     track.discovered ? 1 : 0,
+    track.moodPick ? 1 : 0,
     track.requestedBy || "",
     track.dedication || "",
     track.title || "",
@@ -6160,6 +6166,11 @@ function queueTrackSig(track) {
 function queueBadgeHtml(track) {
   const requester = sanitizeDisplayName(track.requestedBy || "");
   const dedication = sanitizeDedication(track.dedication || "");
+  if (track.moodPick) {
+    const era = eraMood ? DECADE_LABELS[eraMood] : null;
+    const label = era ? `${era} Hit` : "Era Hit";
+    return `<span class="mood-badge" title="Era hit added by the Decades mood (from outside your playlists)">\u{1F4FC} ${escapeHtml(label)}</span>`;
+  }
   if (track.discovered) {
     return `<span class="songs-like-badge" title="Added by Discover (similar to your music)">\u2728 Discover</span>`;
   }
@@ -6599,6 +6610,7 @@ async function addRandom(btn) {
     const payload = { count };
     if (ids) payload.playlistIds = ids;
     if (genres.length) payload.genres = genres;
+    if (currentMoodId()) payload.mood = currentMoodId();
     const res = await fetch("/api/queue/random", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -6607,9 +6619,15 @@ async function addRandom(btn) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Could not add random songs.");
 
-    const playlistAdded = Math.max(0, (data.added || 0) - (data.similarAdded || 0));
+    const playlistAdded = Math.max(
+      0,
+      (data.added || 0) - (data.similarAdded || 0) - (data.moodAdded || 0)
+    );
     let msg = `Added ${data.added} ${data.added === 1 ? "song" : "songs"}`;
-    if (data.similarAdded) {
+    if (data.moodAdded) {
+      const era = DECADE_LABELS[data.mood] || "era";
+      msg += ` (${playlistAdded} from playlists + ${data.moodAdded} ${era} hits)`;
+    } else if (data.similarAdded) {
       msg += ` (${playlistAdded} from playlists + ${data.similarAdded} from Discover)`;
     }
     if (data.added < data.requested) msg += " — pool ran short";
@@ -6670,6 +6688,63 @@ const GENRE_PRESETS = {
   kids: ["kids", "soundtrack"],
   all: null,
 };
+
+// ---- Era mood (Decades) ----
+// One decade at a time (or none = off). Playlist picks stay in the era and
+// shortfalls fill with era hits from outside the library. Persists locally +
+// on the server so Random and Never-Ending share it across phones.
+const decadeChips = document.getElementById("decade-chips");
+const MOOD_KEY = "pq.mood";
+const DECADE_LABELS = {
+  "60s": "60's",
+  "70s": "70's",
+  "80s": "80's",
+  "90s": "90's",
+  "2000s": "2000's",
+  "2010s": "2010's",
+};
+let eraMood = loadEraMood();
+
+function loadEraMood() {
+  try {
+    const raw = localStorage.getItem(MOOD_KEY);
+    return raw && DECADE_LABELS[raw] ? raw : null;
+  } catch {
+    return null;
+  }
+}
+function saveEraMood() {
+  try {
+    if (eraMood) localStorage.setItem(MOOD_KEY, eraMood);
+    else localStorage.removeItem(MOOD_KEY);
+  } catch {
+    /* ignore storage errors */
+  }
+}
+function currentMoodId() {
+  return eraMood;
+}
+function syncDecadeChips() {
+  if (!decadeChips) return;
+  for (const btn of decadeChips.querySelectorAll("[data-mood]")) {
+    const on = btn.dataset.mood === eraMood;
+    btn.classList.toggle("on", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  updateMusicMixHubSummaries();
+}
+if (decadeChips) {
+  decadeChips.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-mood]");
+    if (!btn) return;
+    eraMood = eraMood === btn.dataset.mood ? null : btn.dataset.mood;
+    saveEraMood();
+    syncDecadeChips();
+    syncPickerSelection();
+    refreshPoolSizeHint();
+  });
+  syncDecadeChips();
+}
 
 function loadGenreSelection() {
   try {
@@ -6812,7 +6887,8 @@ function updateMusicMixHubSummaries() {
 
   if (moodEl) {
     const label = currentMoodLabel();
-    moodEl.textContent = label || "—";
+    const era = eraMood ? DECADE_LABELS[eraMood] : null;
+    moodEl.textContent = [label, era].filter(Boolean).join(" \u00b7 ") || "—";
   }
 
   if (genresEl) {
@@ -6866,6 +6942,7 @@ function refreshPoolSizeHint() {
         body: JSON.stringify({
           playlistIds: currentSelectionIds(),
           genres: currentGenreIds(),
+          mood: currentMoodId(),
         }),
       });
       if (!res.ok) return;
@@ -7042,6 +7119,13 @@ async function loadAutoFill() {
       saveGenreSelection();
       if (genreBuckets.length) renderGenres();
     }
+    // Era mood: the server is the source of truth (null = off) so every
+    // phone shows the same decade.
+    if ("mood" in data) {
+      eraMood = typeof data.mood === "string" && DECADE_LABELS[data.mood] ? data.mood : null;
+      saveEraMood();
+      syncDecadeChips();
+    }
     // Re-render checkboxes if playlists already painted with a stale local set.
     if (playlistsChanged && currentPlaylists.length) {
       renderPlaylists(currentPlaylists);
@@ -7060,6 +7144,7 @@ async function setAutoFill(enabled) {
       enabled,
       playlistIds: currentSelectionIds(),
       genres: currentGenreIds(),
+      mood: currentMoodId(),
     }),
   });
   const data = await res.json().catch(() => ({}));
@@ -7103,6 +7188,7 @@ function syncPickerSelection() {
     body: JSON.stringify({
       playlistIds: currentSelectionIds(),
       genres: currentGenreIds(),
+      mood: currentMoodId(),
     }),
   }).catch(() => {});
   // When Never-Ending is on, also refresh its live monitor state.

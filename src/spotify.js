@@ -282,7 +282,7 @@ export async function getPlaylistTracks(playlistId) {
   const token = await getUserAccessToken();
   const out = [];
   const fields = encodeURIComponent(
-    "items(track(uri,name,is_local,type,explicit,artists(name))),next"
+    "items(track(uri,name,is_local,type,explicit,artists(name),album(release_date))),next"
   );
   let url = `${API_BASE}/playlists/${playlistId}/tracks?limit=100&fields=${fields}`;
 
@@ -304,12 +304,19 @@ export async function getPlaylistTracks(playlistId) {
           name: t.name ?? "",
           artist: t.artists?.[0]?.name ?? "",
           explicit: !!t.explicit,
+          // Release year for era Moods (album release_date is "YYYY[-MM-DD]").
+          year: releaseYear(t.album?.release_date),
         });
       }
     }
     url = data.next;
   }
   return out;
+}
+
+function releaseYear(releaseDate) {
+  const y = Number(String(releaseDate || "").slice(0, 4));
+  return Number.isFinite(y) && y >= 1900 && y <= 2100 ? y : null;
 }
 
 // Cached pool of the host's playlists, each with its own list of tracks:
@@ -339,6 +346,10 @@ let playlistsInFlight = null;
 const SPOTIFY_CACHE_FILE = path.join(__dirname, "..", "data", "spotify-cache.json");
 let diskLoaded = false;
 
+// Bump when the pool track shape changes (v2 added `year` for era Moods) so an
+// older on-disk pool rewarms once instead of serving tracks missing new fields.
+const POOL_FORMAT_VERSION = 2;
+
 function loadDiskCache() {
   if (diskLoaded) return;
   diskLoaded = true;
@@ -348,7 +359,13 @@ function loadDiskCache() {
       playlistsCache = { items: raw.playlists, builtAt: Number(raw.playlistsBuiltAt) || 0 };
     }
     if (Array.isArray(raw.pool)) {
-      playlistPoolCache = { playlists: raw.pool, builtAt: Number(raw.poolBuiltAt) || 0 };
+      const stale = (Number(raw.poolVersion) || 1) !== POOL_FORMAT_VERSION;
+      playlistPoolCache = {
+        playlists: raw.pool,
+        // Stale format: keep serving the old pool but mark it expired so the
+        // next warm/build refetches with the current track shape.
+        builtAt: stale ? 0 : Number(raw.poolBuiltAt) || 0,
+      };
     }
     const until = Number(raw.rateLimitedUntil) || 0;
     if (until > Date.now()) rateLimitedUntil = until; // honor an unexpired cooldown
@@ -366,6 +383,7 @@ function persistDiskCache() {
         playlistsBuiltAt: playlistsCache.builtAt,
         pool: playlistPoolCache.playlists,
         poolBuiltAt: playlistPoolCache.builtAt,
+        poolVersion: POOL_FORMAT_VERSION,
         rateLimitedUntil,
       })
     );
@@ -581,6 +599,37 @@ export async function searchTracks(query, limit = 20) {
     searchCache.delete(searchCache.keys().next().value); // evict oldest
   }
   return tracks;
+}
+
+// One raw search page for era Moods fallback sourcing. Unlike searchTracks
+// this exposes offset paging, track ids, and release year, and skips the
+// guest-search cache (mood candidates are cached at a higher level). Filter
+// queries like "year:1980-1989" are valid Spotify search syntax.
+export async function searchTracksPage(query, { limit = 50, offset = 0 } = {}) {
+  const token = await getAccessToken();
+  const market = getSpotifyAppCredentials().market;
+  const params = new URLSearchParams({
+    q: query,
+    type: "track",
+    limit: String(limit),
+    offset: String(offset),
+    market,
+  });
+  const res = await spotifyApiFetch(`${SEARCH_URL}?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw spotifyHttpError("search", res.status);
+  }
+  const data = await res.json();
+  return (data.tracks?.items ?? []).map((t) => ({
+    uri: t.uri,
+    id: t.id,
+    name: t.name ?? "",
+    artist: t.artists?.map((a) => a.name).join(", ") ?? "",
+    explicit: !!t.explicit,
+    year: releaseYear(t.album?.release_date),
+  }));
 }
 
 // Resolve Spotify track IDs to { title, artist, image } using the app-level

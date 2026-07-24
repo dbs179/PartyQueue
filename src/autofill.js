@@ -34,6 +34,7 @@ import {
   queueWorkGeneration,
   queueWorkWasPreempted,
 } from "./queue-preempt.js";
+import { normalizeMood } from "./moods.js";
 
 // Top up when this many (or fewer) songs remain AFTER the current one. Keeping
 // it at 1 means we refill while a song is still queued, so playback never gaps.
@@ -69,6 +70,7 @@ const SAFETY = 0.5; // re-check by ~the halfway point of the music left
 let enabled = false;
 let playlistIds = null;
 let genres = null;
+let mood = null; // era Mood id ("80s", ...) or null = off
 let timer = null;
 let filling = false;
 let stopping = false;
@@ -185,6 +187,7 @@ async function tick() {
             similarCount: discoverEnabled ? similarCount : 0,
             filterExplicit,
             preemptGeneration: workGeneration,
+            mood,
           }
         );
         if (queueWorkWasPreempted(workGeneration)) return;
@@ -229,7 +232,7 @@ async function tick() {
 }
 
 export function getAutoFillState() {
-  return { enabled, playlistIds, genres };
+  return { enabled, playlistIds, genres, mood };
 }
 
 /** Re-check soon after a skip/drain so Never-Ending can't lag behind Next. */
@@ -299,7 +302,7 @@ export function getLastPartyRecap() {
 // playlists to draw from (null/omitted = all) and `genreIds` the enabled genre
 // buckets; each is only updated when an array is given, so a plain on/off
 // doesn't wipe a saved selection.
-export function setAutoFill(on, ids, genreIds) {
+export function setAutoFill(on, ids, genreIds, moodId) {
   enabled = !!on;
   if (Array.isArray(ids)) {
     playlistIds = ids.length ? ids : null;
@@ -307,9 +310,19 @@ export function setAutoFill(on, ids, genreIds) {
   if (Array.isArray(genreIds)) {
     genres = genreIds.length ? genreIds : null;
   }
+  // Like the arrays: only update when explicitly provided (null clears).
+  if (moodId !== undefined) {
+    mood = normalizeMood(moodId);
+  }
   // Merge over the existing file so toggling the monitor doesn't wipe the host's
   // other saved settings (song memory, discovery, explicit filter, etc.).
-  saveSettings({ ...loadSettings(), neverEnding: enabled, playlistIds, genres });
+  saveSettings({
+    ...loadSettings(),
+    neverEnding: enabled,
+    playlistIds,
+    genres,
+    mood,
+  });
 
   clearTimer();
   idleStreak = 0;
@@ -321,15 +334,18 @@ export function setAutoFill(on, ids, genreIds) {
 
 // Persist playlist + genre selection for Random / Never-Ending without changing
 // the monitor on/off state. Keeps every phone and the server on the same pool.
-export function savePickerSelection(ids, genreIds) {
+export function savePickerSelection(ids, genreIds, moodId) {
   if (Array.isArray(ids)) {
     playlistIds = ids.length ? ids : null;
   }
   if (Array.isArray(genreIds)) {
     genres = genreIds.length ? genreIds : null;
   }
-  saveSettings({ ...loadSettings(), playlistIds, genres });
-  return { playlistIds, genres };
+  if (moodId !== undefined) {
+    mood = normalizeMood(moodId);
+  }
+  saveSettings({ ...loadSettings(), playlistIds, genres, mood });
+  return { playlistIds, genres, mood };
 }
 
 // Restore the saved state at startup and resume monitoring if it was on.
@@ -340,5 +356,6 @@ export function initAutoFill() {
     typeof s.neverEnding === "boolean" ? s.neverEnding : NEVER_ENDING_DEFAULT;
   playlistIds = Array.isArray(s.playlistIds) ? s.playlistIds : null;
   genres = Array.isArray(s.genres) ? s.genres : null;
+  mood = normalizeMood(s.mood);
   if (enabled) schedule(START_DELAY_MS);
 }

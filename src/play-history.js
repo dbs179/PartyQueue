@@ -39,6 +39,7 @@ export const HISTORY_SOURCES = new Set([
   "searched",
   "filler",
   "discovered",
+  "mood",
 ]);
 
 function normalizeSource(value) {

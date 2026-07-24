@@ -26,7 +26,8 @@ import {
   DJ_VOICE_DEFAULTS,
   DJ_ICON_DEFAULT_URL,
 } from "./settings.js";
-import { artistMatchesGenres, bucketsForArtistSync } from "./genres.js";
+import { artistMatchesGenres, bucketsForArtistSync, bucketsForArtist } from "./genres.js";
+import { moodPack as eraMoodPack, getMoodHits, trackFitsMood } from "./moods.js";
 import {
   pickSetLane,
   bridgeSlotCount,
@@ -900,6 +901,24 @@ async function addRandomFromPlaylistsUnlocked(
     }
   }
 
+  // Era mood: keep only playlist tracks released in the mood's window. Unlike
+  // the genre filter, an empty result is NOT an error — the mood's whole point
+  // is that the external era top-up covers what the library can't.
+  const activeMoodPack = eraMoodPack(opts.mood);
+  if (activeMoodPack) {
+    usable = usable
+      .map((p) => ({
+        ...p,
+        tracks: (p.tracks || []).filter((t) => trackFitsMood(t, activeMoodPack)),
+      }))
+      .filter((p) => p.tracks.length > 0);
+    if (usable.length === 0) {
+      console.log(
+        `[moods] no ${activeMoodPack.id} tracks in the selected playlists — filling from era charts`
+      );
+    }
+  }
+
   // Track IDs to avoid: already in the queue, plus (as we go) ones we've already
   // enqueued or that failed to enqueue. This lets us re-sample to fill `count`.
   const coordinator = await resolveCoordinator(m);
@@ -1049,7 +1068,36 @@ async function addRandomFromPlaylistsUnlocked(
   // within enabled genres) before filling from playlists. Caps discoveries to
   // one per artist per batch for diversity.
   let discoveries = [];
-  if (similarWant > 0 && isDiscoveryAvailable()) {
+  if (similarWant > 0 && activeMoodPack) {
+    // Era mood: the outside-library slots come from the era's charts instead
+    // of Songs Like, so Discover can't dilute the decade with cross-era picks.
+    const libraryIds = new Set();
+    for (const pl of playlists) {
+      for (const t of pl.tracks || []) {
+        const id = spotifyTrackId(t.uri);
+        if (id) libraryIds.add(id);
+      }
+    }
+    try {
+      discoveries = await getMoodHits({
+        mood: activeMoodPack.id,
+        count: similarWant,
+        excludeIds: new Set([...libraryIds, ...exclude, ...recentIds]),
+        filterExplicit: !!opts.filterExplicit,
+        artistCap: cfg.artistCap,
+        lastArtist: lastPlaylistArtist,
+        moodArtistCap: 1,
+        blockedArtists,
+        enabledGenres: Array.isArray(genres) ? genres : null,
+        bucketsFor: bucketsForArtist,
+      });
+      console.log(
+        `[moods] ${activeMoodPack.id}: filled ${discoveries.length}/${similarWant} outside slots from era charts`
+      );
+    } catch (err) {
+      console.error("[moods] era slot fill failed:", err.message);
+    }
+  } else if (similarWant > 0 && isDiscoveryAvailable()) {
     const libraryIds = new Set();
     for (const pl of playlists) {
       for (const t of pl.tracks || []) {
@@ -1159,12 +1207,15 @@ async function addRandomFromPlaylistsUnlocked(
     name: nameByUri.get(uri) ?? "",
     discovered: false,
   }));
+  // Under an era mood the outside-slot picks are chart hits, not Songs Like —
+  // they get their own "mood" origin so the UI badges them by era.
   const discoveryItems = discoveries.map((d) => ({
     uri: d.uri,
     id: d.id,
     artist: d.artist ?? "",
     name: d.name ?? "",
-    discovered: true,
+    discovered: !activeMoodPack,
+    moodPick: !!activeMoodPack,
   }));
   const order = mixPlaylistAndDiscovery(playlistItems, discoveryItems);
 
@@ -1172,8 +1223,10 @@ async function addRandomFromPlaylistsUnlocked(
   // `similarAdded` is the discovery subset so the UI can badge the mix.
   let added = 0;
   let similarAdded = 0;
+  let moodAdded = 0;
   const recorded = [];
   const discoveredIds = [];
+  const moodIds = [];
   const fillerIds = [];
   for (const item of order) {
     if (wasPreempted()) break;
@@ -1181,7 +1234,10 @@ async function addRandomFromPlaylistsUnlocked(
       const meta = MetaDataHelper.GuessMetaDataAndTrackUri(item.uri, resolveRegion());
       await enqueueMeta(m, meta);
       added++;
-      if (item.discovered) {
+      if (item.moodPick) {
+        moodAdded++;
+        if (item.id) moodIds.push(item.id);
+      } else if (item.discovered) {
         similarAdded++;
         if (item.id) discoveredIds.push(item.id);
       } else if (item.id) {
@@ -1192,7 +1248,11 @@ async function addRandomFromPlaylistsUnlocked(
         id: item.id,
         artist: item.artist,
         name: item.name,
-        source: item.discovered ? "discovered" : "filler",
+        source: item.moodPick
+          ? "mood"
+          : item.discovered
+            ? "discovered"
+            : "filler",
       });
     } catch (err) {
       console.error(`[random] failed to add ${item.uri}:`, err.message);
@@ -1200,6 +1260,7 @@ async function addRandomFromPlaylistsUnlocked(
   }
   if (recorded.length) recordPlayed(recorded);
   if (discoveredIds.length) markOrigin(discoveredIds, "discovered");
+  if (moodIds.length) markOrigin(moodIds, "mood");
   if (fillerIds.length) markOrigin(fillerIds, "filler");
 
   // 5) Top up if some enqueues failed (or discovery shortfall left us under
@@ -1251,6 +1312,58 @@ async function addRandomFromPlaylistsUnlocked(
     if (!progressed) break;
   }
 
+  // Era top-up: the mood's promise. When the (era-filtered) playlists ran dry
+  // before the batch hit its target, fill the remainder with era chart hits
+  // from outside the library. Excludes everything queued this batch plus the
+  // song-memory window; the library itself is fair game here (anything still
+  // eligible would already have been picked above).
+  if (activeMoodPack && added < totalTarget && !wasPreempted()) {
+    try {
+      const hits = await getMoodHits({
+        mood: activeMoodPack.id,
+        count: totalTarget - added,
+        excludeIds: new Set([...exclude, ...recentIds]),
+        filterExplicit: !!opts.filterExplicit,
+        artistCap: cfg.artistCap,
+        artistSeedCounts: artistCountsInWindow(cfg.artistWindow),
+        lastArtist: lastPlaylistArtist,
+        moodArtistCap: 1,
+        blockedArtists,
+        enabledGenres: Array.isArray(genres) ? genres : null,
+        bucketsFor: bucketsForArtist,
+      });
+      if (hits.length) {
+        console.log(
+          `[moods] ${activeMoodPack.id}: topping up ${hits.length} era hit(s) — playlists ran dry at ${added}/${totalTarget}`
+        );
+      }
+      const rec3 = [];
+      const moodIds3 = [];
+      for (const h of hits) {
+        if (wasPreempted()) break;
+        try {
+          const meta = MetaDataHelper.GuessMetaDataAndTrackUri(h.uri, resolveRegion());
+          await enqueueMeta(m, meta);
+          added++;
+          moodAdded++;
+          if (h.id) {
+            exclude.add(h.id);
+            recentIds.add(h.id);
+            moodIds3.push(h.id);
+          }
+          rec3.push({ id: h.id, artist: h.artist, name: h.name, source: "mood" });
+          if (added >= totalTarget) break;
+        } catch (err) {
+          console.error(`[moods] failed to add ${h.uri}:`, err.message);
+        }
+      }
+      if (rec3.length) recordPlayed(rec3);
+      if (moodIds3.length) markOrigin(moodIds3, "mood");
+    } catch (err) {
+      console.error("[moods] era top-up failed:", err.message);
+    }
+  }
+
   // Auto-start playback if the system is idle (stopped), resuming the queue in
   // order. Never hijacks an external source (radio/SiriusXM/line-in) or a
   // deliberate pause (see autoStartDecision). When deferAutoStart is set (DJ
@@ -1295,7 +1408,10 @@ async function addRandomFromPlaylistsUnlocked(
           ? ` (${added - similarAdded} playlists + ${similarAdded} discoveries)`
           : ` (${added} playlists, 0/${similarWant} discoveries)`
         : "";
-    console.log(`[random] added ${added}${discNote} lane=${setLane || "?"}`);
+    const moodNote = activeMoodPack
+      ? ` mood=${activeMoodPack.id} (${moodAdded} era hits)`
+      : "";
+    console.log(`[random] added ${added}${discNote}${moodNote} lane=${setLane || "?"}`);
   }
 
   return {
@@ -1309,6 +1425,8 @@ async function addRandomFromPlaylistsUnlocked(
     highlights,
     similarRequested: similarWant,
     similarAdded,
+    mood: activeMoodPack?.id ?? null,
+    moodAdded,
     relaxedArtist,
     relaxedMemory,
     memoryReuseCount,
@@ -1574,9 +1692,10 @@ async function getNowPlayingRaw() {
           ? ometa?.requestedByUser || ometa?.requestedBy || null
           : null;
       return {
-        origin: source, // searched | discovered | filler | null
+        origin: source, // searched | discovered | mood | filler | null
         searched: source === "searched",
         discovered: source === "discovered",
+        moodPick: source === "mood",
         requestedBy: badge,
         requestedByUser: user,
         dedication: source === "searched" ? ometa?.dedication || null : null,
@@ -1654,6 +1773,7 @@ async function getQueueListRaw() {
         : albumArtUrl(t.AlbumArtUri, coordinator.Host),
       searched: source === "searched",
       discovered: source === "discovered",
+      moodPick: source === "mood",
       requestedBy: source === "searched" ? meta?.requestedBy || null : null,
       requestedByUser:
         source === "searched"

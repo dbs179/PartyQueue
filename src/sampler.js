@@ -48,6 +48,25 @@ export function primaryArtist(name) {
   return normArtist(primary);
 }
 
+// Pure: whether a candidate artist is still under the shared Random artist
+// budget. Used by Discover and era Moods (lives here so both can import it
+// without creating a similar.js <-> moods.js <-> genres.js cycle).
+export function artistUnderBudget(artist, artistCount, artistCap) {
+  const a = primaryArtist(artist);
+  if (!a) return true;
+  const cap =
+    Number.isFinite(artistCap) && artistCap > 0 ? artistCap : Infinity;
+  return (artistCount.get(a) ?? 0) < cap;
+}
+
+// Pure: bump the in-batch artist count after accepting a pick.
+export function spendArtistBudget(artist, artistCount) {
+  const a = primaryArtist(artist);
+  if (!a) return null;
+  artistCount.set(a, (artistCount.get(a) ?? 0) + 1);
+  return a;
+}
+
 // Soft mood continuity: does this track share any genre bucket with the recent
 // session tags? `bucketsFor` is injected so the pure sampler stays I/O-free.
 export function sharesMood(track, recentBuckets, bucketsFor) {
