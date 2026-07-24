@@ -1189,9 +1189,25 @@ settingsSaveBtn?.addEventListener("click", () => {
   saveSettings(currentSettingsPayload(), { toastMessage: "Saved" });
 });
 
+// Discover state is broadcast in the Now Playing payload (settings need host
+// auth, and sessions reset on deploy — without this the toggle looked off).
+// Same stale-poll guard as the Never-Ending toggle.
+let discoverTouchedAt = 0;
+function syncDiscoverFromServer(enabled) {
+  if (typeof enabled !== "boolean" || !discoverEnabledInput) return;
+  if (Date.now() - discoverTouchedAt < 3000) return;
+  if (discoverEnabledInput.checked !== enabled) {
+    discoverEnabledInput.checked = enabled;
+  }
+}
+
 // Persist the discovery toggle immediately so it works without hitting Save.
+// Targeted payload: this toggle lives in Music Mix, where the other settings
+// inputs may never have been filled (e.g. right after a deploy logs the host
+// out) — a full-form save would clamp those blanks into real values.
 discoverEnabledInput.addEventListener("change", () => {
-  saveSettings(currentSettingsPayload());
+  discoverTouchedAt = Date.now();
+  saveSettings({ discoverEnabled: discoverEnabledInput.checked });
 });
 
 // Strict fill also saves immediately — it's a safety switch like Discover.
@@ -2199,7 +2215,7 @@ function formatTimeAgo(ts) {
   return `${d}d ${h % 24}h ago`;
 }
 
-// Spotify Developer app credentials (DJ Booth → Settings → Connections).
+// Spotify Developer app credentials (DJ Booth → Connections).
 // Client secret is write-only — status never returns the secret.
 const spotifyAppStatusEl = document.getElementById("spotify-app-status");
 const spotifyClientIdInput = document.getElementById("set-spotify-client-id");
@@ -3488,7 +3504,6 @@ statsWinBtns.forEach((btn) => {
 // phone Back button and deep links work. Element IDs are unchanged, so all the
 // existing wiring above keeps functioning regardless of which view a block is in.
 const viewMain = document.getElementById("view-main");
-const viewSettings = document.getElementById("view-settings");
 const viewSettingsLook = document.getElementById("view-settings-look");
 const viewSettingsQueue = document.getElementById("view-settings-queue");
 const viewSettingsDj = document.getElementById("view-settings-dj");
@@ -3512,12 +3527,10 @@ const viewMood = document.getElementById("view-mood");
 const viewMoodPresets = document.getElementById("view-mood-presets");
 const viewGenres = document.getElementById("view-genres");
 const viewBooth = document.getElementById("view-booth");
-const openSettingsBtn = document.getElementById("open-settings"); // cards in DJ Booth
 const openMemoryBtn = document.getElementById("open-memory");
 const openSuggestionsBtn = document.getElementById("open-suggestions");
 const openResetBtn = document.getElementById("open-reset");
 const restartAppBtn = document.getElementById("restart-app");
-const settingsBackBtn = document.getElementById("settings-back");
 const settingsLookBackBtn = document.getElementById("settings-look-back");
 const settingsQueueBackBtn = document.getElementById("settings-queue-back");
 const settingsDjBackBtn = document.getElementById("settings-dj-back");
@@ -3582,7 +3595,6 @@ const recapBody = document.getElementById("recap-body");
 const recapDismissBtn = document.getElementById("recap-dismiss");
 const VIEWS = {
   main: viewMain,
-  settings: viewSettings,
   "settings-look": viewSettingsLook,
   "settings-queue": viewSettingsQueue,
   "settings-dj": viewSettingsDj,
@@ -3800,7 +3812,7 @@ async function maybeNudgeSpotifySetup() {
     const data = await res.json();
     if (data?.spotifyConfigured) return;
     showToast(
-      "Next: add Spotify credentials under DJ Booth → Settings → Connections",
+      "Next: add Spotify credentials under DJ Booth → Connections",
       false,
       10000,
       {
@@ -4457,6 +4469,7 @@ function revealSettings() {
 function routeFromHash() {
   let h = (location.hash || "").replace(/^#\/?/, "");
   if (h === "options") h = "booth"; // old bookmark alias
+  if (h === "settings") h = "booth"; // Settings hub folded into the Booth
   if (h === "mood") h = "mix"; // old Music Mix bookmark alias
   showView(VIEWS[h] ? h : "main");
 }
@@ -4467,7 +4480,6 @@ function navigate(name) {
   else location.hash = hash;
 }
 
-openSettingsBtn?.addEventListener("click", () => navigate("settings"));
 document.querySelectorAll("[data-settings-panel]").forEach((btn) => {
   btn.addEventListener("click", () => {
     const panel = btn.getAttribute("data-settings-panel");
@@ -4607,10 +4619,9 @@ async function confirmAndRestart() {
 restartAppBtn?.addEventListener("click", () => {
   void confirmAndRestart();
 });
-settingsBackBtn.addEventListener("click", () => navigate("booth"));
-settingsLookBackBtn?.addEventListener("click", () => navigate("settings"));
-settingsQueueBackBtn?.addEventListener("click", () => navigate("settings"));
-settingsDjBackBtn?.addEventListener("click", () => navigate("settings"));
+settingsLookBackBtn?.addEventListener("click", () => navigate("booth"));
+settingsQueueBackBtn?.addEventListener("click", () => navigate("booth"));
+settingsDjBackBtn?.addEventListener("click", () => navigate("booth"));
 settingsDjBannerBackBtn?.addEventListener("click", () => navigate("settings-dj"));
 settingsDjNameBackBtn?.addEventListener("click", () => navigate("settings-dj"));
 settingsDjVoiceBackBtn?.addEventListener("click", () => navigate("settings-dj"));
@@ -4618,9 +4629,9 @@ settingsDjAdvancedBackBtn?.addEventListener("click", () => navigate("settings-dj
 settingsDjVolumeBackBtn?.addEventListener("click", () => navigate("settings-dj"));
 settingsDjShoutsBackBtn?.addEventListener("click", () => navigate("settings-dj"));
 settingsDjLastcallBackBtn?.addEventListener("click", () => navigate("settings-dj"));
-settingsUsersBackBtn?.addEventListener("click", () => navigate("settings"));
+settingsUsersBackBtn?.addEventListener("click", () => navigate("booth"));
 settingsUserEditBackBtn?.addEventListener("click", () => navigate("settings-users"));
-settingsConnectionsBackBtn?.addEventListener("click", () => navigate("settings"));
+settingsConnectionsBackBtn?.addEventListener("click", () => navigate("booth"));
 settingsResetBackBtn?.addEventListener("click", () => navigate("booth"));
 statsBackBtn?.addEventListener("click", () => navigate("main"));
 playlistsBackBtn.addEventListener("click", () => navigate("mix"));
@@ -4639,7 +4650,10 @@ window.addEventListener("keydown", (event) => {
   }
 });
 window.addEventListener("hashchange", routeFromHash);
-routeFromHash();
+// The initial route runs at the bottom of this file (before appReady): view
+// hooks like the Music Mix summaries touch state declared later, and routing
+// here would crash module evaluation on a #/mood or #/display deep link,
+// killing every boot fetch — toggles then read "off" until a plain reload.
 
 let joinUrlCache = "";
 
@@ -5868,6 +5882,7 @@ function renderNowPlaying(transport) {
   lastTransportNp = transport || null;
   if (transport) {
     syncAutoFillFromServer(transport.neverEnding);
+    syncDiscoverFromServer(transport.discoverEnabled);
     updateMixFromServer(transport);
     if (transport.requestsPaused != null) {
       setRequestsPausedUi(!!transport.requestsPaused);
@@ -7208,6 +7223,8 @@ async function loadAutoFill() {
       saveGenreSelection();
       if (genreBuckets.length) renderGenres();
     }
+    // Discover rides along on this public endpoint (settings are host-gated).
+    syncDiscoverFromServer(data.discoverEnabled);
     // Era mood: the server is the source of truth (null = off) so every
     // phone shows the same decade.
     if ("mood" in data) {
@@ -7374,6 +7391,10 @@ try {
 } catch {
   /* matchMedia unavailable */
 }
+
+// Initial route: deferred to here (see the hashchange listener) so deep links
+// land on their view only after every declaration above has run.
+routeFromHash();
 
 appReady = true;
 syncPolling();

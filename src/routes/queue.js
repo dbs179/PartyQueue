@@ -559,7 +559,13 @@ export function registerQueueRoutes(app, ctx) {
   // "Never-Ending Queue": auto-tops up the queue with random songs when it runs
   // low. State is server-side so it works with no browser open.
   app.get("/api/autofill", (_req, res) => {
-    res.json(getAutoFillState());
+    // discoverEnabled rides along: this endpoint is public and fetched at boot
+    // on every view, so the Discover toggle reflects server truth even when
+    // the host-gated /api/settings is locked (sessions reset on deploy).
+    res.json({
+      ...getAutoFillState(),
+      discoverEnabled: getDiscoverySettings().discoverEnabled,
+    });
   });
 
   app.post("/api/autofill", (req, res) => {

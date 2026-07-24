@@ -564,13 +564,11 @@
           </div>
         </div>
         <div class="controls-divider" aria-hidden="true"></div>
+        <!-- Everything is one click deep: party-night tools first, then setup.
+             (The old intermediate Settings hub was folded in here.) -->
         <div class="settings-box settings-hub">
-          <p class="settings-intro">Host tools. Queue behavior is under Music Mix; DJ Voice is under Settings → DJ. Stats are on the toolbar.</p>
-          <div class="settings-hub-grid" role="navigation" aria-label="Host tools">
-            <button type="button" class="settings-hub-card" id="open-settings">
-              <span class="settings-hub-title">Settings</span>
-              <span class="settings-hub-desc">Look, Queue, DJ, Users, Connections</span>
-            </button>
+          <p class="settings-intro">Party night. Queue behavior toggles live under Music Mix; Stats are on the toolbar.</p>
+          <div class="settings-hub-grid" role="navigation" aria-label="Party night tools">
             <button type="button" class="settings-hub-card" id="open-memory">
               <span class="settings-hub-title">Memory</span>
               <span class="settings-hub-stat" id="booth-stat-memory">—</span>
@@ -581,16 +579,6 @@
               <span class="settings-hub-stat" id="booth-stat-suggestions">—</span>
               <span class="settings-hub-desc">Guest idea inbox</span>
             </button>
-            <div
-              class="settings-hub-card settings-hub-card-static"
-              role="status"
-              aria-label="Sonos media URL"
-            >
-              <span class="settings-hub-title">Sonos media URL</span>
-              <span class="settings-hub-stat booth-media-url" id="booth-stat-media-url">—</span>
-              <span class="settings-hub-desc">Sonos must reach this host for DJ silence handoff.</span>
-              <button type="button" class="pill-btn" id="booth-media-url-copy">Copy</button>
-            </div>
             <button type="button" class="settings-hub-card" id="open-reset">
               <span class="settings-hub-title">Reset</span>
               <span class="settings-hub-desc">Stats, DJ shout memory, song memory, suggestions</span>
@@ -600,19 +588,9 @@
               <span class="settings-hub-desc">Restarts PartyQueue — playback may pause briefly</span>
             </button>
           </div>
-        </div>
-      </div>
-
-
-      <!-- SETTINGS HUB - pick a panel (PIN is only on DJ Booth). -->
-      <div id="view-settings" class="view" hidden>
-        <div class="subpage-head">
-          <h2 class="section-label subpage-title">Settings</h2>
-          <button id="settings-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
-        </div>
-        <div class="settings-box settings-hub">
-          <p class="settings-intro">Pick a section. Party-night knobs live in Queue, DJ, and Users; credentials stay under Connections.</p>
-          <div class="settings-hub-grid" role="navigation" aria-label="Settings sections">
+          <div class="controls-divider" aria-hidden="true"></div>
+          <p class="settings-intro">Setup. Everything DJ (voice, shout-outs, character) lives under DJ.</p>
+          <div class="settings-hub-grid" role="navigation" aria-label="Setup sections">
             <button type="button" class="settings-hub-card" data-settings-panel="settings-look">
               <span class="settings-hub-title">Look</span>
               <span class="settings-hub-desc">Banner, header name, subtitle</span>
@@ -633,6 +611,16 @@
               <span class="settings-hub-title">Connections</span>
               <span class="settings-hub-desc">Spotify, Last.fm, Home Assistant, cache</span>
             </button>
+            <div
+              class="settings-hub-card settings-hub-card-static"
+              role="status"
+              aria-label="Sonos media URL"
+            >
+              <span class="settings-hub-title">Sonos media URL</span>
+              <span class="settings-hub-stat booth-media-url" id="booth-stat-media-url">—</span>
+              <span class="settings-hub-desc">Sonos must reach this host for DJ silence handoff.</span>
+              <button type="button" class="pill-btn" id="booth-media-url-copy">Copy</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1537,7 +1525,7 @@
     <div id="pin-setup-overlay" class="modal-overlay" hidden>
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pin-setup-title">
         <p id="pin-setup-title" class="modal-message">Protect the DJ Booth?</p>
-        <p class="modal-hint">Enter the six-digit setup code stored in data/host-bootstrap-code.json, then choose a host PIN. The code prevents another LAN guest from claiming the DJ Booth first. Skip anytime; set it later under DJ Booth → Settings → Connections.</p>
+        <p class="modal-hint">Enter the six-digit setup code stored in data/host-bootstrap-code.json, then choose a host PIN. The code prevents another LAN guest from claiming the DJ Booth first. Skip anytime; set it later under DJ Booth → Connections.</p>
         <input id="pin-setup-bootstrap" class="setting-input modal-input" type="text" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="Setup code from data file" aria-label="First-time setup code" />
         <input id="pin-setup-input" class="setting-input modal-input" type="password" inputmode="numeric" autocomplete="new-password" placeholder="New PIN (4–32 characters)" aria-label="New host PIN" />
         <input id="pin-setup-confirm" class="setting-input modal-input" type="password" inputmode="numeric" autocomplete="new-password" placeholder="Confirm PIN" aria-label="Confirm host PIN" />

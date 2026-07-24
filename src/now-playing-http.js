@@ -2,7 +2,7 @@ import { createLogger } from "./logger.js";
 import { admitSseClient } from "./http/sse-limits.js";
 import { createNowPlayingMonitor } from "./now-playing-stream.js";
 import { getAutoFillState, getClosingTimeAt, getLastPartyRecap } from "./autofill.js";
-import { getContentSettings } from "./settings.js";
+import { getContentSettings, getDiscoverySettings } from "./settings.js";
 import { getReactions } from "./reactions.js";
 import { spotifyTrackId } from "./sampler.js";
 import {
@@ -26,6 +26,9 @@ export function enrichNowPlaying(np) {
     // can label the current mood: enabled genre ids (null = all) + era mood.
     mixGenres: fill.genres,
     mixMood: fill.mood,
+    // Broadcast so the toggle reflects server truth even before host login
+    // (sessions are in-memory, so every deploy used to leave it looking off).
+    discoverEnabled: getDiscoverySettings().discoverEnabled,
     requestsPaused: getContentSettings().requestsPaused,
     hostControlsOnly: getContentSettings().hostControlsOnly,
     closingTimeAt: getClosingTimeAt(),
