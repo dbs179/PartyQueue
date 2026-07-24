@@ -823,15 +823,11 @@ button.guest-name:focus-visible {
   -webkit-overflow-scrolling: touch;
 }
 
+/* No dividers between queue rows — edit mode draws its own row borders. */
 #queue .track {
   background: transparent;
   border-radius: 0;
   padding: 12px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-#queue .track:last-child {
-  border-bottom: none;
 }
 
 #queue-empty {
