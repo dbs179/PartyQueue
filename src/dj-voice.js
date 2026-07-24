@@ -3360,6 +3360,21 @@ export async function announceSetBatch(
   if (!Number.isFinite(pos) || pos < 1) {
     return { ok: false, skipped: true, error: "Missing queue position." };
   }
+
+  // Freeze played-track trimming for the whole write-script-and-enqueue flow
+  // (mirrors scheduleRefillAnnounce). The maintenance trimmer fires every 45s
+  // while the queue plays; if it lands inside the multi-second script + TTS
+  // window it removes played tracks, shifting the fresh batch up while our
+  // absolute insert position stays put — the announce then enqueues past the
+  // batch and the DJ ends up at the bottom of the queue.
+  let sonosMod = null;
+  try {
+    sonosMod = await import("./sonos.js");
+    sonosMod.pauseQueueTrim(60_000);
+  } catch {
+    /* best-effort — fall through to the planned position below */
+  }
+
   const message = await writeSetScript({
     event,
     count: summary.added,
@@ -3369,13 +3384,40 @@ export async function announceSetBatch(
   if (queueWorkWasPreempted(preemptGeneration)) {
     return { ok: false, skipped: true, reason: "queue-preempted" };
   }
+
+  // Re-anchor on the batch's first song. A trim that fired before the freeze
+  // above (between the caller's queue snapshot and this announce) has already
+  // shifted absolute positions, so resolve the batch start live instead of
+  // trusting the pre-add arithmetic.
+  let insertAt = pos;
+  try {
+    const first = summary.highlights?.[0];
+    const anchored =
+      sonosMod && first && (first.name || first.artist)
+        ? await sonosMod.findUpcomingTrackPosition({
+            name: first.name,
+            artist: first.artist,
+          })
+        : null;
+    if (anchored && anchored >= 1) {
+      if (anchored !== pos) {
+        console.log(
+          `[dj-voice] set announce anchored to batch start: planned #${pos} -> #${anchored}`
+        );
+      }
+      insertAt = anchored;
+    }
+  } catch {
+    /* anchor is best-effort — keep the planned position */
+  }
+
   console.log(
-    `[dj-voice] set batch announce (${summary.added} songs) â†’ queue #${pos}`
+    `[dj-voice] set batch announce (${summary.added} songs) â†’ queue #${insertAt}`
   );
   console.log(`[dj-voice] script: ${message}`);
   return announceOnSonos(message, {
     startPlayback: !!startPlayback,
-    queuePosition: pos,
+    queuePosition: insertAt,
     preemptGeneration,
   });
 }
