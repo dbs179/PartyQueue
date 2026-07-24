@@ -3202,6 +3202,19 @@ export async function scheduleRefillAnnounce(
     pending = null;
     return null;
   }
+
+  // Freeze played-track trimming for the whole write-script-and-enqueue flow.
+  // A trim mid-flow removes tracks in front of the playhead, shifting every
+  // queue position down, which used to land the announce AFTER the first song
+  // of the new batch.
+  let sonosMod = null;
+  try {
+    sonosMod = await import("./sonos.js");
+    sonosMod.pauseQueueTrim(60_000);
+  } catch {
+    /* best-effort — fall through to planned position below */
+  }
+
   const message = await writeSetScript({
     event: "session_refill",
     count: summary?.added ?? summary?.count ?? 0,
@@ -3215,15 +3228,33 @@ export async function scheduleRefillAnnounce(
   let insertAt = planned;
   let liveTrack = track;
   try {
-    const { getQueueStatus } = await import("./sonos.js");
-    const live = await getQueueStatus();
+    const live = await sonosMod.getQueueStatus();
     liveTrack = Number(live?.track) || track;
-    if (live?.playingFromQueue && liveTrack >= 1) {
+
+    // Anchor on the first song of the new batch: trims and playhead movement
+    // during the refill + script write shift absolute positions, so resolve
+    // the batch start live instead of trusting pre-refill arithmetic.
+    const first = summary?.highlights?.[0];
+    const anchored =
+      first && (first.name || first.artist)
+        ? await sonosMod.findUpcomingTrackPosition({
+            name: first.name,
+            artist: first.artist,
+          })
+        : null;
+    if (anchored && anchored >= 1) {
+      if (anchored !== planned) {
+        console.log(
+          `[dj-voice] refill insert anchored to batch start: planned #${planned} -> #${anchored}`
+        );
+      }
+      insertAt = anchored;
+    } else if (live?.playingFromQueue && liveTrack >= 1) {
       if (liveTrack >= planned) {
         // Playhead already moved past the old boundary while we wrote TTS.
         insertAt = liveTrack + 1;
         console.log(
-          `[dj-voice] refill insert catch-up: planned #${planned} â†’ #${insertAt} (live track ${liveTrack})`
+          `[dj-voice] refill insert catch-up: planned #${planned} -> #${insertAt} (live track ${liveTrack})`
         );
       } else {
         insertAt = planned;

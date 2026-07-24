@@ -5,7 +5,7 @@
 // here, so the web app physically cannot disrupt what's currently playing.
 
 import { SonosManager, MetaDataHelper } from "@svrooij/sonos";
-import { withSonosWriteLock } from "./sonos-lock.js";
+import { withSonosWriteLock, withSonosTransportLane } from "./sonos-lock.js";
 import { isDjVolumeHandoffActive } from "./dj-volume-handoff.js";
 import { buildPlaylistPool } from "./spotify.js";
 import { spotifyTrackId, pickWithRelaxation, discoveryPlan, primaryArtist, mixPlaylistAndDiscovery } from "./sampler.js";
@@ -2042,7 +2042,7 @@ export async function getAnnouncePlaybackContext() {
 }
 
 export async function play(...args) {
-  return withSonosWriteLock(() => playUnlocked(...args));
+  return withSonosTransportLane(() => playUnlocked(...args));
 }
 
 async function playUnlocked({ trackNumber } = {}) {
@@ -2094,7 +2094,7 @@ async function playUnlocked({ trackNumber } = {}) {
 
 /** Resume the current queue item without SwitchToQueue/SeekTrack (keeps index). */
 export async function resumeQueuePlayback(...args) {
-  return withSonosWriteLock(() => resumeQueuePlaybackUnlocked(...args));
+  return withSonosTransportLane(() => resumeQueuePlaybackUnlocked(...args));
 }
 
 async function resumeQueuePlaybackUnlocked() {
@@ -2106,7 +2106,7 @@ async function resumeQueuePlaybackUnlocked() {
 }
 
 export async function pause(...args) {
-  return withSonosWriteLock(() => pauseUnlocked(...args));
+  return withSonosTransportLane(() => pauseUnlocked(...args));
 }
 
 async function pauseUnlocked() {
@@ -2121,7 +2121,7 @@ async function pauseUnlocked() {
 // DJ feedback: the current song enters song memory and its artist is cooled
 // down for a few upcoming auto-picks so Random doesn't lean on them again.
 export async function next(...args) {
-  return withSonosWriteLock(() => nextUnlocked(...args));
+  return withSonosTransportLane(() => nextUnlocked(...args));
 }
 
 async function nextUnlocked() {
@@ -2158,7 +2158,7 @@ async function nextUnlocked() {
 
 // Transport: go back to the previous track in the group's queue.
 export async function previous(...args) {
-  return withSonosWriteLock(() => previousUnlocked(...args));
+  return withSonosTransportLane(() => previousUnlocked(...args));
 }
 
 async function previousUnlocked() {
@@ -2194,7 +2194,7 @@ function toggledShuffleMode(current) {
 // changes the order songs play in without reordering or destroying the queue,
 // so it is reversible and safe to flip during a party.
 export async function toggleShuffle(...args) {
-  return withSonosWriteLock(() => toggleShuffleUnlocked(...args));
+  return withSonosTransportLane(() => toggleShuffleUnlocked(...args));
 }
 
 async function toggleShuffleUnlocked() {
@@ -2226,7 +2226,7 @@ function assertManualVolumeAvailable() {
 }
 
 export async function toggleMute(...args) {
-  return withSonosWriteLock(() => {
+  return withSonosTransportLane(() => {
     assertManualVolumeAvailable();
     return toggleMuteUnlocked(...args);
   });
@@ -2317,14 +2317,14 @@ async function adjustGroupVolume(delta) {
 }
 
 export async function volumeUp(step = VOLUME_STEP) {
-  return withSonosWriteLock(() => {
+  return withSonosTransportLane(() => {
     assertManualVolumeAvailable();
     return adjustGroupVolume(Math.abs(step));
   });
 }
 
 export async function volumeDown(step = VOLUME_STEP) {
-  return withSonosWriteLock(() => {
+  return withSonosTransportLane(() => {
     assertManualVolumeAvailable();
     return adjustGroupVolume(-Math.abs(step));
   });
@@ -2342,7 +2342,7 @@ export async function getGroupVolume() {
 }
 
 export async function setGroupVolume(level) {
-  return withSonosWriteLock(() => setGroupVolumeUnlocked(level));
+  return withSonosTransportLane(() => setGroupVolumeUnlocked(level));
 }
 
 async function setGroupVolumeUnlocked(level) {
