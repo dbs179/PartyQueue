@@ -18,9 +18,14 @@ import {
 
 export function enrichNowPlaying(np) {
   const trackId = spotifyTrackId(np?.uri);
+  const fill = getAutoFillState();
   return {
     ...np,
-    neverEnding: getAutoFillState().enabled,
+    neverEnding: fill.enabled,
+    // Host's Music Mix, broadcast so every client (incl. the Party Display)
+    // can label the current mood: enabled genre ids (null = all) + era mood.
+    mixGenres: fill.genres,
+    mixMood: fill.mood,
     requestsPaused: getContentSettings().requestsPaused,
     hostControlsOnly: getContentSettings().hostControlsOnly,
     closingTimeAt: getClosingTimeAt(),

@@ -587,7 +587,10 @@ export function registerQueueRoutes(app, ctx) {
       const { playlistIds, genres, mood } = req.body ?? {};
       const ids = Array.isArray(playlistIds) ? playlistIds : undefined;
       const genreIds = Array.isArray(genres) ? genres : undefined;
-      res.json({ ok: true, ...savePickerSelection(ids, genreIds, mood) });
+      const saved = savePickerSelection(ids, genreIds, mood);
+      // Broadcast so the Now Playing / Party Display mix labels update live.
+      nudgeNowPlayingStream();
+      res.json({ ok: true, ...saved });
     } catch (err) {
       console.error("[selection]", err.message);
       res.status(500).json({ error: err.message || "Could not save selection." });

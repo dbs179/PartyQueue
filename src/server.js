@@ -20,7 +20,7 @@ import {
   registerQueueStreamRoutes,
 } from "./queue-http.js";
 import { registerApiRoutes } from "./routes/index.js";
-import { getBrandingSettings } from "./settings.js";
+import { getBrandingSettings, setDiscoverySettings } from "./settings.js";
 import {
   bannerExists,
   bannerPath,
@@ -436,6 +436,13 @@ function runListenStartup({ seed = true, warm = true } = {}) {
       });
   }
   if (warm) {
+    // Discover starts ON for every deploy/restart. The host can still turn it
+    // off for the night; it simply re-arms the next time the container starts.
+    try {
+      setDiscoverySettings({ discoverEnabled: true });
+    } catch (err) {
+      log.warn(`could not re-arm Discover: ${err.message}`, { event: "startup" });
+    }
     warmTrackPool().then(() => warmGenresFromPool());
     initAutoFill();
     initQueueMaintenance();

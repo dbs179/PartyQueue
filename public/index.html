@@ -121,7 +121,10 @@
         <!-- NOW PLAYING - album art + track info, always visible (never collapses).
              Tap the card to open a full-screen view with lyrics. -->
         <section id="nowplaying-section" class="nowplaying">
-          <h2 class="section-label">Now Playing</h2>
+          <div class="np-head-row">
+            <h2 class="section-label">Now Playing</h2>
+            <span id="np-mix-label" class="section-label np-mix-label" hidden></span>
+          </div>
           <p
             id="np-connection-status"
             class="np-connection-status"
@@ -317,7 +320,10 @@
                   <p id="display-empty" class="party-display-empty">Connecting…</p>
                 </div>
                 <div class="party-display-meta">
-                  <span id="display-state" class="party-display-state" hidden></span>
+                  <div class="party-display-pills">
+                    <span id="display-state" class="party-display-state" hidden></span>
+                    <span id="display-mix" class="party-display-state party-display-mix" hidden></span>
+                  </div>
                   <h3 id="display-title" class="party-display-title"></h3>
                   <p id="display-artist" class="party-display-artist"></p>
                   <p id="display-album" class="party-display-album"></p>

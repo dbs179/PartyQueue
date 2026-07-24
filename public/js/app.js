@@ -5860,6 +5860,7 @@ function renderNowPlaying(transport) {
   lastTransportNp = transport || null;
   if (transport) {
     syncAutoFillFromServer(transport.neverEnding);
+    updateMixFromServer(transport);
     if (transport.requestsPaused != null) {
       setRequestsPausedUi(!!transport.requestsPaused);
     }
@@ -6095,13 +6096,25 @@ function renderPartyDisplayQueue(tracks) {
     artist.textContent = track.artist || "";
     meta.append(title, artist);
 
+    // Tag every row with how it got here (same precedence as the main queue
+    // badges): dedication > requested > era hit > Discover > Random.
     const requester = sanitizeDisplayName(track.requestedBy || "");
-    if (requester || track.discovered) {
-      const source = document.createElement("span");
-      source.className = "party-display-queue-source";
-      source.textContent = requester ? `Requested by ${requester}` : "Discover";
-      meta.appendChild(source);
+    const dedication = sanitizeDedication(track.dedication || "");
+    const source = document.createElement("span");
+    source.className = "party-display-queue-source";
+    if (dedication) {
+      source.textContent = dedicationDisplayLabel(dedication, requester);
+    } else if (track.searched) {
+      source.textContent = requester ? `Requested by ${requester}` : "Requested";
+    } else if (track.moodPick) {
+      const era = activeEraLabel();
+      source.textContent = era ? `${era} Hit` : "Era Hit";
+    } else if (track.discovered) {
+      source.textContent = "Discover";
+    } else {
+      source.textContent = "Random";
     }
+    meta.appendChild(source);
 
     row.append(number, meta);
     displayQueue.appendChild(row);
@@ -6167,7 +6180,7 @@ function queueBadgeHtml(track) {
   const requester = sanitizeDisplayName(track.requestedBy || "");
   const dedication = sanitizeDedication(track.dedication || "");
   if (track.moodPick) {
-    const era = eraMood ? DECADE_LABELS[eraMood] : null;
+    const era = activeEraLabel();
     const label = era ? `${era} Hit` : "Era Hit";
     return `<span class="mood-badge" title="Era hit added by the Decades mood (from outside your playlists)">\u{1F4FC} ${escapeHtml(label)}</span>`;
   }
@@ -6689,6 +6702,13 @@ const GENRE_PRESETS = {
   all: null,
 };
 
+// Mix-label state (declared before the decade block below runs its initial
+// sync, which paints the label). Server-broadcast mix wins; undefined = not
+// seen yet, so local state fills in until the first Now Playing payload.
+const npMixLabel = document.getElementById("np-mix-label");
+const displayMixPill = document.getElementById("display-mix");
+let serverMix = { genres: undefined, mood: undefined };
+
 // ---- Era mood (Decades) ----
 // One decade at a time (or none = off). Playlist picks stay in the era and
 // shortfalls fill with era hits from outside the library. Persists locally +
@@ -6745,6 +6765,58 @@ if (decadeChips) {
     refreshPoolSizeHint();
   });
   syncDecadeChips();
+}
+
+// ---- Mix label ("MOOD: PARTY - 80'S") over Now Playing + on Party Display ----
+/** Active decade label ("80's") preferring the server-broadcast mix. */
+function activeEraLabel() {
+  const mood = serverMix.mood !== undefined ? serverMix.mood : eraMood;
+  return mood ? DECADE_LABELS[mood] || null : null;
+}
+
+function presetNameForIds(ids) {
+  if (!Array.isArray(ids) || !ids.length) return "All";
+  const order = ["party", "chill", "country", "heavy", "rap", "kids"];
+  for (const name of order) {
+    // Bucket-filtered when the bucket list is loaded, raw preset otherwise.
+    const preset = presetIdsFor(name);
+    const target = preset.length ? preset : GENRE_PRESETS[name] || [];
+    if (target.length && sameIdSet(ids, target)) {
+      return name.charAt(0).toUpperCase() + name.slice(1);
+    }
+  }
+  if (genreBuckets.length && sameIdSet(ids, genreBuckets.map((b) => b.id))) {
+    return "All";
+  }
+  return "Custom";
+}
+
+function updateMixLabels() {
+  const genres =
+    serverMix.genres !== undefined ? serverMix.genres : currentGenreIds();
+  const mood = serverMix.mood !== undefined ? serverMix.mood : eraMood;
+  const era = mood ? DECADE_LABELS[mood] : null;
+  const preset = presetNameForIds(genres);
+  const text = era ? `Mood: ${preset} - ${era}` : `Mood: ${preset}`;
+  if (npMixLabel) {
+    npMixLabel.textContent = text;
+    npMixLabel.hidden = false;
+  }
+  if (displayMixPill) {
+    displayMixPill.textContent = text;
+    displayMixPill.hidden = false;
+  }
+}
+
+function updateMixFromServer(np) {
+  if (!np || (!("mixGenres" in np) && !("mixMood" in np))) return;
+  if ("mixGenres" in np) {
+    serverMix.genres = Array.isArray(np.mixGenres) ? np.mixGenres : null;
+  }
+  if ("mixMood" in np) {
+    serverMix.mood = typeof np.mixMood === "string" ? np.mixMood : null;
+  }
+  updateMixLabels();
 }
 
 function loadGenreSelection() {
@@ -6912,6 +6984,8 @@ function updateMusicMixHubSummaries() {
       playlistsEl.textContent = `${selected} of ${total} selected`;
     }
   }
+
+  updateMixLabels();
 }
 
 function applyGenrePreset(name) {
@@ -7183,6 +7257,9 @@ autofillToggle.addEventListener("change", async () => {
 // Always push playlist + genre selection to the server so Random and
 // Never-Ending share one host pool across phones (fire-and-forget).
 function syncPickerSelection() {
+  // Optimistic: show the new mix immediately; the server broadcast follows.
+  serverMix = { genres: currentGenreIds(), mood: currentMoodId() };
+  updateMixLabels();
   hostFetch("/api/selection", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

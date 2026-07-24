@@ -490,6 +490,26 @@ body {
   margin: 20px 0 10px;
 }
 
+/* Now Playing header row: section title left, active Music Mix label right. */
+.np-head-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.np-mix-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.np-mix-label[hidden] {
+  display: none;
+}
+
 /* Name chip above Search — separate from the search field itself. */
 button.guest-name {
   display: inline-flex;
@@ -2774,6 +2794,19 @@ body.party-display-active > .container {
   border-radius: 999px;
   font-size: clamp(0.8rem, 1.1vw, 1rem);
   font-weight: 750;
+}
+
+/* Pill row: playback state + active Music Mix side by side. */
+.party-display-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.party-display-pills .party-display-state {
+  margin-bottom: 0;
 }
 
 .party-display-state[hidden] {
