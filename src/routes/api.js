@@ -113,6 +113,7 @@ import {
   extractHostToken,
   isValidHostToken,
   requireHost,
+  requireHostStrict,
   requireHostPage,
 } from "../host-auth.js";
 import {
@@ -1244,7 +1245,7 @@ export function registerApiRoutes(app, ctx) {
   });
   
   // Forget the recently-played history so the picker starts fresh.
-  app.post("/api/settings/clear-history", requireHost, (_req, res) => {
+  app.post("/api/settings/clear-history", requireHostStrict, (_req, res) => {
     try {
       clearHistory();
       res.json({ ok: true });
@@ -1256,7 +1257,7 @@ export function registerApiRoutes(app, ctx) {
   
   // Forget all guest request stats (top songs/artists/requesters, dedications).
   // DJ shout memory is separate — use /api/settings/clear-dj-memory.
-  app.post("/api/settings/clear-stats", requireHost, (_req, res) => {
+  app.post("/api/settings/clear-stats", requireHostStrict, (_req, res) => {
     try {
       clearRequests();
       res.json({ ok: true });
@@ -1267,7 +1268,7 @@ export function registerApiRoutes(app, ctx) {
   });
   
   // Forget DJ night memory only (first-shout + birthday-once + used blurbs).
-  app.post("/api/settings/clear-dj-memory", requireHost, (_req, res) => {
+  app.post("/api/settings/clear-dj-memory", requireHostStrict, (_req, res) => {
     try {
       clearDjNightMemory();
       res.json({ ok: true });
@@ -1278,7 +1279,7 @@ export function registerApiRoutes(app, ctx) {
   });
   
   // Forget Now Playing mood reactions (keeps Karaoke mic list).
-  app.post("/api/settings/clear-reactions", requireHost, (_req, res) => {
+  app.post("/api/settings/clear-reactions", requireHostStrict, (_req, res) => {
     try {
       clearMoodReactions();
       nudgeNowPlayingStream();
@@ -1292,7 +1293,7 @@ export function registerApiRoutes(app, ctx) {
   });
   
   // Forget Karaoke mic tags only (keeps mood reactions).
-  app.post("/api/settings/clear-karaoke", requireHost, (_req, res) => {
+  app.post("/api/settings/clear-karaoke", requireHostStrict, (_req, res) => {
     try {
       clearKaraokeReactions();
       nudgeNowPlayingStream();
@@ -1310,7 +1311,16 @@ export function registerApiRoutes(app, ctx) {
   const suggestLastByIp = new Map(); // ip -> last submit ts
   
   function suggestClientKey(req) {
-    return req.ip || req.socket?.remoteAddress || "unknown";
+    const key = req.ip || req.socket?.remoteAddress || "unknown";
+    // Bound the map: expired cooldowns are useless, and a spoof-heavy LAN
+    // must not grow this without limit.
+    if (suggestLastByIp.size > 500) {
+      const cutoff = Date.now() - SUGGEST_COOLDOWN_MS;
+      for (const [ip, last] of suggestLastByIp) {
+        if (last < cutoff) suggestLastByIp.delete(ip);
+      }
+    }
+    return key;
   }
   
   app.get("/api/suggestions", (_req, res) => {
@@ -1373,7 +1383,7 @@ export function registerApiRoutes(app, ctx) {
     }
   });
   
-  app.post("/api/settings/clear-suggestions", requireHost, (_req, res) => {
+  app.post("/api/settings/clear-suggestions", requireHostStrict, (_req, res) => {
     try {
       clearSuggestions();
       res.json({ ok: true });
@@ -1393,7 +1403,19 @@ export function registerApiRoutes(app, ctx) {
   const pinAttempts = new Map(); // client key -> { fails, lockUntil }
   
   function pinClientKey(req) {
-    return req.ip || req.socket?.remoteAddress || "unknown";
+    const key = req.ip || req.socket?.remoteAddress || "unknown";
+    // Bound the map under IP-spoofing floods: drop expired locks first, then
+    // oldest entries. Locked-out clients stay locked for their window.
+    if (pinAttempts.size > 500) {
+      const now = Date.now();
+      for (const [ip, rec] of pinAttempts) {
+        if (rec.lockUntil <= now) pinAttempts.delete(ip);
+      }
+      while (pinAttempts.size > 500) {
+        pinAttempts.delete(pinAttempts.keys().next().value);
+      }
+    }
+    return key;
   }
   
   // Whether a host PIN is configured (file hash and/or SETTINGS_PIN env).
@@ -1420,7 +1442,7 @@ export function registerApiRoutes(app, ctx) {
     if (candidate && verifyHostPin(candidate)) {
       pinAttempts.delete(key);
       const token = createHostSession();
-      setHostSessionCookie(res, token);
+      setHostSessionCookie(res, token, req);
       return res.json({ ok: true });
     }
   
@@ -1493,7 +1515,7 @@ export function registerApiRoutes(app, ctx) {
       console.warn("[settings/pin] could not clear SETTINGS_PIN from .env:", err.message);
     }
     const token = createHostSession();
-    setHostSessionCookie(res, token);
+    setHostSessionCookie(res, token, req);
     res.json({ ok: true, ...hostPinStatus() });
   });
   
@@ -1601,7 +1623,7 @@ export function registerApiRoutes(app, ctx) {
     res.json({ ok: true, guest: saved, guests: listGuestProfiles() });
   });
   
-  app.delete("/api/guests/:name/notes/:index", requireHost, (req, res) => {
+  app.delete("/api/guests/:name/notes/:index", requireHostStrict, (req, res) => {
     const removed = removeGuestNote(
       decodeURIComponent(req.params.name || ""),
       req.params.index
@@ -1612,7 +1634,7 @@ export function registerApiRoutes(app, ctx) {
     res.json({ ok: true, guest: removed, guests: listGuestProfiles() });
   });
   
-  app.delete("/api/guests/:name", requireHost, (req, res) => {
+  app.delete("/api/guests/:name", requireHostStrict, (req, res) => {
     const ok = deleteGuestProfile(decodeURIComponent(req.params.name || ""));
     if (!ok) {
       return res.status(404).json({ error: "Guest not found." });
@@ -1621,7 +1643,7 @@ export function registerApiRoutes(app, ctx) {
   });
   
   // Rename a Users profile (and rewrite that name inside guest notes).
-  app.post("/api/guests/rename", requireHost, (req, res) => {
+  app.post("/api/guests/rename", requireHostStrict, (req, res) => {
     const from = req.body?.from ?? req.body?.name;
     const to = req.body?.to ?? req.body?.newName;
     const result = renameGuestProfile(from, to);
@@ -2058,7 +2080,7 @@ export function registerApiRoutes(app, ctx) {
     res.json(getSpotifyAppStatus());
   });
   
-  app.post("/api/spotify/app", requireHost, (req, res) => {
+  app.post("/api/spotify/app", requireHostStrict, (req, res) => {
     try {
       const body = req.body ?? {};
       const status = setSpotifyAppSettings({
@@ -2075,7 +2097,7 @@ export function registerApiRoutes(app, ctx) {
     }
   });
   
-  app.post("/api/spotify/app/clear", requireHost, (_req, res) => {
+  app.post("/api/spotify/app/clear", requireHostStrict, (_req, res) => {
     res.json({ ok: true, ...clearSpotifyAppSettings() });
   });
   
@@ -2096,7 +2118,7 @@ export function registerApiRoutes(app, ctx) {
     res.json(getSonosConnectionStatus());
   });
   
-  app.post("/api/sonos/connection", requireHost, (req, res) => {
+  app.post("/api/sonos/connection", requireHostStrict, (req, res) => {
     try {
       const body = req.body ?? {};
       const status = setSonosConnectionSettings({
@@ -2118,7 +2140,7 @@ export function registerApiRoutes(app, ctx) {
     }
   });
   
-  app.post("/api/sonos/connection/clear", requireHost, (_req, res) => {
+  app.post("/api/sonos/connection/clear", requireHostStrict, (_req, res) => {
     const status = clearSonosConnectionSettings();
     setSonosTargetRoom(null);
     resetSonosManager();
@@ -2144,7 +2166,7 @@ export function registerApiRoutes(app, ctx) {
     res.json(getLastfmStatus());
   });
   
-  app.post("/api/lastfm", requireHost, (req, res) => {
+  app.post("/api/lastfm", requireHostStrict, (req, res) => {
     try {
       const body = req.body ?? {};
       const status = setLastfmSettings({
@@ -2158,7 +2180,7 @@ export function registerApiRoutes(app, ctx) {
     }
   });
   
-  app.post("/api/lastfm/clear", requireHost, (_req, res) => {
+  app.post("/api/lastfm/clear", requireHostStrict, (_req, res) => {
     res.json({ ok: true, ...clearLastfmSettings() });
   });
   
@@ -2179,7 +2201,7 @@ export function registerApiRoutes(app, ctx) {
     res.json(getHaStatus());
   });
   
-  app.post("/api/homeassistant", requireHost, (req, res) => {
+  app.post("/api/homeassistant", requireHostStrict, (req, res) => {
     try {
       const body = req.body ?? {};
       const status = setHaSettings({
@@ -2194,7 +2216,7 @@ export function registerApiRoutes(app, ctx) {
     }
   });
   
-  app.post("/api/homeassistant/clear", requireHost, (_req, res) => {
+  app.post("/api/homeassistant/clear", requireHostStrict, (_req, res) => {
     res.json({ ok: true, ...clearHaSettings() });
   });
   
@@ -2233,7 +2255,7 @@ export function registerApiRoutes(app, ctx) {
     }
   }));
 
-  app.post("/api/restart", requireHost, destructiveLimit, (_req, res) => {
+  app.post("/api/restart", requireHostStrict, destructiveLimit, (_req, res) => {
     res.json({ ok: true, restarting: true });
     setTimeout(() => {
       requestShutdown({ reason: "host restart", restart: true, exit: true });

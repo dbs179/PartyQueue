@@ -303,12 +303,20 @@ export function extractHostToken(req) {
   return "";
 }
 
-/** @param {import("express").Response} res */
-export function setHostSessionCookie(res, token) {
+/**
+ * @param {import("express").Response} res
+ * @param {string} token
+ * @param {import("express").Request} [req] adds Secure when serving over TLS
+ */
+export function setHostSessionCookie(res, token, req = null) {
   const maxAge = hostSessionTtlSec();
+  const secure =
+    !!req &&
+    (req.secure || String(req.get?.("x-forwarded-proto") || "") === "https");
   res.append(
     "Set-Cookie",
-    `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}`
+    `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; ` +
+      `Max-Age=${maxAge}${secure ? "; Secure" : ""}`
   );
 }
 
@@ -332,6 +340,24 @@ export function requireHost(req, res, next) {
     ok: false,
     error: "Host PIN required.",
     pinRequired: true,
+  });
+}
+
+/**
+ * Strict variant for credential writes, restarts, and destructive resets:
+ * when no PIN is configured these stay locked (instead of open) until the
+ * host claims the booth with the bootstrap setup code and creates a PIN.
+ */
+export function requireHostStrict(req, res, next) {
+  if (isHostPinConfigured()) return requireHost(req, res, next);
+  ensureHostBootstrapCode();
+  return res.status(401).json({
+    ok: false,
+    error:
+      "Set a host PIN first — enter the setup code from " +
+      `data/${hostBootstrapFileName()} under Settings → Security.`,
+    pinRequired: true,
+    bootstrapRequired: true,
   });
 }
 

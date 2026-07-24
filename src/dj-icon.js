@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { imageMatchesMime } from "./image-signature.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ICONS_DIR = path.join(__dirname, "..", "data", "dj-icons");
@@ -204,6 +205,9 @@ export function saveDjIcon(dataUrl) {
   const buf = Buffer.from(m[2], "base64");
   if (!buf.length) throw new Error("Image data was empty.");
   if (buf.length > MAX_BYTES) throw new Error("Image is too large (2 MB max).");
+  if (!imageMatchesMime(buf, mime)) {
+    throw new Error("Image data does not match its declared type.");
+  }
 
   ensureDir();
   const name = `dj-icon-${Math.random().toString(36).slice(2, 10)}.${ext}`;

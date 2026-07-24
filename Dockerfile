@@ -12,6 +12,11 @@ RUN npm ci --omit=dev
 COPY src ./src
 COPY public ./public
 
+# Drop root: the app only needs to write /app/data (stores, TTS, banners) and
+# /app itself (Settings saves credentials to .env). Everything else is read-only.
+RUN mkdir -p /app/data && chown node:node /app /app/data
+USER node
+
 ENV NODE_ENV=production
 ENV PORT=8080
 EXPOSE 8080

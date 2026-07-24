@@ -1,4 +1,5 @@
 import { createLogger } from "./logger.js";
+import { admitSseClient } from "./http/sse-limits.js";
 import { createSnapshotMonitor } from "./now-playing-stream.js";
 import {
   getQueueList,
@@ -66,6 +67,8 @@ export function closeQueueStreams() {
 
 export function registerQueueStreamRoutes(app, { monitor = queueMonitor } = {}) {
   app.get("/api/queue/stream", (req, res) => {
+    const ip = admitSseClient(queueStreamClients, req, res);
+    if (ip == null) return;
     res.status(200);
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -86,7 +89,7 @@ export function registerQueueStreamRoutes(app, { monitor = queueMonitor } = {}) 
       if (!res.writableEnded && !res.destroyed) res.write(": ping\n\n");
     }, 15_000);
     heartbeat.unref?.();
-    queueStreamClients.set(res, { unsubscribe, heartbeat });
+    queueStreamClients.set(res, { unsubscribe, heartbeat, ip });
     writeQueueStreamEvent(res, "queue-status", monitor.health);
 
     const cleanup = () => removeQueueStreamClient(res);

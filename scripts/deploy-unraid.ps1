@@ -76,8 +76,11 @@ try {
 
   Write-Host "Rebuilding PartyQueue on Unraid ..."
   $target = "$UnraidUser@$UnraidHost"
+  # chown keeps the mounted data volume writable by the container's non-root
+  # node user (uid/gid 1000) introduced with the hardened Dockerfile.
   $remoteCommand =
-    "cd $RemotePath && docker compose build --no-cache && docker compose up -d"
+    "cd $RemotePath && mkdir -p data && chown -R 1000:1000 data && " +
+    "docker compose build --no-cache && docker compose up -d"
   & ssh -i $IdentityFile -o BatchMode=yes $target $remoteCommand
   if ($LASTEXITCODE -ne 0) {
     throw "The Unraid Docker rebuild failed."

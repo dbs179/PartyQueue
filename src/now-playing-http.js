@@ -1,4 +1,5 @@
 import { createLogger } from "./logger.js";
+import { admitSseClient } from "./http/sse-limits.js";
 import { createNowPlayingMonitor } from "./now-playing-stream.js";
 import { getAutoFillState, getClosingTimeAt, getLastPartyRecap } from "./autofill.js";
 import { getContentSettings } from "./settings.js";
@@ -178,6 +179,8 @@ export function registerNowPlayingRoutes(app) {
   });
 
   app.get("/api/nowplaying/stream", (req, res) => {
+    const ip = admitSseClient(nowPlayingStreamClients, req, res);
+    if (ip == null) return;
     res.status(200);
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -198,7 +201,7 @@ export function registerNowPlayingRoutes(app) {
       if (!res.writableEnded && !res.destroyed) res.write(": ping\n\n");
     }, 15_000);
     heartbeat.unref?.();
-    nowPlayingStreamClients.set(res, { unsubscribe, heartbeat });
+    nowPlayingStreamClients.set(res, { unsubscribe, heartbeat, ip });
     writeNowPlayingStreamEvent(
       res,
       "sonos-status",

@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { imageMatchesMime } from "./image-signature.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BANNERS_DIR = path.join(__dirname, "..", "data", "banners");
@@ -196,6 +197,9 @@ export function saveBanner(dataUrl) {
   const buf = Buffer.from(m[2], "base64");
   if (!buf.length) throw new Error("Image data was empty.");
   if (buf.length > MAX_BYTES) throw new Error("Image is too large (8 MB max).");
+  if (!imageMatchesMime(buf, m[1].toLowerCase())) {
+    throw new Error("Image data does not match its declared type.");
+  }
 
   ensureDir();
   const name = `banner-${Math.random().toString(36).slice(2, 10)}.${ext}`;

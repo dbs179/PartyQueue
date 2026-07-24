@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createLogger, redactString } from "./logger.js";
+import { hostGuard } from "./http/host-guard.js";
 import { softRateLimit } from "./rate-limit.js";
 import {
   nowPlayingMonitor,
@@ -105,6 +106,18 @@ app.use((req, res, next) => {
   next();
 });
 
+// Baseline security headers on every response. Content types are always set
+// explicitly (static by extension, JSON by express), so nosniff is safe.
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Referrer-Policy", "same-origin");
+  next();
+});
+
+// DNS-rebinding guard: API/auth requests must carry a LAN-plausible Host.
+app.use(["/api", "/auth"], hostGuard);
+
 // Block cross-site state-changing requests (CSRF / DNS-rebinding against this
 // LAN service). Same-origin app calls always match. Requests with no Origin
 // (curl, OAuth callback, non-browser clients) are left alone.
@@ -139,6 +152,35 @@ app.use((req, res, next) => {
 
 // Inject saved branding JSON into index.html before first paint.
 const INDEX_HTML_PATH = path.join(__dirname, "..", "public", "index.html");
+
+// Per-request script nonce: inline scripts in index.html carry
+// nonce="__PQ_NONCE__", so only markup we templated ourselves can execute.
+// Spotify CDNs are allowed for search-result and playlist artwork; media
+// stays open because DJ voice previews may use the PUBLIC_BASE_URL host.
+function indexCsp(nonce) {
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}'`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https://*.scdn.co https://*.spotifycdn.com",
+    "media-src 'self' http: https:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'self'",
+  ].join("; ");
+}
+
+function renderIndexHtml(brandJson) {
+  const nonce = crypto.randomBytes(16).toString("base64");
+  let html = fs.readFileSync(INDEX_HTML_PATH, "utf8");
+  html = html
+    .replaceAll("__PQ_BRAND_JSON__", brandJson)
+    .replaceAll("__PQ_NONCE__", nonce);
+  return { html, nonce };
+}
+
 function sendBrandedIndex(_req, res) {
   try {
     const { eventName, subtitle, heroBanner, showVersion } =
@@ -150,16 +192,16 @@ function sendBrandedIndex(_req, res) {
       version: VERSION || "",
       showVersion: !!showVersion,
     }).replace(/</g, "\\u003c");
-    let html = fs.readFileSync(INDEX_HTML_PATH, "utf8");
-    html = html.replaceAll("__PQ_BRAND_JSON__", brandJson);
+    const { html, nonce } = renderIndexHtml(brandJson);
     res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Content-Security-Policy", indexCsp(nonce));
     res.type("html").send(html);
   } catch (err) {
     console.error("[index] brand inject failed:", err.message);
     try {
-      let html = fs.readFileSync(INDEX_HTML_PATH, "utf8");
-      html = html.replaceAll("__PQ_BRAND_JSON__", "null");
+      const { html, nonce } = renderIndexHtml("null");
       res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Content-Security-Policy", indexCsp(nonce));
       return res.type("html").send(html);
     } catch {
       res.sendFile(INDEX_HTML_PATH);
