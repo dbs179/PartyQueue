@@ -6214,10 +6214,16 @@ function renderQueue(tracks) {
 
   const wantEdit = queueEditMode;
   const kids = [...queueList.children];
+  // Rows still dressed for editing (delete X + drag border) must be rebuilt,
+  // not patched — their data-sig matches, so patching would leave the edit
+  // chrome visible after tapping Done.
   const canPatch =
     !wantEdit &&
     kids.length === tracks.length &&
-    kids.every((li) => li.classList.contains("track"));
+    kids.every(
+      (li) =>
+        li.classList.contains("track") && !li.classList.contains("editing")
+    );
 
   if (canPatch) {
     let changed = false;
@@ -6418,6 +6424,9 @@ queueEditToggle.addEventListener("click", () => {
     pendingQueueStreamTracks = null;
     applyQueueTracks(tracks);
   } else {
+    // Flip the edit chrome immediately from what we already have on screen —
+    // waiting on the reconcile fetch left delete buttons visible after Done.
+    renderQueue(lastQueueTracks);
     loadQueue(true); // enter edit fresh, or reconcile when no event arrived
   }
 });

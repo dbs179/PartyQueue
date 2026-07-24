@@ -2049,10 +2049,21 @@ async function playUnlocked({ trackNumber } = {}) {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
 
-  // Always switch the coordinator to its own queue first. This takes over
-  // whatever else is currently playing (SiriusXM, radio, line-in, etc.) and
-  // plays the PartyQueue, rather than just resuming the existing source.
-  await coordinator.SwitchToQueue();
+  // Switch the coordinator to its own queue when another source is active
+  // (SiriusXM, radio, line-in, etc.) so Play starts the PartyQueue instead of
+  // resuming that source. When the queue is ALREADY the active source (e.g.
+  // resuming after pause), skip the switch — re-setting the AVTransport URI
+  // resets Sonos to queue track 1, which replayed an earlier song on resume.
+  let onQueue = false;
+  try {
+    const media = await coordinator.AVTransportService.GetMediaInfo({
+      InstanceID: 0,
+    });
+    onQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
+  } catch {
+    /* best-effort — fall back to switching below */
+  }
+  if (!onQueue) await coordinator.SwitchToQueue();
   const n = Number(trackNumber);
   if (Number.isFinite(n) && n >= 1) {
     try {
