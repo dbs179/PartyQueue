@@ -202,6 +202,13 @@ export function dedicationOf(id) {
   return index.get(id)?.dedication ?? null;
 }
 
+/** Decade pack id ("80s", "90s", …) an era-mood track was added under, or null. */
+export function moodOf(id) {
+  if (!id) return null;
+  load();
+  return index.get(id)?.mood ?? null;
+}
+
 /**
  * Set or clear dedication on an existing searched origin.
  * @returns {{ ok: true, dedication: string|null } | { ok: false, error: string }}

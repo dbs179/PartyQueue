@@ -27,7 +27,7 @@ export function enrichNowPlaying(np) {
   return {
     ...np,
     neverEnding: fill.enabled,
-    // Host's Music Mix, broadcast so every client (incl. the Party Display)
+    // Host's Vibe mix, broadcast so every client (incl. the Party Display)
     // can label the current mood: enabled genre ids (null = all) + era mood.
     mixGenres: fill.genres,
     mixMood: fill.mood,

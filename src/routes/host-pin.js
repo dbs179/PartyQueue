@@ -50,6 +50,15 @@ export function registerHostPinRoutes(app) {
     res.json(hostPinStatus());
   });
 
+  // Whether this browser still holds a valid host session. Lets the UI
+  // re-lock the DJ Booth after the server session expires or a restart wipes
+  // it (the client's own "unlocked" flag would otherwise outlive it). Never
+  // issues or refreshes a session.
+  app.get("/api/settings/pin-session", (req, res) => {
+    if (!isHostPinConfigured()) return res.json({ ok: true });
+    res.json({ ok: isValidHostToken(extractHostToken(req)) });
+  });
+
   // Verify a candidate PIN. Lockout blunts LAN brute force. On success issues
   // an HttpOnly host-session cookie; the token is never exposed to JavaScript.
   app.post("/api/settings/verify-pin", (req, res) => {

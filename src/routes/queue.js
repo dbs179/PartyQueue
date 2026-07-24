@@ -75,8 +75,10 @@ import {
   randomDjAnnouncePlan,
   play,
   removeQueueTrack,
+  removeUpcomingFillerTracks,
   reorderQueueTrack,
 } from "../sonos.js";
+import { setRequestsPaused } from "../party-rituals.js";
 import { requireHostControls } from "../http/host-controls.js";
 import { nudgeNowPlayingStream } from "../now-playing-http.js";
 
@@ -95,6 +97,7 @@ export function registerQueueRoutes(app, ctx) {
     addRandomFromPlaylists,
     getQueueList,
     removeQueueTrack,
+    removeUpcomingFillerTracks,
     reorderQueueTrack,
     play,
     invalidateSonosSnapshots,
@@ -186,9 +189,10 @@ export function registerQueueRoutes(app, ctx) {
       const reqId = spotifyTrackId(uri);
 
       // House ritual: hand-adding the End of Night song signals last call. We
-      // announce it to everyone (via the Now Playing poll) and, if the
-      // Never-Ending Queue is on, switch it off so the night plays out and ends.
-      // Optional Party Summary TTS is inserted immediately before that song.
+      // announce it to everyone (via the Now Playing poll), switch off the
+      // Never-Ending Queue, pause new requests, and clear upcoming filler
+      // (Random / Discover / era hits) so only real requests play out the
+      // night. Optional Party Summary TTS is inserted before that song.
       let closingTime = false;
       let partyRecap = null;
       if (
@@ -196,10 +200,26 @@ export function registerQueueRoutes(app, ctx) {
         isEndOfNightTrack({ uri, name, artist })
       ) {
         if (getAutoFillState().enabled) setAutoFill(false);
+        setRequestsPaused(true);
+        // Filler removals above shift the just-added song up; removedBefore
+        // keeps the recap announce pointed at its live position.
+        let removedBefore = 0;
+        try {
+          const cleared = await sonos.removeUpcomingFillerTracks({
+            beforePosition:
+              Number(result.absoluteQueuePosition ?? result.queuePosition) || 0,
+          });
+          removedBefore = cleared.removedBefore || 0;
+        } catch (err) {
+          console.error("[queue] closing-time filler clear:", err.message);
+        }
         partyRecap = buildPartyRecap();
         markClosingTime(partyRecap);
         closingTime = true;
-        const pos = Number(result.absoluteQueuePosition ?? result.queuePosition);
+        const posRaw = Number(
+          result.absoluteQueuePosition ?? result.queuePosition
+        );
+        const pos = Number.isFinite(posRaw) ? posRaw - removedBefore : posRaw;
         if (
           shouldAnnouncePartyRecap() &&
           isDjVoiceReady() &&

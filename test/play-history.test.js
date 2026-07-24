@@ -111,8 +111,8 @@ test("exposes history newest-first with title and artist", () => {
     { id: "new", artist: "Second", name: "New Song" },
   ]);
   assert.deepEqual(hist.getHistory(), [
-    { id: "new", artist: "Second", name: "New Song", source: null, skipped: false, requestedBy: null },
-    { id: "old", artist: "First", name: "Old Song", source: null, skipped: false, requestedBy: null },
+    { id: "new", artist: "Second", name: "New Song", source: null, mood: null, skipped: false, requestedBy: null },
+    { id: "old", artist: "First", name: "Old Song", source: null, mood: null, skipped: false, requestedBy: null },
   ]);
 });
 
@@ -129,8 +129,8 @@ test("recentEntries returns the newest N songs oldest-first within the slice", (
     { id: "3", artist: "C", name: "Three" },
   ]);
   assert.deepEqual(hist.recentEntries(2), [
-    { id: "2", artist: "B", name: "Two", source: null, skipped: false, requestedBy: null },
-    { id: "3", artist: "C", name: "Three", source: null, skipped: false, requestedBy: null },
+    { id: "2", artist: "B", name: "Two", source: null, mood: null, skipped: false, requestedBy: null },
+    { id: "3", artist: "C", name: "Three", source: null, mood: null, skipped: false, requestedBy: null },
   ]);
 });
 
@@ -164,6 +164,28 @@ test("stores and preserves entry source for Memory badges", () => {
   const skippedFill = hist.getHistory().find((e) => e.id === "b");
   assert.equal(skippedFill.source, "filler");
   assert.equal(skippedFill.skipped, true);
+});
+
+test("era hits keep their decade for the Memory badge", () => {
+  hist.recordPlayed([
+    { id: "hit", artist: "A", name: "Era Song", source: "mood", mood: "80s" },
+  ]);
+  assert.equal(hist.getHistory()[0].mood, "80s");
+  // Replay without a mood keeps the original decade stamp.
+  hist.recordPlayed([{ id: "hit", artist: "A", name: "Era Song", source: "mood" }]);
+  assert.equal(hist.getHistory()[0].mood, "80s");
+  // A skip doesn't lose it either.
+  hist.recordSkip({ id: "hit", artist: "A", name: "Era Song" }, 500, 2);
+  const afterSkip = hist.getHistory()[0];
+  assert.equal(afterSkip.mood, "80s");
+  assert.equal(afterSkip.source, "mood");
+  // Decade survives a disk round-trip.
+  hist.flushHistoryPersist();
+  const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
+  assert.equal(raw.find((e) => e.id === "hit").mood, "80s");
+  // Non-mood sources never carry a decade.
+  hist.recordPlayed([{ id: "hit", artist: "A", name: "Era Song", source: "filler" }]);
+  assert.equal(hist.getHistory()[0].mood, null);
 });
 
 test("stores and preserves requestedBy on searched history", () => {

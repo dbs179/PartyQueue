@@ -23,7 +23,7 @@ import {
 } from "../display-name.js";
 import { getHistory } from "../play-history.js";
 import { getTracksByIds } from "../spotify.js";
-import { originOf, requestedByOf } from "../queue-origin.js";
+import { originOf, moodOf, requestedByOf } from "../queue-origin.js";
 import {
   getRequests,
   summarizeRequests,
@@ -168,6 +168,9 @@ export function registerGuestRoutes(app) {
           artist: e.artist || extra?.artist || "",
           image: extra?.image ?? null,
           source,
+          // Decade the era hit was added under ("80s", ...). Older entries
+          // predate the history stamp — recover it from queue-origin if held.
+          mood: source === "mood" ? e.mood || moodOf(e.id) || null : null,
           skipped: !!e.skipped,
           requestedBy: source === "searched" ? requestedBy : null,
         };

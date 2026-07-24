@@ -50,6 +50,11 @@ function normalizeSource(value) {
   return HISTORY_SOURCES.has(s) ? s : null;
 }
 
+/** Decade pack id ("80s", "90s", …) an era hit was added under, or null. */
+function normalizeMood(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 function normalizeSkipped(entry) {
   if (!entry || typeof entry !== "object") return false;
   if (entry.skipped === true) return true;
@@ -75,6 +80,7 @@ function load() {
             artist: typeof e.artist === "string" ? e.artist : "",
             name: typeof e.name === "string" ? e.name : "",
             source: normalizeSource(e.source),
+            mood: normalizeMood(e.mood),
             skipped: normalizeSkipped(e),
             requestedBy: sanitizeDisplayName(e.requestedBy),
           }))
@@ -90,6 +96,7 @@ function persistNow() {
     const out = (cache ?? []).map((e) => {
       const row = { id: e.id, artist: e.artist, name: e.name ?? "" };
       if (e.source) row.source = e.source;
+      if (e.mood) row.mood = e.mood;
       if (e.skipped) row.skipped = true;
       if (e.requestedBy) row.requestedBy = e.requestedBy;
       return row;
@@ -184,6 +191,7 @@ export function getHistory() {
       artist: e.artist,
       name: e.name ?? "",
       source: e.source || null,
+      mood: e.mood || null,
       skipped: !!e.skipped,
       requestedBy: e.requestedBy || null,
     }))
@@ -200,6 +208,7 @@ export function recentEntries(n = 3) {
     artist: e.artist,
     name: e.name ?? "",
     source: e.source || null,
+    mood: e.mood || null,
     skipped: !!e.skipped,
     requestedBy: e.requestedBy || null,
   }));
@@ -240,6 +249,10 @@ export function recordPlayed(entries, maxSize = HISTORY_CAP) {
     const prev = idx !== -1 ? list[idx] : null;
     if (idx !== -1) list.splice(idx, 1);
     const nextSource = normalizeSource(e.source) || prev?.source || null;
+    // Era hits keep the decade they were added under (so the Memory badge can
+    // say "80's Hit" even after the host switches decades).
+    const nextMood =
+      nextSource === "mood" ? normalizeMood(e.mood) || prev?.mood || null : null;
     const nextSkipped =
       e.skipped === true ? true : e.skipped === false ? false : !!prev?.skipped;
     const incomingBy = sanitizeDisplayName(e.requestedBy);
@@ -252,6 +265,7 @@ export function recordPlayed(entries, maxSize = HISTORY_CAP) {
       artist: typeof e.artist === "string" ? e.artist : "",
       name: typeof e.name === "string" ? e.name : "",
       source: nextSource,
+      mood: nextMood,
       skipped: nextSkipped,
       requestedBy: nextRequestedBy,
     });
@@ -283,6 +297,7 @@ export function recordSkip(
         artist: entry.artist,
         name: entry.name,
         source: normalizeSource(entry.source),
+        mood: normalizeMood(entry.mood),
         skipped: true,
       },
     ],

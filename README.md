@@ -142,7 +142,7 @@ The temporary code expires after two hours and is deleted after setup. Restart
 PartyQueue to create a new code if it expires.
 
 Party controls stay open to guests unless you also enable **Host-only
-controls** in Music Mix.
+controls** in DJ Booth.
 
 ## Using PartyQueue at a party
 
@@ -157,7 +157,7 @@ Useful music tools:
 - **Random** adds a fresh group of songs from your selected music.
 - **Never-Ending** adds more music when the active queue is running low. It
   will not restart an empty queue after Stop or Clear.
-- **Music Mix** controls which playlists and genres Random can use.
+- **Vibe** controls which playlists and genres Random can use.
 - **Edit queue** lets you remove or rearrange songs. It is off by default.
 - **Request fairness** can limit how many songs one person adds after the
   shared request queue reaches a size you choose. It is off by default.
@@ -165,17 +165,17 @@ Useful music tools:
   The default final song is “Closing Time” by Semisonic.
 
 Host settings, user notes, branding, connections, reset, and restart tools are
-under **DJ Booth**. Stats, Sonos groups, and Music Mix are available from the
+under **DJ Booth**. Stats, Sonos groups, and Vibe are available from the
 main toolbar.
 
 ## Your Spotify playlists (optional)
 
 Basic song search works without linking your personal Spotify account. Link it
-only if you want Random and Music Mix to use your own playlists, including
+only if you want Random and Vibe to use your own playlists, including
 private playlists.
 
 1. Register PartyQueue's Redirect URI in your Spotify Developer app.
-2. In PartyQueue, open **Music Mix → Playlists**.
+2. In PartyQueue, open **Vibe → Playlists**.
 3. Select **Connect Spotify** and approve access.
 
 PartyQueue saves a refresh token in `data/spotify-tokens.json`. Keep that file

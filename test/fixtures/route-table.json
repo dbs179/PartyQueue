@@ -34,6 +34,7 @@
   "GET /api/search :: <anonymous>",
   "GET /api/settings :: requireHost > <anonymous>",
   "GET /api/settings/pin-required :: <anonymous>",
+  "GET /api/settings/pin-session :: <anonymous>",
   "GET /api/sonos/connection :: requireHost > <anonymous>",
   "GET /api/spotify/app/status :: requireHost > <anonymous>",
   "GET /api/spotify/status :: <anonymous>",

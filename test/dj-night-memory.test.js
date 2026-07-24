@@ -26,9 +26,8 @@ const guests = await import("../src/guest-profiles.js");
 const { shouldShoutOnSearch, resetSearchAddCountForTests } = await import(
   "../src/dj-shout.js"
 );
-const { writeRecapScript, tonightBirthdayGuests } = await import(
-  "../src/party-recap.js"
-);
+const { writeRecapScript, tonightBirthdayGuests, END_OF_NIGHT_SIGNOFFS } =
+  await import("../src/party-recap.js");
 const { getDjVoiceSettings, setDjVoiceSettings } = await import(
   "../src/settings.js"
 );
@@ -396,6 +395,31 @@ test("writeRecapScript includes birthday beat for tonight's birthday guests", ()
   assert.match(script, /birthday/i);
   assert.match(script, /Mark/);
   assert.match(script, /birthday boy/i);
+});
+
+test("writeRecapScript always signs off with a line from the pack", () => {
+  // Tight word budget on purpose: the sign-off rides outside the trim, so it
+  // must survive even when the recap body gets cut.
+  const prev = getDjVoiceSettings();
+  setDjVoiceSettings({ djAnnounceMaxWords: 28 });
+  try {
+    for (let i = 0; i < 25; i++) {
+      const script = writeRecapScript(
+        {
+          total: 12,
+          topSongs: [{ name: "Goodbye Horses", artist: "Q Lazzarus", count: 2 }],
+          topArtists: [],
+        },
+        [{ name: "Mark", count: 3 }]
+      );
+      assert.ok(
+        END_OF_NIGHT_SIGNOFFS.some((line) => script.endsWith(line)),
+        `recap must end with a pack sign-off, got: "${script}"`
+      );
+    }
+  } finally {
+    setDjVoiceSettings({ djAnnounceMaxWords: prev.djAnnounceMaxWords });
+  }
 });
 
 test("tonightBirthdayGuests filters to calendar birthdays in the window", () => {

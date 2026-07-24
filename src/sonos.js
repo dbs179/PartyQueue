@@ -26,6 +26,7 @@ import {
   DJ_VOICE_DEFAULTS,
   DJ_ICON_DEFAULT_URL,
 } from "./settings.js";
+import { taglineForClip } from "./dj-taglines.js";
 import { artistMatchesGenres, bucketsForArtistSync, bucketsForArtist } from "./genres.js";
 import { moodPack as eraMoodPack, getMoodHits, trackFitsMood } from "./moods.js";
 import {
@@ -35,7 +36,7 @@ import {
   recordGenreLane,
 } from "./genre-flow.js";
 import { getSimilarUris, isDiscoveryAvailable } from "./similar.js";
-import { markOrigin, originOf, originSnapshot } from "./queue-origin.js";
+import { markOrigin, originOf, moodOf, originSnapshot, isFiller } from "./queue-origin.js";
 import { warmLyrics } from "./lyrics.js";
 import { queueWorkWasPreempted } from "./queue-preempt.js";
 
@@ -1253,6 +1254,7 @@ async function addRandomFromPlaylistsUnlocked(
           : item.discovered
             ? "discovered"
             : "filler",
+        mood: item.moodPick ? activeMoodPack?.id || null : null,
       });
     } catch (err) {
       console.error(`[random] failed to add ${item.uri}:`, err.message);
@@ -1352,7 +1354,13 @@ async function addRandomFromPlaylistsUnlocked(
             recentIds.add(h.id);
             moodIds3.push(h.id);
           }
-          rec3.push({ id: h.id, artist: h.artist, name: h.name, source: "mood" });
+          rec3.push({
+            id: h.id,
+            artist: h.artist,
+            name: h.name,
+            source: "mood",
+            mood: activeMoodPack.id,
+          });
           if (added >= totalTarget) break;
         } catch (err) {
           console.error(`[moods] failed to add ${h.uri}:`, err.message);
@@ -1443,15 +1451,25 @@ export function interleave(base, extra) {
   return mixPlaylistAndDiscovery(base, extra);
 }
 
-// Build a same-origin album-art URL that proxies through our server, so it
-// works for any client regardless of which subnet the speakers live on.
 // DJ Voice clips are HTTP TTS URLs with empty/ugly Sonos metadata. The app
-// presents them using the configured DJ persona instead of the raw mp3 name.
-function djVoiceDisplay() {
+// presents them as the configured DJ name (title line) plus a fun tagline
+// from the pack on the artist line (where "PartyQueue" used to sit) — hashed
+// from the clip URL so a clip keeps its tagline across polls. Silence pads
+// playing in Now Playing reuse the tagline of the announce clip they belong
+// to (via `remember`) so the line doesn't change mid-announce.
+let lastNowPlayingDjTagline = null;
+function djVoiceDisplay(uri = null, { silence = false, remember = false } = {}) {
   const dj = getDjVoiceSettings();
+  let tagline;
+  if (silence && lastNowPlayingDjTagline) {
+    tagline = lastNowPlayingDjTagline;
+  } else {
+    tagline = taglineForClip(uri);
+    if (remember && !silence) lastNowPlayingDjTagline = tagline;
+  }
   return {
     title: dj.djName || DJ_VOICE_DEFAULTS.djName,
-    artist: "PartyQueue",
+    artist: tagline,
     album: "DJ Voice",
     albumArt: dj.djIconUrl || DJ_ICON_DEFAULT_URL,
   };
@@ -1597,7 +1615,10 @@ async function getNowPlayingRaw() {
   const djClip = isDjVoiceUri(uri) && !silenceBridge;
   // Silence pad stays under the DJ persona (name + icon); guests shouldn't see
   // a blank/"silence" track flash between the announce and the first song.
-  const djPersona = djClip || silenceBridge ? djVoiceDisplay() : null;
+  const djPersona =
+    djClip || silenceBridge
+      ? djVoiceDisplay(uri, { silence: silenceBridge, remember: true })
+      : null;
 
   let title;
   let artist;
@@ -1630,8 +1651,9 @@ async function getNowPlayingRaw() {
       // Prefer the queue-origin tag when PartyQueue added it; Sonos-app / radio
       // plays stay untagged.
       const source = originOf(id) || null;
+      const mood = source === "mood" ? moodOf(id) : null;
       recordPlayed([
-        { id, artist: artist || "", name: title || "", source },
+        { id, artist: artist || "", name: title || "", source, mood },
       ]);
     }
   }
@@ -1761,7 +1783,7 @@ async function getQueueListRaw() {
   const tracks = upcoming.map(({ t, absoluteIndex }) => {
     const uri = t.TrackUri ?? null;
     const djClip = isDjVoiceUri(uri) && !isDjSilenceUri(uri);
-    const djPersona = djClip ? djVoiceDisplay() : null;
+    const djPersona = djClip ? djVoiceDisplay(uri) : null;
     const meta = origin.get(spotifyTrackId(uri));
     const source = meta?.source ?? null;
     return {
@@ -2011,6 +2033,77 @@ async function removeUpcomingAnnouncePadsUnlocked({ beforePosition } = {}) {
     console.log(`[dj-voice] removed ${removed} superseded announce pad(s)`);
   }
   return { removed, removedBefore, protectedThrough };
+}
+
+/**
+ * Last call: clear upcoming filler — Random / Never-Ending picks, Discover
+ * finds, and era-mood top-ups — so only real requests play out the night.
+ * Guest requests, DJ clips, and the current track are untouched.
+ * @param {{ beforePosition?: number }} [opts]
+ *   beforePosition: count how many removed songs sat strictly before this
+ *   1-based index (for adjusting an announce position after the wipe).
+ * @returns {Promise<{ removed: number, removedBefore: number }>}
+ */
+export async function removeUpcomingFillerTracks(...args) {
+  return withSonosWriteLock(() => removeUpcomingFillerTracksUnlocked(...args));
+}
+
+async function removeUpcomingFillerTracksUnlocked({ beforePosition } = {}) {
+  const m = await getManager();
+  const coordinator = await resolveCoordinator(m);
+  const [pos, media, queue] = await Promise.all([
+    coordinator.AVTransportService.GetPositionInfo().catch(() => ({ Track: 0 })),
+    coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
+      CurrentURI: "",
+    })),
+    coordinator.GetQueue().catch(() => ({ Result: [], UpdateID: 0 })),
+  ]);
+  const items = Array.isArray(queue.Result) ? queue.Result : [];
+  const playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
+  const track = Number(pos.Track) || 0;
+  // First index eligible for removal (0-based): everything strictly after the
+  // current track when playing from the queue, else the whole queue.
+  const startIdx = playingFromQueue && track >= 1 ? track : 0;
+  const indices = [];
+  for (let i = startIdx; i < items.length; i++) {
+    const id = spotifyTrackId(items[i].TrackUri ?? null);
+    if (id && isFiller(id)) indices.push(i + 1);
+  }
+  if (!indices.length) return { removed: 0, removedBefore: 0 };
+
+  const before = Number(beforePosition) || 0;
+  const removedBefore =
+    before >= 1 ? indices.filter((i) => i < before).length : 0;
+
+  // Highest ranges first so earlier indices stay valid after each remove.
+  const ranges = contiguousIndexRanges(indices).sort(
+    (a, b) => b.StartingIndex - a.StartingIndex
+  );
+  let updateId = Number(queue.UpdateID) || 0;
+  let removed = 0;
+  for (const range of ranges) {
+    try {
+      await coordinator.AVTransportService.RemoveTrackRangeFromQueue({
+        InstanceID: 0,
+        UpdateID: updateId,
+        StartingIndex: range.StartingIndex,
+        NumberOfTracks: range.NumberOfTracks,
+      });
+      removed += range.NumberOfTracks;
+      updateId = 0;
+    } catch (err) {
+      console.error(
+        `[closing-time] remove filler #${range.StartingIndex}+${range.NumberOfTracks} failed:`,
+        err.message
+      );
+      break;
+    }
+  }
+  if (removed) {
+    invalidateSonosSnapshots();
+    console.log(`[closing-time] cleared ${removed} filler song(s) for last call`);
+  }
+  return { removed, removedBefore };
 }
 
 // Move a song so it sits just before `beforeUri` (or to the end when null).

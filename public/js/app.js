@@ -352,7 +352,7 @@ const toolbarDisplayBtn = document.getElementById("toolbar-display");
 const moodNeedSpotify = document.getElementById("mood-need-spotify");
 const musicMixHub = document.getElementById("music-mix-hub");
 
-/** Music Mix toolbar button stays visible; only the Mood/Genres/Playlists hub is Spotify-gated. */
+/** Vibe toolbar button stays visible; only the Mood/Genres/Playlists hub is Spotify-gated. */
 function syncToolbarMoodVisibility() {
   if (!randomBar) return;
   const connected = !randomBar.hidden;
@@ -1244,7 +1244,7 @@ function syncDiscoverFromServer(enabled) {
 }
 
 // Persist the discovery toggle immediately so it works without hitting Save.
-// Targeted payload: this toggle lives in Music Mix, where the other settings
+// Targeted payload: this toggle lives in Vibe, where the other settings
 // inputs may never have been filled (e.g. right after a deploy logs the host
 // out) — a full-form save would clamp those blanks into real values.
 discoverEnabledInput.addEventListener("change", () => {
@@ -2972,7 +2972,7 @@ if (bannerUploadBtn && bannerFileInput) {
 }
 
 settingsResetBtn?.addEventListener("click", () => {
-  // Leave Music Mix / DJ persona / branding alone; each has its own control
+  // Leave Vibe / DJ persona / branding alone; each has its own control
   // and shouldn't be wiped by the Queue defaults.
   const rest = { ...settingsDefaults };
   delete rest.filterExplicit;
@@ -3140,7 +3140,7 @@ const memoryIntro = document.getElementById("memory-intro");
 const memoryList = document.getElementById("memory-list");
 const memoryEmpty = document.getElementById("memory-empty");
 
-function memorySourceBadge(source, skipped, requestedBy) {
+function memorySourceBadge(source, skipped, requestedBy, mood) {
   const parts = [];
   switch (source) {
     case "searched": {
@@ -3159,11 +3159,15 @@ function memorySourceBadge(source, skipped, requestedBy) {
         `<span class="songs-like-badge" title="Added by Discover">\u2728 Discover</span>`
       );
       break;
-    case "mood":
+    case "mood": {
+      // Same wording as the queue badges: "80's Hit" when the decade is known.
+      const era = mood ? DECADE_LABELS[mood] || null : null;
+      const label = era ? `${era} Hit` : "Era Hit";
       parts.push(
-        `<span class="mood-badge" title="Era hit added by the Decades mood">\u{1F4FC} Era Hit</span>`
+        `<span class="mood-badge" title="Era hit added by the Decades mood">\u{1F4FC} ${escapeHtml(label)}</span>`
       );
       break;
+    }
     case "filler":
       parts.push(
         `<span class="memory-random-badge" title="Added by Random / Never-Ending">\u{1F3B2} Random</span>`
@@ -3192,7 +3196,12 @@ function renderMemory(tracks) {
     const art = track.image
       ? `<img src="${track.image}" alt="" loading="lazy" />`
       : `<div class="art-fallback"></div>`;
-    const badge = memorySourceBadge(track.source, track.skipped, track.requestedBy);
+    const badge = memorySourceBadge(
+      track.source,
+      track.skipped,
+      track.requestedBy,
+      track.mood
+    );
     li.innerHTML = `
       <span class="queue-index">${i + 1}</span>
       ${art}
@@ -3210,7 +3219,7 @@ async function loadMemory() {
   memoryIntro.hidden = true;
   memoryCount.textContent = "...";
   try {
-    const res = await fetch("/api/history");
+    const res = await hostFetch("/api/history");
     if (!res.ok) throw new Error("Could not load memory.");
     const data = await res.json();
     renderMemory(data.tracks || []);
@@ -3358,7 +3367,7 @@ async function loadSuggestions() {
   }
   if (suggestionsCountEl) suggestionsCountEl.textContent = "...";
   try {
-    const res = await fetch("/api/suggestions");
+    const res = await hostFetch("/api/suggestions");
     if (!res.ok) throw new Error("Could not load suggestions.");
     const data = await res.json();
     suggestionsCache = Array.isArray(data.suggestions) ? data.suggestions : [];
@@ -3757,9 +3766,19 @@ function isMusicMixArea(name) {
   );
 }
 
-/** Only the DJ Booth hub asks for PIN when SETTINGS_PIN is configured. */
+/**
+ * Everything behind the DJ Booth — the hub itself plus every page it links to
+ * (Look, Queue, DJ, Users, Connections, Reset, Memory, Suggestions). All of it
+ * asks for the host PIN when one is configured, even when a page is reached
+ * directly by URL hash or a toast shortcut.
+ */
 function isHostArea(name) {
-  return name === "booth";
+  return (
+    name === "booth" ||
+    name === "memory" ||
+    name === "suggestions" ||
+    isSettingsArea(name)
+  );
 }
 
 function syncHostControlsVisibility() {
@@ -3789,10 +3808,11 @@ document.getElementById("controls-host-unlock")?.addEventListener("click", () =>
 });
 
 // ---- Host PIN gate -----------------------------------------------------
-// Optional gate for the DJ Booth tab only. PIN is verified by the server
-// (never shipped to the browser). Settings, Music Mix, Sonos, Memory,
-// Suggestions, Reset, Restart, Controls, and the rest of the party UI stay
-// open without a PIN.
+// Optional gate for the DJ Booth and everything behind it (all settings
+// pages, Users, Connections, Memory, Suggestions, Reset, Restart). PIN is
+// verified by the server (never shipped to the browser). Vibe, Stats, Sonos
+// groups, Join Code, Party Display, and the rest of the party UI stay open
+// without a PIN.
 const pinOverlay = document.getElementById("pin-overlay");
 const pinInput = document.getElementById("pin-input");
 const pinError = document.getElementById("pin-error");
@@ -3825,6 +3845,34 @@ function setSettingsUnlocked(on) {
 
 function settingsGateOk() {
   return !settingsPinRequired || settingsUnlocked();
+}
+
+// The unlocked flag lives in sessionStorage, so a long-lived tab can keep it
+// after the server-side host session expired (TTL or a restart). On host-area
+// entry we confirm the session with the server and re-lock when it's gone.
+let hostSessionCheckedAt = 0;
+async function verifyHostSessionStillValid() {
+  if (!settingsPinRequired || !settingsUnlocked()) return;
+  const now = Date.now();
+  if (now - hostSessionCheckedAt < 15000) return; // debounce booth browsing
+  hostSessionCheckedAt = now;
+  try {
+    const res = await fetch("/api/settings/pin-session", {
+      credentials: "same-origin",
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && data.ok === false) {
+      setSettingsUnlocked(false);
+      syncHostControlsVisibility();
+      if (isHostArea(currentView)) {
+        if (VIEWS[currentView]) VIEWS[currentView].hidden = true;
+        openPinGate({ title: "DJ Booth is locked", action: "reveal-host" });
+      }
+    }
+  } catch {
+    /* offline / transient — host APIs still re-lock on 401 */
+  }
 }
 
 /** fetch() for host-only APIs — uses the HttpOnly session cookie; re-locks on 401. */
@@ -3985,9 +4033,9 @@ async function refreshHostPinStatus() {
 
 async function loadPinRequired() {
   await refreshHostPinStatus();
-  // If we already landed on Booth before this resolved, enforce the gate.
-  if (currentView === "booth" && !settingsGateOk()) {
-    if (VIEWS.booth) VIEWS.booth.hidden = true;
+  // If we already landed on a Booth page before this resolved, enforce the gate.
+  if (isHostArea(currentView) && !settingsGateOk()) {
+    if (VIEWS[currentView]) VIEWS[currentView].hidden = true;
     openPinGate({
       title: "DJ Booth is locked",
       action: "reveal-host",
@@ -4205,11 +4253,10 @@ async function submitPin() {
       pendingPinAction = null;
       if (action === "restart") {
         void confirmAndRestart();
-      } else if (isSettingsArea(currentView)) {
-        revealSettings();
-      } else if (currentView === "booth" && VIEWS.booth) {
-        VIEWS.booth.hidden = false;
-        updateBoothHubSummaries();
+      } else if (isHostArea(currentView)) {
+        // Re-run the view now that the gate passes: reveals it and fires the
+        // data loads showView skipped while locked.
+        showView(currentView);
       }
       return;
     }
@@ -4530,38 +4577,41 @@ function showView(name) {
   currentView = target;
   for (const key of Object.keys(VIEWS)) VIEWS[key].hidden = key !== target;
   document.body.classList.toggle("party-display-active", target === "display");
+  // The DJ Booth and everything behind it require the host PIN. While locked,
+  // keep the view hidden and skip its data loads (they'd 401 anyway).
+  const hostLocked = isHostArea(target) && !settingsGateOk();
+  if (hostLocked) {
+    VIEWS[target].hidden = true;
+    openPinGate({
+      title: "DJ Booth is locked",
+      action: "reveal-host",
+    });
+  } else if (pinOverlay && !pinOverlay.hidden && pendingPinAction !== "restart") {
+    pendingPinAction = null;
+    closePinGate(); // leaving the Booth (e.g. phone Back) dismisses the gate
+  }
   if (target === "stats") loadStats();
   if (target === "join" || target === "display") loadJoinCode();
   if (target === "display" && displayEventName) {
     displayEventName.textContent =
       document.getElementById("event-name")?.textContent?.trim() || "PartyQueue";
   }
-  if (target === "settings-dj") updateDjHubSummaries();
-  if (target === "settings-dj-advanced") void loadDjEffectivePrompt();
-  if (isSettingsArea(target)) revealSettings();
-  if (target === "memory") loadMemory();
-  if (target === "suggestions") loadSuggestions();
+  if (!hostLocked) {
+    if (target === "booth") updateBoothHubSummaries();
+    if (target === "settings-dj") updateDjHubSummaries();
+    if (target === "settings-dj-advanced") void loadDjEffectivePrompt();
+    if (isSettingsArea(target)) revealSettings();
+    if (target === "memory") loadMemory();
+    if (target === "suggestions") loadSuggestions();
+    // A long-lived tab can outlive the server's host session (restart or
+    // expiry). Confirm it in the background and re-lock if it's gone.
+    if (isHostArea(target)) void verifyHostSessionStillValid();
+  }
   if (target === "sonos") loadGroups(true);
   if (isMusicMixArea(target)) {
     syncToolbarMoodVisibility();
     if (target === "playlists") loadPlaylists();
     if (target === "mix") updateMusicMixHubSummaries();
-  }
-  // DJ Booth is the only PIN-gated view.
-  if (target === "booth") {
-    if (settingsGateOk()) {
-      VIEWS.booth.hidden = false;
-      updateBoothHubSummaries();
-    } else {
-      VIEWS.booth.hidden = true;
-      openPinGate({
-        title: "DJ Booth is locked",
-        action: "reveal-host",
-      });
-    }
-  } else if (pinOverlay && !pinOverlay.hidden && pendingPinAction !== "restart") {
-    pendingPinAction = null;
-    closePinGate(); // leaving Booth (e.g. phone Back) dismisses the gate
   }
   syncHostControlsVisibility();
   // Start/stop polling to match the new view (skipped during initial load).
@@ -4590,7 +4640,7 @@ function routeFromHash() {
   let h = (location.hash || "").replace(/^#\/?/, "");
   if (h === "options") h = "booth"; // old bookmark alias
   if (h === "settings") h = "booth"; // Settings hub folded into the Booth
-  if (h === "mood") h = "mix"; // old Music Mix bookmark alias
+  if (h === "mood") h = "mix"; // old Vibe (Music Mix) bookmark alias
   showView(VIEWS[h] ? h : "main");
 }
 
@@ -4640,7 +4690,7 @@ async function refreshBoothMediaUrl() {
   }
 }
 
-/** Live counts on DJ Booth hub cards (title + stat + static desc, like Music Mix). */
+/** Live counts on DJ Booth hub cards (title + stat + static desc, like Vibe). */
 async function updateBoothHubSummaries() {
   const memoryEl = document.getElementById("booth-stat-memory");
   const suggestionsEl = document.getElementById("booth-stat-suggestions");
@@ -4648,7 +4698,7 @@ async function updateBoothHubSummaries() {
   const tasks = [];
   if (memoryEl) {
     tasks.push(
-      fetch("/api/history")
+      hostFetch("/api/history")
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           const n = Array.isArray(data?.tracks) ? data.tracks.length : 0;
@@ -4662,7 +4712,7 @@ async function updateBoothHubSummaries() {
   }
   if (suggestionsEl) {
     tasks.push(
-      fetch("/api/suggestions?includeDone=1")
+      hostFetch("/api/suggestions?includeDone=1")
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           const open = Number(data?.counts?.open);
@@ -4768,7 +4818,7 @@ window.addEventListener("keydown", (event) => {
 });
 window.addEventListener("hashchange", routeFromHash);
 // The initial route runs at the bottom of this file (before appReady): view
-// hooks like the Music Mix summaries touch state declared later, and routing
+// hooks like the Vibe summaries touch state declared later, and routing
 // here would crash module evaluation on a #/mood or #/display deep link,
 // killing every boot fetch — toggles then read "off" until a plain reload.
 
@@ -6232,10 +6282,11 @@ function displayOriginLabel(track) {
 
 function renderPartyDisplayQueue(tracks) {
   if (!displayQueue || !displayQueueEmpty || !displayQueueCount) return;
-  const musicTracks = tracks.filter((track) => !track.djVoice);
-  const visible = musicTracks.slice(0, 6);
-  displayQueueCount.textContent = musicTracks.length
-    ? `${musicTracks.length} queued`
+  // DJ announce rows stay in the list (same as the main page's Up Next) so
+  // guests can see the DJ coming between requests.
+  const visible = tracks.slice(0, 6);
+  displayQueueCount.textContent = tracks.length
+    ? `${tracks.length} queued`
     : "";
   displayQueueEmpty.hidden = visible.length > 0;
   displayQueueEmpty.textContent = "The queue is empty.";
@@ -6255,12 +6306,15 @@ function renderPartyDisplayQueue(tracks) {
     artist.textContent = track.artist || "";
     meta.append(title, artist);
 
-    // Tag every row with how it got here (same precedence as the main queue
-    // badges): dedication > requested > era hit > Discover > Random.
-    const source = document.createElement("span");
-    source.className = "party-display-queue-source";
-    source.textContent = displayOriginLabel(track);
-    meta.appendChild(source);
+    // Tag every song row with how it got here (same precedence as the main
+    // queue badges): dedication > requested > era hit > Discover > Random.
+    // DJ clips aren't songs — no origin tag, matching the main page.
+    if (!track.djVoice) {
+      const source = document.createElement("span");
+      source.className = "party-display-queue-source";
+      source.textContent = displayOriginLabel(track);
+      meta.appendChild(source);
+    }
 
     row.append(number, meta);
     displayQueue.appendChild(row);

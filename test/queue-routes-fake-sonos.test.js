@@ -92,6 +92,11 @@ function createFakeSonos() {
     async play() {
       return { playing: true };
     },
+    fillerClears: [],
+    async removeUpcomingFillerTracks(opts = {}) {
+      this.fillerClears.push(opts);
+      return { removed: 0, removedBefore: 0 };
+    },
     invalidateSonosSnapshots() {},
   };
 }
@@ -247,5 +252,36 @@ describe("queue routes with a fake speaker", { concurrency: false }, () => {
     const body = await res.json();
     assert.equal(body.ok, true);
     assert.equal(fake.tracks.length, 0);
+  });
+
+  test("adding the End of Night song locks the party down", async () => {
+    const { getContentSettings } = await import("../src/settings.js");
+    const { setRequestsPaused } = await import("../src/party-rituals.js");
+    try {
+      const res = await postJson("/api/queue", {
+        uri: "spotify:track:closingtime000000000AA",
+        name: "Closing Time",
+        artist: "Semisonic",
+        requestedBy: "Host",
+        requestedByUser: "Host",
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.closingTime, true);
+      // Requests pause so nothing new can be added...
+      assert.equal(getContentSettings().requestsPaused, true);
+      const denied = await postJson("/api/queue", {
+        ...TRACK_B,
+        requestedBy: "Ada",
+        requestedByUser: "Ada",
+      });
+      assert.equal(denied.status, 403);
+      // ...and upcoming filler (Random / Discover / era hits) gets cleared,
+      // pointed at the just-added song so the recap position can adjust.
+      assert.equal(fake.fillerClears.length, 1);
+      assert.equal(fake.fillerClears[0].beforePosition, body.queuePosition);
+    } finally {
+      setRequestsPaused(false);
+    }
   });
 });

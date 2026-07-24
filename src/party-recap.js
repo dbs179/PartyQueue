@@ -11,6 +11,22 @@ import { getEndOfNightTrack } from "./closing-time.js";
 
 const RECAP_WINDOW_HOURS = 12;
 
+// End-of-night sign-off pack: the DJ's final words of the night, used ONLY by
+// the party recap (last call). One is always picked from here — appended after
+// the word-budget trim so the goodbye can never get cut off mid-recap.
+export const END_OF_NIGHT_SIGNOFFS = [
+  "Good night, and God speed.",
+  "Have a great night — but get the heck out.",
+  "You don't have to go home, but you can't stay here.",
+  "Drive safe, hug your people, and take your cups to the kitchen.",
+  "Last one out turns off the lights.",
+  "It's been real, it's been fun — now scram, lovingly.",
+  "The dance floor is closed. The memories stay open all night.",
+  "Go home before the neighbors write a review.",
+  "The DJ loves you, but the DJ needs sleep.",
+  "Tip your host, grab your jacket, and get on out of here.",
+];
+
 function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
@@ -160,11 +176,14 @@ export function writeRecapScript(
     pick([
       `${songLabel} is next — thanks for dancing.`,
       `Here comes ${songLabel}. You were amazing.`,
-      `Last call — ${songLabel}. Good night, and thanks for the requests.`,
+      `Last call — ${songLabel}.`,
     ])
   );
 
-  return trimWords(bits.join(" ").replace(/\s+/g, " ").trim(), maxWords);
+  // Sign-off comes from the dedicated pack and rides outside the word budget
+  // so the goodbye always makes it to air.
+  const body = trimWords(bits.join(" ").replace(/\s+/g, " ").trim(), maxWords);
+  return `${body} ${pick(END_OF_NIGHT_SIGNOFFS)}`.trim();
 }
 
 /**

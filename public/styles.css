@@ -490,7 +490,7 @@ body {
   margin: 20px 0 10px;
 }
 
-/* Now Playing header row: section title left, active Music Mix label right. */
+/* Now Playing header row: section title left, active Vibe label right. */
 .np-head-row {
   display: flex;
   align-items: baseline;
@@ -880,7 +880,7 @@ button.guest-name:focus-visible {
   display: none;
 }
 
-/* "Never-Ending Queue" / Music Mix toggles. */
+/* "Never-Ending Queue" / Vibe toggles. */
 .options-list {
   display: flex;
   flex-direction: column;
@@ -2079,11 +2079,31 @@ button.guest-name:focus-visible {
   font-size: 0.9rem;
 }
 
-/* Edit lives in the Up next header row, centered between title and chevron. */
+/* Edit lives in the Up next header row, centered between title and chevron.
+   Styled as clickable text (like the "Adding as" name chip), not a pill. */
 #queue-edit-toggle {
-  padding: 0.35rem 0.95rem;
-  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   margin: 0 auto;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+#queue-edit-toggle:hover,
+#queue-edit-toggle:focus-visible {
+  color: var(--text, #e8e8ef);
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 #queue-edit-toggle[hidden] {
@@ -2091,15 +2111,13 @@ button.guest-name:focus-visible {
 }
 
 #queue-edit-toggle.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
-#queue-edit-toggle.active:hover:not(:disabled) {
-  background: var(--accent-press);
-  border-color: var(--accent-press);
-  color: #fff;
+#queue-edit-toggle.active:hover {
+  color: var(--accent-press);
 }
 
 .queue-edit-hint {
@@ -2817,7 +2835,7 @@ body.party-display-active > .container {
   font-weight: 750;
 }
 
-/* Pill row: playback state + active Music Mix side by side. */
+/* Pill row: playback state + active Vibe side by side. */
 .party-display-pills {
   display: flex;
   flex-wrap: wrap;

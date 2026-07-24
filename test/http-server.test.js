@@ -142,6 +142,16 @@ describe("HTTP server harness", { concurrency: false }, () => {
     const body = await res.json();
     assert.equal(typeof body.required, "boolean");
   });
+
+  test("GET /api/settings/pin-session reports the host session state", async () => {
+    // This client holds no host session cookie, so ok mirrors the PIN state:
+    // true only when there is no PIN to gate (dotenv may supply SETTINGS_PIN).
+    const res = await fetch(`${baseUrl}/api/settings/pin-session`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    const pin = await (await fetch(`${baseUrl}/api/settings/pin-required`)).json();
+    assert.equal(body.ok, !pin.required);
+  });
 });
 
 

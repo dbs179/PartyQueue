@@ -195,7 +195,7 @@
         <section id="queue-section" class="queue-section">
           <h2 class="section-label section-toggle" id="queue-toggle" role="button" tabindex="0" aria-expanded="true" title="Collapse / expand">
             <span>Up next <span id="queue-count" class="queue-count"></span></span>
-            <button id="queue-edit-toggle" type="button" class="pill-btn" aria-pressed="false" title="Turn on to delete or drag-reorder songs" hidden>Edit</button>
+            <button id="queue-edit-toggle" type="button" aria-pressed="false" title="Turn on to delete or drag-reorder songs" hidden>Edit</button>
             <span class="chevron" aria-hidden="true">&#9662;</span>
           </h2>
           <div class="queue-box">
@@ -276,7 +276,7 @@
           <div class="controls" aria-label="Tools">
             <div class="toolbar-grid toolbar-grid-6">
               <button id="toolbar-sonos" type="button" class="pill-btn" title="Open Sonos Group">Sonos Group</button>
-              <button id="toolbar-mood" type="button" class="pill-btn" title="Open Music Mix">Music Mix</button>
+              <button id="toolbar-mood" type="button" class="pill-btn" title="Open Vibe — mood, genres, and playlists">Vibe</button>
               <button id="toolbar-stats" type="button" class="pill-btn" title="Open Stats">Stats</button>
               <button id="toolbar-booth" type="button" class="pill-btn" title="Open DJ Booth">DJ Booth</button>
               <button id="toolbar-join" type="button" class="pill-btn" title="Open Join Code QR">Join Code</button>
@@ -418,10 +418,10 @@
         </div>
       </div>
 
-      <!-- MUSIC MIX HUB — Mood / Genres / Playlists (Spotify-gated via #random-bar) -->
+      <!-- VIBE HUB (formerly "Music Mix") — Mood / Genres / Playlists (Spotify-gated via #random-bar) -->
       <div id="view-mood" class="view" hidden>
         <div class="subpage-head">
-          <h2 class="section-label subpage-title">Music Mix</h2>
+          <h2 class="section-label subpage-title">Vibe</h2>
           <button id="mood-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
         </div>
         <!-- Queue behavior toggles — always available; playlist hub is Spotify-gated. -->
@@ -483,7 +483,7 @@
         <div id="random-bar" hidden></div>
         <div id="music-mix-hub" class="settings-box settings-hub" hidden>
           <p class="settings-intro">What feeds the pool — moods, genres, and playlists.</p>
-          <div class="settings-hub-grid" role="navigation" aria-label="Music Mix sections">
+          <div class="settings-hub-grid" role="navigation" aria-label="Vibe sections">
             <button type="button" class="settings-hub-card" data-mix-panel="mood-presets">
               <span class="settings-hub-title">Mood</span>
               <span class="settings-hub-stat" id="mix-stat-mood">—</span>
@@ -560,6 +560,32 @@
              Fine-tuning (counts, windows, voices) stays in the section pages. -->
         <div class="controls music-mix-toggles" aria-label="Host switches">
           <div class="options-list">
+            <p class="section-label settings-banner-label booth-toggle-group">DJ</p>
+            <label class="autofill" title="Announce a short DJ intro before each new set via Home Assistant">
+              <input type="checkbox" id="dj-voice-toggle" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">DJ Voice</span>
+                <span class="autofill-hint">Announces each new set on Sonos (needs Home Assistant)</span>
+              </span>
+            </label>
+            <label class="autofill" title="Announce searched songs and shout out the requestor">
+              <input type="checkbox" id="set-dj-shout-enabled" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Enable shout-outs</span>
+                <span class="autofill-hint">DJ announces the song + requestor on Sonos</span>
+              </span>
+            </label>
+            <label class="autofill" title="DJ speaks a short recap before the last song (needs DJ Voice)">
+              <input type="checkbox" id="set-dj-party-recap-enabled" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Party Summary</span>
+                <span class="autofill-hint">DJ speaks a short recap before the last song (needs DJ Voice)</span>
+              </span>
+            </label>
+            <div class="controls-divider" aria-hidden="true"></div>
             <p class="section-label settings-banner-label booth-toggle-group">Guest access</p>
             <label class="autofill" title="Block guests from adding songs until you turn this off">
               <input type="checkbox" id="requests-paused-toggle" class="autofill-input" />
@@ -575,6 +601,16 @@
               <span class="autofill-text">
                 <span class="autofill-label">Host-only controls</span>
                 <span class="autofill-hint">Guests can still search, request songs, react, and view the queue</span>
+              </span>
+            </label>
+            <div class="controls-divider" aria-hidden="true"></div>
+            <p class="section-label settings-banner-label booth-toggle-group">Look</p>
+            <label class="autofill" title="Show or hide the build tag next to the title">
+              <input type="checkbox" id="set-show-version" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Show version number</span>
+                <span class="autofill-hint">Displays the build tag (e.g. v3.10.0) next to the title</span>
               </span>
             </label>
             <div class="controls-divider" aria-hidden="true"></div>
@@ -603,42 +639,6 @@
                 <span class="autofill-hint">Fairness limits skip the host (needs an active PIN session)</span>
               </span>
             </label>
-            <div class="controls-divider" aria-hidden="true"></div>
-            <p class="section-label settings-banner-label booth-toggle-group">DJ</p>
-            <label class="autofill" title="Announce a short DJ intro before each new set via Home Assistant">
-              <input type="checkbox" id="dj-voice-toggle" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">DJ Voice</span>
-                <span class="autofill-hint">Announces each new set on Sonos (needs Home Assistant)</span>
-              </span>
-            </label>
-            <label class="autofill" title="Announce searched songs and shout out the requestor">
-              <input type="checkbox" id="set-dj-shout-enabled" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Enable shout-outs</span>
-                <span class="autofill-hint">DJ announces the song + requestor on Sonos</span>
-              </span>
-            </label>
-            <label class="autofill" title="DJ speaks a short recap before the last song (needs DJ Voice)">
-              <input type="checkbox" id="set-dj-party-recap-enabled" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Party Summary</span>
-                <span class="autofill-hint">DJ speaks a short recap before the last song (needs DJ Voice)</span>
-              </span>
-            </label>
-            <div class="controls-divider" aria-hidden="true"></div>
-            <p class="section-label settings-banner-label booth-toggle-group">Look</p>
-            <label class="autofill" title="Show or hide the build tag next to the title">
-              <input type="checkbox" id="set-show-version" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Show version number</span>
-                <span class="autofill-hint">Displays the build tag (e.g. v3.10.0) next to the title</span>
-              </span>
-            </label>
           </div>
         </div>
         <div class="controls-divider" aria-hidden="true"></div>
@@ -646,7 +646,7 @@
              party-night tools, Restart last on its own full-width row.
              (The old intermediate Settings hub was folded in here.) -->
         <div class="settings-box settings-hub">
-          <p class="settings-intro">Host tools. Music toggles (Never-Ending, Discover, Kids) live under Music Mix; Stats are on the toolbar.</p>
+          <p class="settings-intro">Host tools. Music toggles (Never-Ending, Discover, Kids) live under Vibe; Stats are on the toolbar.</p>
           <div class="settings-hub-grid" role="navigation" aria-label="Host tools">
             <button type="button" class="settings-hub-card" data-settings-panel="settings-look">
               <span class="settings-hub-title">Look</span>
@@ -785,7 +785,7 @@
 
           <div class="controls-divider" aria-hidden="true"></div>
           <p class="section-label settings-banner-label">Automatic rotation</p>
-          <p class="settings-intro">Tuning for the Random Mood and Random Decade switches on Music Mix. Chips pick what rotation may choose from and save on tap.</p>
+          <p class="settings-intro">Tuning for the Random Mood and Random Decade switches on Vibe. Chips pick what rotation may choose from and save on tap.</p>
           <div class="setting-row">
             <label class="setting-label" for="set-random-mood-every">Mood every</label>
             <input type="number" id="set-random-mood-every" class="setting-input" min="1" max="20" step="1" inputmode="numeric" />
@@ -997,7 +997,9 @@
             <input type="number" id="set-dj-max-words" class="setting-input" min="28" max="120" step="1" inputmode="numeric" />
             <span class="setting-hint">words (soft trim; default 55 — DJ X short drops)</span>
           </div>
-          <div class="settings-actions settings-actions-sticky">
+          <!-- In flow (not sticky): this panel is tall, and floating buttons
+               cover the bottom rows while scrolling. -->
+          <div class="settings-actions">
             <button type="button" class="pill-btn success dj-voice-save-btn">Save</button>
             <button type="button" class="pill-btn dj-voice-reset-btn">Defaults</button>
           </div>
@@ -1432,7 +1434,7 @@
         </div>
       </div>
 
-      <!-- PLAYLISTS VIEW - under Music Mix; which playlists feed Random / Never-Ending. -->
+      <!-- PLAYLISTS VIEW - under Vibe; which playlists feed Random / Never-Ending. -->
       <div id="view-playlists" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Playlists</h2>
