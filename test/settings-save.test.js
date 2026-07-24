@@ -90,3 +90,37 @@ test("Discover is enabled once on upgrade, then respects the host choice", () =>
   disk = JSON.parse(fs.readFileSync(STORE, "utf8"));
   assert.equal(disk.discoveryDefaultVersion, 1);
 });
+
+test("rotation settings default off with full pools", () => {
+  assert.deepEqual(settings.getRotationSettings(), {
+    randomMoodEnabled: false,
+    randomDecadeEnabled: false,
+    randomMoodEverySets: 1,
+    randomDecadeEverySets: 1,
+    randomMoodPool: ["party", "chill", "country", "heavy", "rap"],
+    randomDecadePool: ["60s", "70s", "80s", "90s", "2000s", "2010s", "2020s"],
+  });
+});
+
+test("rotation cadence clamps to 1-20 and pools are sanitized", () => {
+  const saved = settings.setRotationSettings({
+    randomMoodEnabled: true,
+    randomMoodEverySets: 500,
+    randomDecadeEverySets: 0,
+    randomMoodPool: ["Party", "party", 42, "  CHILL  "],
+    randomDecadePool: [],
+  });
+  assert.equal(saved.randomMoodEnabled, true);
+  assert.equal(saved.randomMoodEverySets, 20);
+  assert.equal(saved.randomDecadeEverySets, 1);
+  // Lowercased, deduped, non-strings dropped.
+  assert.deepEqual(saved.randomMoodPool, ["party", "chill"]);
+  // An explicitly empty pool sticks (rotation just skips it).
+  assert.deepEqual(saved.randomDecadePool, []);
+
+  // Partial updates leave the other keys alone.
+  const next = settings.setRotationSettings({ randomDecadeEnabled: true });
+  assert.equal(next.randomMoodEverySets, 20);
+  assert.deepEqual(next.randomMoodPool, ["party", "chill"]);
+  assert.equal(next.randomDecadeEnabled, true);
+});

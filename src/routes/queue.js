@@ -34,6 +34,7 @@ import {
   getDiscoverySettings,
   getRequestFairnessSettings,
   getContentSettings,
+  getRotationSettings,
 } from "../settings.js";
 import {
   announceFreshSet,
@@ -559,12 +560,16 @@ export function registerQueueRoutes(app, ctx) {
   // "Never-Ending Queue": auto-tops up the queue with random songs when it runs
   // low. State is server-side so it works with no browser open.
   app.get("/api/autofill", (_req, res) => {
-    // discoverEnabled rides along: this endpoint is public and fetched at boot
-    // on every view, so the Discover toggle reflects server truth even when
-    // the host-gated /api/settings is locked (sessions reset on deploy).
+    // discoverEnabled + rotation switches ride along: this endpoint is public
+    // and fetched at boot on every view, so those toggles reflect server truth
+    // even when the host-gated /api/settings is locked (sessions reset on
+    // deploy).
+    const rotation = getRotationSettings();
     res.json({
       ...getAutoFillState(),
       discoverEnabled: getDiscoverySettings().discoverEnabled,
+      randomMoodEnabled: rotation.randomMoodEnabled,
+      randomDecadeEnabled: rotation.randomDecadeEnabled,
     });
   });
 

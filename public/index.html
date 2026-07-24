@@ -460,6 +460,22 @@
                 <span class="autofill-hint">Kids mood + calmer DJ; unlock restores your previous mix</span>
               </span>
             </label>
+            <label class="autofill" title="Pick a new mood preset between Never-Ending sets (tune it under DJ Booth &gt; Queue)">
+              <input type="checkbox" id="random-mood-toggle" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Random Mood</span>
+                <span class="autofill-hint">Rotates the mood preset between Never-Ending sets</span>
+              </span>
+            </label>
+            <label class="autofill" title="Pick a new decade between Never-Ending sets (tune it under DJ Booth &gt; Queue)">
+              <input type="checkbox" id="random-decade-toggle" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Random Decade</span>
+                <span class="autofill-hint">Rotates the decade between Never-Ending sets</span>
+              </span>
+            </label>
           </div>
         </div>
         <div class="controls-divider" aria-hidden="true"></div>
@@ -765,6 +781,39 @@
               <input type="number" id="set-request-fairness-window" class="setting-input" min="1" max="1440" step="1" inputmode="numeric" />
               <span class="setting-hint">minutes before an older request stops counting (default 30)</span>
             </div>
+          </div>
+
+          <div class="controls-divider" aria-hidden="true"></div>
+          <p class="section-label settings-banner-label">Automatic rotation</p>
+          <p class="settings-intro">Tuning for the Random Mood and Random Decade switches on Music Mix. Chips pick what rotation may choose from and save on tap.</p>
+          <div class="setting-row">
+            <label class="setting-label" for="set-random-mood-every">Mood every</label>
+            <input type="number" id="set-random-mood-every" class="setting-input" min="1" max="20" step="1" inputmode="numeric" />
+            <span class="setting-hint">Never-Ending sets between mood changes (default 1 = every set)</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="set-random-decade-every">Decade every</label>
+            <input type="number" id="set-random-decade-every" class="setting-input" min="1" max="20" step="1" inputmode="numeric" />
+            <span class="setting-hint">Never-Ending sets between decade changes (default 1 = every set)</span>
+          </div>
+          <p class="setting-group-label">Moods rotation may pick</p>
+          <div id="rotation-mood-pool" class="genre-chips" role="group" aria-label="Eligible moods">
+            <button type="button" class="genre-chip" data-pool-preset="party">Party</button>
+            <button type="button" class="genre-chip" data-pool-preset="chill">Chill</button>
+            <button type="button" class="genre-chip" data-pool-preset="country">Country</button>
+            <button type="button" class="genre-chip" data-pool-preset="heavy">Heavy</button>
+            <button type="button" class="genre-chip" data-pool-preset="rap">Rap</button>
+            <button type="button" class="genre-chip" data-pool-preset="kids">Kids</button>
+          </div>
+          <p class="setting-group-label">Decades rotation may pick</p>
+          <div id="rotation-decade-pool" class="genre-chips" role="group" aria-label="Eligible decades">
+            <button type="button" class="genre-chip" data-pool-decade="60s">60's</button>
+            <button type="button" class="genre-chip" data-pool-decade="70s">70's</button>
+            <button type="button" class="genre-chip" data-pool-decade="80s">80's</button>
+            <button type="button" class="genre-chip" data-pool-decade="90s">90's</button>
+            <button type="button" class="genre-chip" data-pool-decade="2000s">2000's</button>
+            <button type="button" class="genre-chip" data-pool-decade="2010s">2010's</button>
+            <button type="button" class="genre-chip" data-pool-decade="2020s">2020's</button>
           </div>
 
           <div class="settings-actions">

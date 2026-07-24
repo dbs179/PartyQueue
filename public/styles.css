@@ -1126,6 +1126,12 @@ button.guest-name:focus-visible {
   color: var(--text, #fff);
 }
 
+/* Rotation pool chips (Booth > Queue > Automatic rotation). */
+#rotation-mood-pool,
+#rotation-decade-pool {
+  margin: 0 0 14px;
+}
+
 /* Divider between Controls sections. */
 .controls-divider {
   margin: 14px 0;

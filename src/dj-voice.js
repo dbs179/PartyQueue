@@ -647,27 +647,11 @@ function discoveryHighlights(highlights) {
   return (Array.isArray(highlights) ? highlights : []).filter((h) => h?.discovered);
 }
 
-// Mood presets mirror the Controls UI chips (kept here so DJ scripts can
-// name the active vibe without importing browser code).
-export const DJ_MOOD_PRESETS = {
-  party: [
-    "rock",
-    "metal",
-    "country",
-    "hiphop",
-    "electronic",
-    "pop",
-    "punk",
-    "soul",
-    "folk",
-  ],
-  chill: ["folk", "soul", "jazz", "blues", "pop", "electronic", "oldies", "other"],
-  country: ["country", "folk"],
-  heavy: ["rock", "metal"],
-  rap: ["hiphop"],
-  kids: ["kids", "soundtrack"],
-  all: null,
-};
+// Mood presets live in the shared registry (src/genre-presets.js) so the
+// Never-Ending rotation engine can use them too; re-exported under the old
+// name for existing callers and tests.
+export { GENRE_PRESETS as DJ_MOOD_PRESETS } from "./genre-presets.js";
+import { GENRE_PRESETS as DJ_MOOD_PRESETS } from "./genre-presets.js";
 
 const DJ_MOOD_LABELS = {
   party: "Party",

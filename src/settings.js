@@ -103,6 +103,103 @@ export function getRandomnessSettings() {
   return out;
 }
 
+// Automatic rotation between Never-Ending sets ("Random Mood" / "Random
+// Decade"). `...Pool` holds the ids eligible for rotation: mood-preset ids
+// ("party", "chill", ...) and decade ids ("60s".."2020s"). Pools are stored as
+// sanitized id strings only — the rotation engine re-validates against the
+// live preset/decade registries at pick time (settings.js can't import
+// moods.js: moods -> closing-time -> settings would be a cycle), so a stale
+// id in the file is simply never picked.
+export const ROTATION_DEFAULTS = {
+  randomMoodEnabled: false,
+  randomDecadeEnabled: false,
+  randomMoodEverySets: 1,
+  randomDecadeEverySets: 1,
+  randomMoodPool: ["party", "chill", "country", "heavy", "rap"],
+  randomDecadePool: ["60s", "70s", "80s", "90s", "2000s", "2010s", "2020s"],
+};
+const ROTATION_EVERY_BOUNDS = { min: 1, max: 20 };
+
+/** Dedupe + lowercase an id array; non-arrays fall back to the default. */
+function cleanIdArray(value, fallback) {
+  if (!Array.isArray(value)) return [...fallback];
+  const out = [];
+  for (const v of value) {
+    if (typeof v !== "string") continue;
+    const id = v.trim().toLowerCase().slice(0, 24);
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+export function getRotationSettings() {
+  const s = loadSettings();
+  return {
+    randomMoodEnabled:
+      typeof s.randomMoodEnabled === "boolean"
+        ? s.randomMoodEnabled
+        : ROTATION_DEFAULTS.randomMoodEnabled,
+    randomDecadeEnabled:
+      typeof s.randomDecadeEnabled === "boolean"
+        ? s.randomDecadeEnabled
+        : ROTATION_DEFAULTS.randomDecadeEnabled,
+    randomMoodEverySets: clampInt(
+      s.randomMoodEverySets,
+      ROTATION_DEFAULTS.randomMoodEverySets,
+      ROTATION_EVERY_BOUNDS
+    ),
+    randomDecadeEverySets: clampInt(
+      s.randomDecadeEverySets,
+      ROTATION_DEFAULTS.randomDecadeEverySets,
+      ROTATION_EVERY_BOUNDS
+    ),
+    randomMoodPool: cleanIdArray(s.randomMoodPool, ROTATION_DEFAULTS.randomMoodPool),
+    randomDecadePool: cleanIdArray(
+      s.randomDecadePool,
+      ROTATION_DEFAULTS.randomDecadePool
+    ),
+  };
+}
+
+// Persist a partial rotation update; returns the effective settings.
+export function setRotationSettings(partial = {}) {
+  const next = { ...loadSettings() };
+  if (partial.randomMoodEnabled != null) {
+    next.randomMoodEnabled = !!partial.randomMoodEnabled;
+  }
+  if (partial.randomDecadeEnabled != null) {
+    next.randomDecadeEnabled = !!partial.randomDecadeEnabled;
+  }
+  if (partial.randomMoodEverySets != null) {
+    next.randomMoodEverySets = clampInt(
+      partial.randomMoodEverySets,
+      ROTATION_DEFAULTS.randomMoodEverySets,
+      ROTATION_EVERY_BOUNDS
+    );
+  }
+  if (partial.randomDecadeEverySets != null) {
+    next.randomDecadeEverySets = clampInt(
+      partial.randomDecadeEverySets,
+      ROTATION_DEFAULTS.randomDecadeEverySets,
+      ROTATION_EVERY_BOUNDS
+    );
+  }
+  if (Array.isArray(partial.randomMoodPool)) {
+    next.randomMoodPool = cleanIdArray(
+      partial.randomMoodPool,
+      ROTATION_DEFAULTS.randomMoodPool
+    );
+  }
+  if (Array.isArray(partial.randomDecadePool)) {
+    next.randomDecadePool = cleanIdArray(
+      partial.randomDecadePool,
+      ROTATION_DEFAULTS.randomDecadePool
+    );
+  }
+  saveSettings(next);
+  return getRotationSettings();
+}
+
 // "Songs Like" discovery: whether to mix in Last.fm-similar songs from outside
 // the host's playlists. Discovery slots are carved out of the requested count,
 // while at least half of each batch remains selected-playlist music.

@@ -650,6 +650,8 @@ const settingsClearSuggestionsBtn = document.getElementById("settings-clear-sugg
 const settingsClearReactionsBtn = document.getElementById("settings-clear-reactions");
 const settingsClearKaraokeBtn = document.getElementById("settings-clear-karaoke");
 const discoverEnabledInput = document.getElementById("set-discover-enabled");
+const randomMoodToggle = document.getElementById("random-mood-toggle");
+const randomDecadeToggle = document.getElementById("random-decade-toggle");
 const similarCountInput = document.getElementById("set-similar-count");
 const endlessCountInput = document.getElementById("set-endless-count");
 const requestFairnessEnabledInput = document.getElementById(
@@ -670,6 +672,12 @@ const requestFairnessWindowInput = document.getElementById(
 const requestFairnessHostBypassInput = document.getElementById(
   "set-request-fairness-host-bypass"
 );
+const randomMoodEveryInput = document.getElementById("set-random-mood-every");
+const randomDecadeEveryInput = document.getElementById(
+  "set-random-decade-every"
+);
+const rotationMoodPool = document.getElementById("rotation-mood-pool");
+const rotationDecadePool = document.getElementById("rotation-decade-pool");
 const autofillHint = document.getElementById("autofill-hint");
 const filterExplicitInput = document.getElementById("filter-explicit-toggle");
 const requestsPausedInput = document.getElementById("requests-paused-toggle");
@@ -892,6 +900,24 @@ function fillSettings(s) {
   if (s.artistCap != null) artistCapInput.value = s.artistCap;
   if (s.strictFill != null) strictFillInput.checked = !!s.strictFill;
   if (s.discoverEnabled != null) discoverEnabledInput.checked = !!s.discoverEnabled;
+  if (s.randomMoodEnabled != null && randomMoodToggle) {
+    randomMoodToggle.checked = !!s.randomMoodEnabled;
+  }
+  if (s.randomDecadeEnabled != null && randomDecadeToggle) {
+    randomDecadeToggle.checked = !!s.randomDecadeEnabled;
+  }
+  if (s.randomMoodEverySets != null && randomMoodEveryInput) {
+    randomMoodEveryInput.value = s.randomMoodEverySets;
+  }
+  if (s.randomDecadeEverySets != null && randomDecadeEveryInput) {
+    randomDecadeEveryInput.value = s.randomDecadeEverySets;
+  }
+  if (Array.isArray(s.randomMoodPool)) {
+    paintRotationPool(rotationMoodPool, "data-pool-preset", s.randomMoodPool);
+  }
+  if (Array.isArray(s.randomDecadePool)) {
+    paintRotationPool(rotationDecadePool, "data-pool-decade", s.randomDecadePool);
+  }
   if (s.similarCount != null) similarCountInput.value = s.similarCount;
   if (s.requestFairnessEnabled != null && requestFairnessEnabledInput) {
     requestFairnessEnabledInput.checked = !!s.requestFairnessEnabled;
@@ -1196,6 +1222,8 @@ function currentSettingsPayload() {
     requestFairnessRollingMax: Number(requestFairnessRollingMaxInput?.value),
     requestFairnessWindowMinutes: Number(requestFairnessWindowInput?.value),
     requestFairnessHostBypass: !!requestFairnessHostBypassInput?.checked,
+    randomMoodEverySets: Number(randomMoodEveryInput?.value),
+    randomDecadeEverySets: Number(randomDecadeEveryInput?.value),
   };
 }
 
@@ -1223,6 +1251,70 @@ discoverEnabledInput.addEventListener("change", () => {
   discoverTouchedAt = Date.now();
   saveSettings({ discoverEnabled: discoverEnabledInput.checked });
 });
+
+// Random Mood / Random Decade: rotate the mix between Never-Ending sets.
+// Same broadcast-sync + targeted-save pattern as Discover.
+let rotationTouchedAt = 0;
+function syncRotationFromServer(payload) {
+  if (!payload || Date.now() - rotationTouchedAt < 3000) return;
+  if (typeof payload.randomMoodEnabled === "boolean" && randomMoodToggle) {
+    randomMoodToggle.checked = payload.randomMoodEnabled;
+  }
+  if (typeof payload.randomDecadeEnabled === "boolean" && randomDecadeToggle) {
+    randomDecadeToggle.checked = payload.randomDecadeEnabled;
+  }
+}
+randomMoodToggle?.addEventListener("change", () => {
+  rotationTouchedAt = Date.now();
+  saveSettings(
+    { randomMoodEnabled: randomMoodToggle.checked },
+    {
+      toastMessage: randomMoodToggle.checked
+        ? "Random Mood on — mood rotates between sets"
+        : "Random Mood off",
+    }
+  );
+});
+randomDecadeToggle?.addEventListener("change", () => {
+  rotationTouchedAt = Date.now();
+  saveSettings(
+    { randomDecadeEnabled: randomDecadeToggle.checked },
+    {
+      toastMessage: randomDecadeToggle.checked
+        ? "Random Decade on — decade rotates between sets"
+        : "Random Decade off",
+    }
+  );
+});
+
+// Rotation pool chips (Booth > Queue): what Random Mood / Random Decade may
+// pick from. Chips save on tap; the server echoes the effective pools back
+// through fillSettings, which repaints via paintRotationPool.
+function paintRotationPool(container, attr, ids) {
+  if (!container) return;
+  const set = new Set(Array.isArray(ids) ? ids : []);
+  for (const btn of container.querySelectorAll(`[${attr}]`)) {
+    const on = set.has(btn.getAttribute(attr));
+    btn.classList.toggle("on", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+}
+function wireRotationPool(container, attr, settingsKey) {
+  if (!container) return;
+  container.addEventListener("click", (e) => {
+    const btn = e.target.closest(`[${attr}]`);
+    if (!btn) return;
+    const on = !btn.classList.contains("on");
+    btn.classList.toggle("on", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    const ids = [...container.querySelectorAll(`[${attr}].on`)].map((b) =>
+      b.getAttribute(attr)
+    );
+    saveSettings({ [settingsKey]: ids });
+  });
+}
+wireRotationPool(rotationMoodPool, "data-pool-preset", "randomMoodPool");
+wireRotationPool(rotationDecadePool, "data-pool-decade", "randomDecadePool");
 
 // Strict fill also saves immediately — it's a safety switch like Discover.
 // Targeted payload: the toggle sits on the Booth page, so don't send the whole
@@ -5908,6 +6000,7 @@ function renderNowPlaying(transport) {
   if (transport) {
     syncAutoFillFromServer(transport.neverEnding);
     syncDiscoverFromServer(transport.discoverEnabled);
+    syncRotationFromServer(transport);
     updateMixFromServer(transport);
     if (transport.requestsPaused != null) {
       setRequestsPausedUi(!!transport.requestsPaused);
@@ -6883,6 +6976,35 @@ function updateMixFromServer(np) {
     serverMix.mood = typeof np.mixMood === "string" ? np.mixMood : null;
   }
   updateMixLabels();
+  applyServerMixToPickers();
+}
+
+// When the server changes the mix underneath us (Random Mood / Random Decade
+// rotating between sets), follow along: repaint the decade chips, genre chips
+// + preset highlight, and local storage. Guarded by the recent-touch window
+// so a host mid-tap isn't fought by an in-flight poll.
+let mixTouchedAt = 0;
+function applyServerMixToPickers() {
+  if (Date.now() - mixTouchedAt < 3000) return;
+  if (serverMix.mood !== undefined) {
+    const m =
+      serverMix.mood && DECADE_LABELS[serverMix.mood] ? serverMix.mood : null;
+    if (m !== eraMood) {
+      eraMood = m;
+      saveEraMood();
+      syncDecadeChips();
+    }
+  }
+  if (serverMix.genres !== undefined && genreBuckets.length) {
+    const want = Array.isArray(serverMix.genres)
+      ? serverMix.genres
+      : genreBuckets.map((b) => b.id);
+    if (!sameIdSet(currentGenreIds(), want)) {
+      genreSelection = new Set(want);
+      saveGenreSelection();
+      renderGenres();
+    }
+  }
 }
 
 function loadGenreSelection() {
@@ -7260,8 +7382,10 @@ async function loadAutoFill() {
       saveGenreSelection();
       if (genreBuckets.length) renderGenres();
     }
-    // Discover rides along on this public endpoint (settings are host-gated).
+    // Discover + rotation ride along on this public endpoint (settings are
+    // host-gated).
     syncDiscoverFromServer(data.discoverEnabled);
+    syncRotationFromServer(data);
     // Era mood: the server is the source of truth (null = off) so every
     // phone shows the same decade.
     if ("mood" in data) {
@@ -7326,6 +7450,7 @@ autofillToggle.addEventListener("change", async () => {
 // Never-Ending share one host pool across phones (fire-and-forget).
 function syncPickerSelection() {
   // Optimistic: show the new mix immediately; the server broadcast follows.
+  mixTouchedAt = Date.now();
   serverMix = { genres: currentGenreIds(), mood: currentMoodId() };
   updateMixLabels();
   hostFetch("/api/selection", {

@@ -21,6 +21,7 @@ import {
   getDiscoverySettings,
   getContentSettings,
   getRandomnessSettings,
+  getRotationSettings,
   NEVER_ENDING_DEFAULT,
 } from "./settings.js";
 import {
@@ -34,7 +35,9 @@ import {
   queueWorkGeneration,
   queueWorkWasPreempted,
 } from "./queue-preempt.js";
-import { normalizeMood } from "./moods.js";
+import { normalizeMood, moodPack } from "./moods.js";
+import { presetGenres, presetIdForGenres } from "./genre-presets.js";
+import { eligiblePoolSize } from "./genres.js";
 
 // Top up when this many (or fewer) songs remain AFTER the current one. Keeping
 // it at 1 means we refill while a song is still queued, so playback never gaps.
@@ -153,6 +156,123 @@ export function autofillNextDelayMs(
   return Math.min(IDLE_MS * 2 ** streak, IDLE_MAX_MS);
 }
 
+// ---- "Random Mood" / "Random Decade" rotation between sets ----------------
+//
+// When enabled, each Never-Ending refill may first pick a new mood preset
+// (party/chill/...) and/or decade before the set is built. Counters live in
+// memory only: a restart just means the next due set rotates.
+
+let setsSinceMoodRotation = 0;
+let setsSinceDecadeRotation = 0;
+
+/** Random pick from `pool`, never repeating `current`. Null when impossible. */
+function pickRotation(pool, current) {
+  const options = pool.filter((id) => id !== current);
+  if (!options.length) return null;
+  return options[Math.floor(Math.random() * options.length)];
+}
+
+/**
+ * Maybe rotate the mood preset / decade ahead of the next set. Never throws
+ * and never blocks a refill — worst case the set is built with the current
+ * selection. Exported for tests.
+ *
+ * @param {{ poolSize?: typeof eligiblePoolSize }} [deps]
+ * @returns {Promise<{ genres: string[]|null, mood: string|null } | null>}
+ *   The applied change, or null when nothing rotated.
+ */
+export async function rotateSelectionIfDue(deps = {}) {
+  try {
+    const rot = getRotationSettings();
+    if (!rot.randomMoodEnabled) setsSinceMoodRotation = 0;
+    if (!rot.randomDecadeEnabled) setsSinceDecadeRotation = 0;
+    if (!rot.randomMoodEnabled && !rot.randomDecadeEnabled) return null;
+    // Kids Lock pins the Kids mood — never rotate underneath it.
+    if (getContentSettings().kidsLock) return null;
+
+    // Validate pools against the live registries (settings stores raw ids).
+    const moodPool = rot.randomMoodPool.filter((id) => presetGenres(id));
+    const decadePool = rot.randomDecadePool.filter((id) => normalizeMood(id));
+
+    const pickBoth = () => {
+      let nextPreset; // undefined = unchanged
+      let nextDecade; // undefined = unchanged
+      if (rot.randomMoodEnabled && moodPool.length >= 2) {
+        if (setsSinceMoodRotation + 1 >= rot.randomMoodEverySets) {
+          nextPreset = pickRotation(moodPool, presetIdForGenres(genres));
+          if (nextPreset == null) nextPreset = undefined;
+        }
+      }
+      if (rot.randomDecadeEnabled && decadePool.length >= 2) {
+        if (setsSinceDecadeRotation + 1 >= rot.randomDecadeEverySets) {
+          nextDecade = pickRotation(decadePool, mood);
+          if (nextDecade == null) nextDecade = undefined;
+        }
+      }
+      return { nextPreset, nextDecade };
+    };
+
+    let { nextPreset, nextDecade } = pickBoth();
+    if (nextPreset === undefined && nextDecade === undefined) {
+      // Not due yet (or pools too small) — count this set and move on.
+      if (rot.randomMoodEnabled) setsSinceMoodRotation += 1;
+      if (rot.randomDecadeEnabled) setsSinceDecadeRotation += 1;
+      return null;
+    }
+
+    // Soft guardrail: if the picked combo leaves the playlist pool thinner
+    // than one batch, re-roll once. Shortfalls are still fine (era top-up and
+    // Discover cover them) — this just avoids obviously starved combos.
+    const poolSize = deps.poolSize || eligiblePoolSize;
+    try {
+      const candGenres =
+        nextPreset !== undefined ? presetGenres(nextPreset) : genres;
+      const candMood = nextDecade !== undefined ? nextDecade : mood;
+      const { tracks } = await poolSize({
+        playlistIds,
+        genres: candGenres,
+        years: moodPack(candMood)?.years ?? null,
+      });
+      const { endlessQueueCount } = getRandomnessSettings();
+      if (tracks < endlessQueueCount) {
+        ({ nextPreset, nextDecade } = pickBoth());
+      }
+    } catch {
+      /* pool probe is best-effort */
+    }
+
+    const applied = savePickerSelection(
+      undefined,
+      nextPreset !== undefined ? presetGenres(nextPreset) : undefined,
+      nextDecade !== undefined ? nextDecade : undefined
+    );
+    if (nextPreset !== undefined) setsSinceMoodRotation = 0;
+    else if (rot.randomMoodEnabled) setsSinceMoodRotation += 1;
+    if (nextDecade !== undefined) setsSinceDecadeRotation = 0;
+    else if (rot.randomDecadeEnabled) setsSinceDecadeRotation += 1;
+
+    console.log(
+      "[rotate] " +
+        [
+          nextPreset !== undefined ? `mood -> ${nextPreset}` : null,
+          nextDecade !== undefined ? `decade -> ${nextDecade}` : null,
+        ]
+          .filter(Boolean)
+          .join(", ")
+    );
+    return { genres: applied.genres, mood: applied.mood };
+  } catch (err) {
+    console.error("[rotate] failed:", err.message);
+    return null;
+  }
+}
+
+/** Test hook: reset the in-memory rotation counters. */
+export function resetRotationCounters() {
+  setsSinceMoodRotation = 0;
+  setsSinceDecadeRotation = 0;
+}
+
 async function tick() {
   if (!enabled || queueClearPauseCount > 0) return;
   const workGeneration = queueWorkGeneration();
@@ -173,6 +293,9 @@ async function tick() {
     if (shouldRefill && !filling) {
       filling = true;
       try {
+        // Random Mood / Random Decade: maybe pick a fresh mix for this set.
+        await rotateSelectionIfDue();
+        if (queueWorkWasPreempted(workGeneration)) return;
         // Honor the host's current discovery + content + refill size settings.
         const { discoverEnabled, similarCount } = getDiscoverySettings();
         const { filterExplicit } = getContentSettings();
