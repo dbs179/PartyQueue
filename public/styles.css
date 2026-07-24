@@ -729,12 +729,20 @@ button.guest-name:focus-visible {
   background: linear-gradient(135deg, #3a8dde, #2f6fd0);
 }
 
+/* Reaction buttons share the full Now Playing width evenly (like the
+   Display page progress bar) instead of packing left: one row of 8 when
+   there's room, two even rows of 4 on phones. */
 .np-reactions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
   gap: 0.45rem;
   margin-top: 0.65rem;
-  justify-content: flex-start;
+}
+
+@media (max-width: 640px) {
+  .np-reactions {
+    grid-template-columns: repeat(4, 1fr);
+  }
 }
 
 .np-reactions[hidden] {
@@ -746,8 +754,9 @@ button.guest-name:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 0.3rem;
+  min-width: 0;
   min-height: 44px;
-  padding: 0.45rem 0.75rem;
+  padding: 0.45rem 0.5rem;
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.35);

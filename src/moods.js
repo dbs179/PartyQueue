@@ -38,6 +38,9 @@ export const MOOD_PACKS = [
   { id: "90s", label: "90's", years: [1990, 1999], lastfmTags: ["90s", "1990s"] },
   { id: "2000s", label: "2000's", years: [2000, 2009], lastfmTags: ["2000s", "00s"] },
   { id: "2010s", label: "2010's", years: [2010, 2019], lastfmTags: ["2010s", "10s"] },
+  // Current decade: open-ended in spirit; 2029 upper bound keeps the shape
+  // uniform and naturally includes everything released so far.
+  { id: "2020s", label: "2020's", years: [2020, 2029], lastfmTags: ["2020s"] },
 ];
 
 const PACKS_BY_ID = new Map(MOOD_PACKS.map((p) => [p.id, p]));

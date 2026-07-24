@@ -6702,6 +6702,7 @@ const DECADE_LABELS = {
   "90s": "90's",
   "2000s": "2000's",
   "2010s": "2010's",
+  "2020s": "2020's",
 };
 let eraMood = loadEraMood();
 
