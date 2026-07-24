@@ -11,8 +11,11 @@
 //                  (filler for ordering; badged with the era).
 //
 // Sonos has nowhere to stash this, so we keep a small, bounded, JSON-backed map
-// of Spotify track IDs -> { source, requestedBy?, requestedByUser?, dedication? }
-// (data/queue-origin.json).
+// of Spotify track IDs -> { source, requestedBy?, requestedByUser?, dedication?,
+// mood? } (data/queue-origin.json).
+//
+// `mood` = the decade pack id ("80s", "90s", …) the track was added under, so
+// badges keep saying "80's Hit" even after the host switches decades.
 //
 // `requestedBy` = badge text (alias, or User when alias blank).
 // `requestedByUser` = stable User for shouts/stats (optional; old rows omit it).
@@ -35,8 +38,8 @@ const LEGACY_DISCOVERED_FILE = path.join(__dirname, "..", "data", "discovered.js
 const MAX = 1000;
 const VALID = new Set(["searched", "filler", "discovered", "mood"]);
 
-let entries = null; // [{ id, source, requestedBy?, requestedByUser?, dedication? }]
-/** @type {Map<string, { source: string, requestedBy: string|null, requestedByUser: string|null, dedication: string|null }>|null} */
+let entries = null; // [{ id, source, requestedBy?, requestedByUser?, dedication?, mood? }]
+/** @type {Map<string, { source: string, requestedBy: string|null, requestedByUser: string|null, dedication: string|null, mood: string|null }>|null} */
 let index = null;
 
 function buildIndex() {
@@ -47,6 +50,7 @@ function buildIndex() {
       requestedBy: e.requestedBy || null,
       requestedByUser: e.requestedByUser || null,
       dedication: e.dedication || null,
+      mood: e.mood || null,
     });
   }
 }
@@ -64,6 +68,7 @@ function load() {
             requestedBy: sanitizeDisplayName(e.requestedBy),
             requestedByUser: sanitizeDisplayName(e.requestedByUser),
             dedication: sanitizeDedication(e.dedication),
+            mood: typeof e.mood === "string" && e.mood ? e.mood : null,
           }))
       : null;
   } catch {
@@ -105,6 +110,7 @@ function persist() {
       if (e.requestedBy) row.requestedBy = e.requestedBy;
       if (e.requestedByUser) row.requestedByUser = e.requestedByUser;
       if (e.dedication) row.dedication = e.dedication;
+      if (e.mood) row.mood = e.mood;
       return row;
     });
     writeFileAtomic(STORE_FILE, JSON.stringify(out));
@@ -117,7 +123,7 @@ function persist() {
  * Record the source for one or more track IDs (most-recent wins).
  * @param {string[]} ids
  * @param {string} source
- * @param {{ requestedBy?: string|null, requestedByUser?: string|null, dedication?: string|null }} [opts]
+ * @param {{ requestedBy?: string|null, requestedByUser?: string|null, dedication?: string|null, mood?: string|null }} [opts]
  */
 export function markOrigin(ids, source, opts = {}) {
   if (!VALID.has(source)) return;
@@ -129,6 +135,10 @@ export function markOrigin(ids, source, opts = {}) {
     source === "searched" ? sanitizeDisplayName(opts.requestedByUser) : null;
   const dedication =
     source === "searched" ? sanitizeDedication(opts.dedication) : null;
+  const mood =
+    source === "mood" && typeof opts.mood === "string" && opts.mood
+      ? opts.mood
+      : null;
   load();
   for (const id of clean) {
     const at = entries.findIndex((e) => e.id === id);
@@ -149,12 +159,14 @@ export function markOrigin(ids, source, opts = {}) {
       requestedBy: by,
       requestedByUser: byUser,
       dedication: ded,
+      mood,
     });
     index.set(id, {
       source,
       requestedBy: by,
       requestedByUser: byUser,
       dedication: ded,
+      mood,
     });
   }
   while (entries.length > MAX) {
@@ -234,7 +246,7 @@ export function isDiscovered(id) {
   return originOf(id) === "discovered";
 }
 
-// Snapshot: id -> { source, requestedBy, requestedByUser, dedication }.
+// Snapshot: id -> { source, requestedBy, requestedByUser, dedication, mood }.
 export function originSnapshot() {
   load();
   return new Map(index);

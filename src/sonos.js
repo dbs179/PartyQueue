@@ -1260,7 +1260,8 @@ async function addRandomFromPlaylistsUnlocked(
   }
   if (recorded.length) recordPlayed(recorded);
   if (discoveredIds.length) markOrigin(discoveredIds, "discovered");
-  if (moodIds.length) markOrigin(moodIds, "mood");
+  if (moodIds.length)
+    markOrigin(moodIds, "mood", { mood: activeMoodPack?.id || null });
   if (fillerIds.length) markOrigin(fillerIds, "filler");
 
   // 5) Top up if some enqueues failed (or discovery shortfall left us under
@@ -1358,7 +1359,8 @@ async function addRandomFromPlaylistsUnlocked(
         }
       }
       if (rec3.length) recordPlayed(rec3);
-      if (moodIds3.length) markOrigin(moodIds3, "mood");
+      if (moodIds3.length)
+        markOrigin(moodIds3, "mood", { mood: activeMoodPack.id });
     } catch (err) {
       console.error("[moods] era top-up failed:", err.message);
     }
@@ -1696,6 +1698,8 @@ async function getNowPlayingRaw() {
         searched: source === "searched",
         discovered: source === "discovered",
         moodPick: source === "mood",
+        // Decade the track was added under, so badges survive decade swaps.
+        mood: source === "mood" ? ometa?.mood || null : null,
         requestedBy: badge,
         requestedByUser: user,
         dedication: source === "searched" ? ometa?.dedication || null : null,
@@ -1774,6 +1778,8 @@ async function getQueueListRaw() {
       searched: source === "searched",
       discovered: source === "discovered",
       moodPick: source === "mood",
+      // Decade the track was added under, so badges survive decade swaps.
+      mood: source === "mood" ? meta?.mood || null : null,
       requestedBy: source === "searched" ? meta?.requestedBy || null : null,
       requestedByUser:
         source === "searched"

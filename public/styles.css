@@ -2068,20 +2068,15 @@ button.guest-name:focus-visible {
   font-size: 0.9rem;
 }
 
-.queue-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 0 2px;
-}
-
-.queue-toolbar[hidden] {
-  display: none;
-}
-
+/* Edit lives in the Up next header row, centered between title and chevron. */
 #queue-edit-toggle {
   padding: 0.35rem 0.95rem;
   font-size: 0.8rem;
+  margin: 0 auto;
+}
+
+#queue-edit-toggle[hidden] {
+  display: none;
 }
 
 #queue-edit-toggle.active {
@@ -2097,8 +2092,10 @@ button.guest-name:focus-visible {
 }
 
 .queue-edit-hint {
+  display: block;
   color: var(--muted);
   font-size: 0.8rem;
+  padding: 10px 0 2px;
 }
 
 .queue-edit-hint[hidden] {
@@ -2624,10 +2621,8 @@ body.modal-open {
 /* ---- Phase 3: phone composition + reduced motion ---------------------- */
 
 @media (max-width: 640px) {
+  /* Show the full 3:2 banner — cropping it to a strip cut the art off. */
   .hero {
-    max-height: 28vw;
-    min-height: 72px;
-    object-fit: cover;
     margin-bottom: 8px;
   }
 

@@ -225,9 +225,17 @@ const queueCount = document.getElementById("queue-count");
 const queueEmpty = document.getElementById("queue-empty");
 const queueSection = document.getElementById("queue-section");
 const queueToggle = document.getElementById("queue-toggle");
-const queueToolbar = document.getElementById("queue-toolbar");
 const queueEditToggle = document.getElementById("queue-edit-toggle");
 const queueEditHint = document.getElementById("queue-edit-hint");
+
+// Edit lives inside the collapsible header row; it's hidden both while the
+// queue is empty and while host-only controls lock guests out.
+let queueEditLockedForGuests = false;
+let queueHasTracks = false;
+function syncQueueEditButton() {
+  if (queueEditToggle)
+    queueEditToggle.hidden = queueEditLockedForGuests || !queueHasTracks;
+}
 
 const randomBar = document.getElementById("random-bar");
 const controlsRandom = document.getElementById("controls-random");
@@ -278,12 +286,16 @@ function applyQueueCollapsed(collapsed) {
   const stored = localStorage.getItem(QUEUE_COLLAPSE_KEY);
   applyQueueCollapsed(stored == null ? false : stored === "1");
 }
-queueToggle.addEventListener("click", () => {
+queueToggle.addEventListener("click", (e) => {
+  // The Edit button sits inside this header; don't collapse when it's used.
+  if (e.target instanceof Element && e.target.closest("#queue-edit-toggle"))
+    return;
   const collapsed = !queueSection.classList.contains("collapsed");
   localStorage.setItem(QUEUE_COLLAPSE_KEY, collapsed ? "1" : "0");
   applyQueueCollapsed(collapsed);
 });
 queueToggle.addEventListener("keydown", (e) => {
+  if (e.target !== queueToggle) return;
   if (e.key === "Enter" || e.key === " ") {
     e.preventDefault();
     queueToggle.click();
@@ -1052,6 +1064,8 @@ function formatDjIconLabel(name) {
 }
 
 function updateDjHubSummaries() {
+  // The Sonos media URL card lives on this hub now.
+  void refreshBoothMediaUrl();
   const bannerEl = document.getElementById("dj-stat-banner");
   const nameEl = document.getElementById("dj-stat-name");
   const voiceEl = document.getElementById("dj-stat-voice");
@@ -3652,7 +3666,8 @@ function syncHostControlsVisibility() {
   if (body) body.hidden = false;
   if (protectedControls) protectedControls.hidden = locked;
   if (lock) lock.hidden = !locked;
-  if (queueEditToggle) queueEditToggle.hidden = locked;
+  queueEditLockedForGuests = locked;
+  syncQueueEditButton();
   if (locked && queueEditMode) {
     queueEditMode = false;
     queueEditToggle?.classList.remove("active");
@@ -4504,11 +4519,26 @@ openResetBtn?.addEventListener("click", () => navigate("settings-reset"));
 
 let boothMediaUrlCache = "";
 
+/** Fill the Sonos media URL card (lives on the DJ hub) and cache it for Copy. */
+async function refreshBoothMediaUrl() {
+  const mediaUrlEl = document.getElementById("booth-stat-media-url");
+  if (!mediaUrlEl) return;
+  try {
+    const r = await fetch("/api/media-base");
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || "unavailable");
+    boothMediaUrlCache = data.url || "";
+    mediaUrlEl.textContent = boothMediaUrlCache || "—";
+  } catch {
+    boothMediaUrlCache = "";
+    mediaUrlEl.textContent = "unavailable";
+  }
+}
+
 /** Live counts on DJ Booth hub cards (title + stat + static desc, like Music Mix). */
 async function updateBoothHubSummaries() {
   const memoryEl = document.getElementById("booth-stat-memory");
   const suggestionsEl = document.getElementById("booth-stat-suggestions");
-  const mediaUrlEl = document.getElementById("booth-stat-media-url");
 
   const tasks = [];
   if (memoryEl) {
@@ -4541,24 +4571,6 @@ async function updateBoothHubSummaries() {
         })
         .catch(() => {
           suggestionsEl.textContent = "—";
-        })
-    );
-  }
-  if (mediaUrlEl) {
-    tasks.push(
-      fetch("/api/media-base")
-        .then(async (r) => {
-          const data = await r.json().catch(() => ({}));
-          if (!r.ok) throw new Error(data.error || "unavailable");
-          return data;
-        })
-        .then((data) => {
-          boothMediaUrlCache = data.url || "";
-          mediaUrlEl.textContent = boothMediaUrlCache || "—";
-        })
-        .catch(() => {
-          boothMediaUrlCache = "";
-          mediaUrlEl.textContent = "unavailable";
         })
     );
   }
@@ -6105,7 +6117,7 @@ function displayOriginLabel(track) {
   if (dedication) return dedicationDisplayLabel(dedication, requester);
   if (track.searched) return requester ? `Requested by ${requester}` : "Requested";
   if (track.moodPick) {
-    const era = activeEraLabel();
+    const era = trackEraLabel(track);
     return era ? `${era} Hit` : "Era Hit";
   }
   if (track.discovered) return "Discover";
@@ -6196,6 +6208,7 @@ function queueTrackSig(track) {
     track.searched ? 1 : 0,
     track.discovered ? 1 : 0,
     track.moodPick ? 1 : 0,
+    track.mood || "",
     track.requestedBy || "",
     track.dedication || "",
     track.title || "",
@@ -6208,7 +6221,7 @@ function queueBadgeHtml(track) {
   const requester = sanitizeDisplayName(track.requestedBy || "");
   const dedication = sanitizeDedication(track.dedication || "");
   if (track.moodPick) {
-    const era = activeEraLabel();
+    const era = trackEraLabel(track);
     const label = era ? `${era} Hit` : "Era Hit";
     return `<span class="mood-badge" title="Era hit added by the Decades mood (from outside your playlists)">\u{1F4FC} ${escapeHtml(label)}</span>`;
   }
@@ -6263,7 +6276,8 @@ function renderQueue(tracks) {
     queueEmpty.textContent = "The queue is empty.";
     queueEmpty.hidden = tracks.length > 0;
   }
-  queueToolbar.hidden = tracks.length === 0;
+  queueHasTracks = tracks.length > 0;
+  syncQueueEditButton();
 
   const wantEdit = queueEditMode;
   const kids = [...queueList.children];
@@ -6801,6 +6815,16 @@ if (decadeChips) {
 function activeEraLabel() {
   const mood = serverMix.mood !== undefined ? serverMix.mood : eraMood;
   return mood ? DECADE_LABELS[mood] || null : null;
+}
+
+/**
+ * Era label for one queued track. Prefers the decade stamped on the track at
+ * add time (survives the host switching decades mid-party); falls back to the
+ * active decade only for rows queued before per-track stamping existed.
+ */
+function trackEraLabel(track) {
+  if (track?.mood && DECADE_LABELS[track.mood]) return DECADE_LABELS[track.mood];
+  return activeEraLabel();
 }
 
 function presetNameForIds(ids) {

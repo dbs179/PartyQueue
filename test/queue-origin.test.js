@@ -113,6 +113,23 @@ test("sanitizes blank / oversized requestedBy", () => {
   assert.equal(origin.requestedByOf("rb3"), "ABCDEFGHIJKLMNOPQRSTUVWX");
 });
 
+test("stores the decade on mood origins and survives a reload", () => {
+  origin.markOrigin(["era1"], "mood", { mood: "80s" });
+  const snap = origin.originSnapshot().get("era1");
+  assert.equal(snap.source, "mood");
+  assert.equal(snap.mood, "80s");
+  // Persisted to disk with the decade attached.
+  const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
+  assert.ok(raw.some((e) => e.id === "era1" && e.mood === "80s"));
+  // A later batch under a different decade doesn't relabel this track...
+  origin.markOrigin(["era2"], "mood", { mood: "90s" });
+  assert.equal(origin.originSnapshot().get("era1").mood, "80s");
+  assert.equal(origin.originSnapshot().get("era2").mood, "90s");
+  // ...and non-mood sources never carry a decade.
+  origin.markOrigin(["era1"], "filler", { mood: "90s" });
+  assert.equal(origin.originSnapshot().get("era1").mood, null);
+});
+
 test("stores badge alias and requestedByUser separately", () => {
   origin.markOrigin(["alias1"], "searched", {
     requestedBy: "Party Alex",

@@ -195,13 +195,11 @@
         <section id="queue-section" class="queue-section">
           <h2 class="section-label section-toggle" id="queue-toggle" role="button" tabindex="0" aria-expanded="true" title="Collapse / expand">
             <span>Up next <span id="queue-count" class="queue-count"></span></span>
+            <button id="queue-edit-toggle" type="button" class="pill-btn" aria-pressed="false" title="Turn on to delete or drag-reorder songs" hidden>Edit</button>
             <span class="chevron" aria-hidden="true">&#9662;</span>
           </h2>
           <div class="queue-box">
-            <div class="queue-toolbar" id="queue-toolbar" hidden>
-              <button id="queue-edit-toggle" type="button" class="pill-btn" aria-pressed="false" title="Turn on to delete or drag-reorder songs">Edit</button>
-              <span id="queue-edit-hint" class="queue-edit-hint" hidden>Drag to reorder &middot; tap &times; to remove</span>
-            </div>
+            <span id="queue-edit-hint" class="queue-edit-hint" hidden>Drag to reorder &middot; tap &times; to remove</span>
             <ul id="queue" class="results"></ul>
             <p id="queue-empty" class="np-empty" hidden>The queue is empty.</p>
           </div>
@@ -564,33 +562,12 @@
           </div>
         </div>
         <div class="controls-divider" aria-hidden="true"></div>
-        <!-- Everything is one click deep: party-night tools first, then setup.
+        <!-- Everything is one click deep: setup sections first, then the
+             party-night tools, Restart last on its own full-width row.
              (The old intermediate Settings hub was folded in here.) -->
         <div class="settings-box settings-hub">
-          <p class="settings-intro">Party night. Queue behavior toggles live under Music Mix; Stats are on the toolbar.</p>
-          <div class="settings-hub-grid" role="navigation" aria-label="Party night tools">
-            <button type="button" class="settings-hub-card" id="open-memory">
-              <span class="settings-hub-title">Memory</span>
-              <span class="settings-hub-stat" id="booth-stat-memory">—</span>
-              <span class="settings-hub-desc">Songs the DJ remembers and skips</span>
-            </button>
-            <button type="button" class="settings-hub-card" id="open-suggestions">
-              <span class="settings-hub-title">Suggestions</span>
-              <span class="settings-hub-stat" id="booth-stat-suggestions">—</span>
-              <span class="settings-hub-desc">Guest idea inbox</span>
-            </button>
-            <button type="button" class="settings-hub-card" id="open-reset">
-              <span class="settings-hub-title">Reset</span>
-              <span class="settings-hub-desc">Stats, DJ shout memory, song memory, suggestions</span>
-            </button>
-            <button type="button" class="settings-hub-card" id="restart-app">
-              <span class="settings-hub-title">Restart</span>
-              <span class="settings-hub-desc">Restarts PartyQueue — playback may pause briefly</span>
-            </button>
-          </div>
-          <div class="controls-divider" aria-hidden="true"></div>
-          <p class="settings-intro">Setup. Everything DJ (voice, shout-outs, character) lives under DJ.</p>
-          <div class="settings-hub-grid" role="navigation" aria-label="Setup sections">
+          <p class="settings-intro">Host tools. Queue behavior toggles live under Music Mix; Stats are on the toolbar.</p>
+          <div class="settings-hub-grid" role="navigation" aria-label="Host tools">
             <button type="button" class="settings-hub-card" data-settings-panel="settings-look">
               <span class="settings-hub-title">Look</span>
               <span class="settings-hub-desc">Banner, header name, subtitle</span>
@@ -611,16 +588,24 @@
               <span class="settings-hub-title">Connections</span>
               <span class="settings-hub-desc">Spotify, Last.fm, Home Assistant, cache</span>
             </button>
-            <div
-              class="settings-hub-card settings-hub-card-static"
-              role="status"
-              aria-label="Sonos media URL"
-            >
-              <span class="settings-hub-title">Sonos media URL</span>
-              <span class="settings-hub-stat booth-media-url" id="booth-stat-media-url">—</span>
-              <span class="settings-hub-desc">Sonos must reach this host for DJ silence handoff.</span>
-              <button type="button" class="pill-btn" id="booth-media-url-copy">Copy</button>
-            </div>
+            <button type="button" class="settings-hub-card" id="open-memory">
+              <span class="settings-hub-title">Memory</span>
+              <span class="settings-hub-stat" id="booth-stat-memory">—</span>
+              <span class="settings-hub-desc">Songs the DJ remembers and skips</span>
+            </button>
+            <button type="button" class="settings-hub-card" id="open-suggestions">
+              <span class="settings-hub-title">Suggestions</span>
+              <span class="settings-hub-stat" id="booth-stat-suggestions">—</span>
+              <span class="settings-hub-desc">Guest idea inbox</span>
+            </button>
+            <button type="button" class="settings-hub-card" id="open-reset">
+              <span class="settings-hub-title">Reset</span>
+              <span class="settings-hub-desc">Stats, DJ shout memory, song memory, suggestions</span>
+            </button>
+            <button type="button" class="settings-hub-card settings-hub-card-full" id="restart-app">
+              <span class="settings-hub-title">Restart</span>
+              <span class="settings-hub-desc">Restarts PartyQueue — playback may pause briefly</span>
+            </button>
           </div>
         </div>
       </div>
@@ -823,6 +808,16 @@
               <span class="settings-hub-stat" id="dj-stat-lastcall">—</span>
               <span class="settings-hub-desc">End of night song + party summary</span>
             </button>
+            <div
+              class="settings-hub-card settings-hub-card-static"
+              role="status"
+              aria-label="Sonos media URL"
+            >
+              <span class="settings-hub-title">Sonos media URL</span>
+              <span class="settings-hub-stat booth-media-url" id="booth-stat-media-url">—</span>
+              <span class="settings-hub-desc">Sonos must reach this host for DJ silence handoff.</span>
+              <button type="button" class="pill-btn" id="booth-media-url-copy">Copy</button>
+            </div>
           </div>
         </div>
       </div>
