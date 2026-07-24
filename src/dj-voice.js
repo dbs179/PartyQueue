@@ -70,10 +70,6 @@ function ttsProvider() {
   return normalizeDjTtsProvider(ttsSettings().djTtsProvider);
 }
 
-function ttsEngine() {
-  return ttsSettings().djTtsEngine || djTtsEngineForProvider(ttsProvider());
-}
-
 function ttsVoice() {
   const s = ttsSettings();
   return normalizeDjTtsVoice(s.djTtsVoice, s.djTtsProvider);
@@ -2438,10 +2434,6 @@ function silenceDurationSec() {
   return normalizeDjSilenceSec(getDjVoiceSettings().djHandoffSilenceSec);
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 // Copy every prebuilt silence length into data/tts as both ramp + restore pads.
 export function syncSilencePadFiles({
   publicDir = path.join(__dirname, "..", "public"),
@@ -2657,29 +2649,20 @@ export function getPublicBaseUrl() {
   const preferredIp = pickLanIpv4();
   const cleaned = normalizeBaseUrl(fromEnv);
 
-  try {
-    const resolved = resolvePublicBaseUrl({
-      envUrl: cleaned,
-      port,
-      localIps,
-      preferredIp,
-      inDocker,
-      forceEnv,
-    });
-    if (
-      cleaned &&
-      resolved !== cleaned &&
-      !inDocker &&
-      !forceEnv
-    ) {
-      console.warn(
-        `[dj-voice] ignoring PUBLIC_BASE_URL=${cleaned} on local run (not this host); using ${resolved}`
-      );
-    }
-    return resolved;
-  } catch (err) {
-    throw err;
+  const resolved = resolvePublicBaseUrl({
+    envUrl: cleaned,
+    port,
+    localIps,
+    preferredIp,
+    inDocker,
+    forceEnv,
+  });
+  if (cleaned && resolved !== cleaned && !inDocker && !forceEnv) {
+    console.warn(
+      `[dj-voice] ignoring PUBLIC_BASE_URL=${cleaned} on local run (not this host); using ${resolved}`
+    );
   }
+  return resolved;
 }
 
 function pruneTtsFiles() {
@@ -2780,7 +2763,7 @@ function applyTempoWithFfmpeg(inputPath, outputPath, speed) {
 // proxy URL for the Sonos queue when speakers cannot reach the PartyQueue host
 // directly. Still save a local copy for debugging/pruning.
 // Optional voice/speed/provider overrides (used by Settings Preview). When
-// speed â‰  1, the local PartyQueue URL is used so Sonos hears the tempo-changed clip.
+// speed != 1, the local PartyQueue URL is used so Sonos hears the tempo-changed clip.
 export async function saveTtsClip(
   message,
   {

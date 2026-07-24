@@ -1,6 +1,6 @@
 {
   "name": "partyqueue",
-  "version": "7.3.0",
+  "version": "7.4.0",
   "description": "A LAN party app for guests to search Spotify and add songs to your Sonos queue, with Random, Never-Ending, Music Mix, and optional DJ Voice.",
   "license": "MIT",
   "type": "module",
@@ -9,6 +9,7 @@
     "start": "node --env-file-if-exists=.env src/server.js",
     "dev": "node --watch --env-file-if-exists=.env src/server.js",
     "test": "node scripts/run-tests.mjs",
+    "lint": "eslint .",
     "test:browser": "playwright test --project=chromium",
     "deploy:unraid": "powershell -ExecutionPolicy Bypass -File scripts/deploy-unraid.ps1",
     "smoke:supersede": "node --env-file-if-exists=.env scripts/smoke-announce-supersede.mjs",
@@ -24,6 +25,10 @@
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1"
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
+    "eslint": "^10.7.0",
+    "eslint-plugin-n": "^18.2.2",
+    "globals": "^17.7.0"
   }
 }

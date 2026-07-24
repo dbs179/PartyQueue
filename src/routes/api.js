@@ -1,7 +1,5 @@
 import express from "express";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import {
   createByteLruCache,
   createInFlightCoalescer,
@@ -52,9 +50,7 @@ import {
   GENRE_BUCKETS,
   genreCounts,
   eligiblePoolSize,
-  flushGenrePersist,
   isGenreDataEnabled,
-  stopGenreWarm,
   warmGenresFromPool,
 } from "../genres.js";
 import {
@@ -139,21 +135,14 @@ import {
   saveBanner,
   deleteBanner,
   bannerExists,
-  bannerPath,
-  seedStarterBanners,
 } from "../banners.js";
 import {
   listDjIcons,
   saveDjIcon,
   deleteDjIcon,
   djIconExists,
-  seedStarterDjIcons,
 } from "../dj-icon.js";
-import {
-  clearHistory,
-  flushHistoryPersist,
-  getHistory,
-} from "../play-history.js";
+import { clearHistory, getHistory } from "../play-history.js";
 import {
   originOf,
   requestedByOf,
@@ -213,7 +202,6 @@ import {
   addPlaylistToQueue,
   addRandomFromPlaylists,
   addTrackToQueue,
-  getNowPlaying,
   getQueueList,
   invalidateSonosSnapshots,
   groupAll,

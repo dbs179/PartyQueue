@@ -1,7 +1,7 @@
 // Small structured logger for PartyQueue. Default output stays human-readable
 // for Unraid/console; set LOG_FORMAT=json for one JSON object per line.
 
-function envWantsJson() {
+export function logFormatIsJson() {
   const raw = String(process.env.LOG_FORMAT || "").trim().toLowerCase();
   return raw === "json" || raw === "structured";
 }
@@ -37,7 +37,7 @@ export function redactString(value) {
     );
 }
 
-function redactValue(value, key = "", seen = new WeakSet()) {
+export function redactValue(value, key = "", seen = new WeakSet()) {
   if (value == null || typeof value === "boolean" || typeof value === "number") {
     return value;
   }
@@ -104,7 +104,7 @@ function writeJson(sink, level, scope, message, meta, now) {
  */
 export function createLogger(scope = "app", options = {}) {
   const sink = options.sink || console;
-  const json = options.json ?? envWantsJson();
+  const json = options.json ?? logFormatIsJson();
   const now = options.now || Date.now;
 
   function log(level, message, meta) {

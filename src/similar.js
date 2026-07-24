@@ -178,7 +178,7 @@ export async function getSimilarUris({
   // have thin similarity data or resolve to already-excluded songs.
   const seedQueue = shuffled(seeds).slice(0, Math.max(count * 4, 12));
 
-  const accept = (found, artist) => {
+  const accept = (found, _artist) => {
     chosen.push({
       uri: found.uri,
       id: found.id,

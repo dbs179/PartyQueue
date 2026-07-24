@@ -229,7 +229,7 @@ export function createSnapshotMonitor({
             retryMs: errorIntervalMs,
           });
         }
-        logger.warn?.(`[${monitorName}-stream] poll failed:`, err.message);
+        logger.warn?.("poll failed", { err: err.message });
         return null;
       })
       .finally(() => {

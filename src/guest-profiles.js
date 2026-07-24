@@ -182,7 +182,7 @@ export function normalizeBirthday(value) {
     return null;
   }
   const s = String(value).trim();
-  let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})(?:[\/\-]\d{2,4})?$/);
+  let m = s.match(/^(\d{1,2})[/-](\d{1,2})(?:[/-]\d{2,4})?$/);
   if (m) {
     const month = Math.floor(Number(m[1]));
     const day = Math.floor(Number(m[2]));
@@ -221,7 +221,7 @@ function inferBirthdayFromNotes(notes) {
       return normalizeBirthday({ month: MONTHS[named[1]], day: Number(named[2]) });
     }
     const numeric = lower.match(
-      /(?:birthday|bday|b-day)\s+(?:is\s+|on\s+)?(\d{1,2})[\/\-](\d{1,2})/
+      /(?:birthday|bday|b-day)\s+(?:is\s+|on\s+)?(\d{1,2})[/-](\d{1,2})/
     );
     if (numeric) {
       return normalizeBirthday({ month: Number(numeric[1]), day: Number(numeric[2]) });

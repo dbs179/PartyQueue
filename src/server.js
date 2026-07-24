@@ -6,6 +6,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createLogger, redactString } from "./logger.js";
+import { installConsoleBridge } from "./console-bridge.js";
 import { hostGuard } from "./http/host-guard.js";
 import { softRateLimit } from "./rate-limit.js";
 import {
@@ -47,6 +48,11 @@ import { flushLyricsPersist } from "./lyrics.js";
 import { flushReactionsPersist } from "./reactions.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// From here on, every console.* call (legacy call sites and dependencies
+// alike) is redacted and honors LOG_FORMAT=json.
+installConsoleBridge();
+
 const app = express();
 const PORT = Number(process.env.PORT) || 8080;
 const log = createLogger("server");
@@ -317,7 +323,7 @@ registerApiRoutes(app, {
 // Terminal error handler: sync throws and next(err) become JSON instead of
 // Express's default HTML error page. (Async rejections are converted upstream
 // by asyncHandler.) The res.json wrapper above redacts credential patterns.
-// eslint-disable-next-line no-unused-vars -- Express requires 4 args here
+// Express requires the 4-arg signature to treat this as an error handler.
 app.use((err, req, res, _next) => {
   httpLog.error("unhandled route error", {
     requestId: req.requestId,
