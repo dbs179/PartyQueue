@@ -1225,16 +1225,29 @@ discoverEnabledInput.addEventListener("change", () => {
 });
 
 // Strict fill also saves immediately — it's a safety switch like Discover.
+// Targeted payload: the toggle sits on the Booth page, so don't send the whole
+// Queue form (it may not be loaded when host sessions reset on deploy).
 strictFillInput.addEventListener("change", () => {
-  saveSettings(currentSettingsPayload());
+  saveSettings({ strictFill: strictFillInput.checked });
+});
+
+// Host bypass lives on the Booth page now, away from the Queue panel's Save
+// button, so it saves on flip like the other Booth switches.
+requestFairnessHostBypassInput?.addEventListener("change", () => {
+  saveSettings({
+    requestFairnessHostBypass: !!requestFairnessHostBypassInput.checked,
+  });
 });
 
 requestFairnessEnabledInput?.addEventListener("change", () => {
-  saveSettings(currentSettingsPayload(), {
-    toastMessage: requestFairnessEnabledInput.checked
-      ? "Request fairness enabled"
-      : "Request fairness disabled",
-  });
+  saveSettings(
+    { requestFairnessEnabled: !!requestFairnessEnabledInput.checked },
+    {
+      toastMessage: requestFairnessEnabledInput.checked
+        ? "Request fairness enabled"
+        : "Request fairness disabled",
+    }
+  );
 });
 
 // The explicit filter is an independent switch (like Never-Ending Queue): it

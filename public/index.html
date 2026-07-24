@@ -540,9 +540,11 @@
           <button id="booth-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
         </div>
         <div class="controls-divider" aria-hidden="true"></div>
-        <!-- Guest-access switches — host decisions, so they live in the Booth. -->
-        <div class="controls music-mix-toggles" aria-label="Guest access">
+        <!-- Every host switch lives here at the Booth root, grouped by area.
+             Fine-tuning (counts, windows, voices) stays in the section pages. -->
+        <div class="controls music-mix-toggles" aria-label="Host switches">
           <div class="options-list">
+            <p class="section-label settings-banner-label booth-toggle-group">Guest access</p>
             <label class="autofill" title="Block guests from adding songs until you turn this off">
               <input type="checkbox" id="requests-paused-toggle" class="autofill-input" />
               <span class="autofill-switch" aria-hidden="true"></span>
@@ -559,6 +561,68 @@
                 <span class="autofill-hint">Guests can still search, request songs, react, and view the queue</span>
               </span>
             </label>
+            <div class="controls-divider" aria-hidden="true"></div>
+            <p class="section-label settings-banner-label booth-toggle-group">Queue</p>
+            <label class="autofill" title="Prefer a short batch over re-adding songs already in memory">
+              <input type="checkbox" id="set-strict-fill" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Strict fill</span>
+                <span class="autofill-hint">Never re-add remembered songs just to fill a short batch</span>
+              </span>
+            </label>
+            <label class="autofill" title="Prevent one guest from filling the searched queue">
+              <input type="checkbox" id="set-request-fairness-enabled" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Enable request fairness</span>
+                <span class="autofill-hint">Per-User request limits — tune them under Queue</span>
+              </span>
+            </label>
+            <label class="autofill" title="Let a signed-in host add songs without fairness limits">
+              <input type="checkbox" id="set-request-fairness-host-bypass" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Host bypass</span>
+                <span class="autofill-hint">Fairness limits skip the host (needs an active PIN session)</span>
+              </span>
+            </label>
+            <div class="controls-divider" aria-hidden="true"></div>
+            <p class="section-label settings-banner-label booth-toggle-group">DJ</p>
+            <label class="autofill" title="Announce a short DJ intro before each new set via Home Assistant">
+              <input type="checkbox" id="dj-voice-toggle" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">DJ Voice</span>
+                <span class="autofill-hint">Announces each new set on Sonos (needs Home Assistant)</span>
+              </span>
+            </label>
+            <label class="autofill" title="Announce searched songs and shout out the requestor">
+              <input type="checkbox" id="set-dj-shout-enabled" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Enable shout-outs</span>
+                <span class="autofill-hint">DJ announces the song + requestor on Sonos</span>
+              </span>
+            </label>
+            <label class="autofill" title="DJ speaks a short recap before the last song (needs DJ Voice)">
+              <input type="checkbox" id="set-dj-party-recap-enabled" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Party Summary</span>
+                <span class="autofill-hint">DJ speaks a short recap before the last song (needs DJ Voice)</span>
+              </span>
+            </label>
+            <div class="controls-divider" aria-hidden="true"></div>
+            <p class="section-label settings-banner-label booth-toggle-group">Look</p>
+            <label class="autofill" title="Show or hide the build tag next to the title">
+              <input type="checkbox" id="set-show-version" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Show version number</span>
+                <span class="autofill-hint">Displays the build tag (e.g. v3.10.0) next to the title</span>
+              </span>
+            </label>
           </div>
         </div>
         <div class="controls-divider" aria-hidden="true"></div>
@@ -566,7 +630,7 @@
              party-night tools, Restart last on its own full-width row.
              (The old intermediate Settings hub was folded in here.) -->
         <div class="settings-box settings-hub">
-          <p class="settings-intro">Host tools. Queue behavior toggles live under Music Mix; Stats are on the toolbar.</p>
+          <p class="settings-intro">Host tools. Music toggles (Never-Ending, Discover, Kids) live under Music Mix; Stats are on the toolbar.</p>
           <div class="settings-hub-grid" role="navigation" aria-label="Host tools">
             <button type="button" class="settings-hub-card" data-settings-panel="settings-look">
               <span class="settings-hub-title">Look</span>
@@ -574,11 +638,11 @@
             </button>
             <button type="button" class="settings-hub-card" data-settings-panel="settings-queue">
               <span class="settings-hub-title">Queue</span>
-              <span class="settings-hub-desc">Memory, Discover, Never-Ending, Strict fill</span>
+              <span class="settings-hub-desc">Memory, Discover count, Never-Ending, fairness limits</span>
             </button>
             <button type="button" class="settings-hub-card" data-settings-panel="settings-dj">
               <span class="settings-hub-title">DJ</span>
-              <span class="settings-hub-desc">Voice, shout-outs, banner, character</span>
+              <span class="settings-hub-desc">Banner, name, voice &amp; character, timing</span>
             </button>
             <button type="button" class="settings-hub-card" data-settings-panel="settings-users">
               <span class="settings-hub-title">Users</span>
@@ -616,18 +680,7 @@
           <button id="settings-look-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
         </div>
         <div class="settings-box settings-panel">
-          <p class="settings-intro">Party branding — banner and header text.</p>
-          <label class="autofill" title="Show or hide the build tag next to the title">
-            <input type="checkbox" id="set-show-version" class="autofill-input" />
-            <span class="autofill-switch" aria-hidden="true"></span>
-            <span class="autofill-text">
-              <span class="autofill-label">Show version number</span>
-              <span class="autofill-hint">Displays the build tag (e.g. v3.10.0) next to the title</span>
-            </span>
-          </label>
-
-          <div class="controls-divider" aria-hidden="true"></div>
-
+          <p class="settings-intro">Party branding — banner and header text. The version-tag switch lives on the Booth page.</p>
           <p class="section-label settings-banner-label">Banner</p>
           <p class="settings-intro">Upload a header image (PNG, JPG, WEBP or GIF, 8&nbsp;MB max).</p>
           <div class="banner-actions">
@@ -688,26 +741,9 @@
             <span class="setting-hint">songs added each Never-Ending refill (default 5)</span>
           </div>
 
-          <label class="autofill" title="Prefer a short batch over re-adding songs already in memory">
-            <input type="checkbox" id="set-strict-fill" class="autofill-input" />
-            <span class="autofill-switch" aria-hidden="true"></span>
-            <span class="autofill-text">
-              <span class="autofill-label">Strict fill</span>
-              <span class="autofill-hint">Never re-add remembered songs just to fill a short batch</span>
-            </span>
-          </label>
-
           <div class="controls-divider" aria-hidden="true"></div>
           <p class="section-label settings-banner-label">Request fairness</p>
-          <p class="settings-intro">Optional per-User limits for searched song requests. Limits are off until enabled.</p>
-          <label class="autofill" title="Prevent one guest from filling the searched queue">
-            <input type="checkbox" id="set-request-fairness-enabled" class="autofill-input" />
-            <span class="autofill-switch" aria-hidden="true"></span>
-            <span class="autofill-text">
-              <span class="autofill-label">Enable request fairness</span>
-              <span class="autofill-hint">Uses each guest&apos;s User name, not their optional queue alias</span>
-            </span>
-          </label>
+          <p class="settings-intro">Per-User limits for searched song requests. The Strict fill, fairness, and Host bypass switches live on the Booth page; limits below use each guest&apos;s User name, not their optional queue alias.</p>
           <div id="request-fairness-fields">
             <div class="setting-row">
               <label class="setting-label" for="set-request-fairness-threshold">Limit starts at</label>
@@ -729,14 +765,6 @@
               <input type="number" id="set-request-fairness-window" class="setting-input" min="1" max="1440" step="1" inputmode="numeric" />
               <span class="setting-hint">minutes before an older request stops counting (default 30)</span>
             </div>
-            <label class="autofill" title="Let a signed-in host add songs without fairness limits">
-              <input type="checkbox" id="set-request-fairness-host-bypass" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Host bypass</span>
-                <span class="autofill-hint">Requires an active host PIN session</span>
-              </span>
-            </label>
           </div>
 
           <div class="settings-actions">
@@ -752,26 +780,7 @@
           <button id="settings-dj-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
         </div>
         <div class="settings-box settings-hub">
-          <p class="settings-intro">Party-night switches stay up top. Open a section to tune the rest. Guest notes live under Users.</p>
-          <div class="options-list">
-            <label class="autofill" title="Announce a short DJ intro before each new set via Home Assistant">
-              <input type="checkbox" id="dj-voice-toggle" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">DJ Voice</span>
-                <span class="autofill-hint">Announces each new set on Sonos (needs Home Assistant)</span>
-              </span>
-            </label>
-            <label class="autofill" title="Announce searched songs and shout out the requestor">
-              <input type="checkbox" id="set-dj-shout-enabled" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Enable shout-outs</span>
-                <span class="autofill-hint">DJ announces the song + requestor on Sonos</span>
-              </span>
-            </label>
-          </div>
-          <div class="controls-divider" aria-hidden="true"></div>
+          <p class="settings-intro">DJ Voice, shout-out, and Party Summary switches live on the Booth page. Open a section to tune the rest. Guest notes live under Users.</p>
           <div class="settings-hub-grid" role="navigation" aria-label="DJ sections">
             <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-banner">
               <span class="settings-hub-title">Banner</span>
@@ -1068,17 +1077,7 @@
           <div class="settings-actions">
             <button id="end-of-night-reset" type="button" class="pill-btn warning">Reset to Closing Time</button>
           </div>
-          <div class="controls-divider" aria-hidden="true"></div>
-          <div class="options-list">
-            <label class="autofill" title="DJ speaks a short recap before the last song (needs DJ Voice)">
-              <input type="checkbox" id="set-dj-party-recap-enabled" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Party Summary</span>
-                <span class="autofill-hint">DJ speaks a short recap before the last song (needs DJ Voice)</span>
-              </span>
-            </label>
-          </div>
+          <p class="setting-hint">The Party Summary switch lives on the Booth page.</p>
         </div>
       </div>
 

@@ -1113,6 +1113,11 @@ button.guest-name:focus-visible {
   margin: 0 0 10px;
 }
 
+/* Group captions between the Booth-root toggles (Guest access / Queue / DJ / Look). */
+.booth-toggle-group {
+  margin: 2px 0 0;
+}
+
 /* Light captions that group related controls inside the Song Selection box. */
 .setting-group-label {
   margin: 0 0 6px;
