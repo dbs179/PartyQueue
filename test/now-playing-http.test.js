@@ -65,7 +65,7 @@ test("HTTP nowplaying route uses transition-aware reader for SSE parity", () => 
 
 test("transport convergence uses the snapshot captured before the Sonos command", () => {
   const src = fs.readFileSync(
-    path.join(here, "..", "src", "routes", "api.js"),
+    path.join(here, "..", "src", "routes", "transport.js"),
     "utf8"
   );
   assert.match(

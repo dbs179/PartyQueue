@@ -1,0 +1,634 @@
+// Queue routes: guest add (with request fairness + DJ shouts), dedications,
+// playlist/Random adds, the Random picker helpers (genres, pool size,
+// Never-Ending autofill, selection), and host queue editing.
+
+import { asyncHandler } from "../http/async-handler.js";
+import {
+  queueWorkGeneration,
+  queueWorkWasPreempted,
+} from "../queue-preempt.js";
+import { isUserConnected } from "../spotify.js";
+import {
+  getAutoFillState,
+  getClosingTimeAt,
+  markClosingTime,
+  setAutoFill,
+  savePickerSelection,
+  clearQueueWithoutAutoRefill,
+} from "../autofill.js";
+import {
+  isEndOfNightTrack,
+  shouldAnnouncePartyRecap,
+} from "../closing-time.js";
+import { buildPartyRecap } from "../party-recap.js";
+import { shouldShoutOnSearch, announceRequestShout } from "../dj-shout.js";
+import {
+  GENRE_BUCKETS,
+  genreCounts,
+  eligiblePoolSize,
+  isGenreDataEnabled,
+} from "../genres.js";
+import {
+  getRandomnessSettings,
+  getDiscoverySettings,
+  getRequestFairnessSettings,
+  getContentSettings,
+} from "../settings.js";
+import {
+  announceFreshSet,
+  announceSetBatch,
+  announcePartyRecap,
+  isDjVoiceReady,
+} from "../dj-voice.js";
+import {
+  extractHostToken,
+  isValidHostToken,
+} from "../host-auth.js";
+import {
+  requestedByOf,
+  requestedByUserOf,
+  setDedication,
+} from "../queue-origin.js";
+import {
+  resolveGuestIdentity,
+  sanitizeDedication,
+} from "../display-name.js";
+import {
+  recordRequest,
+  getRequests,
+  setRequestDedication,
+} from "../request-log.js";
+import {
+  evaluateRequestFairness,
+  withRequestFairnessLock,
+} from "../request-fairness.js";
+import { spotifyTrackId } from "../sampler.js";
+import {
+  addPlaylistToQueue,
+  addRandomFromPlaylists,
+  addTrackToQueue,
+  getQueueList,
+  invalidateSonosSnapshots,
+  shouldClearQueueForRandomDj,
+  randomDjAnnouncePlan,
+  play,
+  removeQueueTrack,
+  reorderQueueTrack,
+} from "../sonos.js";
+import { requireHostControls } from "../http/host-controls.js";
+import { nudgeNowPlayingStream } from "../now-playing-http.js";
+
+/** @param {import('express').Express} app @param {import('./api.js').ApiCtx} ctx */
+export function registerQueueRoutes(app, ctx) {
+  const { queueBurstLimit, queueSustainedLimit, destructiveLimit } = ctx;
+
+  // Speaker-layer seam: production uses ../sonos.js (and autofill's clear);
+  // tests inject fakes via ctx.sonos to cover happy paths without a live
+  // speaker. DJ-voice-only calls (getQueueStatus, clearQueue,
+  // findUpcomingTrackPosition) stay dynamic imports — they never run unless
+  // DJ Voice is configured.
+  const sonos = {
+    addTrackToQueue,
+    addPlaylistToQueue,
+    addRandomFromPlaylists,
+    getQueueList,
+    removeQueueTrack,
+    reorderQueueTrack,
+    play,
+    invalidateSonosSnapshots,
+    clearQueueWithoutAutoRefill,
+    ...(ctx.sonos || {}),
+  };
+
+  app.post("/api/queue", queueBurstLimit, queueSustainedLimit, asyncHandler(async (req, res) => {
+    const preemptGeneration = queueWorkGeneration();
+    const { uri, name, artist, force, requestedBy, requestedByUser, dedication } =
+      req.body ?? {};
+    if (!uri) {
+      return res.status(400).json({ error: "Missing track uri." });
+    }
+    if (getContentSettings().requestsPaused) {
+      return res.status(403).json({ error: "Requests are paused right now." });
+    }
+    const { user, badge, alias } = resolveGuestIdentity({
+      requestedBy,
+      requestedByUser,
+    });
+    if (!user) {
+      return res.status(400).json({ error: "Enter your name before adding a song." });
+    }
+    const note = sanitizeDedication(dedication);
+    try {
+      const outcome = await withRequestFairnessLock(async () => {
+        const fairness = getRequestFairnessSettings();
+        const queueSnapshot = fairness.requestFairnessEnabled
+          ? await sonos.getQueueList()
+          : { tracks: [] };
+        const decision = evaluateRequestFairness({
+          settings: fairness,
+          user,
+          queue: Array.isArray(queueSnapshot)
+            ? queueSnapshot
+            : queueSnapshot?.tracks || [],
+          events: getRequests(),
+          target: { uri, name, artist },
+          force: !!force,
+          hostAuthenticated: isValidHostToken(extractHostToken(req)),
+        });
+        if (!decision.allowed) return { decision };
+
+        const added = await sonos.addTrackToQueue(uri, {
+          name,
+          artist,
+          force: !!force,
+          requestedBy: badge,
+          requestedByUser: user,
+          dedication: note,
+        });
+
+        // Only a newly-added or promoted queue slot consumes rolling fairness
+        // quota and Party Stats. Repeating an existing request is idempotent.
+        const reqId = spotifyTrackId(uri);
+        if (reqId && added.requestCreated !== false) {
+          recordRequest({
+            id: reqId,
+            name,
+            artist,
+            requestedBy: user,
+            alias: alias && alias !== user ? alias : null,
+            dedication: note,
+          });
+        }
+        return { result: added };
+      });
+
+      if (outcome.decision) {
+        const denied = outcome.decision;
+        if (denied.retryAfterSec) {
+          res.set("Retry-After", String(denied.retryAfterSec));
+        }
+        return res.status(denied.status || 429).json({
+          error: denied.error,
+          code: denied.code,
+          totalRequestedUpcoming: denied.totalRequestedUpcoming,
+          upcomingThreshold: denied.upcomingThreshold,
+          upcomingCount: denied.upcomingCount,
+          upcomingCap: denied.upcomingCap,
+          rollingCount: denied.rollingCount,
+          rollingMax: denied.rollingMax,
+          retryAt: denied.retryAt,
+        });
+      }
+
+      const result = outcome.result;
+      const reqId = spotifyTrackId(uri);
+
+      // House ritual: hand-adding the End of Night song signals last call. We
+      // announce it to everyone (via the Now Playing poll) and, if the
+      // Never-Ending Queue is on, switch it off so the night plays out and ends.
+      // Optional Party Summary TTS is inserted immediately before that song.
+      let closingTime = false;
+      let partyRecap = null;
+      if (
+        result.requestCreated !== false &&
+        isEndOfNightTrack({ uri, name, artist })
+      ) {
+        if (getAutoFillState().enabled) setAutoFill(false);
+        partyRecap = buildPartyRecap();
+        markClosingTime(partyRecap);
+        closingTime = true;
+        const pos = Number(result.absoluteQueuePosition ?? result.queuePosition);
+        if (
+          shouldAnnouncePartyRecap() &&
+          isDjVoiceReady() &&
+          Number.isFinite(pos) &&
+          pos >= 1
+        ) {
+          void announcePartyRecap(partyRecap, {
+            queuePosition: pos,
+            preemptGeneration,
+          }).catch(
+            (err) => console.error("[queue] party recap announce:", err.message)
+          );
+        }
+      } else if (
+        result.requestCreated !== false &&
+        shouldShoutOnSearch({
+          force: !!result.queueWasEmpty,
+          requestedBy: user,
+        })
+      ) {
+        // Mood Pulse: occasional DJ shout on search adds. Empty queue always
+        // shouts when enabled (and starts playback from the TTS clip).
+        // Speak/key off User (real name), never the queue alias.
+        const pos = Number(result.absoluteQueuePosition ?? result.queuePosition);
+        const startPlayback = !!(result.queueWasEmpty || result.deferredStart);
+        if (Number.isFinite(pos) && pos >= 1) {
+          if (startPlayback) {
+            // Await empty/idle shouts so we can fall back to playing the song if
+            // TTS/HA fails — otherwise the queue stays STOPPED forever.
+            try {
+              const voice = await announceRequestShout({
+                name,
+                artist,
+                requestedBy: user,
+                dedication: note,
+                uri,
+                trackId: reqId,
+                queuePosition: pos,
+                startPlayback: true,
+                preemptGeneration,
+              });
+              if (
+                !voice?.ok &&
+                !voice?.skipped &&
+                !queueWorkWasPreempted(preemptGeneration)
+              ) {
+                await sonos.play({ trackNumber: 1 });
+              }
+            } catch (err) {
+              console.error("[queue] request shout:", err.message);
+              if (!queueWorkWasPreempted(preemptGeneration)) {
+                try {
+                  await sonos.play({ trackNumber: 1 });
+                } catch (playErr) {
+                  console.error("[queue] shout fallback play:", playErr.message);
+                }
+              }
+            }
+          } else {
+            // Mid-set request: await TTS insert so the playhead can't race past
+            // the shout (song is often next-up after promote-ahead-of-filler).
+            // Script re-reads dedicationOf at write time so a toast Dedicate can
+            // still land while TTS is generating.
+            try {
+              await announceRequestShout({
+                name,
+                artist,
+                requestedBy: user,
+                dedication: note,
+                uri,
+                trackId: reqId,
+                queuePosition: pos,
+                startPlayback: false,
+                preemptGeneration,
+              });
+            } catch (err) {
+              console.error("[queue] request shout:", err.message);
+            }
+          }
+        }
+      } else if (
+        result.requestCreated !== false &&
+        result.deferredStart &&
+        !result.started &&
+        !queueWorkWasPreempted(preemptGeneration)
+      ) {
+        // Shout was deferred-start but didn't fire (DJ not ready, etc.) — play song.
+        void sonos.play({ trackNumber: 1 }).catch((err) =>
+          console.error("[queue] deferred start failed:", err.message)
+        );
+      }
+
+      if (closingTime) nudgeNowPlayingStream();
+      res.json({
+        ok: true,
+        ...result,
+        closingTime,
+        closingTimeAt: closingTime ? getClosingTimeAt() : 0,
+        partyRecap,
+      });
+    } catch (err) {
+      console.error("[queue]", err.message);
+      res.status(502).json({ error: err.message || "Could not add to Sonos queue." });
+    }
+  }));
+
+  // Optional post-Add dedication (toast chip). Guest-accessible; only updates
+  // searched origins. If a mid-queue shout pad is still upcoming, supersede it
+  // so the DJ can say “goes out to …”.
+  app.post("/api/queue/dedication", asyncHandler(async (req, res) => {
+    const preemptGeneration = queueWorkGeneration();
+    const { uri, dedication, name, artist } = req.body ?? {};
+    const id = spotifyTrackId(uri);
+    if (!id) {
+      return res.status(400).json({ error: "Missing track uri." });
+    }
+    const updated = setDedication(id, dedication);
+    if (!updated.ok) {
+      return res.status(400).json({ error: updated.error });
+    }
+
+    const forWho = updated.dedication;
+    // Keep the request-log wall in sync with toast Dedicate.
+    setRequestDedication(id, forWho);
+
+    if (forWho && isDjVoiceReady() && name) {
+      const by = requestedByUserOf(id) || requestedByOf(id);
+      try {
+        const { findUpcomingTrackPosition } = await import("../sonos.js");
+        const pos = await findUpcomingTrackPosition({ name, artist });
+        if (pos != null && pos >= 1) {
+          void announceRequestShout({
+            name,
+            artist,
+            requestedBy: by,
+            dedication: forWho,
+            uri,
+            trackId: id,
+            queuePosition: pos,
+            startPlayback: false,
+            preemptGeneration,
+          }).catch((err) =>
+            console.error("[queue] dedication shout refresh:", err.message)
+          );
+        }
+      } catch (err) {
+        console.warn("[queue] dedication shout refresh skipped:", err.message);
+      }
+    }
+    sonos.invalidateSonosSnapshots();
+
+    res.json({ ok: true, dedication: forWho });
+  }));
+
+  app.post("/api/queue/playlist", queueBurstLimit, queueSustainedLimit, asyncHandler(async (req, res) => {
+    const { uri } = req.body ?? {};
+    if (!uri) {
+      return res.status(400).json({ error: "Missing playlist uri." });
+    }
+    try {
+      const result = await sonos.addPlaylistToQueue(uri);
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      console.error("[queue/playlist]", err.message);
+      res.status(502).json({ error: err.message || "Could not add playlist to Sonos queue." });
+    }
+  }));
+
+  function parseCount(raw) {
+    const n = Math.round(Number(raw));
+    if (!Number.isFinite(n) || n < 1) return 50;
+    return Math.min(100, n);
+  }
+
+  app.post("/api/queue/random", destructiveLimit, asyncHandler(async (req, res) => {
+    const preemptGeneration = queueWorkGeneration();
+    if (!isUserConnected()) {
+      return res.status(400).json({ error: "Connect your Spotify account first." });
+    }
+    const { playlistIds, count, genres } = req.body ?? {};
+    const ids = Array.isArray(playlistIds) ? playlistIds : null;
+    const genreIds = Array.isArray(genres) ? genres : null;
+    const { discoverEnabled, similarCount } = getDiscoverySettings();
+    const { filterExplicit } = getContentSettings();
+    const djReady = isDjVoiceReady();
+    try {
+      // Empty-queue + DJ: clear (no-op wipe + Stop) so the playhead resets before
+      // a fresh-set announce owns position 1. Never clear when anything is already
+      // queued — guest requests must survive Random (older logic cleared on any
+      // !isPlaying / !playingFromQueue, which wiped requests during DJ pauses).
+      let clearForDj = false;
+      if (djReady) {
+        try {
+          const { getQueueStatus } = await import("../sonos.js");
+          const status = await getQueueStatus();
+          clearForDj = shouldClearQueueForRandomDj(status);
+          if (!clearForDj && status.total > 0) {
+            console.log(
+              `[queue/random] skip DJ clear — queue has ${status.total} track(s)` +
+                ` (playing=${!!status.isPlaying}, fromQueue=${!!status.playingFromQueue})`
+            );
+          }
+        } catch {
+          clearForDj = false;
+        }
+      }
+
+      if (djReady && clearForDj) {
+        try {
+          console.log("[queue/random] clearing empty queue for DJ fresh-set start");
+          const { clearQueue } = await import("../sonos.js");
+          await clearQueue();
+        } catch (err) {
+          console.error("[queue/random] DJ clear failed:", err.message);
+        }
+      }
+
+      const result = await sonos.addRandomFromPlaylists(parseCount(count), ids, genreIds, {
+        similarCount: discoverEnabled ? similarCount : 0,
+        filterExplicit,
+        deferAutoStart: djReady,
+        preemptGeneration,
+      });
+
+      // Fresh idle Random: set announce at #1 + Play. Mid-party Random: set
+      // announce immediately before the new batch (under guest requests) — never
+      // only when deferredStart (that skipped announce while music was playing).
+      let announced = false;
+      const plan = randomDjAnnouncePlan({
+        djReady,
+        added: result.added,
+        queueTotalBefore: result.queueTotalBefore,
+        clearForDj,
+        deferredStart: result.deferredStart,
+        firstAppendPosition: result.firstAppendPosition,
+      });
+      if (plan.action === "fresh_set") {
+        try {
+          const voice = await announceFreshSet(result, { preemptGeneration });
+          announced = !!voice?.ok;
+          if (voice?.ok) {
+            result.started = true;
+          } else if (!queueWorkWasPreempted(preemptGeneration)) {
+            await sonos.play({ trackNumber: 1 });
+            result.started = true;
+          }
+        } catch (err) {
+          console.error("[queue/random] DJ announce failed:", err.message);
+          if (queueWorkWasPreempted(preemptGeneration)) {
+            result.preempted = true;
+          } else {
+            try {
+              await sonos.play({ trackNumber: 1 });
+              result.started = true;
+            } catch (playErr) {
+              console.error("[queue/random] fallback play failed:", playErr.message);
+            }
+          }
+        }
+      } else if (plan.action === "before_batch") {
+        try {
+          const voice = await announceSetBatch(result, {
+            queuePosition: plan.queuePosition,
+            startPlayback: false,
+            event: "session_refill",
+            preemptGeneration,
+          });
+          announced = !!voice?.ok;
+          if (
+            plan.resumePlay &&
+            !queueWorkWasPreempted(preemptGeneration)
+          ) {
+            // Leftover queue was STOPPED — resume without seeking to the
+            // bottom announce (guest requests at the front stay first).
+            await sonos.play();
+            result.started = true;
+          }
+        } catch (err) {
+          console.error("[queue/random] mid-queue set announce failed:", err.message);
+          if (
+            plan.resumePlay &&
+            !queueWorkWasPreempted(preemptGeneration)
+          ) {
+            try {
+              await sonos.play();
+              result.started = true;
+            } catch (playErr) {
+              console.error("[queue/random] resume play failed:", playErr.message);
+            }
+          }
+        }
+      }
+
+      res.json({
+        ok: true,
+        ...result,
+        announced,
+      });
+    } catch (err) {
+      console.error("[queue/random]", err.message);
+      res.status(502).json({ error: err.message || "Could not add random songs." });
+    }
+  }));
+
+  // Available genre buckets plus how many pool songs fall in each, for the UI's
+  // genre toggles. `enabled` reports whether a Last.fm key is configured (when
+  // off, every song is "Other" and filtering is effectively a no-op).
+  // Optional `?playlistIds=a,b,c` scopes chip counts to the host's selection.
+  app.get("/api/genres", asyncHandler(async (req, res) => {
+    try {
+      const raw = req.query?.playlistIds;
+      const playlistIds =
+        typeof raw === "string" && raw.trim()
+          ? raw.split(",").map((s) => s.trim()).filter(Boolean)
+          : null;
+      res.json({
+        enabled: isGenreDataEnabled(),
+        buckets: GENRE_BUCKETS,
+        counts: await genreCounts({ playlistIds }),
+      });
+    } catch (err) {
+      console.error("[genres]", err.message);
+      res.status(500).json({ error: err.message || "Could not load genres." });
+    }
+  }));
+
+  // How many unique tracks Random would draw from with the given filters. Powers
+  // the pool-size hint under the genre chips. Also returns per-genre counts for
+  // the same playlist scope so chip numbers stay in sync with the selection.
+  app.post("/api/pool-size", asyncHandler(async (req, res) => {
+    try {
+      const { playlistIds, genres } = req.body ?? {};
+      const ids = Array.isArray(playlistIds) ? playlistIds : null;
+      const size = await eligiblePoolSize({
+        playlistIds: ids,
+        genres: Array.isArray(genres) ? genres : null,
+      });
+      const counts = await genreCounts({ playlistIds: ids });
+      const { songMemory } = getRandomnessSettings();
+      res.json({
+        ok: true,
+        ...size,
+        counts,
+        songMemory,
+        // Soft warning thresholds: under memory size, or under ~10x a typical
+        // Random-25 batch, repeats / relaxation become likely.
+        warn: size.tracks > 0 && (size.tracks < songMemory || size.tracks < 250),
+      });
+    } catch (err) {
+      console.error("[pool-size]", err.message);
+      res.status(500).json({ error: err.message || "Could not measure pool size." });
+    }
+  }));
+
+  // "Never-Ending Queue": auto-tops up the queue with random songs when it runs
+  // low. State is server-side so it works with no browser open.
+  app.get("/api/autofill", (_req, res) => {
+    res.json(getAutoFillState());
+  });
+
+  app.post("/api/autofill", (req, res) => {
+    try {
+      const { enabled, playlistIds, genres } = req.body ?? {};
+      if (enabled && !isUserConnected()) {
+        return res.status(400).json({ error: "Connect your Spotify account first." });
+      }
+      const ids = Array.isArray(playlistIds) ? playlistIds : undefined;
+      const genreIds = Array.isArray(genres) ? genres : undefined;
+      const state = setAutoFill(!!enabled, ids, genreIds);
+      nudgeNowPlayingStream();
+      res.json({ ok: true, ...state });
+    } catch (err) {
+      console.error("[autofill]", err.message);
+      res.status(500).json({ error: err.message || "Could not save Never-Ending setting." });
+    }
+  });
+
+  // Persist playlist + genre selection for Random / Never-Ending even when the
+  // monitor is off, so every phone and the server share one host selection.
+  app.post("/api/selection", (req, res) => {
+    try {
+      const { playlistIds, genres } = req.body ?? {};
+      const ids = Array.isArray(playlistIds) ? playlistIds : undefined;
+      const genreIds = Array.isArray(genres) ? genres : undefined;
+      res.json({ ok: true, ...savePickerSelection(ids, genreIds) });
+    } catch (err) {
+      console.error("[selection]", err.message);
+      res.status(500).json({ error: err.message || "Could not save selection." });
+    }
+  });
+
+  app.get("/api/queue/list", asyncHandler(async (_req, res) => {
+    try {
+      res.json({ tracks: await sonos.getQueueList() });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  }));
+
+  app.post("/api/queue/remove", destructiveLimit, requireHostControls, asyncHandler(async (req, res) => {
+    const { uri, position } = req.body ?? {};
+    if (!uri) return res.status(400).json({ error: "Missing track uri." });
+    try {
+      res.json({ ok: true, ...(await sonos.removeQueueTrack({ uri, position })) });
+    } catch (err) {
+      console.error("[queue/remove]", err.message);
+      res.status(502).json({ error: err.message || "Could not remove the song." });
+    }
+  }));
+
+  app.post("/api/queue/reorder", destructiveLimit, requireHostControls, asyncHandler(async (req, res) => {
+    const { uri, fromPosition, beforeUri, beforePosition } = req.body ?? {};
+    if (!uri) return res.status(400).json({ error: "Missing track uri." });
+    try {
+      res.json({
+        ok: true,
+        ...(await sonos.reorderQueueTrack({ uri, fromPosition, beforeUri, beforePosition })),
+      });
+    } catch (err) {
+      console.error("[queue/reorder]", err.message);
+      res.status(502).json({ error: err.message || "Could not move the song." });
+    }
+  }));
+
+  app.post("/api/queue/clear", destructiveLimit, requireHostControls, asyncHandler(async (_req, res) => {
+    try {
+      const result = await sonos.clearQueueWithoutAutoRefill();
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      console.error("[clear]", err.message);
+      res.status(502).json({ error: err.message || "Could not clear the Sonos queue." });
+    }
+  }));
+}

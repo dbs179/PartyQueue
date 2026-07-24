@@ -20,7 +20,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const apiSrc = fs.readFileSync(
-  path.join(__dirname, "../src/routes/api.js"),
+  path.join(__dirname, "../src/routes/dj.js"),
   "utf8"
 );
 

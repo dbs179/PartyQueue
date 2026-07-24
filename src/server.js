@@ -304,6 +304,12 @@ const transportLimit = softRateLimit({
   max: 4,
   message: "Easy on the controls — try again in a moment.",
 });
+// Tag the limiter closures so the route-table parity test (and debuggers) can
+// tell them apart — they all share the internal name "rateLimitMiddleware".
+queueBurstLimit.displayName = "queueBurstLimit";
+queueSustainedLimit.displayName = "queueSustainedLimit";
+destructiveLimit.displayName = "destructiveLimit";
+transportLimit.displayName = "transportLimit";
 
 registerNowPlayingRoutes(app);
 registerQueueStreamRoutes(app);
