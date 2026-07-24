@@ -925,11 +925,11 @@ export function registerApiRoutes(app, ctx) {
   
   // Hero banners: list stored banners + the active one, upload a new one, pick an
   // existing one, or delete. The active banner is tracked in branding settings
-  // (`heroBanner`); null means the built-in public/hero.png.
+  // (`heroBanner`); null means the built-in public/hero.jpg.
   app.get("/api/banners", requireHost, (_req, res) => {
     res.json({
       active: getBrandingSettings().heroBanner,
-      defaultUrl: "/hero.png",
+      defaultUrl: "/hero.jpg",
       banners: listBanners(),
     });
   });

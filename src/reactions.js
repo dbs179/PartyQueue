@@ -170,6 +170,49 @@ function persist() {
   }
 }
 
+// Reaction taps arrive in bursts (a chorus drop gets a dozen in a second);
+// coalesce them into one disk write like the lyrics cache does.
+const PERSIST_DEBOUNCE_MS = 250;
+let persistTimer = null;
+
+function schedulePersist() {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    persist();
+  }, PERSIST_DEBOUNCE_MS);
+  persistTimer.unref?.();
+}
+
+/** Flush a pending debounced write (shutdown / tests). */
+export function flushReactionsPersist() {
+  if (!persistTimer) return;
+  clearTimeout(persistTimer);
+  persistTimer = null;
+  persist();
+}
+
+// The store keeps one row per reacted track until a host reset; a long
+// multi-party stretch without resets would grow it forever. Past the cap,
+// drop the least recently reacted tracks (with slack so the sort is rare).
+const TRACK_CAP = 3000;
+const TRACK_CAP_SLACK = 150;
+
+function pruneIfOverCap(keepId) {
+  const ids = Object.keys(cache.byTrack);
+  if (ids.length <= TRACK_CAP + TRACK_CAP_SLACK) return;
+  const lastActive = (row) =>
+    Math.max(Number(row?.moodAt) || 0, Number(row?.micAt) || 0);
+  const oldestFirst = ids.sort(
+    (a, b) => lastActive(cache.byTrack[a]) - lastActive(cache.byTrack[b])
+  );
+  for (const id of oldestFirst) {
+    if (Object.keys(cache.byTrack).length <= TRACK_CAP) break;
+    if (id === keepId) continue;
+    delete cache.byTrack[id];
+  }
+}
+
 function snapshot(trackId, guestId = "") {
   const guest = cleanGuestId(guestId);
   if (!trackId) {
@@ -234,7 +277,8 @@ export function setReaction(trackId, kind, guestId, meta = {}) {
   }
 
   cache.byTrack[trackId] = row;
-  persist();
+  pruneIfOverCap(trackId);
+  schedulePersist();
   return { ok: true, ...snapshot(trackId, guest) };
 }
 
@@ -406,6 +450,10 @@ export function clearKaraokeReactions() {
 
 /** Wipe all reactions + karaoke mic tags (tests / full wipe). */
 export function clearReactions() {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
   cache = { byTrack: {} };
   try {
     fs.rmSync(STORE_FILE, { force: true });
@@ -417,5 +465,9 @@ export function clearReactions() {
 
 /** Test helper — next read reloads from disk. */
 export function resetCacheForTests() {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
   cache = null;
 }

@@ -1032,7 +1032,7 @@ export const BRANDING_DEFAULTS = {
   eventName: "PartyQueue",
   subtitle: "",
   showVersion: false,
-  heroBanner: null, // null = built-in public/hero.png; otherwise a data/banners file
+  heroBanner: null, // null = built-in public/hero.jpg; otherwise a data/banners file
 };
 const BRANDING_MAXLEN = { eventName: 60, subtitle: 120 };
 

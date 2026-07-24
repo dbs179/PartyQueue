@@ -16,7 +16,7 @@ const STARTER_DIR = path.join(__dirname, "..", "public", "banners");
 export const MAX_BANNERS = 20;
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB decoded image cap
 
-// Bundled defaults (public/banners → data/banners). hero.png remains the
+// Bundled defaults (public/banners → data/banners). hero.jpg remains the
 // true app Default (null); these are extra gallery choices.
 const STARTER_BANNERS = [
   { src: "vinyl.jpg", dest: "banner-vinyl.jpg" },

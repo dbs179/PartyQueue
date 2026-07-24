@@ -2134,7 +2134,7 @@ const MAX_BANNER_BYTES = 8 * 1024 * 1024;
 function renderBanners(data) {
   if (!bannerGallery) return;
   const active = data.active ?? null;
-  const defaultUrl = data.defaultUrl || "hero.png";
+  const defaultUrl = data.defaultUrl || "hero.jpg";
   bannerGallery.innerHTML = "";
 
   const tiles = [{ name: null, url: defaultUrl, starter: true }];

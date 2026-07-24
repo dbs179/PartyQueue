@@ -117,8 +117,10 @@ test("shouldAutofillRefill skips deep queues and external sources with leftovers
   );
 });
 
-test("autofillNextDelayMs uses critical cadence when idle near-empty", () => {
-  const critical = autofillNextDelayMs({
+test("autofillNextDelayMs never burns critical polls while stopped", () => {
+  // Overnight state: stopped, empty queue. Refill can't fire here, so hold the
+  // gentle idle cadence instead of the old 5s critical loop (~70k calls/night).
+  const stoppedEmpty = autofillNextDelayMs({
     playingFromQueue: true,
     isPlaying: false,
     upcoming: 0,
@@ -130,8 +132,21 @@ test("autofillNextDelayMs uses critical cadence when idle near-empty", () => {
     upcoming: 8,
     total: 10,
   });
-  assert.equal(critical, 5_000);
+  assert.equal(stoppedEmpty, 60_000);
   assert.equal(idleDeep, 60_000);
+});
+
+test("autofillNextDelayMs decays deep stopped queues, capped at 5 minutes", () => {
+  const stoppedDeep = { playingFromQueue: false, isPlaying: false, upcoming: 8, total: 10 };
+  assert.equal(autofillNextDelayMs(stoppedDeep, 1, 0), 60_000);
+  assert.equal(autofillNextDelayMs(stoppedDeep, 1, 1), 120_000);
+  assert.equal(autofillNextDelayMs(stoppedDeep, 1, 2), 240_000);
+  assert.equal(autofillNextDelayMs(stoppedDeep, 1, 3), 300_000);
+  assert.equal(autofillNextDelayMs(stoppedDeep, 1, 50), 300_000);
+  // Near-empty stopped queues never decay past the idle cadence: an externally
+  // resumed last song must still be caught within a minute.
+  const stoppedEmpty = { playingFromQueue: false, isPlaying: false, upcoming: 0, total: 0 };
+  assert.equal(autofillNextDelayMs(stoppedEmpty, 1, 50), 60_000);
 });
 
 test("autofillNextDelayMs tightens while playing near the end", () => {

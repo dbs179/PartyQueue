@@ -50,6 +50,33 @@ export function spotifyCooldownMs() {
   return Math.max(0, rateLimitedUntil - Date.now());
 }
 
+// --- Network-failure breaker ------------------------------------------------
+// The 429 cooldown above only trips on an HTTP response. When Spotify is
+// unreachable (DNS failure, outage, WAN down), every guest keystroke batch
+// would still spawn a fetch that has to time out. Mirror the lyrics
+// providers' pattern: one failure trips a short backoff and everything
+// short-circuits instantly until it expires.
+const NETWORK_FAIL_BACKOFF_MS = 10_000;
+let networkFailedUntil = 0;
+
+/** fetch() that trips/honors the outage backoff on network-level failures. */
+async function spotifyNetworkFetch(url, opts) {
+  const wait = networkFailedUntil - Date.now();
+  if (wait > 0) {
+    throw new Error(
+      `Spotify is unreachable; retrying in ${Math.ceil(wait / 1000)}s`
+    );
+  }
+  try {
+    const res = await fetch(url, opts);
+    networkFailedUntil = 0;
+    return res;
+  } catch (err) {
+    networkFailedUntil = Date.now() + NETWORK_FAIL_BACKOFF_MS;
+    throw new Error(`Spotify request failed: ${err?.message || err}`);
+  }
+}
+
 // Wrapper for Spotify Web API *data* requests (not token calls): refuse to call
 // during a cooldown, and on a 429 set the cooldown from Retry-After (default
 // 30s) before throwing so callers fail fast instead of piling on more requests.
@@ -59,7 +86,7 @@ async function spotifyApiFetch(url, opts) {
   if (wait > 0) {
     throw new Error(`Spotify is rate-limited; retry in ${Math.ceil(wait / 1000)}s`);
   }
-  const res = await fetch(url, opts);
+  const res = await spotifyNetworkFetch(url, opts);
   if (res.status === 429) {
     const ra = Number(res.headers.get("retry-after"));
     const backoff = Number.isFinite(ra) && ra > 0 ? ra * 1000 : 30_000;
@@ -181,7 +208,7 @@ async function getUserAccessToken() {
     const { clientId, clientSecret } = getCredentials();
     const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
-    const res = await fetch(TOKEN_URL, {
+    const res = await spotifyNetworkFetch(TOKEN_URL, {
       method: "POST",
       headers: {
         Authorization: `Basic ${basic}`,
@@ -419,6 +446,7 @@ export function clearSpotifyCaches() {
 // is unreachable so the caller can surface the error.
 export async function rewarmCaches() {
   rateLimitedUntil = 0; // the host explicitly asked; allow an immediate attempt
+  networkFailedUntil = 0;
   clearSpotifyCaches();
   const playlists = await getPlaylists({ force: true });
   const pool = await buildPlaylistPool({ force: true });
@@ -470,7 +498,7 @@ async function getAccessToken() {
     const { clientId, clientSecret } = getCredentials();
     const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
-    const res = await fetch(TOKEN_URL, {
+    const res = await spotifyNetworkFetch(TOKEN_URL, {
       method: "POST",
       headers: {
         Authorization: `Basic ${basic}`,
@@ -561,6 +589,16 @@ export async function searchTracks(query, limit = 20) {
 // immutable), and looked up in batches of 50 (the API max). Unknown/invalid IDs
 // are simply omitted from the returned map. Never throws for partial failures.
 const trackInfoCache = new Map();
+const TRACK_INFO_CACHE_MAX = 2000; // LRU cap: metadata is small but unbounded
+
+function setTrackInfoCache(id, info) {
+  if (trackInfoCache.has(id)) trackInfoCache.delete(id); // refresh insertion order
+  trackInfoCache.set(id, info);
+  while (trackInfoCache.size > TRACK_INFO_CACHE_MAX) {
+    const oldest = trackInfoCache.keys().next().value;
+    trackInfoCache.delete(oldest);
+  }
+}
 
 export async function getTracksByIds(ids) {
   const out = new Map();
@@ -602,7 +640,7 @@ export async function getTracksByIds(ids) {
         artist: t.artists?.map((a) => a.name).join(", ") ?? "",
         image: pickImage(t.album?.images),
       };
-      trackInfoCache.set(t.id, info);
+      setTrackInfoCache(t.id, info);
       out.set(t.id, info);
     }
   }

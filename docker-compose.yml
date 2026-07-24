@@ -15,6 +15,13 @@ services:
     # Alternatively, set SPOTIFY_REFRESH_TOKEN in .env and drop this volume.
     volumes:
       - ./data:/app/data
+    # Guardrail: a hypothetical slow leak becomes a clean restart (via
+    # restart: unless-stopped) instead of pressuring the whole host. The heap
+    # cap keeps V8 comfortably under the container limit (headroom for
+    # buffers, ffmpeg, and the TTS pipeline).
+    mem_limit: 512m
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=384"
     # Show the app's icon in the UnRaid Docker tab (served by the app itself).
     # Uses PUBLIC_BASE_URL from .env when set; otherwise localhost (host network).
     labels:

@@ -98,6 +98,7 @@ test("persists votes to disk", () => {
     artist: "Singer",
     by: "Alex",
   });
+  reactions.flushReactionsPersist(); // writes are debounced
   const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
   assert.equal(raw.byTrack.t9.votes.guestpersist1.kind, "fire");
   assert.equal(raw.byTrack.t9.votes.guestpersist1.by, "Alex");

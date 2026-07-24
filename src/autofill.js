@@ -52,6 +52,7 @@ const NEAR_MS = 30_000; // 2 left -> every 30s
 // check often once we're on the final upcoming track.
 const CRITICAL_MS = 5_000; // 0–1 left -> every 5s
 const IDLE_MS = 60_000; // queue not the active source / not playing
+const IDLE_MAX_MS = 5 * 60_000; // decayed ceiling for long-stopped deep queues
 const AFTER_FILL_MS = 8_000; // brief cool-down after a refill
 const ERROR_MS = 30_000; // back off after a failed check
 const START_DELAY_MS = 10_000; // wait after boot (pool may still be warming)
@@ -73,6 +74,7 @@ let filling = false;
 let stopping = false;
 let activeTick = null;
 let queueClearPauseCount = 0;
+let idleStreak = 0; // consecutive not-playing ticks, drives the idle decay
 
 function clearTimer() {
   if (timer) {
@@ -122,10 +124,19 @@ export function shouldAutofillRefill(
 }
 
 /**
- * Pure: adaptive poll delay. Near-empty STOPPED queues use CRITICAL_MS so we
- * recover quickly; deep idle queues stay on IDLE_MS. Exported for tests.
+ * Pure: adaptive poll delay. While playing, tighten as the queue empties.
+ * When stopped/paused a refill can never fire (shouldAutofillRefill requires
+ * active queue playback), so never burn CRITICAL_MS polls on a sleeping
+ * speaker overnight: near-empty queues hold the 60s idle cadence (still
+ * catches an externally resumed last song in time) and deep queues decay
+ * toward IDLE_MAX_MS with `idleStreak`. nudgeAutoFill() snaps back instantly
+ * for in-app transport/queue actions. Exported for tests.
  */
-export function autofillNextDelayMs(status, threshold = REFILL_THRESHOLD) {
+export function autofillNextDelayMs(
+  status,
+  threshold = REFILL_THRESHOLD,
+  idleStreak = 0
+) {
   const upcoming = Number(status?.upcoming);
   const u = Number.isFinite(upcoming) ? upcoming : 0;
   const total = Number(status?.total) || 0;
@@ -135,8 +146,9 @@ export function autofillNextDelayMs(status, threshold = REFILL_THRESHOLD) {
     const cap = Math.max(NEAR_MS, u * SONG_MS * SAFETY);
     return Math.min(bandDelay(u), cap);
   }
-  // STOPPED / paused / not on queue: poll slowly unless near-empty.
-  return nearEmpty ? CRITICAL_MS : IDLE_MS;
+  if (nearEmpty) return IDLE_MS;
+  const streak = Math.min(Math.max(0, Number(idleStreak) || 0), 3);
+  return Math.min(IDLE_MS * 2 ** streak, IDLE_MAX_MS);
 }
 
 async function tick() {
@@ -206,7 +218,10 @@ async function tick() {
       return;
     }
 
-    schedule(autofillNextDelayMs(status));
+    const delay = autofillNextDelayMs(status, REFILL_THRESHOLD, idleStreak);
+    if (status?.playingFromQueue && status?.isPlaying) idleStreak = 0;
+    else idleStreak += 1;
+    schedule(delay);
   } catch (err) {
     console.error("[autofill] check failed:", err.message);
     schedule(ERROR_MS);
@@ -220,6 +235,7 @@ export function getAutoFillState() {
 /** Re-check soon after a skip/drain so Never-Ending can't lag behind Next. */
 export function nudgeAutoFill() {
   if (!enabled || filling || stopping || queueClearPauseCount > 0) return false;
+  idleStreak = 0;
   schedule(NUDGE_MS);
   return true;
 }
@@ -250,6 +266,7 @@ export async function clearQueueWithoutAutoRefill(options = {}) {
   } finally {
     queueClearPauseCount = Math.max(0, queueClearPauseCount - 1);
     if (queueClearPauseCount === 0 && enabled && !stopping) {
+      idleStreak = 0;
       schedule(CRITICAL_MS);
     }
   }
@@ -295,6 +312,7 @@ export function setAutoFill(on, ids, genreIds) {
   saveSettings({ ...loadSettings(), neverEnding: enabled, playlistIds, genres });
 
   clearTimer();
+  idleStreak = 0;
   if (enabled) {
     schedule(2_000); // first check shortly after enabling
   }

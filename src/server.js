@@ -44,6 +44,7 @@ import {
 } from "./queue-maintenance.js";
 import { flushHistoryPersist } from "./play-history.js";
 import { flushLyricsPersist } from "./lyrics.js";
+import { flushReactionsPersist } from "./reactions.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -153,6 +154,21 @@ app.use((req, res, next) => {
 // Inject saved branding JSON into index.html before first paint.
 const INDEX_HTML_PATH = path.join(__dirname, "..", "public", "index.html");
 
+// Template cache: a cheap stat per request instead of re-reading ~100 KB of
+// HTML for every page load (and twice on the error path). mtime validation
+// keeps local-dev edits visible without a restart.
+let indexTemplateCache = null; // { html, mtimeMs }
+function indexTemplate() {
+  const { mtimeMs } = fs.statSync(INDEX_HTML_PATH);
+  if (!indexTemplateCache || indexTemplateCache.mtimeMs !== mtimeMs) {
+    indexTemplateCache = {
+      html: fs.readFileSync(INDEX_HTML_PATH, "utf8"),
+      mtimeMs,
+    };
+  }
+  return indexTemplateCache.html;
+}
+
 // Per-request script nonce: inline scripts in index.html carry
 // nonce="__PQ_NONCE__", so only markup we templated ourselves can execute.
 // Spotify CDNs are allowed for search-result and playlist artwork; media
@@ -174,8 +190,7 @@ function indexCsp(nonce) {
 
 function renderIndexHtml(brandJson) {
   const nonce = crypto.randomBytes(16).toString("base64");
-  let html = fs.readFileSync(INDEX_HTML_PATH, "utf8");
-  html = html
+  const html = indexTemplate()
     .replaceAll("__PQ_BRAND_JSON__", brandJson)
     .replaceAll("__PQ_NONCE__", nonce);
   return { html, nonce };
@@ -210,14 +225,32 @@ function sendBrandedIndex(_req, res) {
 }
 app.get(["/", "/index.html"], sendBrandedIndex);
 
-// Serve the UI with "no-cache" so browsers always revalidate (cheap 304s).
+// App code (HTML/CSS/JS) stays "no-cache" so deploys reach guests immediately
+// (cheap 304 revalidations). Images and vendored libs rarely change and cost
+// each phone real transfer time on party Wi-Fi, so they get a day of cache.
+const STATIC_IMAGE_RE = /\.(png|jpe?g|webp|gif|ico|svg)$/i;
 app.use(
   express.static(path.join(__dirname, "..", "public"), {
     index: false,
-    setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
+    setHeaders: (res, filePath) => {
+      const longLived =
+        STATIC_IMAGE_RE.test(filePath) || /[\\/]vendor[\\/]/.test(filePath);
+      res.setHeader(
+        "Cache-Control",
+        longLived ? "public, max-age=86400" : "no-cache"
+      );
+    },
   })
 );
-app.use("/banners", express.static(path.join(__dirname, "..", "data", "banners")));
+// Uploaded banners/DJ icons get random filenames, so cached copies can never
+// go stale under the same URL — cache them for a week.
+app.use(
+  "/banners",
+  express.static(path.join(__dirname, "..", "data", "banners"), {
+    setHeaders: (res) =>
+      res.setHeader("Cache-Control", "public, max-age=604800"),
+  })
+);
 app.get("/banner", (_req, res) => {
   res.setHeader("Cache-Control", "no-cache");
   const name = getBrandingSettings().heroBanner;
@@ -225,12 +258,13 @@ app.get("/banner", (_req, res) => {
     const file = bannerPath(name);
     if (file) return res.sendFile(file);
   }
-  return res.sendFile(path.join(__dirname, "..", "public", "hero.png"));
+  return res.sendFile(path.join(__dirname, "..", "public", "hero.jpg"));
 });
 app.use(
   "/dj-icon",
   express.static(path.join(__dirname, "..", "data", "dj-icons"), {
-    setHeaders: (res) => res.setHeader("Cache-Control", "no-cache"),
+    setHeaders: (res) =>
+      res.setHeader("Cache-Control", "public, max-age=604800"),
   })
 );
 app.use(
@@ -303,6 +337,7 @@ function flushShutdownStores() {
     ["history", flushHistoryPersist],
     ["genres", flushGenrePersist],
     ["lyrics", flushLyricsPersist],
+    ["reactions", flushReactionsPersist],
   ]) {
     try {
       flush();
