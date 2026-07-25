@@ -5523,8 +5523,50 @@ function mirrorLyricsContainers() {
   if (!source) return;
   for (const el of containers) {
     if (el === source || lyricsContainerHasPaint(el)) continue;
+    // Party Display uses a 3-line window for synced lyrics — not a full list clone.
+    if (
+      el === displayLyrics &&
+      npSyncedLines &&
+      source.querySelector(".np-fs-lyrics-synced")
+    ) {
+      continue;
+    }
     el.innerHTML = source.innerHTML;
   }
+}
+
+/**
+ * Party Display karaoke window: previous / current / next only.
+ * Avoids scrollIntoView, which can shove the TV layout off-screen.
+ */
+function paintDisplayLyricWindow(activeIdx) {
+  if (!displayLyrics || !npSyncedLines) return;
+  const ul = document.createElement("ul");
+  ul.className = "np-fs-lyrics-synced party-display-lyrics-window";
+  const slots = [
+    { i: activeIdx - 1, cls: "is-past" },
+    { i: activeIdx, cls: "is-active" },
+    { i: activeIdx + 1, cls: "is-next" },
+  ];
+  for (const slot of slots) {
+    const li = document.createElement("li");
+    li.className = "np-fs-line";
+    const line =
+      slot.i >= 0 && slot.i < npSyncedLines.length
+        ? npSyncedLines[slot.i]
+        : null;
+    if (line) {
+      li.textContent = line.text;
+      if (slot.cls === "is-active") li.classList.add("is-active");
+      else if (slot.cls === "is-past") li.classList.add("is-past");
+      else li.classList.add("is-next");
+    } else {
+      li.classList.add("is-empty");
+      li.innerHTML = "&nbsp;";
+    }
+    ul.appendChild(li);
+  }
+  displayLyrics.replaceChildren(ul);
 }
 
 function setNpFsLyricsStatus(msg) {
@@ -5546,7 +5588,8 @@ function renderPlainLyrics(text) {
 
 function renderSyncedLyrics(lines) {
   npSyncedLines = lines;
-  for (const el of lyricsContainers()) {
+  // Full scrolling sheet for the phone overlay; TV uses a 3-line window.
+  if (npFsLyrics) {
     const ul = document.createElement("ul");
     ul.className = "np-fs-lyrics-synced";
     for (const line of lines) {
@@ -5555,36 +5598,34 @@ function renderSyncedLyrics(lines) {
       li.textContent = line.text;
       ul.appendChild(li);
     }
-    el.innerHTML = "";
-    el.appendChild(ul);
+    npFsLyrics.replaceChildren(ul);
   }
   updateSyncedHighlight(true);
 }
 
 function renderLyricsAttribution(data) {
-  if (!data) return;
+  if (!data || !npFsLyrics) return;
+  // Attribution stays on the phone overlay only — keep the TV lyrics box compact.
   const isPlain = data.syncKind === "plain" || !data.syncedLyrics;
   const attribution = data.provider === "unison" ? data.attribution : null;
   if (!isPlain && !attribution) return;
 
-  for (const el of lyricsContainers()) {
-    const note = document.createElement("p");
-    note.className = "np-fs-lyrics-attribution";
-    if (isPlain) note.append("Plain lyrics");
-    if (attribution?.url) {
-      if (isPlain) note.append(" · ");
-      const link = document.createElement("a");
-      link.href = attribution.url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      link.textContent = attribution.text || "Lyrics from Unison";
-      note.appendChild(link);
-    } else if (attribution?.text) {
-      if (isPlain) note.append(" · ");
-      note.append(attribution.text);
-    }
-    el.prepend(note);
+  const note = document.createElement("p");
+  note.className = "np-fs-lyrics-attribution";
+  if (isPlain) note.append("Plain lyrics");
+  if (attribution?.url) {
+    if (isPlain) note.append(" · ");
+    const link = document.createElement("a");
+    link.href = attribution.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = attribution.text || "Lyrics from Unison";
+    note.appendChild(link);
+  } else if (attribution?.text) {
+    if (isPlain) note.append(" · ");
+    note.append(attribution.text);
   }
+  npFsLyrics.prepend(note);
 }
 
 function estimatedPositionSec() {
@@ -5725,32 +5766,32 @@ function updateSyncedHighlight(forceScroll) {
     if (npSyncedLines[i].t <= pos + LYRICS_LEAD_SEC) idx = i;
     else break;
   }
-  for (const root of lyricsContainers()) {
-    const ul = root.querySelector(".np-fs-lyrics-synced");
-    if (!ul) continue;
-    const kids = ul.children;
-    let activeEl = null;
-    let becameActive = false;
-    for (let i = 0; i < kids.length; i++) {
-      const el = kids[i];
-      const wasActive = el.classList.contains("is-active");
-      el.classList.toggle("is-active", i === idx);
-      el.classList.toggle("is-past", i < idx);
-      if (i === idx) {
-        activeEl = el;
-        if (!wasActive) becameActive = true;
-      }
+  if (currentView === "display") paintDisplayLyricWindow(idx);
+  if (!npFsLyrics) return;
+  const ul = npFsLyrics.querySelector(".np-fs-lyrics-synced");
+  if (!ul) return;
+  const kids = ul.children;
+  let activeEl = null;
+  let becameActive = false;
+  for (let i = 0; i < kids.length; i++) {
+    const el = kids[i];
+    const wasActive = el.classList.contains("is-active");
+    el.classList.toggle("is-active", i === idx);
+    el.classList.toggle("is-past", i < idx);
+    if (i === idx) {
+      activeEl = el;
+      if (!wasActive) becameActive = true;
     }
-    if (
-      activeEl &&
-      (becameActive || forceScroll) &&
-      shouldScrollLyricsRoot(root)
-    ) {
-      activeEl.scrollIntoView({
-        block: "center",
-        behavior: forceScroll ? "auto" : "smooth",
-      });
-    }
+  }
+  if (
+    activeEl &&
+    (becameActive || forceScroll) &&
+    shouldScrollLyricsRoot(npFsLyrics)
+  ) {
+    activeEl.scrollIntoView({
+      block: "center",
+      behavior: forceScroll ? "auto" : "smooth",
+    });
   }
 }
 
