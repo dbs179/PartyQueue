@@ -48,14 +48,15 @@ export const GENRE_BUCKETS = [
 // Bump when the tag->bucket rules below change. Cached artists that still have
 // their raw tags are re-mapped locally (free); artists stuck in "Other" under an
 // older mapping are re-fetched once to try the new buckets.
-const MAPPING_VERSION = 2;
+const MAPPING_VERSION = 3;
 
 const BUCKET_IDS = new Set(GENRE_BUCKETS.map((b) => b.id));
 
 // How many of an artist's top tags we consider, and the minimum Last.fm
-// popularity (0-100) a tag needs to count. Top tags are the most-agreed-on, so
-// a handful is plenty and avoids noisy long-tail tags ("seen live", "favorite").
-const TOP_TAGS = 6;
+// popularity (0-100) a tag needs to count. Only the two strongest tags drive
+// the bucket so a weak third tag (e.g. rnb under norteño/latin) can't hijack
+// the lane.
+const TOP_TAGS = 2;
 const MIN_TAG_COUNT = 10;
 
 // Throttle Last.fm calls. Their terms ask for <= ~5 req/sec; we stay well under.
@@ -89,10 +90,24 @@ function tagToBuckets(tag) {
 }
 
 // Reduce an artist's top tags to the set of buckets they belong to.
-function tagsToBuckets(tags) {
+// Only the strongest TOP_TAGS (by Last.fm count) are considered, so weaker
+// long-tail tags can't pull an artist into an unrelated lane.
+export function tagsToBuckets(tags) {
+  const ranked = (Array.isArray(tags) ? tags : [])
+    .map((t) => ({
+      name: t?.name,
+      count: Number(t?.count),
+    }))
+    .filter((t) => t.name)
+    .sort((a, b) => {
+      const ac = Number.isFinite(a.count) ? a.count : -1;
+      const bc = Number.isFinite(b.count) ? b.count : -1;
+      return bc - ac;
+    })
+    .slice(0, TOP_TAGS);
   const buckets = new Set();
-  for (const { name, count } of tags) {
-    if (count != null && count < MIN_TAG_COUNT) continue;
+  for (const { name, count } of ranked) {
+    if (Number.isFinite(count) && count < MIN_TAG_COUNT) continue;
     for (const b of tagToBuckets(name)) buckets.add(b);
   }
   return [...buckets];

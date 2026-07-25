@@ -519,9 +519,14 @@ button.np-vibe-link {
   border: 0;
   background: transparent;
   padding: 0;
-  font: inherit;
-  letter-spacing: inherit;
-  color: inherit;
+  /* Match .section-label / Up Next (don't use font:inherit — it wipes size/caps). */
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  line-height: inherit;
+  color: var(--muted);
   cursor: pointer;
   max-width: 100%;
 }
