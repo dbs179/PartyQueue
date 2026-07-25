@@ -32,3 +32,40 @@ test("tagsToBuckets ignores tags below the popularity floor", () => {
   ]);
   assert.deepEqual(buckets, ["rock"]);
 });
+
+test("needsGenreFetch re-fetches legacy bucket-only cache rows", async () => {
+  // Use an isolated temp cache so we don't touch the live genre-cache.json.
+  const prev = process.env.PARTYQUEUE_GENRE_CACHE_FILE;
+  const tmp = new URL(`./tmp-genre-cache-${Date.now()}.json`, import.meta.url);
+  const { writeFileSync, unlinkSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const path = fileURLToPath(tmp);
+  writeFileSync(
+    path,
+    JSON.stringify({
+      marshmello: { buckets: ["electronic", "hiphop", "pop"], at: 1 },
+      "fresh artist": {
+        buckets: ["rock"],
+        tags: [{ name: "rock", count: 100 }],
+        v: 4,
+        at: 1,
+      },
+    })
+  );
+  process.env.PARTYQUEUE_GENRE_CACHE_FILE = path;
+  try {
+    // Re-import so CACHE_FILE / in-memory cache pick up the temp path.
+    const mod = await import(`../src/genres.js?cacheBust=${Date.now()}`);
+    assert.equal(mod.needsGenreFetch("Marshmello"), true);
+    assert.equal(mod.needsGenreFetch("Fresh Artist"), false);
+    assert.equal(mod.needsGenreFetch("Never Seen"), true);
+  } finally {
+    if (prev == null) delete process.env.PARTYQUEUE_GENRE_CACHE_FILE;
+    else process.env.PARTYQUEUE_GENRE_CACHE_FILE = prev;
+    try {
+      unlinkSync(path);
+    } catch {
+      /* ignore */
+    }
+  }
+});

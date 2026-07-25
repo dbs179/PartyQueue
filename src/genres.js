@@ -47,16 +47,19 @@ export const GENRE_BUCKETS = [
 
 // Bump when the tag->bucket rules below change. Cached artists that still have
 // their raw tags are re-mapped locally (free); artists stuck in "Other" under an
-// older mapping are re-fetched once to try the new buckets.
-const MAPPING_VERSION = 3;
+// older mapping are re-fetched once to try the new buckets. Also bump when
+// needsFetch rules change so legacy bucket-only rows get a Last.fm refresh.
+const MAPPING_VERSION = 4;
 
 const BUCKET_IDS = new Set(GENRE_BUCKETS.map((b) => b.id));
 
 // How many of an artist's top tags we consider, and the minimum Last.fm
 // popularity (0-100) a tag needs to count. Only the two strongest tags drive
 // the bucket so a weak third tag (e.g. rnb under norteño/latin) can't hijack
-// the lane.
+// the lane. We still *store* more raw tags so future mapping bumps remapping
+// without another network round-trip.
 const TOP_TAGS = 2;
+const RAW_TAG_STORE = 12;
 const MIN_TAG_COUNT = 10;
 
 // Throttle Last.fm calls. Their terms ask for <= ~5 req/sec; we stay well under.
@@ -178,16 +181,42 @@ export function bucketsForArtistSync(artist) {
   return entry.buckets ?? [];
 }
 
-// Whether an artist should be (re)fetched from Last.fm: not cached at all, or
-// still in "Other" under an older mapping (give the new buckets a chance). Once
-// re-fetched at the current mapping version, a still-empty result is left alone.
-function needsFetch(name) {
+// Whether an artist should be (re)fetched from Last.fm.
+// - Missing entirely → fetch
+// - Legacy bucket-only rows (no tags array) → fetch so top-2 can apply
+// - Outdated version with empty tags → one more fetch attempt
+// - Outdated version with tags → local remap in bucketsForArtistSync (no fetch)
+// - Current version → leave alone (including genuinely untagged empty tags)
+export function needsGenreFetch(name) {
   const entry = loadCache()[normName(name)];
   if (!entry) return true;
-  if ((entry.v ?? 1) < MAPPING_VERSION && (!entry.buckets || entry.buckets.length === 0)) {
-    return true;
+  if (!Array.isArray(entry.tags)) return true;
+  if ((entry.v ?? 1) >= MAPPING_VERSION) return false;
+  return entry.tags.length === 0;
+}
+
+/** @deprecated use needsGenreFetch — kept as the internal warm/filter name. */
+function needsFetch(name) {
+  return needsGenreFetch(name);
+}
+
+/**
+ * Re-derive buckets from stored Last.fm tags for every outdated cache row that
+ * still has tags. Returns how many artists were remapped (0 = nothing to do).
+ */
+export function remapGenreCacheInPlace() {
+  const c = loadCache();
+  let n = 0;
+  for (const entry of Object.values(c)) {
+    if (!entry || typeof entry !== "object") continue;
+    if (!Array.isArray(entry.tags) || !entry.tags.length) continue;
+    if ((entry.v ?? 1) >= MAPPING_VERSION) continue;
+    entry.buckets = tagsToBuckets(entry.tags);
+    entry.v = MAPPING_VERSION;
+    n += 1;
   }
-  return false;
+  if (n) scheduleSave();
+  return n;
 }
 
 // Does a track's artist fall into at least one enabled bucket? Unresolved/empty
@@ -224,7 +253,7 @@ async function resolveArtist(artist) {
     if (res.ok) {
       const data = await res.json();
       const tags = (data?.toptags?.tag ?? [])
-        .slice(0, TOP_TAGS)
+        .slice(0, RAW_TAG_STORE)
         .map((t) => ({ name: t.name, count: Number(t.count) }));
       buckets = tagsToBuckets(tags);
       // Persist the raw tags so future mapping changes re-derive for free.
@@ -304,10 +333,21 @@ export async function warmGenresFromPool() {
     return;
   }
   try {
+    const remapped = remapGenreCacheInPlace();
+    if (remapped) {
+      console.log(
+        `[genres] remapped ${remapped} artist(s) to top-${TOP_TAGS} tags from stored Last.fm tags`
+      );
+    }
     const playlists = await buildPlaylistPool();
     const artists = [];
     for (const pl of playlists) {
       for (const t of pl.tracks || []) artists.push(t.artist);
+    }
+    // Also refresh legacy bucket-only cache rows even if that artist isn't in
+    // the current pool (e.g. Discover artists from earlier sets).
+    for (const key of Object.keys(loadCache())) {
+      if (needsFetch(key)) artists.push(key);
     }
     await warmArtists(artists);
   } catch (err) {

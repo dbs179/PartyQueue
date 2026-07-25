@@ -68,6 +68,36 @@ test("resolveDisplayGenre uses set lane for filler and artist genre for requests
   );
 });
 
+test("resolveDisplayGenre prefers the track's enqueue lane over the latest set lane", async () => {
+  const { resolveDisplayGenre } = await import("../src/now-playing-http.js");
+  assert.deepEqual(
+    resolveDisplayGenre(
+      {
+        title: "Pop Filler",
+        artist: "Band",
+        uri: "spotify:track:1",
+        origin: "filler",
+        genreLane: "pop",
+      },
+      { setLane: "folk" }
+    ),
+    { mixGenreLane: "pop", mixGenreLabel: "Pop" }
+  );
+  assert.deepEqual(
+    resolveDisplayGenre(
+      {
+        title: "Discover Hit",
+        artist: "Band",
+        uri: "spotify:track:2",
+        origin: "discovered",
+        genreLane: "rock",
+      },
+      { setLane: "electronic" }
+    ),
+    { mixGenreLane: "rock", mixGenreLabel: "Rock" }
+  );
+});
+
 test("position age is calculated using the server clock", async () => {
   const { addPositionAge } = await import("../src/now-playing-http.js");
   const payload = addPositionAge(

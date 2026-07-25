@@ -130,6 +130,23 @@ test("stores the decade on mood origins and survives a reload", () => {
   assert.equal(origin.originSnapshot().get("era1").mood, null);
 });
 
+test("stores the set genre lane on filler origins and survives a reload", () => {
+  origin.markOrigin(["lane1"], "filler", { genreLane: "pop" });
+  assert.equal(origin.genreLaneOf("lane1"), "pop");
+  const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
+  assert.ok(raw.some((e) => e.id === "lane1" && e.genreLane === "pop"));
+  // Later batch under a different lane does not relabel this track.
+  origin.markOrigin(["lane2"], "discovered", { genreLane: "folk" });
+  assert.equal(origin.genreLaneOf("lane1"), "pop");
+  assert.equal(origin.genreLaneOf("lane2"), "folk");
+  // Re-mark without a lane keeps the previous value.
+  origin.markOrigin(["lane1"], "filler");
+  assert.equal(origin.genreLaneOf("lane1"), "pop");
+  // Searched requests never carry a set lane.
+  origin.markOrigin(["lane1"], "searched", { genreLane: "rock" });
+  assert.equal(origin.genreLaneOf("lane1"), null);
+});
+
 test("stores badge alias and requestedByUser separately", () => {
   origin.markOrigin(["alias1"], "searched", {
     requestedBy: "Party Alex",

@@ -1279,10 +1279,14 @@ async function addRandomFromPlaylistsUnlocked(
     }
   }
   if (recorded.length) recordPlayed(recorded);
-  if (discoveredIds.length) markOrigin(discoveredIds, "discovered");
+  const laneOpts = setLane ? { genreLane: setLane } : {};
+  if (discoveredIds.length) markOrigin(discoveredIds, "discovered", laneOpts);
   if (moodIds.length)
-    markOrigin(moodIds, "mood", { mood: activeMoodPack?.id || null });
-  if (fillerIds.length) markOrigin(fillerIds, "filler");
+    markOrigin(moodIds, "mood", {
+      mood: activeMoodPack?.id || null,
+      ...laneOpts,
+    });
+  if (fillerIds.length) markOrigin(fillerIds, "filler", laneOpts);
 
   // 5) Top up if some enqueues failed (or we are still under totalTarget).
   // Exact-lane playlist leftovers first, then Spotify lane hits — never off-lane.
@@ -1328,7 +1332,7 @@ async function addRandomFromPlaylistsUnlocked(
         }
       }
       if (rec2.length) recordPlayed(rec2);
-      if (filler2.length) markOrigin(filler2, "filler");
+      if (filler2.length) markOrigin(filler2, "filler", laneOpts);
     }
     if (added >= totalTarget || wasPreempted()) break;
     if (!setLane) break;
@@ -1388,7 +1392,7 @@ async function addRandomFromPlaylistsUnlocked(
       }
     }
     if (recHits.length) recordPlayed(recHits);
-    if (discIds.length) markOrigin(discIds, "discovered");
+    if (discIds.length) markOrigin(discIds, "discovered", laneOpts);
     if (!progressed) break;
   }
 
@@ -1446,7 +1450,10 @@ async function addRandomFromPlaylistsUnlocked(
       }
       if (rec3.length) recordPlayed(rec3);
       if (moodIds3.length)
-        markOrigin(moodIds3, "mood", { mood: activeMoodPack.id });
+        markOrigin(moodIds3, "mood", {
+          mood: activeMoodPack.id,
+          ...laneOpts,
+        });
     } catch (err) {
       console.error("[moods] era top-up failed:", err.message);
     }
@@ -1886,6 +1893,13 @@ async function getNowPlayingRaw() {
         moodPick: source === "mood",
         // Decade the track was added under, so badges survive decade swaps.
         mood: source === "mood" ? ometa?.mood || null : null,
+        // Set lane used when this track was enqueued (survives lane rotation).
+        genreLane:
+          source === "filler" ||
+          source === "discovered" ||
+          source === "mood"
+            ? ometa?.genreLane || null
+            : null,
         requestedBy: badge,
         requestedByUser: user,
         dedication: source === "searched" ? ometa?.dedication || null : null,

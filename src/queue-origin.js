@@ -12,10 +12,14 @@
 //
 // Sonos has nowhere to stash this, so we keep a small, bounded, JSON-backed map
 // of Spotify track IDs -> { source, requestedBy?, requestedByUser?, dedication?,
-// mood? } (data/queue-origin.json).
+// mood?, genreLane? } (data/queue-origin.json).
 //
 // `mood` = the decade pack id ("80s", "90s", …) the track was added under, so
 // badges keep saying "80's Hit" even after the host switches decades.
+//
+// `genreLane` = the exact set lane id ("pop", "folk", …) used when a
+// filler/discovered/mood track was enqueued, so the Genre header stays with
+// that track after Never-Ending rotates to a new lane.
 //
 // `requestedBy` = badge text (alias, or User when alias blank).
 // `requestedByUser` = stable User for shouts/stats (optional; old rows omit it).
@@ -38,8 +42,10 @@ const LEGACY_DISCOVERED_FILE = path.join(__dirname, "..", "data", "discovered.js
 const MAX = 1000;
 const VALID = new Set(["searched", "filler", "discovered", "mood"]);
 
-let entries = null; // [{ id, source, requestedBy?, requestedByUser?, dedication?, mood? }]
-/** @type {Map<string, { source: string, requestedBy: string|null, requestedByUser: string|null, dedication: string|null, mood: string|null }>|null} */
+const SET_SOURCES = new Set(["filler", "discovered", "mood"]);
+
+let entries = null; // [{ id, source, requestedBy?, requestedByUser?, dedication?, mood?, genreLane? }]
+/** @type {Map<string, { source: string, requestedBy: string|null, requestedByUser: string|null, dedication: string|null, mood: string|null, genreLane: string|null }>|null} */
 let index = null;
 
 function buildIndex() {
@@ -51,8 +57,13 @@ function buildIndex() {
       requestedByUser: e.requestedByUser || null,
       dedication: e.dedication || null,
       mood: e.mood || null,
+      genreLane: e.genreLane || null,
     });
   }
+}
+
+function cleanGenreLane(value) {
+  return typeof value === "string" && value ? value : null;
 }
 
 function load() {
@@ -69,6 +80,7 @@ function load() {
             requestedByUser: sanitizeDisplayName(e.requestedByUser),
             dedication: sanitizeDedication(e.dedication),
             mood: typeof e.mood === "string" && e.mood ? e.mood : null,
+            genreLane: cleanGenreLane(e.genreLane),
           }))
       : null;
   } catch {
@@ -111,6 +123,7 @@ function persist() {
       if (e.requestedByUser) row.requestedByUser = e.requestedByUser;
       if (e.dedication) row.dedication = e.dedication;
       if (e.mood) row.mood = e.mood;
+      if (e.genreLane) row.genreLane = e.genreLane;
       return row;
     });
     writeFileAtomic(STORE_FILE, JSON.stringify(out));
@@ -123,7 +136,7 @@ function persist() {
  * Record the source for one or more track IDs (most-recent wins).
  * @param {string[]} ids
  * @param {string} source
- * @param {{ requestedBy?: string|null, requestedByUser?: string|null, dedication?: string|null, mood?: string|null }} [opts]
+ * @param {{ requestedBy?: string|null, requestedByUser?: string|null, dedication?: string|null, mood?: string|null, genreLane?: string|null }} [opts]
  */
 export function markOrigin(ids, source, opts = {}) {
   if (!VALID.has(source)) return;
@@ -139,6 +152,7 @@ export function markOrigin(ids, source, opts = {}) {
     source === "mood" && typeof opts.mood === "string" && opts.mood
       ? opts.mood
       : null;
+  const genreLaneOpt = cleanGenreLane(opts.genreLane);
   load();
   for (const id of clean) {
     const at = entries.findIndex((e) => e.id === id);
@@ -153,6 +167,9 @@ export function markOrigin(ids, source, opts = {}) {
     const ded =
       dedication ||
       (source === "searched" ? prev?.dedication || null : null);
+    const genreLane = SET_SOURCES.has(source)
+      ? genreLaneOpt || prev?.genreLane || null
+      : null;
     entries.push({
       id,
       source,
@@ -160,6 +177,7 @@ export function markOrigin(ids, source, opts = {}) {
       requestedByUser: byUser,
       dedication: ded,
       mood,
+      genreLane,
     });
     index.set(id, {
       source,
@@ -167,6 +185,7 @@ export function markOrigin(ids, source, opts = {}) {
       requestedByUser: byUser,
       dedication: ded,
       mood,
+      genreLane,
     });
   }
   while (entries.length > MAX) {
@@ -207,6 +226,13 @@ export function moodOf(id) {
   if (!id) return null;
   load();
   return index.get(id)?.mood ?? null;
+}
+
+/** Set lane id ("pop", "folk", …) a filler/discovered/mood track was added under. */
+export function genreLaneOf(id) {
+  if (!id) return null;
+  load();
+  return index.get(id)?.genreLane ?? null;
 }
 
 /**
@@ -253,7 +279,7 @@ export function isDiscovered(id) {
   return originOf(id) === "discovered";
 }
 
-// Snapshot: id -> { source, requestedBy, requestedByUser, dedication, mood }.
+// Snapshot: id -> { source, requestedBy, requestedByUser, dedication, mood, genreLane }.
 export function originSnapshot() {
   load();
   return new Map(index);

@@ -33,7 +33,8 @@ function labelForLane(lane) {
 
 /**
  * What the Now Playing "Genre:" header should show for this track.
- * - Random / Never-Ending / Discover / era picks → current set lane
+ * - Random / Never-Ending / Discover / era picks → that track's set lane
+ *   (stored at enqueue; falls back to the latest recorded lane for older rows)
  * - Guest requests → that artist's mapped genre
  * - Idle / DJ clip / unknown → hidden (do not keep a stale set lane)
  */
@@ -54,9 +55,12 @@ export function resolveDisplayGenre(
 
   const origin = typeof np.origin === "string" ? np.origin : null;
   if (SET_ORIGINS.has(origin)) {
-    const label = labelForLane(setLane);
+    const trackLane =
+      typeof np.genreLane === "string" && np.genreLane ? np.genreLane : null;
+    const lane = trackLane || setLane;
+    const label = labelForLane(lane);
     return {
-      mixGenreLane: label ? setLane : null,
+      mixGenreLane: label ? lane : null,
       mixGenreLabel: label,
     };
   }
