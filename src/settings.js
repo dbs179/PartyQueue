@@ -1142,6 +1142,8 @@ export const BRANDING_DEFAULTS = {
   eventName: "PartyQueue",
   subtitle: "",
   showVersion: false,
+  // Second Up Next pill: song/set genre next to Requested / Discover / Random.
+  showQueueGenre: false,
   heroBanner: null, // null = built-in public/hero.jpg; otherwise a data/banners file
 };
 const BRANDING_MAXLEN = { eventName: 60, subtitle: 120 };
@@ -1174,6 +1176,10 @@ export function getBrandingSettings() {
       typeof s.showVersion === "boolean"
         ? s.showVersion
         : BRANDING_DEFAULTS.showVersion,
+    showQueueGenre:
+      typeof s.showQueueGenre === "boolean"
+        ? s.showQueueGenre
+        : BRANDING_DEFAULTS.showQueueGenre,
     heroBanner,
   };
 }
@@ -1189,6 +1195,9 @@ export function setBrandingSettings(partial = {}) {
     next.subtitle = cleanText(partial.subtitle, BRANDING_MAXLEN.subtitle) ?? "";
   }
   if (partial.showVersion != null) next.showVersion = !!partial.showVersion;
+  if (partial.showQueueGenre != null) {
+    next.showQueueGenre = !!partial.showQueueGenre;
+  }
   if (partial.heroBanner !== undefined) {
     next.heroBanner =
       typeof partial.heroBanner === "string" && partial.heroBanner ? partial.heroBanner : null;

@@ -27,13 +27,19 @@ import {
   DJ_ICON_DEFAULT_URL,
 } from "./settings.js";
 import { taglineForClip } from "./dj-taglines.js";
-import { artistMatchesGenres, bucketsForArtistSync, bucketsForArtist } from "./genres.js";
+import {
+  artistMatchesGenres,
+  bucketsForArtistSync,
+  bucketsForArtist,
+  GENRE_BUCKETS,
+} from "./genres.js";
 import { moodPack as eraMoodPack, getMoodHits, trackFitsMood } from "./moods.js";
 import {
   pickSetLane,
   fitsExactLane,
   getGenreFlowState,
   recordGenreLane,
+  dominantBucket,
 } from "./genre-flow.js";
 import { getSimilarUris, isDiscoveryAvailable } from "./similar.js";
 import { getLaneHits } from "./lane-hits.js";
@@ -1605,6 +1611,73 @@ export function isDjVoiceUri(uri) {
   return /tts_proxy|\/media\/tts\//i.test(String(uri || ""));
 }
 
+const GENRE_LABEL_BY_ID = new Map(GENRE_BUCKETS.map((b) => [b.id, b.label]));
+
+function emptyQueueGenreFields() {
+  return {
+    genreLane: null,
+    genreLabel: null,
+    genreLanes: [],
+    genreLabels: [],
+  };
+}
+
+function labelForGenreLane(lane) {
+  if (!lane || lane === "other") return null;
+  return GENRE_LABEL_BY_ID.get(lane) || String(lane);
+}
+
+/**
+ * Genre pill fields for an Up Next row.
+ * Uses the artist's cached top-2 buckets (up to two pills). Falls back to the
+ * enqueue set lane when the artist has no mapped genres yet.
+ */
+export function queueTrackGenreFields(artist, meta, { djClip = false } = {}) {
+  if (djClip) return emptyQueueGenreFields();
+  const source = meta?.source ?? null;
+  if (
+    source !== "filler" &&
+    source !== "discovered" &&
+    source !== "mood" &&
+    source !== "searched"
+  ) {
+    return emptyQueueGenreFields();
+  }
+
+  const fromCache = (bucketsForArtistSync(artist) || []).filter(
+    (b) => b && b !== "other"
+  );
+  let lanes = [...new Set(fromCache)].slice(0, 2);
+
+  const setLane =
+    typeof meta?.genreLane === "string" && meta.genreLane && meta.genreLane !== "other"
+      ? meta.genreLane
+      : null;
+
+  // Legacy / untagged: keep a single pill from the set lane if we have one.
+  if (!lanes.length && source !== "searched" && setLane) {
+    lanes = [setLane];
+  }
+  if (!lanes.length) {
+    const dom = dominantBucket(bucketsForArtistSync(artist));
+    if (dom && dom !== "other") lanes = [dom];
+  }
+
+  // Matching set-lane genre first (Folk, then Rock), then the other tag.
+  if (setLane && lanes.includes(setLane)) {
+    lanes = [setLane, ...lanes.filter((l) => l !== setLane)].slice(0, 2);
+  }
+
+  const labels = lanes.map(labelForGenreLane).filter(Boolean);
+  if (!labels.length) return emptyQueueGenreFields();
+  return {
+    genreLane: lanes[0] || null,
+    genreLabel: labels[0] || null,
+    genreLanes: lanes,
+    genreLabels: labels,
+  };
+}
+
 // Quiet pads around a DJ clip (pre-ramp + post-restore). Still /media/tts
 // URLs; UI hides these from the queue and keeps DJ branding in Now Playing.
 export function isDjSilenceUri(uri) {
@@ -1957,12 +2030,14 @@ async function getQueueListRaw() {
     const djPersona = djClip ? djVoiceDisplay(uri) : null;
     const meta = origin.get(spotifyTrackId(uri));
     const source = meta?.source ?? null;
+    const artist = djClip ? djPersona.artist : t.Artist ?? "";
+    const genre = queueTrackGenreFields(artist, meta, { djClip });
     return {
       position: absoluteIndex,
       itemId: t.ItemId ?? null,
       uri,
       title: djClip ? djPersona.title : t.Title ?? "Unknown",
-      artist: djClip ? djPersona.artist : t.Artist ?? "",
+      artist,
       album: djClip ? djPersona.album : t.Album ?? "",
       // Surfaced for now-playing prefetch (next 1–2 covers). Queue UI stays text-only.
       albumArt: djClip
@@ -1980,6 +2055,10 @@ async function getQueueListRaw() {
           : null,
       dedication: source === "searched" ? meta?.dedication || null : null,
       djVoice: djClip,
+      genreLane: genre.genreLane,
+      genreLabel: genre.genreLabel,
+      genreLanes: genre.genreLanes,
+      genreLabels: genre.genreLabels,
     };
   });
 

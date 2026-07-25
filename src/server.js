@@ -204,7 +204,7 @@ function renderIndexHtml(brandJson) {
 
 function sendBrandedIndex(_req, res) {
   try {
-    const { eventName, subtitle, heroBanner, showVersion } =
+    const { eventName, subtitle, heroBanner, showVersion, showQueueGenre } =
       getBrandingSettings();
     const brandJson = JSON.stringify({
       eventName,
@@ -212,6 +212,7 @@ function sendBrandedIndex(_req, res) {
       heroBanner: heroBanner || null,
       version: VERSION || "",
       showVersion: !!showVersion,
+      showQueueGenre: !!showQueueGenre,
     }).replace(/</g, "\\u003c");
     const { html, nonce } = renderIndexHtml(brandJson);
     res.setHeader("Cache-Control", "no-cache");

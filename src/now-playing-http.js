@@ -5,6 +5,7 @@ import { getAutoFillState, getClosingTimeAt, getLastPartyRecap } from "./autofil
 import { dominantBucket, getGenreFlowState } from "./genre-flow.js";
 import { bucketsForArtistSync, GENRE_BUCKETS } from "./genres.js";
 import {
+  getBrandingSettings,
   getContentSettings,
   getDiscoverySettings,
   getRotationSettings,
@@ -156,6 +157,7 @@ export async function enrichNowPlaying(np) {
     // Broadcast so the toggles reflect server truth even before host login
     // (sessions are in-memory, so every deploy used to leave them looking off).
     discoverEnabled: getDiscoverySettings().discoverEnabled,
+    showQueueGenre: !!getBrandingSettings().showQueueGenre,
     randomMoodEnabled: rotation.randomMoodEnabled,
     randomDecadeEnabled: rotation.randomDecadeEnabled,
     requestsPaused: getContentSettings().requestsPaused,

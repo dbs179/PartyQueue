@@ -810,6 +810,7 @@ let activeDjIconName = null;
 const eventNameInput = document.getElementById("set-event-name");
 const subtitleInput = document.getElementById("set-subtitle");
 const showVersionInput = document.getElementById("set-show-version");
+const showQueueGenreInput = document.getElementById("set-show-queue-genre");
 const headerEventName = document.getElementById("event-name");
 const headerSubtitle = document.getElementById("subtitle");
 const headerVersion = document.getElementById("app-version");
@@ -821,6 +822,24 @@ let settingsDefaults = {
   artistCap: 1,
   strictFill: true,
 };
+/** Guest-visible: second Up Next pill for song/set genre (DJ Booth Look). */
+let showQueueGenre = false;
+try {
+  const bootBrand = window.__PQ_BRAND__;
+  if (bootBrand && typeof bootBrand.showQueueGenre === "boolean") {
+    showQueueGenre = !!bootBrand.showQueueGenre;
+  } else {
+    const cached = JSON.parse(
+      localStorage.getItem("pq.branding") || "{}"
+    );
+    if (typeof cached.showQueueGenre === "boolean") {
+      showQueueGenre = cached.showQueueGenre;
+    }
+  }
+} catch {
+  /* ignore */
+}
+if (showQueueGenreInput) showQueueGenreInput.checked = showQueueGenre;
 
 const BRANDING_STORAGE_KEY = "pq.branding";
 
@@ -846,10 +865,28 @@ function persistBrandingCache(partial = {}) {
         partial.showVersion != null
           ? !!partial.showVersion
           : !!prev.showVersion,
+      showQueueGenre:
+        partial.showQueueGenre != null
+          ? !!partial.showQueueGenre
+          : !!prev.showQueueGenre,
     };
     localStorage.setItem(BRANDING_STORAGE_KEY, JSON.stringify(next));
   } catch {
     /* ignore quota / private mode */
+  }
+}
+
+function syncShowQueueGenre(enabled, { rerender = true } = {}) {
+  if (typeof enabled !== "boolean") return;
+  if (showQueueGenre === enabled) {
+    if (showQueueGenreInput) showQueueGenreInput.checked = enabled;
+    return;
+  }
+  showQueueGenre = enabled;
+  if (showQueueGenreInput) showQueueGenreInput.checked = enabled;
+  persistBrandingCache({ showQueueGenre: enabled });
+  if (rerender && Array.isArray(lastQueueTracks)) {
+    renderQueue(lastQueueTracks);
   }
 }
 
@@ -1072,6 +1109,9 @@ function fillSettings(s) {
     showVersionInput.checked = !!s.showVersion;
     if (headerVersion) headerVersion.hidden = !s.showVersion;
     persistBrandingCache({ showVersion: !!s.showVersion });
+  }
+  if (s.showQueueGenre != null) {
+    syncShowQueueGenre(!!s.showQueueGenre, { rerender: true });
   }
   if (s.heroBanner !== undefined) applyHero(s.heroBanner);
   applyBranding(s.eventName, s.subtitle);
@@ -2295,6 +2335,12 @@ showVersionInput.addEventListener("change", () => {
   if (headerVersion) headerVersion.hidden = !showVersionInput.checked;
   persistBrandingCache({ showVersion: showVersionInput.checked });
 });
+if (showQueueGenreInput) {
+  showQueueGenreInput.addEventListener("change", () => {
+    syncShowQueueGenre(showQueueGenreInput.checked, { rerender: true });
+    saveSettings({ showQueueGenre: showQueueGenreInput.checked });
+  });
+}
 
 // ---- Hero banner picker (Settings page) --------------------------------
 const bannerUploadBtn = document.getElementById("banner-upload-btn");
@@ -3038,6 +3084,7 @@ settingsResetBtn?.addEventListener("click", () => {
   delete rest.eventName;
   delete rest.subtitle;
   delete rest.showVersion;
+  delete rest.showQueueGenre;
   delete rest.heroBanner;
   fillSettings(rest);
   saveSettings({ ...rest }, { toastMessage: "Set to Default" });
@@ -6120,6 +6167,9 @@ function renderNowPlaying(transport) {
   if (transport) {
     syncAutoFillFromServer(transport.neverEnding);
     syncDiscoverFromServer(transport.discoverEnabled);
+    if (transport.showQueueGenre != null) {
+      syncShowQueueGenre(!!transport.showQueueGenre, { rerender: true });
+    }
     syncRotationFromServer(transport);
     updateMixFromServer(transport);
     if (transport.requestsPaused != null) {
@@ -6447,10 +6497,14 @@ function queueTrackSig(track) {
     track.title || "",
     track.artist || "",
     track.djVoice ? 1 : 0,
+    showQueueGenre ? 1 : 0,
+    track.genreLane || "",
+    track.genreLabel || "",
+    Array.isArray(track.genreLabels) ? track.genreLabels.join(",") : "",
   ].join("\0");
 }
 
-function queueBadgeHtml(track) {
+function queueOriginBadgeHtml(track) {
   const requester = sanitizeDisplayName(track.requestedBy || "");
   const dedication = sanitizeDedication(track.dedication || "");
   if (track.moodPick) {
@@ -6476,6 +6530,29 @@ function queueBadgeHtml(track) {
   }
   if (track.djVoice) return "";
   return `<span class="memory-random-badge" title="Added by Random / Never-Ending">\u{1F3B2} Random</span>`;
+}
+
+function queueGenreBadgeHtml(track) {
+  if (!showQueueGenre || track.djVoice) return "";
+  const labels = Array.isArray(track.genreLabels)
+    ? track.genreLabels.filter((x) => typeof x === "string" && x)
+    : typeof track.genreLabel === "string" && track.genreLabel
+      ? [track.genreLabel]
+      : typeof track.genreLane === "string" && track.genreLane
+        ? [track.genreLane]
+        : [];
+  if (!labels.length) return "";
+  return labels
+    .slice(0, 2)
+    .map(
+      (label) =>
+        `<span class="queue-genre-badge" title="Song genre">${escapeHtml(label)}</span>`
+    )
+    .join("");
+}
+
+function queueBadgeHtml(track) {
+  return `${queueOriginBadgeHtml(track)}${queueGenreBadgeHtml(track)}`;
 }
 
 function fillQueueRow(li, track, index) {
