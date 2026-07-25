@@ -124,6 +124,19 @@ test.describe("PartyQueue browser smoke", () => {
         },
       })
     );
+    await page.route(/\/api\/lyrics\?/, (route) =>
+      route.fulfill({
+        status: 200,
+        json: {
+          found: true,
+          instrumental: false,
+          syncKind: "synced",
+          syncedLyrics: "[00:01.00]Waiting in the night\n[00:05.00]Midnight City lights\n",
+          plainLyrics: "Waiting in the night\nMidnight City lights",
+          provider: "lrclib",
+        },
+      })
+    );
 
     await page.goto("/#/display");
     await expect(page.locator("#view-display")).toBeVisible();
@@ -152,6 +165,10 @@ test.describe("PartyQueue browser smoke", () => {
       "http://partyqueue.local"
     );
     await expect(page.locator("#display-progress")).toBeVisible();
+    await expect(page.locator("#display-lyrics")).toBeVisible();
+    await expect(page.locator("#display-lyrics")).toContainText(
+      "Midnight City lights"
+    );
     const toSeconds = (value) =>
       String(value)
         .split(":")

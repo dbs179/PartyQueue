@@ -2888,7 +2888,7 @@ body.party-display-active > .container {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 2.15fr) minmax(300px, 0.85fr);
-  align-items: start;
+  align-items: stretch;
   gap: clamp(20px, 3vw, 46px);
 }
 
@@ -2901,14 +2901,16 @@ body.party-display-active > .container {
 .party-display-now {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: clamp(12px, 1.5vw, 20px);
+  min-height: 0;
+  height: 100%;
 }
 
 .party-display-hero {
-  flex: 1;
+  flex: 0 0 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(260px, 0.95fr) minmax(300px, 1.15fr);
+  grid-template-columns: minmax(220px, 0.85fr) minmax(280px, 1.15fr);
   align-items: start;
   gap: clamp(24px, 4vw, 64px);
 }
@@ -2916,7 +2918,7 @@ body.party-display-active > .container {
 .party-display-art-wrap {
   position: relative;
   width: 100%;
-  max-height: min(72dvh, 760px);
+  max-height: min(48dvh, 520px);
   aspect-ratio: 1;
   align-self: start;
   border-radius: clamp(16px, 2vw, 28px);
@@ -3060,6 +3062,57 @@ body.party-display-active > .container {
 .party-display-reactions strong {
   min-width: 1ch;
   font-variant-numeric: tabular-nums;
+}
+
+.party-display-lyrics {
+  flex: 1 1 auto;
+  min-height: clamp(140px, 22dvh, 280px);
+  max-height: min(36dvh, 420px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: clamp(8px, 1vw, 16px) 4px 0;
+  text-align: left;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 18px),
+    transparent 100%
+  );
+}
+
+.party-display-lyrics .np-fs-lyrics-status {
+  margin: 12px 0;
+  font-size: clamp(1.05rem, 1.6vw, 1.45rem);
+}
+
+.party-display-lyrics .np-fs-lyrics-attribution {
+  font-size: clamp(0.75rem, 1vw, 0.95rem);
+  margin: 0 0 8px;
+}
+
+.party-display-lyrics .np-fs-lyrics-plain {
+  font-size: clamp(1.15rem, 1.8vw, 1.7rem);
+  line-height: 1.55;
+  max-width: none;
+}
+
+.party-display-lyrics .np-fs-lyrics-synced {
+  padding: 8vh 0 28vh;
+  gap: 0.95rem;
+  align-items: flex-start;
+}
+
+.party-display-lyrics .np-fs-line {
+  font-size: clamp(1.35rem, 2.4vw, 2.55rem);
+  line-height: 1.35;
+}
+
+.party-display-lyrics .np-fs-line.is-active {
+  transform: scale(1.04);
+  transform-origin: left center;
 }
 
 .party-display-side {

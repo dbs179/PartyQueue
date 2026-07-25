@@ -211,6 +211,7 @@ const npFsProgressFill = document.getElementById("np-fs-progress-fill");
 const npFsProgressElapsed = document.getElementById("np-fs-progress-elapsed");
 const npFsProgressDuration = document.getElementById("np-fs-progress-duration");
 const npFsLyrics = document.getElementById("np-fs-lyrics");
+const displayLyrics = document.getElementById("display-lyrics");
 const shuffleBtn = document.getElementById("shuffle-btn");
 const prevBtn = document.getElementById("prev-btn");
 const nextBtn = document.getElementById("next-btn");
@@ -4662,6 +4663,7 @@ function syncPolling() {
 
 function showView(name) {
   const target = VIEWS[name] ? name : "main";
+  const previousView = currentView;
   if (!isHostArea(target)) lastNonSettingsView = target;
   currentView = target;
   for (const key of Object.keys(VIEWS)) VIEWS[key].hidden = key !== target;
@@ -4684,6 +4686,13 @@ function showView(name) {
   if (target === "display" && displayEventName) {
     displayEventName.textContent =
       document.getElementById("event-name")?.textContent?.trim() || "PartyQueue";
+  }
+  if (target === "display") {
+    syncNowPlayingLyrics(lastNowPlaying);
+  } else if (previousView === "display" && !npOverlayOpen) {
+    clearLyricsRetry();
+    stopLyricTicker();
+    npLyricsFetchId += 1;
   }
   if (!hostLocked) {
     if (target === "booth") updateBoothHubSummaries();
@@ -5493,57 +5502,89 @@ function lyricsTrackKey(np) {
   return playbackIdentity(np);
 }
 
+function lyricsActive() {
+  return npOverlayOpen || currentView === "display";
+}
+
+function lyricsContainers() {
+  return [npFsLyrics, displayLyrics].filter(Boolean);
+}
+
+function lyricsContainerHasPaint(el) {
+  return !!el?.querySelector(
+    ".np-fs-lyrics-synced, .np-fs-lyrics-plain, .np-fs-lyrics-status"
+  );
+}
+
+/** Copy a filled lyrics panel into any empty sibling targets. */
+function mirrorLyricsContainers() {
+  const containers = lyricsContainers();
+  const source = containers.find((el) => lyricsContainerHasPaint(el));
+  if (!source) return;
+  for (const el of containers) {
+    if (el === source || lyricsContainerHasPaint(el)) continue;
+    el.innerHTML = source.innerHTML;
+  }
+}
+
 function setNpFsLyricsStatus(msg) {
-  if (!npFsLyrics) return;
-  npFsLyrics.innerHTML = `<p class="np-fs-lyrics-status">${escapeHtml(msg)}</p>`;
   npSyncedLines = null;
+  const html = `<p class="np-fs-lyrics-status">${escapeHtml(msg)}</p>`;
+  for (const el of lyricsContainers()) el.innerHTML = html;
 }
 
 function renderPlainLyrics(text) {
-  if (!npFsLyrics) return;
   npSyncedLines = null;
-  const pre = document.createElement("pre");
-  pre.className = "np-fs-lyrics-plain";
-  pre.textContent = text;
-  npFsLyrics.innerHTML = "";
-  npFsLyrics.appendChild(pre);
+  for (const el of lyricsContainers()) {
+    const pre = document.createElement("pre");
+    pre.className = "np-fs-lyrics-plain";
+    pre.textContent = text;
+    el.innerHTML = "";
+    el.appendChild(pre);
+  }
 }
 
 function renderSyncedLyrics(lines) {
-  if (!npFsLyrics) return;
   npSyncedLines = lines;
-  const ul = document.createElement("ul");
-  ul.className = "np-fs-lyrics-synced";
-  for (const line of lines) {
-    const li = document.createElement("li");
-    li.className = "np-fs-line";
-    li.textContent = line.text;
-    ul.appendChild(li);
+  for (const el of lyricsContainers()) {
+    const ul = document.createElement("ul");
+    ul.className = "np-fs-lyrics-synced";
+    for (const line of lines) {
+      const li = document.createElement("li");
+      li.className = "np-fs-line";
+      li.textContent = line.text;
+      ul.appendChild(li);
+    }
+    el.innerHTML = "";
+    el.appendChild(ul);
   }
-  npFsLyrics.innerHTML = "";
-  npFsLyrics.appendChild(ul);
   updateSyncedHighlight(true);
 }
 
 function renderLyricsAttribution(data) {
-  if (!npFsLyrics || !data) return;
+  if (!data) return;
   const isPlain = data.syncKind === "plain" || !data.syncedLyrics;
   const attribution = data.provider === "unison" ? data.attribution : null;
   if (!isPlain && !attribution) return;
 
-  const note = document.createElement("p");
-  note.className = "np-fs-lyrics-attribution";
-  if (isPlain) note.append("Plain lyrics");
-  if (attribution?.url) {
-    if (isPlain) note.append(" · ");
-    const link = document.createElement("a");
-    link.href = attribution.url;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = attribution.text || "Lyrics from Unison";
-    note.appendChild(link);
+  for (const el of lyricsContainers()) {
+    const note = document.createElement("p");
+    note.className = "np-fs-lyrics-attribution";
+    if (isPlain) note.append("Plain lyrics");
+    if (attribution?.url) {
+      if (isPlain) note.append(" · ");
+      const link = document.createElement("a");
+      link.href = attribution.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = attribution.text || "Lyrics from Unison";
+      note.appendChild(link);
+    } else if (attribution?.text) {
+      if (isPlain) note.append(" · ");
+      note.append(attribution.text);
+    }
+    el.prepend(note);
   }
-  npFsLyrics.prepend(note);
 }
 
 function estimatedPositionSec() {
@@ -5670,43 +5711,55 @@ function applyPlaybackClock(np, { force = false } = {}) {
   npIsPlayingOverlay = playing;
 }
 
+function shouldScrollLyricsRoot(root) {
+  if (root === npFsLyrics) return npOverlayOpen;
+  if (root === displayLyrics) return currentView === "display";
+  return false;
+}
+
 function updateSyncedHighlight(forceScroll) {
-  if (!npSyncedLines || !npFsLyrics) return;
-  const ul = npFsLyrics.querySelector(".np-fs-lyrics-synced");
-  if (!ul) return;
+  if (!npSyncedLines) return;
   const pos = estimatedPositionSec();
   let idx = -1;
   for (let i = 0; i < npSyncedLines.length; i++) {
     if (npSyncedLines[i].t <= pos + LYRICS_LEAD_SEC) idx = i;
     else break;
   }
-  const kids = ul.children;
-  let activeEl = null;
-  let becameActive = false;
-  for (let i = 0; i < kids.length; i++) {
-    const el = kids[i];
-    const wasActive = el.classList.contains("is-active");
-    el.classList.toggle("is-active", i === idx);
-    el.classList.toggle("is-past", i < idx);
-    if (i === idx) {
-      activeEl = el;
-      if (!wasActive) becameActive = true;
+  for (const root of lyricsContainers()) {
+    const ul = root.querySelector(".np-fs-lyrics-synced");
+    if (!ul) continue;
+    const kids = ul.children;
+    let activeEl = null;
+    let becameActive = false;
+    for (let i = 0; i < kids.length; i++) {
+      const el = kids[i];
+      const wasActive = el.classList.contains("is-active");
+      el.classList.toggle("is-active", i === idx);
+      el.classList.toggle("is-past", i < idx);
+      if (i === idx) {
+        activeEl = el;
+        if (!wasActive) becameActive = true;
+      }
     }
-  }
-  if (activeEl && (becameActive || forceScroll)) {
-    activeEl.scrollIntoView({
-      block: "center",
-      behavior: forceScroll ? "auto" : "smooth",
-    });
+    if (
+      activeEl &&
+      (becameActive || forceScroll) &&
+      shouldScrollLyricsRoot(root)
+    ) {
+      activeEl.scrollIntoView({
+        block: "center",
+        behavior: forceScroll ? "auto" : "smooth",
+      });
+    }
   }
 }
 
 function startLyricTicker() {
   stopLyricTicker();
-  if (!npOverlayOpen || !npSyncedLines) return;
+  if (!lyricsActive() || !npSyncedLines) return;
   let lastIdx = -1;
   const tick = () => {
-    if (!npOverlayOpen || !npSyncedLines) return;
+    if (!lyricsActive() || !npSyncedLines) return;
     const pos = estimatedPositionSec();
     let idx = -1;
     for (let i = 0; i < npSyncedLines.length; i++) {
@@ -5825,8 +5878,8 @@ async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
     return;
   }
   // Keep an already-painted lyric sheet visible while a quiet refresh runs.
-  const hasPaintedLyrics = !!(
-    npFsLyrics?.querySelector(".np-fs-lyrics-synced, .np-fs-lyrics-plain")
+  const hasPaintedLyrics = lyricsContainers().some((el) =>
+    el.querySelector(".np-fs-lyrics-synced, .np-fs-lyrics-plain")
   );
   if (!hasPaintedLyrics) setNpFsLyricsStatus("Loading lyrics…");
   const params = new URLSearchParams({
@@ -5869,7 +5922,7 @@ async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
     }
   } catch (err) {
     if (fetchId !== npLyricsFetchId) return;
-    if (err.status === 503 && retryCount < 2 && npOverlayOpen) {
+    if (err.status === 503 && retryCount < 2 && lyricsActive()) {
       const retryAfterSec = Number.isFinite(err.retryAfterSec)
         ? Math.max(1, Math.min(30, err.retryAfterSec))
         : 10;
@@ -5880,7 +5933,7 @@ async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
       }
       npLyricsRetryTimer = setTimeout(() => {
         npLyricsRetryTimer = null;
-        if (npOverlayOpen && lyricsTrackKey(lastNowPlaying) === npLyricsKey) {
+        if (lyricsActive() && lyricsTrackKey(lastNowPlaying) === npLyricsKey) {
           loadOverlayLyrics(lastNowPlaying, { retryCount: retryCount + 1 });
         }
       }, retryAfterSec * 1000);
@@ -5892,11 +5945,12 @@ async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
   }
 }
 
-function syncNpOverlay(np) {
-  if (!npOverlayOpen) return;
+/** Keep overlay + Party Display lyrics in sync with the current track. */
+function syncNowPlayingLyrics(np) {
+  if (!lyricsActive()) return;
   const key = lyricsTrackKey(np);
   const trackChanged = key !== npLyricsKey;
-  fillNpOverlayMeta(np);
+  if (npOverlayOpen) fillNpOverlayMeta(np);
   // Only refetch when the displayed track identity changes. Brief updating /
   // converging toggles must not wipe a successful lyric paint.
   if (trackChanged) {
@@ -5904,7 +5958,14 @@ function syncNpOverlay(np) {
     clearLyricsRetry();
     stopLyricTicker();
     loadOverlayLyrics(np);
+    return;
   }
+  mirrorLyricsContainers();
+  if (npSyncedLines) startLyricTicker();
+}
+
+function syncNpOverlay(np) {
+  syncNowPlayingLyrics(np);
 }
 
 function openNpOverlay() {
@@ -5931,9 +5992,11 @@ function openNpOverlay() {
 function closeNpOverlay({ fromPopstate = false } = {}) {
   if (!npOverlayOpen) return;
   npOverlayOpen = false;
-  clearLyricsRetry();
-  stopLyricTicker();
-  npLyricsFetchId += 1;
+  if (!lyricsActive()) {
+    clearLyricsRetry();
+    stopLyricTicker();
+    npLyricsFetchId += 1;
+  }
   if (npOverlay) npOverlay.hidden = true;
   document.body.classList.remove("np-overlay-open");
   if (!fromPopstate && npOverlayHistoryPushed && history.state?.npOverlay) {
@@ -6084,6 +6147,9 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
     if (displayState) displayState.hidden = true;
     if (displayOriginPill) displayOriginPill.hidden = true;
     if (displayReactions) displayReactions.hidden = true;
+    if (displayLyrics && currentView === "display") {
+      displayLyrics.innerHTML = "";
+    }
     return;
   }
 
