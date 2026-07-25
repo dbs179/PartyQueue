@@ -2888,8 +2888,10 @@ body.party-display-active > .container {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 2.15fr) minmax(300px, 0.85fr);
-  grid-template-rows: minmax(0, 1fr) auto;
-  align-items: stretch;
+  /* auto (not 1fr): keep lyrics snug under art/meta instead of bottom of the TV */
+  grid-template-rows: auto auto;
+  align-items: start;
+  align-content: start;
   column-gap: clamp(20px, 3vw, 46px);
   row-gap: clamp(14px, 1.8vw, 22px);
 }
@@ -2907,7 +2909,6 @@ body.party-display-active > .container {
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  align-self: stretch;
   gap: clamp(12px, 1.5vw, 18px);
 }
 
@@ -2917,7 +2918,6 @@ body.party-display-active > .container {
 
 .party-display-hero {
   min-height: 0;
-  height: 100%;
   display: grid;
   grid-template-columns: minmax(220px, 0.85fr) minmax(280px, 1.15fr);
   align-items: start;
