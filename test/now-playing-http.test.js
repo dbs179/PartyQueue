@@ -8,7 +8,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 test("enrichNowPlaying adds shared party flags without throwing", async () => {
   const { enrichNowPlaying } = await import("../src/now-playing-http.js");
-  const enriched = enrichNowPlaying({
+  const enriched = await enrichNowPlaying({
     title: "Test",
     artist: "Artist",
     uri: "spotify:track:abc",
@@ -95,6 +95,45 @@ test("resolveDisplayGenre prefers the track's enqueue lane over the latest set l
       { setLane: "electronic" }
     ),
     { mixGenreLane: "rock", mixGenreLabel: "Rock" }
+  );
+});
+
+test("resolveDisplayGenre during DJ uses the upcoming song's set lane", async () => {
+  const { resolveDisplayGenre } = await import("../src/now-playing-http.js");
+  assert.deepEqual(
+    resolveDisplayGenre(
+      {
+        title: "DJ Holy Roller",
+        artist: "Live from the Booth",
+        uri: "http://ha/tts_proxy/clip.mp3",
+        djVoice: true,
+      },
+      {
+        setLane: "folk",
+        upcomingForGenre: {
+          title: "Neon",
+          artist: "DJ Artist",
+          uri: "spotify:track:neo",
+          origin: "filler",
+          genreLane: "electronic",
+        },
+      }
+    ),
+    { mixGenreLane: "electronic", mixGenreLabel: "Electronic" }
+  );
+  // No upcoming row yet — keep the latest set lane so a just-queued batch
+  // does not blank the header while the announce is current.
+  assert.deepEqual(
+    resolveDisplayGenre(
+      {
+        title: "DJ Holy Roller",
+        artist: "Live from the Booth",
+        uri: "http://ha/tts_proxy/clip.mp3",
+        djVoice: true,
+      },
+      { setLane: "electronic" }
+    ),
+    { mixGenreLane: "electronic", mixGenreLabel: "Electronic" }
   );
 });
 

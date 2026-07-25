@@ -11,6 +11,7 @@ import {
 } from "./settings.js";
 import { isPartyOver } from "./party-rituals.js";
 import { getReactions } from "./reactions.js";
+import { originSnapshot } from "./queue-origin.js";
 import { spotifyTrackId } from "./sampler.js";
 import {
   createNowPlayingTransitionTracker,
@@ -32,21 +33,74 @@ function labelForLane(lane) {
 }
 
 /**
+ * First non-DJ upcoming queue track, shaped for resolveDisplayGenre.
+ * Used while a DJ announce/silence pad is current so Genre stays on the
+ * set the DJ is about to introduce.
+ */
+export async function upcomingTrackForGenreDisplay() {
+  try {
+    const tracks = await getQueueList();
+    const next = (Array.isArray(tracks) ? tracks : []).find(
+      (t) => t && !t.djVoice && t.uri && (t.title || t.artist)
+    );
+    if (!next) return null;
+    const id = spotifyTrackId(next.uri);
+    const meta = id ? originSnapshot().get(id) : null;
+    const source =
+      meta?.source ||
+      (next.searched
+        ? "searched"
+        : next.discovered
+          ? "discovered"
+          : next.moodPick
+            ? "mood"
+            : null);
+    return {
+      uri: next.uri,
+      title: next.title || null,
+      artist: next.artist || null,
+      origin: source,
+      genreLane: meta?.genreLane || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * What the Now Playing "Genre:" header should show for this track.
  * - Random / Never-Ending / Discover / era picks → that track's set lane
  *   (stored at enqueue; falls back to the latest recorded lane for older rows)
  * - Guest requests → that artist's mapped genre
- * - Idle / DJ clip / unknown → hidden (do not keep a stale set lane)
+ * - DJ announce / silence → upcoming song's genre (what the DJ is introducing)
+ * - Idle / unknown → hidden (do not keep a stale set lane)
  */
 export function resolveDisplayGenre(
   np,
   {
     setLane = null,
     bucketsFor = bucketsForArtistSync,
+    upcomingForGenre = null,
   } = {}
 ) {
-  if (!np || np.djVoice || np.djSilence) {
+  if (!np) {
     return { mixGenreLane: null, mixGenreLabel: null };
+  }
+  // While the DJ (or silence pad) is up, show the next song's set lane —
+  // not blank, and not the previous track.
+  if (np.djVoice || np.djSilence) {
+    if (upcomingForGenre) {
+      const fromNext = resolveDisplayGenre(upcomingForGenre, {
+        setLane,
+        bucketsFor,
+      });
+      if (fromNext.mixGenreLane) return fromNext;
+    }
+    const label = labelForLane(setLane);
+    return {
+      mixGenreLane: label ? setLane : null,
+      mixGenreLabel: label,
+    };
   }
   const hasTrack = !!(np.uri && (np.title || np.artist));
   if (!hasTrack) {
@@ -76,12 +130,16 @@ export function resolveDisplayGenre(
   return { mixGenreLane: null, mixGenreLabel: null };
 }
 
-export function enrichNowPlaying(np) {
+export async function enrichNowPlaying(np) {
   const trackId = spotifyTrackId(np?.uri);
   const fill = getAutoFillState();
   const rotation = getRotationSettings();
+  const setLane = getGenreFlowState().lastLane;
+  const upcomingForGenre =
+    np?.djVoice || np?.djSilence ? await upcomingTrackForGenreDisplay() : null;
   const { mixGenreLane, mixGenreLabel } = resolveDisplayGenre(np, {
-    setLane: getGenreFlowState().lastLane,
+    setLane,
+    upcomingForGenre,
   });
   return {
     ...np,
@@ -91,7 +149,8 @@ export function enrichNowPlaying(np) {
     mixGenres: fill.genres,
     mixMood: fill.mood,
     // Genre header: set lane while a set track plays; request artist genre
-    // while a guest request plays; cleared when idle / no relevant track.
+    // while a guest request plays; next-up lane while DJ announces; cleared
+    // when idle / no relevant track.
     mixGenreLane,
     mixGenreLabel,
     // Broadcast so the toggles reflect server truth even before host login
@@ -130,7 +189,7 @@ const transitionTracker = createNowPlayingTransitionTracker();
 export async function readNowPlayingPayload({ fresh = false } = {}) {
   nowPlayingReadCounters[fresh ? "fresh" : "regular"] += 1;
   const read = fresh ? getNowPlayingFresh : getNowPlaying;
-  return addPositionAge(enrichNowPlaying(await read()));
+  return addPositionAge(await enrichNowPlaying(await read()));
 }
 
 const nowPlayingStreamClients = new Map();
@@ -309,7 +368,7 @@ export function registerNowPlayingRoutes(app) {
       );
       const [np, tracks] = await Promise.all([getNowPlaying(), getQueueList()]);
       res.json({
-        ...enrichNowPlaying(np),
+        ...(await enrichNowPlaying(np)),
         tracks,
       });
     } catch (err) {
