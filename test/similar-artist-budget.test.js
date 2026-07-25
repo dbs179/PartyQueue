@@ -41,9 +41,10 @@ test("primary artist collapses featured credits for budget checks", () => {
   assert.equal(spendArtistBudget("Tyga, Nicki", new Map()), "tyga");
 });
 
-test("discoveryFitsLane hard-rejects off-lane Songs Like", () => {
+test("discoveryFitsLane hard-rejects non-exact Songs Like", () => {
   assert.equal(discoveryFitsLane(["metal", "rock"], "metal"), true);
-  assert.equal(discoveryFitsLane(["rock"], "metal"), true); // neighbor OK
+  assert.equal(discoveryFitsLane(["rock"], "metal"), false); // neighbor not enough
+  assert.equal(discoveryFitsLane(["hiphop"], "folk"), false);
   assert.equal(discoveryFitsLane(["country"], "metal"), false);
   assert.equal(discoveryFitsLane(["other"], "metal"), false);
   assert.equal(discoveryFitsLane([], "metal"), false);

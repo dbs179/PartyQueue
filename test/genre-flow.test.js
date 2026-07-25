@@ -6,6 +6,7 @@ import {
   compatibleWith,
   bucketsCompatible,
   fitsLane,
+  fitsExactLane,
   fitsNeighbor,
   bridgeFitsBoth,
   bridgeSlotCount,
@@ -30,6 +31,15 @@ test("fitsLane / fitsNeighbor soft checks", () => {
   assert.equal(fitsLane([], "metal"), true); // unknown → don't block
   assert.equal(fitsNeighbor(["punk"], ["metal"]), true);
   assert.equal(fitsNeighbor(["country"], ["metal"]), false);
+});
+
+test("fitsExactLane requires the lane bucket itself", () => {
+  assert.equal(fitsExactLane(["metal", "rock"], "metal"), true);
+  assert.equal(fitsExactLane(["rock"], "metal"), false); // neighbor only
+  assert.equal(fitsExactLane(["hiphop", "pop"], "folk"), false);
+  assert.equal(fitsExactLane(["other"], "folk"), false);
+  assert.equal(fitsExactLane([], "folk"), false);
+  assert.equal(fitsExactLane(["folk"], null), true); // no lane → allow
 });
 
 test("bridge prefers overlap between previous and next lane", () => {
@@ -76,7 +86,7 @@ test("genreFlowScore ranks on-lane higher than clash", () => {
   assert.ok(on > off, `expected on-lane ${on} > off-lane ${off}`);
 });
 
-test("genreFlowScore ranks exact lane above a neighbor", () => {
+test("genreFlowScore scores exact lane only", () => {
   const flow = {
     lane: "metal",
     previousLane: null,
@@ -86,8 +96,9 @@ test("genreFlowScore ranks exact lane above a neighbor", () => {
   const exact = genreFlowScore(["metal"], flow);
   const neighbor = genreFlowScore(["rock"], flow); // rock neighbors metal
   const clash = genreFlowScore(["country"], flow);
-  assert.ok(exact > neighbor, `expected exact ${exact} > neighbor ${neighbor}`);
-  assert.ok(neighbor > clash, `expected neighbor ${neighbor} > clash ${clash}`);
+  assert.ok(exact > 0, `expected exact ${exact} > 0`);
+  assert.equal(neighbor, 0);
+  assert.equal(clash, 0);
 });
 
 test("pickSetLane skips lanes the pool can't serve", () => {
@@ -128,9 +139,7 @@ test("pickSetLane keeps the full rotation when no lane meets the minimum", () =>
   assert.ok(["pop", "hiphop"].includes(lane));
 });
 
-test("sampleSongs picks exact-lane tracks before neighbor-lane tracks", () => {
-  // Rock neighbors metal, so both "fit" the lane — but with enough metal in
-  // the pool, a metal set should actually be metal.
+test("sampleSongs hard-filters to exact-lane tracks only", () => {
   const playlists = [
     {
       id: "m",
@@ -178,36 +187,21 @@ test("sampleSongs picks exact-lane tracks before neighbor-lane tracks", () => {
   );
 });
 
-test("sampleSongs with flowState soft-prefers the set lane", () => {
-  // One playlist of metal, one of country — lane=metal should usually win.
+test("sampleSongs never picks off-lane tracks even when the lane pool is empty", () => {
   const playlists = [
     {
-      id: "m",
-      name: "metal",
+      id: "h",
+      name: "hiphop",
       tracks: Array.from({ length: 8 }, (_, i) => ({
-        uri: `spotify:track:metal${i}`,
-        name: `M${i}`,
-        artist: `MetalAct${i}`,
-      })),
-    },
-    {
-      id: "c",
-      name: "country",
-      tracks: Array.from({ length: 8 }, (_, i) => ({
-        uri: `spotify:track:country${i}`,
-        name: `C${i}`,
-        artist: `CountryAct${i}`,
+        uri: `spotify:track:hip${i}`,
+        name: `H${i}`,
+        artist: `HipAct${i}`,
       })),
     },
   ];
-  const bucketsFor = (artist) => {
-    const a = String(artist || "").toLowerCase();
-    if (a.startsWith("metal")) return ["metal"];
-    if (a.startsWith("country")) return ["country"];
-    return ["other"];
-  };
+  const bucketsFor = () => ["hiphop"];
   const flowState = {
-    lane: "metal",
+    lane: "folk",
     previousLane: null,
     bridgeLeft: 0,
     lastBuckets: new Set(),
@@ -216,14 +210,7 @@ test("sampleSongs with flowState soft-prefers the set lane", () => {
     bucketsFor,
     flowState,
   });
-  assert.equal(picks.length, 5);
-  const metalCount = picks.filter((u) =>
-    String(spotifyTrackId(u) || "").startsWith("metal")
-  ).length;
-  assert.ok(
-    metalCount >= 4,
-    `expected mostly metal picks, got ${metalCount}/5: ${picks.join(",")}`
-  );
+  assert.equal(picks.length, 0);
 });
 
 test("BUCKET_NEIGHBORS covers every GENRE bucket id used as a key", () => {

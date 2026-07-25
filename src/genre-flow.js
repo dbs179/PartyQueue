@@ -1,9 +1,9 @@
 // Genre-lane flow for Random / Never-Ending sets.
 //
-// Within a set: pick one primary lane and soft-prefer compatible neighbors
-// (rock↔metal↔punk OK; metal↔country avoided). Thin pools still fill.
-// Across sets: rotate the lane, but bridge the first 1–2 songs so the
-// handoff from the previous set isn't a cliff.
+// Within a set: one primary lane; playlist / Discover / era / Spotify top-ups
+// must exact-match that bucket (neighbors do not count). Thin playlist pools
+// top up from Spotify lane hits rather than drifting off-lane.
+// Across sets: rotate the lane; previous-lane bridging is not used for picks.
 
 import { GENRE_BUCKETS } from "./genres.js";
 import { loadSettings, saveSettings } from "./settings.js";
@@ -68,6 +68,19 @@ export function fitsLane(artistBuckets, lane) {
   const buckets = uniq(artistBuckets);
   if (!buckets.length) return true;
   return bucketsCompatible(buckets, [lane]);
+}
+
+/**
+ * Hard exact-lane membership for Random / Never-Ending / Discover.
+ * Artist must carry the lane bucket itself. Neighbors, empty, and other-only
+ * do not count when a lane is set.
+ */
+export function fitsExactLane(artistBuckets, lane) {
+  if (!lane) return true;
+  const want = String(lane);
+  const buckets = uniq(artistBuckets).filter((b) => b && b !== "other");
+  if (!buckets.length) return false;
+  return buckets.includes(want);
 }
 
 /** Soft neighbor check against the previous pick's buckets. */
@@ -214,29 +227,16 @@ export function recordGenreLane(lane) {
   return { lastLane: lane, recentLanes: recent };
 }
 
-/** Score a track for soft genre-flow tiers (higher = better). */
+/**
+ * Score a track inside an exact-lane pool (higher = better).
+ * Off-lane / unknown tracks score 0 — callers should hard-filter with
+ * fitsExactLane before ranking.
+ */
 export function genreFlowScore(artistBuckets, flowState) {
   if (!flowState?.lane) return 0;
-  const {
-    lane,
-    previousLane = null,
-    bridgeLeft = 0,
-    lastBuckets = null,
-  } = flowState;
-  const bridging = bridgeLeft > 0 && previousLane && previousLane !== lane;
-
-  let score = 0;
-  if (bridging) {
-    if (bridgeFitsBoth(artistBuckets, previousLane, lane)) score += 40;
-    else if (fitsBridge(artistBuckets, previousLane, lane)) score += 25;
-  } else {
-    // Exact lane membership outranks a neighbor: for broad lanes like pop the
-    // neighbor set covers most of the map, so treating both as one tier lets
-    // a set swing country → hiphop → rock while "fitting the lane".
-    const buckets = uniq(artistBuckets);
-    if (buckets.includes(lane)) score += 60;
-    else if (fitsLane(buckets, lane)) score += 40;
-  }
+  const { lane, lastBuckets = null } = flowState;
+  if (!fitsExactLane(artistBuckets, lane)) return 0;
+  let score = 60;
   if (lastBuckets && lastBuckets.size && fitsNeighbor(artistBuckets, lastBuckets)) {
     score += 20;
   }

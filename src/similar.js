@@ -12,7 +12,7 @@
 
 import { findTrackUri } from "./spotify.js";
 import { bucketsForArtist } from "./genres.js";
-import { fitsLane } from "./genre-flow.js";
+import { fitsExactLane } from "./genre-flow.js";
 import {
   shuffled,
   primaryArtist,
@@ -118,9 +118,9 @@ async function similarArtistTracksFor(seed) {
 //                  playlist picks so discoveries don't step on Random settings
 //   discoveryArtistCap - max discoveries from one artist in THIS batch (default 1)
 //   blockedArtists - skip-cooldown primary artists (hard reject)
-//   preferLane - hard-require discoveries that fit this genre lane (or a
-//                neighbor). Off-lane Songs Like are dropped; shortfall is
-//                filled from playlist picks instead of mismatched discoveries.
+//   preferLane - hard-require discoveries that exact-match this genre lane.
+//                Neighbors / unknown / other are dropped; shortfall is filled
+//                by Spotify lane hits (or a shorter batch), never off-lane.
 export async function getSimilarUris({
   seeds,
   count,
@@ -233,8 +233,7 @@ export async function getSimilarUris({
       }
       if (enabled && !buckets.some((b) => enabled.has(b))) continue;
 
-      // Hard lane: discoveries must match the set lane (or a neighbor), same
-      // affinity graph as Random fillers. Never inject country into a metal set.
+      // Hard exact lane: discoveries must carry the set lane bucket itself.
       if (lane && !discoveryFitsLane(buckets, lane)) continue;
 
       accept(found, artist);
@@ -245,15 +244,9 @@ export async function getSimilarUris({
 }
 
 /**
- * Hard gate for Songs Like / Discover against the Random set lane.
- * Unknown / other-only artists are rejected when a lane is set so they can't
- * punch holes in an otherwise coherent batch.
+ * Hard exact-lane gate for Songs Like / Discover against the Random set lane.
+ * Unknown / other-only / neighbor-only artists are rejected when a lane is set.
  */
 export function discoveryFitsLane(artistBuckets, lane) {
-  if (!lane) return true;
-  const buckets = Array.isArray(artistBuckets)
-    ? artistBuckets.map(String).filter((b) => b && b !== "other")
-    : [];
-  if (!buckets.length) return false;
-  return fitsLane(buckets, lane);
+  return fitsExactLane(artistBuckets, lane);
 }

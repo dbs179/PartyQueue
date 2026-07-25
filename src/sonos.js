@@ -31,11 +31,12 @@ import { artistMatchesGenres, bucketsForArtistSync, bucketsForArtist } from "./g
 import { moodPack as eraMoodPack, getMoodHits, trackFitsMood } from "./moods.js";
 import {
   pickSetLane,
-  bridgeSlotCount,
+  fitsExactLane,
   getGenreFlowState,
   recordGenreLane,
 } from "./genre-flow.js";
 import { getSimilarUris, isDiscoveryAvailable } from "./similar.js";
+import { getLaneHits } from "./lane-hits.js";
 import { markOrigin, originOf, moodOf, originSnapshot, isFiller } from "./queue-origin.js";
 import { warmLyrics } from "./lyrics.js";
 import { queueWorkWasPreempted } from "./queue-preempt.js";
@@ -1022,20 +1023,15 @@ async function addRandomFromPlaylistsUnlocked(
   } else if (recentBuckets.size) {
     tailBuckets = [...recentBuckets];
   }
-  const bridgeLeft =
-    flowPrev.lastLane && flowPrev.lastLane !== setLane
-      ? bridgeSlotCount(playlistWant)
-      : 0;
   cfg.flowState = {
     lane: setLane,
     previousLane: flowPrev.lastLane,
-    bridgeLeft,
+    bridgeLeft: 0,
     lastBuckets: new Set(tailBuckets),
   };
   console.log(
-    `[random] genre lane=${setLane}` +
-      (flowPrev.lastLane ? ` (was ${flowPrev.lastLane})` : "") +
-      (bridgeLeft ? ` bridge=${bridgeLeft}` : "")
+    `[random] genre lane=${setLane} exact` +
+      (flowPrev.lastLane ? ` (was ${flowPrev.lastLane})` : "")
   );
 
   const artistByUri = new Map();
@@ -1077,25 +1073,18 @@ async function addRandomFromPlaylistsUnlocked(
     if (artist) lastPlaylistArtist = artist;
   }
 
-  // 2) "Songs Like" discovery: pull songs similar to the (filtered) pool but
-  // OUTSIDE the entire library. Excludes the whole library, the live queue, and
-  // recent memory so suggestions are genuinely new. Prefer the set genre lane
-  // (neighbors OK); if that yields nothing, retry without the lane (still
-  // within enabled genres) before filling from playlists. Caps discoveries to
-  // one per artist per batch for diversity.
+  // 2) Outside-library slots: era charts (mood on) or Songs Like Discover.
+  // Exact lane only — no neighbor soft-fit and no off-lane Discover retry.
   let discoveries = [];
-  if (similarWant > 0 && activeMoodPack) {
-    // Era mood: the outside-library slots come from the era's charts instead
-    // of Songs Like, so Discover can't dilute the decade with cross-era picks.
-    // The set's genre lane still applies (soft, neighbors OK) so a decade
-    // chart can't whiplash a set between hard rock and country.
-    const libraryIds = new Set();
-    for (const pl of playlists) {
-      for (const t of pl.tracks || []) {
-        const id = spotifyTrackId(t.uri);
-        if (id) libraryIds.add(id);
-      }
+  let laneHitAdded = 0;
+  const libraryIds = new Set();
+  for (const pl of playlists) {
+    for (const t of pl.tracks || []) {
+      const id = spotifyTrackId(t.uri);
+      if (id) libraryIds.add(id);
     }
+  }
+  if (similarWant > 0 && activeMoodPack) {
     try {
       discoveries = await getMoodHits({
         mood: activeMoodPack.id,
@@ -1111,87 +1100,55 @@ async function addRandomFromPlaylistsUnlocked(
         preferLane: setLane,
       });
       console.log(
-        `[moods] ${activeMoodPack.id}: filled ${discoveries.length}/${similarWant} outside slots from era charts (lane=${setLane})`
+        `[moods] ${activeMoodPack.id}: filled ${discoveries.length}/${similarWant} outside slots from era charts (lane=${setLane} exact)`
       );
     } catch (err) {
       console.error("[moods] era slot fill failed:", err.message);
     }
   } else if (similarWant > 0 && isDiscoveryAvailable()) {
-    const libraryIds = new Set();
-    for (const pl of playlists) {
-      for (const t of pl.tracks || []) {
-        const id = spotifyTrackId(t.uri);
-        if (id) libraryIds.add(id);
-      }
-    }
     const discExclude = new Set([...libraryIds, ...exclude, ...recentIds]);
+    // Prefer seeds already on the exact lane so Songs Like stays in-family.
     const seeds = [];
     for (const pl of usable) {
-      for (const t of pl.tracks || []) seeds.push({ artist: t.artist, name: t.name });
+      for (const t of pl.tracks || []) {
+        let buckets = bucketsForArtistSync(t.artist);
+        if (!buckets.length) buckets = ["other"];
+        if (fitsExactLane(buckets, setLane)) {
+          seeds.push({ artist: t.artist, name: t.name });
+        }
+      }
     }
-    const discOpts = {
-      seeds,
-      excludeIds: discExclude,
-      enabledGenres: Array.isArray(genres) ? genres : null,
-      filterExplicit: !!opts.filterExplicit,
-      // Don't inherit the Random artist-window budget: with artistCap 1 that
-      // window is often fully spent, so every popular similar artist is
-      // rejected and Discover silently fills from playlists. Song memory +
-      // library exclude already keep discoveries fresh; discoveryArtistCap
-      // keeps this batch diverse; lastArtist avoids back-to-back repeats.
-      artistCap: cfg.artistCap,
-      artistSeedCounts: null,
-      lastArtist: lastPlaylistArtist,
-      discoveryArtistCap: 1,
-      blockedArtists,
-      flowState: cfg.flowState,
-    };
+    if (!seeds.length) {
+      for (const pl of usable) {
+        for (const t of pl.tracks || []) {
+          seeds.push({ artist: t.artist, name: t.name });
+        }
+      }
+    }
     try {
       discoveries = await getSimilarUris({
-        ...discOpts,
+        seeds,
+        excludeIds: discExclude,
+        enabledGenres: Array.isArray(genres) ? genres : null,
+        filterExplicit: !!opts.filterExplicit,
+        artistCap: cfg.artistCap,
+        artistSeedCounts: null,
+        lastArtist: lastPlaylistArtist,
+        discoveryArtistCap: 1,
+        blockedArtists,
+        flowState: cfg.flowState,
         count: similarWant,
         preferLane: setLane,
       });
-      const laneHit = discoveries.length;
-      if (discoveries.length < similarWant) {
-        for (const d of discoveries) {
-          if (d.id) discExclude.add(d.id);
-        }
-        const need = similarWant - discoveries.length;
-        const more = await getSimilarUris({
-          ...discOpts,
-          excludeIds: discExclude,
-          count: need,
-          preferLane: null,
-          flowState: null,
-        });
-        if (more.length) {
-          console.log(
-            `[discover] lane=${setLane || "?"} got ${laneHit}/${similarWant}; ` +
-              `filled ${more.length} more without lane gate`
-          );
-          discoveries = discoveries.concat(more);
-        } else if (laneHit === 0) {
-          console.log(
-            `[discover] lane=${setLane || "?"} got 0/${similarWant}; fallback also empty`
-          );
-        } else {
-          console.log(
-            `[discover] lane=${setLane || "?"} got ${laneHit}/${similarWant}; fallback empty`
-          );
-        }
-      } else {
-        console.log(
-          `[discover] lane=${setLane || "?"} got ${laneHit}/${similarWant}`
-        );
-      }
+      console.log(
+        `[discover] lane=${setLane || "?"} exact got ${discoveries.length}/${similarWant}`
+      );
     } catch (err) {
       console.error("[discover] failed:", err.message);
     }
   }
 
-  // If discovery came up short, fill leftover slots from playlists so the batch
-  // still aims for `totalTarget` songs.
+  // If discovery came up short, try more exact-lane playlist picks first.
   const discoveryShortfall = Math.max(0, similarWant - discoveries.length);
   if (discoveryShortfall > 0) {
     artistSeed = artistCountsInWindow(cfg.artistWindow);
@@ -1214,6 +1171,49 @@ async function addRandomFromPlaylistsUnlocked(
     relaxedArtist = relaxedArtist || fill.relaxedArtist;
     relaxedMemory = relaxedMemory || fill.relaxedMemory;
     memoryReuseCount += fill.memoryReuseCount;
+  }
+
+  // Still short of the batch target → Spotify / Last.fm exact-lane hits
+  // outside the library. Never pad with off-lane tracks.
+  {
+    const need = Math.max(
+      0,
+      totalTarget - playlistUris.length - discoveries.length
+    );
+    if (need > 0 && setLane && !wasPreempted()) {
+      try {
+        const hits = await getLaneHits({
+          lane: setLane,
+          count: need,
+          excludeIds: new Set([...libraryIds, ...exclude, ...recentIds]),
+          filterExplicit: !!opts.filterExplicit,
+          artistCap: cfg.artistCap,
+          lastArtist: lastPlaylistArtist,
+          laneArtistCap: 1,
+          blockedArtists,
+          enabledGenres: Array.isArray(genres) ? genres : null,
+          bucketsFor: bucketsForArtist,
+        });
+        if (hits.length) {
+          for (const h of hits) {
+            if (h.id) exclude.add(h.id);
+            const artist = primaryArtist(h.artist);
+            if (artist) lastPlaylistArtist = artist;
+          }
+          discoveries = discoveries.concat(hits);
+          laneHitAdded += hits.length;
+          console.log(
+            `[lane-hits] lane=${setLane} filled ${hits.length}/${need} Spotify exact-lane hit(s)`
+          );
+        } else {
+          console.log(
+            `[lane-hits] lane=${setLane} need ${need}; none available (shorten batch)`
+          );
+        }
+      } catch (err) {
+        console.error("[lane-hits] shortfall fill failed:", err.message);
+      }
+    }
   }
 
   // 3) Mix discoveries through playlist picks (always lead with a playlist
@@ -1284,9 +1284,8 @@ async function addRandomFromPlaylistsUnlocked(
     markOrigin(moodIds, "mood", { mood: activeMoodPack?.id || null });
   if (fillerIds.length) markOrigin(fillerIds, "filler");
 
-  // 5) Top up if some enqueues failed (or discovery shortfall left us under
-  // totalTarget), appended at the end. Refresh the artist seed from disk so the
-  // budget includes what we just recorded.
+  // 5) Top up if some enqueues failed (or we are still under totalTarget).
+  // Exact-lane playlist leftovers first, then Spotify lane hits — never off-lane.
   while (added < totalTarget && !wasPreempted()) {
     artistSeed = artistCountsInWindow(cfg.artistWindow);
     const more = pickWithRelaxation(
@@ -1297,39 +1296,99 @@ async function addRandomFromPlaylistsUnlocked(
       artistSeed,
       cfg
     );
-    if (!more.uris.length) break;
-    relaxedArtist = relaxedArtist || more.relaxedArtist;
-    relaxedMemory = relaxedMemory || more.relaxedMemory;
-    memoryReuseCount += more.memoryReuseCount;
     let progressed = false;
-    const rec2 = [];
-    const filler2 = [];
-    for (const uri of more.uris) {
+    if (more.uris.length) {
+      relaxedArtist = relaxedArtist || more.relaxedArtist;
+      relaxedMemory = relaxedMemory || more.relaxedMemory;
+      memoryReuseCount += more.memoryReuseCount;
+      const rec2 = [];
+      const filler2 = [];
+      for (const uri of more.uris) {
+        if (wasPreempted()) break;
+        const id = spotifyTrackId(uri);
+        exclude.add(id);
+        try {
+          const meta = MetaDataHelper.GuessMetaDataAndTrackUri(uri, resolveRegion());
+          await enqueueMeta(m, meta);
+          added++;
+          progressed = true;
+          if (id) {
+            recentIds.add(id);
+            filler2.push(id);
+          }
+          rec2.push({
+            id,
+            artist: artistByUri.get(uri) ?? "",
+            name: nameByUri.get(uri) ?? "",
+            source: "filler",
+          });
+          if (added >= totalTarget) break;
+        } catch (err) {
+          console.error(`[random] failed to add ${uri}:`, err.message);
+        }
+      }
+      if (rec2.length) recordPlayed(rec2);
+      if (filler2.length) markOrigin(filler2, "filler");
+    }
+    if (added >= totalTarget || wasPreempted()) break;
+    if (!setLane) break;
+    let hits = [];
+    try {
+      hits = await getLaneHits({
+        lane: setLane,
+        count: totalTarget - added,
+        excludeIds: new Set([...libraryIds, ...exclude, ...recentIds]),
+        filterExplicit: !!opts.filterExplicit,
+        artistCap: cfg.artistCap,
+        artistSeedCounts: artistCountsInWindow(cfg.artistWindow),
+        lastArtist: lastPlaylistArtist,
+        laneArtistCap: 1,
+        blockedArtists,
+        enabledGenres: Array.isArray(genres) ? genres : null,
+        bucketsFor: bucketsForArtist,
+      });
+    } catch (err) {
+      console.error("[lane-hits] top-up failed:", err.message);
+      break;
+    }
+    if (!hits.length) break;
+    const recHits = [];
+    const discIds = [];
+    for (const h of hits) {
       if (wasPreempted()) break;
-      const id = spotifyTrackId(uri);
-      exclude.add(id);
       try {
-        const meta = MetaDataHelper.GuessMetaDataAndTrackUri(uri, resolveRegion());
+        const meta = MetaDataHelper.GuessMetaDataAndTrackUri(h.uri, resolveRegion());
         await enqueueMeta(m, meta);
         added++;
+        similarAdded++;
+        laneHitAdded += 1;
         progressed = true;
-        if (id) {
-          recentIds.add(id);
-          filler2.push(id);
+        if (h.id) {
+          exclude.add(h.id);
+          recentIds.add(h.id);
+          discIds.push(h.id);
         }
-        rec2.push({
-          id,
-          artist: artistByUri.get(uri) ?? "",
-          name: nameByUri.get(uri) ?? "",
-          source: "filler",
+        const artist = primaryArtist(h.artist);
+        if (artist) lastPlaylistArtist = artist;
+        recHits.push({
+          id: h.id,
+          artist: h.artist,
+          name: h.name,
+          source: "discovered",
+        });
+        recorded.push({
+          id: h.id,
+          artist: h.artist || "",
+          name: h.name || "",
+          discovered: true,
         });
         if (added >= totalTarget) break;
       } catch (err) {
-        console.error(`[random] failed to add ${uri}:`, err.message);
+        console.error(`[lane-hits] failed to add ${h.uri}:`, err.message);
       }
     }
-    if (rec2.length) recordPlayed(rec2);
-    if (filler2.length) markOrigin(filler2, "filler");
+    if (recHits.length) recordPlayed(recHits);
+    if (discIds.length) markOrigin(discIds, "discovered");
     if (!progressed) break;
   }
 
@@ -1431,16 +1490,14 @@ async function addRandomFromPlaylistsUnlocked(
   }));
 
   if (added > 0) {
-    const discNote =
-      similarWant > 0
-        ? similarAdded > 0
-          ? ` (${added - similarAdded} playlists + ${similarAdded} discoveries)`
-          : ` (${added} playlists, 0/${similarWant} discoveries)`
-        : "";
-    const moodNote = activeMoodPack
-      ? ` mood=${activeMoodPack.id} (${moodAdded} era hits)`
-      : "";
-    console.log(`[random] added ${added}${discNote}${moodNote} lane=${setLane || "?"}`);
+    const short = Math.max(0, totalTarget - added);
+    console.log(
+      `[random] genre lane=${setLane || "?"} exact ` +
+        `playlist=${added - similarAdded - moodAdded} ` +
+        `discover=${similarAdded} laneHits=${laneHitAdded}` +
+        (activeMoodPack ? ` mood=${activeMoodPack.id} (${moodAdded} era hits)` : "") +
+        (short ? ` short=${short}` : "")
+    );
   }
 
   return {

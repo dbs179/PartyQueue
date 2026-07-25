@@ -192,7 +192,7 @@ test("getMoodHits prefers exact-lane era hits over neighbor-lane hits", async ()
   );
 });
 
-test("getMoodHits fills from neighbor-lane hits before clashing genres", async () => {
+test("getMoodHits rejects neighbor-lane hits under exact Genre", async () => {
   const candidates = [
     { artist: "MetalB", name: "Song 1" },
     { artist: "RockA", name: "Song 2" },
@@ -218,11 +218,11 @@ test("getMoodHits fills from neighbor-lane hits before clashing genres", async (
     },
     { tagCandidates: async () => candidates, resolveTrack: fakeResolver(catalog) }
   );
-  // Exact metal + neighbor rock; country never makes the cut at count 2.
-  assert.deepEqual(out.map((t) => t.id).sort(), ["m1", "r1"]);
+  // Exact metal only — neighbor rock and country are skipped (shorten).
+  assert.deepEqual(out.map((t) => t.id), ["m1"]);
 });
 
-test("getMoodHits tops up with off-lane era hits when the lane runs dry", async () => {
+test("getMoodHits shortens when the exact lane runs dry", async () => {
   const candidates = [
     { artist: "RockA", name: "Song 1" },
     { artist: "CountryB", name: "Song 2" },
@@ -249,9 +249,8 @@ test("getMoodHits tops up with off-lane era hits when the lane runs dry", async 
     },
     { tagCandidates: async () => candidates, resolveTrack: fakeResolver(catalog) }
   );
-  // A thin lane must not starve the batch — off-lane era hits fill the rest.
-  assert.equal(out.length, 3);
-  assert.ok(out.some((t) => t.id === "r1"));
+  // Exact-only: one rock hit, no off-lane pad.
+  assert.deepEqual(out.map((t) => t.id), ["r1"]);
 });
 
 test("getMoodHits falls back to era-filtered Spotify search", async () => {

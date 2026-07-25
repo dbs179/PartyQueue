@@ -9,7 +9,7 @@
 // doesn't keep leaning on the same songs and artists.
 
 import { isClosingTime } from "./closing-time.js";
-import { genreFlowScore } from "./genre-flow.js";
+import { fitsExactLane, genreFlowScore } from "./genre-flow.js";
 
 // Pull the bare spotify:track:<id> out of whatever URI form Sonos stores in the
 // queue, e.g. "x-sonos-spotify:spotify%3atrack%3a<id>?sid=9&flags=8224&sn=7".
@@ -104,8 +104,8 @@ function artistBucketsOf(track, bucketsFor) {
 //   - bucketsFor:       (artist) => string[] genre buckets (for mood continuity)
 //   - lastArtist:       primary artist of the prior song (queue tail / last pick)
 //                       so the first pick of this call avoids that artist too
-//   - flowState:        mutable genre-lane state { lane, previousLane, bridgeLeft,
-//                       lastBuckets } — soft-prefer lane + neighbor fit, then fill
+//   - flowState:        mutable genre-lane state { lane, lastBuckets } —
+//                       hard exact-lane filter, then rank within that pool
 export function sampleSongs(playlists, exclude, want, opts = {}) {
   if (want <= 0) return [];
 
@@ -149,8 +149,8 @@ export function sampleSongs(playlists, exclude, want, opts = {}) {
     guard++;
     let addedThisRound = 0;
 
-    // Genre flow: each step picks the single best-scoring track across all
-    // playlists (so metal doesn't lose a slot to country every round).
+    // Genre flow: hard exact-lane filter, then pick the best-scoring track
+    // across playlists. Off-lane tracks never enter the candidate pool.
     // Without flow: classic one-random-song-per-playlist-per-round.
     if (useFlow) {
       const candidates = [];
@@ -163,6 +163,9 @@ export function sampleSongs(playlists, exclude, want, opts = {}) {
           const artist = primaryArtist(t.artist);
           if (blockedArtists && artist && blockedArtists.has(artist)) return false;
           if ((artistCount.get(artist) ?? 0) >= artistCap) return false;
+          if (!fitsExactLane(artistBucketsOf(t, bucketsFor), flowState.lane)) {
+            return false;
+          }
           return true;
         });
         if (!fresh.length) continue;
@@ -201,7 +204,6 @@ export function sampleSongs(playlists, exclude, want, opts = {}) {
       lastArtist = artist;
       artistCount.set(artist, (artistCount.get(artist) ?? 0) + 1);
       flowState.lastBuckets = new Set(pickBuckets);
-      if (flowState.bridgeLeft > 0) flowState.bridgeLeft -= 1;
       addedThisRound++;
     } else {
       for (const pl of shuffled(playlists)) {
