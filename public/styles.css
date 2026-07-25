@@ -2888,37 +2888,40 @@ body.party-display-active > .container {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 2.15fr) minmax(300px, 0.85fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   align-items: stretch;
-  gap: clamp(20px, 3vw, 46px);
+  column-gap: clamp(20px, 3vw, 46px);
+  row-gap: clamp(14px, 1.8vw, 22px);
 }
 
-.party-display-now,
-.party-display-side,
+.party-display-now {
+  grid-column: 1;
+  grid-row: 1;
+  min-height: 0;
+}
+
+.party-display-side {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-self: stretch;
+  gap: clamp(12px, 1.5vw, 18px);
+}
+
 .party-display-queue {
   min-height: 0;
 }
 
-.party-display-now {
-  display: flex;
-  flex-direction: column;
-  gap: clamp(12px, 1.5vw, 20px);
-  min-height: 0;
-}
-
 .party-display-hero {
-  flex: 0 1 auto;
   min-height: 0;
+  height: 100%;
   display: grid;
   grid-template-columns: minmax(220px, 0.85fr) minmax(280px, 1.15fr);
   align-items: start;
   gap: clamp(24px, 4vw, 64px);
-}
-
-.party-display-art-col {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: clamp(12px, 1.4vw, 18px);
 }
 
 .party-display-art-wrap {
@@ -3070,13 +3073,15 @@ body.party-display-active > .container {
   font-variant-numeric: tabular-nums;
 }
 
-/* Fixed 3-line karaoke window — directly under album art. */
+/* Fixed 3-line karaoke window — full layout width under Now + Up Next. */
 .party-display-lyrics {
-  --display-lyric-size: clamp(1.2rem, 2.1vw, 2rem);
+  --display-lyric-size: clamp(1.25rem, 2.2vw, 2.15rem);
   --display-lyric-line: 1.3;
   --display-lyric-gap: 0.4rem;
-  flex: 0 0 auto;
+  grid-column: 1 / -1;
+  grid-row: 2;
   width: 100%;
+  min-width: 0;
   height: calc(
     (3 * var(--display-lyric-size) * var(--display-lyric-line)) +
       (2 * var(--display-lyric-gap))
@@ -3148,14 +3153,6 @@ body.party-display-active > .container {
 
 .party-display-lyrics .np-fs-line.is-empty {
   visibility: hidden;
-}
-
-.party-display-side {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  align-self: start;
-  gap: clamp(12px, 1.5vw, 18px);
 }
 
 .party-display-queue,
@@ -3290,6 +3287,25 @@ body.party-display-active > .container {
 
   .party-display-layout {
     grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+  }
+
+  .party-display-now,
+  .party-display-side,
+  .party-display-lyrics {
+    grid-column: 1;
+  }
+
+  .party-display-now {
+    grid-row: 1;
+  }
+
+  .party-display-side {
+    grid-row: 2;
+  }
+
+  .party-display-lyrics {
+    grid-row: 3;
   }
 
   .party-display-hero {
