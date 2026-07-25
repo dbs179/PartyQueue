@@ -2903,7 +2903,6 @@ body.party-display-active > .container {
   flex-direction: column;
   gap: clamp(12px, 1.5vw, 20px);
   min-height: 0;
-  height: 100%;
 }
 
 .party-display-hero {
@@ -2915,10 +2914,17 @@ body.party-display-active > .container {
   gap: clamp(24px, 4vw, 64px);
 }
 
+.party-display-art-col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(12px, 1.4vw, 18px);
+}
+
 .party-display-art-wrap {
   position: relative;
   width: 100%;
-  max-height: min(58dvh, 640px);
+  max-height: min(52dvh, 560px);
   aspect-ratio: 1;
   align-self: start;
   border-radius: clamp(16px, 2vw, 28px);
@@ -3064,19 +3070,19 @@ body.party-display-active > .container {
   font-variant-numeric: tabular-nums;
 }
 
-/* Fixed 3-line karaoke window — pinned to the bottom of the Now column. */
+/* Fixed 3-line karaoke window — directly under album art. */
 .party-display-lyrics {
   --display-lyric-size: clamp(1.2rem, 2.1vw, 2rem);
   --display-lyric-line: 1.3;
   --display-lyric-gap: 0.4rem;
   flex: 0 0 auto;
-  margin-top: auto;
+  width: 100%;
   height: calc(
     (3 * var(--display-lyric-size) * var(--display-lyric-line)) +
       (2 * var(--display-lyric-gap))
   );
   overflow: hidden;
-  padding: 0 4px;
+  padding: 0 2px;
   text-align: left;
 }
 

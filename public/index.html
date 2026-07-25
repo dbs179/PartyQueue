@@ -326,9 +326,17 @@
           <div class="party-display-layout">
             <section class="party-display-now" aria-labelledby="display-title">
               <div class="party-display-hero">
-                <div class="party-display-art-wrap">
-                  <img id="display-art" class="party-display-art" alt="" />
-                  <p id="display-empty" class="party-display-empty">Connecting…</p>
+                <div class="party-display-art-col">
+                  <div class="party-display-art-wrap">
+                    <img id="display-art" class="party-display-art" alt="" />
+                    <p id="display-empty" class="party-display-empty">Connecting…</p>
+                  </div>
+                  <div
+                    id="display-lyrics"
+                    class="party-display-lyrics"
+                    aria-live="polite"
+                    aria-label="Lyrics"
+                  ></div>
                 </div>
                 <div class="party-display-meta">
           <div class="party-display-pills">
@@ -362,12 +370,6 @@
                   </div>
                 </div>
               </div>
-              <div
-                id="display-lyrics"
-                class="party-display-lyrics"
-                aria-live="polite"
-                aria-label="Lyrics"
-              ></div>
             </section>
 
             <aside class="party-display-side" aria-label="Upcoming songs and join code">
