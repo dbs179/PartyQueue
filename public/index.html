@@ -122,8 +122,20 @@
              Tap the card to open a full-screen view with lyrics. -->
         <section id="nowplaying-section" class="nowplaying">
           <div class="np-head-row">
-            <span id="np-mood-label" class="section-label np-mood-label" hidden></span>
-            <span id="np-genre-label" class="section-label np-genre-label" hidden></span>
+            <button
+              type="button"
+              id="np-mood-label"
+              class="section-label np-mood-label np-vibe-link"
+              title="Open Mood"
+              hidden
+            ></button>
+            <button
+              type="button"
+              id="np-genre-label"
+              class="section-label np-genre-label np-vibe-link"
+              title="Open Genres"
+              hidden
+            ></button>
           </div>
           <p
             id="np-connection-status"

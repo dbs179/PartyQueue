@@ -4686,6 +4686,36 @@ function navigate(name) {
   else location.hash = hash;
 }
 
+// Mood / Genres / Playlists Back returns here (Vibe hub, main, etc.) instead of
+// always jumping to the Vibe hub — e.g. Now Playing Mood/Genre labels.
+let mixPanelReturnView = "mix";
+
+function isMixPanelView(name) {
+  return (
+    name === "mood-presets" || name === "genres" || name === "playlists"
+  );
+}
+
+function rememberMixPanelReturn() {
+  if (isMixPanelView(currentView)) return;
+  mixPanelReturnView =
+    currentView && VIEWS[currentView] ? currentView : "main";
+}
+
+function navigateMixPanel(panel) {
+  if (!panel || !VIEWS[panel]) return;
+  rememberMixPanelReturn();
+  navigate(panel);
+}
+
+function navigateMixPanelBack() {
+  const back =
+    mixPanelReturnView && VIEWS[mixPanelReturnView]
+      ? mixPanelReturnView
+      : "mix";
+  navigate(back);
+}
+
 document.querySelectorAll("[data-settings-panel]").forEach((btn) => {
   btn.addEventListener("click", () => {
     const panel = btn.getAttribute("data-settings-panel");
@@ -4701,7 +4731,7 @@ document.querySelectorAll("[data-dj-panel]").forEach((btn) => {
 document.querySelectorAll("[data-mix-panel]").forEach((btn) => {
   btn.addEventListener("click", () => {
     const panel = btn.getAttribute("data-mix-panel");
-    if (panel && VIEWS[panel]) navigate(panel);
+    navigateMixPanel(panel);
   });
 });
 openMemoryBtn?.addEventListener("click", () => navigate("memory"));
@@ -4837,13 +4867,13 @@ settingsUserEditBackBtn?.addEventListener("click", () => navigate("settings-user
 settingsConnectionsBackBtn?.addEventListener("click", () => navigate("booth"));
 settingsResetBackBtn?.addEventListener("click", () => navigate("booth"));
 statsBackBtn?.addEventListener("click", () => navigate("main"));
-playlistsBackBtn.addEventListener("click", () => navigate("mix"));
+playlistsBackBtn.addEventListener("click", () => navigateMixPanelBack());
 memoryBackBtn.addEventListener("click", () => navigate("booth"));
 suggestionsBackBtn?.addEventListener("click", () => navigate("booth"));
 sonosBackBtn?.addEventListener("click", () => navigate("main"));
 moodBackBtn?.addEventListener("click", () => navigate("main"));
-moodPresetsBackBtn?.addEventListener("click", () => navigate("mix"));
-genresBackBtn?.addEventListener("click", () => navigate("mix"));
+moodPresetsBackBtn?.addEventListener("click", () => navigateMixPanelBack());
+genresBackBtn?.addEventListener("click", () => navigateMixPanelBack());
 boothBackBtn?.addEventListener("click", () => navigate("main"));
 joinBackBtn?.addEventListener("click", () => navigate("main"));
 window.addEventListener("keydown", (event) => {
@@ -6955,6 +6985,9 @@ const npMoodLabel = document.getElementById("np-mood-label");
 const npGenreLabel = document.getElementById("np-genre-label");
 const displayMixPill = document.getElementById("display-mix");
 let serverMix = { genres: undefined, mood: undefined, genreLabel: undefined };
+
+npMoodLabel?.addEventListener("click", () => navigateMixPanel("mood-presets"));
+npGenreLabel?.addEventListener("click", () => navigateMixPanel("genres"));
 
 // ---- Era mood (Decades) ----
 // One decade at a time (or none = off). Playlist picks stay in the era and

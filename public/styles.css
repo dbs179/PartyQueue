@@ -514,6 +514,30 @@ body {
   text-align: right;
 }
 
+button.np-vibe-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  cursor: pointer;
+  max-width: 100%;
+}
+
+button.np-vibe-link:hover,
+button.np-vibe-link:focus-visible {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+button.np-vibe-link:focus-visible {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: 3px;
+}
+
 .np-mood-label[hidden],
 .np-genre-label[hidden] {
   display: none;
