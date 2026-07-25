@@ -22,7 +22,7 @@ test("tagsToBuckets maps the two strongest mappable tags", () => {
     { name: "rock", count: 80 },
     { name: "country", count: 40 },
   ]);
-  assert.deepEqual(buckets.sort(), ["metal", "rock"]);
+  assert.deepEqual(buckets, ["metal", "rock"]);
 });
 
 test("tagsToBuckets ignores tags below the popularity floor", () => {
@@ -31,6 +31,18 @@ test("tagsToBuckets ignores tags below the popularity floor", () => {
     { name: "country", count: 4 },
   ]);
   assert.deepEqual(buckets, ["rock"]);
+});
+
+test("tagsToBuckets treats pop punk as Punk only and caps at two genres", () => {
+  // Yellowcard-shaped: pop punk must not also become Pop via \\bpop\\b.
+  const buckets = tagsToBuckets([
+    { name: "pop punk", count: 100 },
+    { name: "punk rock", count: 97 },
+    { name: "rock", count: 51 },
+  ]);
+  assert.deepEqual(buckets, ["punk", "rock"]);
+  assert.ok(!buckets.includes("pop"));
+  assert.equal(buckets.length, 2);
 });
 
 test("needsGenreFetch re-fetches legacy bucket-only cache rows", async () => {

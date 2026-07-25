@@ -1644,13 +1644,19 @@ export function queueTrackGenreFields(artist, meta, { djClip = false } = {}) {
     return emptyQueueGenreFields();
   }
 
-  const fromCache = (bucketsForArtistSync(artist) || []).filter(
-    (b) => b && b !== "other"
-  );
-  let lanes = [...new Set(fromCache)].slice(0, 2);
+  // Keep the full mapped set until we prioritize the enqueue lane — slicing
+  // first can drop the set lane when two Last.fm tags expand to 3 buckets
+  // (e.g. Yellowcard: pop punk + punk rock → punk/pop/rock).
+  let lanes = [
+    ...new Set(
+      (bucketsForArtistSync(artist) || []).filter((b) => b && b !== "other")
+    ),
+  ];
 
   const setLane =
-    typeof meta?.genreLane === "string" && meta.genreLane && meta.genreLane !== "other"
+    typeof meta?.genreLane === "string" &&
+    meta.genreLane &&
+    meta.genreLane !== "other"
       ? meta.genreLane
       : null;
 
@@ -1663,10 +1669,11 @@ export function queueTrackGenreFields(artist, meta, { djClip = false } = {}) {
     if (dom && dom !== "other") lanes = [dom];
   }
 
-  // Matching set-lane genre first (Folk, then Rock), then the other tag.
+  // Matching set-lane genre first, then one other cached bucket.
   if (setLane && lanes.includes(setLane)) {
-    lanes = [setLane, ...lanes.filter((l) => l !== setLane)].slice(0, 2);
+    lanes = [setLane, ...lanes.filter((l) => l !== setLane)];
   }
+  lanes = lanes.slice(0, 2);
 
   const labels = lanes.map(labelForGenreLane).filter(Boolean);
   if (!labels.length) return emptyQueueGenreFields();

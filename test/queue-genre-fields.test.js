@@ -49,6 +49,18 @@ test("queueTrackGenreFields returns both cached buckets with set lane first", ()
   assert.deepEqual(out.genreLabels, ["Folk", "Rock"]);
 });
 
+test("queueTrackGenreFields keeps set lane when two tags expand to three buckets", () => {
+  // Yellowcard: pop punk + punk rock → punk/pop/rock; Rock set must lead.
+  const out = queueTrackGenreFields("Yellowcard", {
+    source: "discovered",
+    genreLane: "rock",
+  });
+  assert.equal(out.genreLanes[0], "rock");
+  assert.equal(out.genreLabels[0], "Rock");
+  assert.equal(out.genreLanes.length, 2);
+  assert.ok(out.genreLanes.includes("rock"));
+});
+
 test("queueTrackGenreFields maps searched artists from genre cache", () => {
   const out = queueTrackGenreFields("Ariana Grande", { source: "searched" });
   assert.ok(out.genreLanes.length >= 1);

@@ -49,15 +49,15 @@ export const GENRE_BUCKETS = [
 // their raw tags are re-mapped locally (free); artists stuck in "Other" under an
 // older mapping are re-fetched once to try the new buckets. Also bump when
 // needsFetch rules change so legacy bucket-only rows get a Last.fm refresh.
-const MAPPING_VERSION = 4;
+const MAPPING_VERSION = 5;
 
 const BUCKET_IDS = new Set(GENRE_BUCKETS.map((b) => b.id));
 
-// How many of an artist's top tags we consider, and the minimum Last.fm
-// popularity (0-100) a tag needs to count. Only the two strongest tags drive
-// the bucket so a weak third tag (e.g. rnb under norteño/latin) can't hijack
-// the lane. We still *store* more raw tags so future mapping bumps remapping
-// without another network round-trip.
+// How many of an artist's top Last.fm tags we consider, and the minimum
+// popularity (0-100) a tag needs to count. Those tags map into at most
+// TOP_TAGS buckets (insertion order from strongest tag first) so a compound
+// tag can't inflate an artist past two genres. We still *store* more raw tags
+// so future mapping bumps remapping without another network round-trip.
 const TOP_TAGS = 2;
 const RAW_TAG_STORE = 12;
 const MIN_TAG_COUNT = 10;
@@ -98,7 +98,7 @@ export const GENRE_TAG_GUIDE = [
   {
     id: "pop",
     label: "Pop",
-    tags: "pop, synthpop, electropop, dance pop, power pop",
+    tags: "pop, synthpop, electropop, dance pop, power pop (not pop punk)",
   },
   {
     id: "folk",
@@ -172,7 +172,13 @@ function tagToBuckets(tag) {
   if (has(/edm|dubstep|electro|house|techno|trance|\bdnb\b|drum and bass|electronic|\bdance\b|synthwave/)) out.push("electronic");
   if (has(/folk|singer-songwriter|acoustic|indie folk|bluegrass/)) out.push("folk");
   if (has(/rock|grunge|alternative|post-grunge|hard rock|classic rock|indie rock|punk rock/)) out.push("rock");
-  if (has(/\bpop\b|synthpop|electropop|dance pop|power pop/)) out.push("pop");
+  // "pop punk" is Punk, not Pop — bare \bpop\b would otherwise double-map it.
+  if (
+    has(/\bpop\b|synthpop|electropop|dance pop|power pop/) &&
+    !has(/pop.?punk/)
+  ) {
+    out.push("pop");
+  }
   if (has(/soul|funk|disco|motown|rhythm and blues|\brnb\b|r&b|neo-soul|new jack swing/)) out.push("soul");
   if (has(/jazz|swing|big band|bebop|ragtime|dixieland/)) out.push("jazz");
   if (has(/blues|delta blues|chicago blues/)) out.push("blues");
@@ -184,9 +190,9 @@ function tagToBuckets(tag) {
   return out.filter((b) => BUCKET_IDS.has(b));
 }
 
-// Reduce an artist's top tags to the set of buckets they belong to.
-// Only the strongest TOP_TAGS (by Last.fm count) are considered, so weaker
-// long-tail tags can't pull an artist into an unrelated lane.
+// Reduce an artist's top tags to at most TOP_TAGS genre buckets.
+// Only the strongest TOP_TAGS Last.fm tags (by count) are considered, then
+// the mapped buckets are capped at TOP_TAGS (strongest-tag insertion order).
 export function tagsToBuckets(tags) {
   const ranked = (Array.isArray(tags) ? tags : [])
     .map((t) => ({
@@ -200,12 +206,18 @@ export function tagsToBuckets(tags) {
       return bc - ac;
     })
     .slice(0, TOP_TAGS);
-  const buckets = new Set();
+  const buckets = [];
+  const seen = new Set();
   for (const { name, count } of ranked) {
     if (Number.isFinite(count) && count < MIN_TAG_COUNT) continue;
-    for (const b of tagToBuckets(name)) buckets.add(b);
+    for (const b of tagToBuckets(name)) {
+      if (seen.has(b)) continue;
+      seen.add(b);
+      buckets.push(b);
+      if (buckets.length >= TOP_TAGS) return buckets;
+    }
   }
-  return [...buckets];
+  return buckets;
 }
 
 // Normalize an artist name for cache keys (case/space-insensitive).
