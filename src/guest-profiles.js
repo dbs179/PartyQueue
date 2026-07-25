@@ -344,6 +344,23 @@ export function birthdayShoutLabel(name) {
 }
 
 /**
+ * Make sure a guest shows up in the Users list. Called when someone queues a
+ * song under a new name; creates an empty profile (no notes, no birthday)
+ * unless one already exists (case-insensitive).
+ * @returns {boolean} true when a new profile was created
+ */
+export function ensureGuestProfile(name) {
+  const key = sanitizeDisplayName(name);
+  if (!key) return false;
+  if (findGuestKey(key)) return false;
+  const store = load();
+  ensureEntry(key);
+  cache = store;
+  persist();
+  return true;
+}
+
+/**
  * Append one note for a guest (creates the profile if needed).
  * @returns {{ name: string, notes: string[], birthday?: string|null, birthdayRole?: string }|null}
  */

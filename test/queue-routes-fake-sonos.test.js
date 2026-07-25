@@ -35,6 +35,7 @@ const express = (await import("express")).default;
 const { registerQueueRoutes } = await import("../src/routes/queue.js");
 const { setRequestFairnessSettings } = await import("../src/settings.js");
 const { clearRequests, getRequests } = await import("../src/request-log.js");
+const { getGuestProfile } = await import("../src/guest-profiles.js");
 
 /** In-memory stand-in for the Sonos queue. */
 function createFakeSonos() {
@@ -169,6 +170,11 @@ describe("queue routes with a fake speaker", { concurrency: false }, () => {
     const events = getRequests();
     assert.equal(events.length, 1);
     assert.equal(events[0].requestedBy, "Ada");
+
+    // First request under a new name lands them in the Users list.
+    const profile = getGuestProfile("Ada");
+    assert.equal(profile?.name, "Ada");
+    assert.deepEqual(profile.notes, []);
   });
 
   test("GET /api/queue/list returns the fake queue contents", async () => {
@@ -283,5 +289,18 @@ describe("queue routes with a fake speaker", { concurrency: false }, () => {
     } finally {
       setRequestsPaused(false);
     }
+  });
+
+  test("guest profile is keyed on the stable User, not the badge alias", async () => {
+    const res = await postJson("/api/queue", {
+      uri: "spotify:track:aliasprofiletest0000AA",
+      name: "September",
+      artist: "Earth, Wind & Fire",
+      requestedBy: "The Birthday Crew",
+      requestedByUser: "Mo",
+    });
+    assert.equal(res.status, 200);
+    assert.equal(getGuestProfile("Mo")?.name, "Mo");
+    assert.equal(getGuestProfile("The Birthday Crew"), null);
   });
 });

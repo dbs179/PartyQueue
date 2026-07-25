@@ -55,6 +55,7 @@ import {
   resolveGuestIdentity,
   sanitizeDedication,
 } from "../display-name.js";
+import { ensureGuestProfile } from "../guest-profiles.js";
 import {
   recordRequest,
   getRequests,
@@ -187,6 +188,16 @@ export function registerQueueRoutes(app, ctx) {
 
       const result = outcome.result;
       const reqId = spotifyTrackId(uri);
+
+      // First request under a new name → add them to the Users list so the
+      // host can attach shout-out notes without typing the name by hand.
+      try {
+        if (ensureGuestProfile(user)) {
+          console.log(`[queue] new guest profile created: ${user}`);
+        }
+      } catch (err) {
+        console.error("[queue] guest profile create:", err.message);
+      }
 
       // House ritual: hand-adding the End of Night song signals last call. We
       // announce it to everyone (via the Now Playing poll), switch off the
