@@ -2903,10 +2903,11 @@ body.party-display-active > .container {
   flex-direction: column;
   gap: clamp(12px, 1.5vw, 20px);
   min-height: 0;
+  height: 100%;
 }
 
 .party-display-hero {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(220px, 0.85fr) minmax(280px, 1.15fr);
@@ -3063,12 +3064,13 @@ body.party-display-active > .container {
   font-variant-numeric: tabular-nums;
 }
 
-/* Fixed 3-line karaoke window — must not grow and shove art/header off a TV. */
+/* Fixed 3-line karaoke window — pinned to the bottom of the Now column. */
 .party-display-lyrics {
   --display-lyric-size: clamp(1.2rem, 2.1vw, 2rem);
   --display-lyric-line: 1.3;
   --display-lyric-gap: 0.4rem;
   flex: 0 0 auto;
+  margin-top: auto;
   height: calc(
     (3 * var(--display-lyric-size) * var(--display-lyric-line)) +
       (2 * var(--display-lyric-gap))
@@ -3143,19 +3145,22 @@ body.party-display-active > .container {
 }
 
 .party-display-side {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: clamp(16px, 2vw, 24px);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-self: start;
+  gap: clamp(12px, 1.5vw, 18px);
 }
 
 .party-display-queue,
 .party-display-join {
+  flex: 0 0 auto;
   background: var(--surface);
   border-radius: clamp(14px, 1.5vw, 22px);
 }
 
 .party-display-queue {
-  padding: clamp(16px, 2vw, 26px);
+  padding: clamp(14px, 1.6vw, 20px);
   overflow: hidden;
 }
 
@@ -3178,7 +3183,7 @@ body.party-display-active > .container {
   grid-template-columns: 2rem minmax(0, 1fr);
   gap: 10px;
   align-items: center;
-  padding: clamp(8px, 1.2vh, 14px) 0;
+  padding: clamp(6px, 0.9vh, 10px) 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -3288,8 +3293,17 @@ body.party-display-active > .container {
   }
 
   .party-display-side {
-    grid-template-columns: minmax(0, 1fr) minmax(240px, 0.55fr);
-    grid-template-rows: auto;
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .party-display-queue {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .party-display-join {
+    flex: 0 1 42%;
   }
 }
 
@@ -3302,9 +3316,12 @@ body.party-display-active > .container {
     align-items: flex-start;
   }
 
-  .party-display-hero,
-  .party-display-side {
+  .party-display-hero {
     grid-template-columns: 1fr;
+  }
+
+  .party-display-side {
+    flex-direction: column;
   }
 
   .party-display-art-wrap {

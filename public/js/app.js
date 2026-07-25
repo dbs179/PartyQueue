@@ -6519,8 +6519,9 @@ function displayOriginLabel(track) {
 function renderPartyDisplayQueue(tracks) {
   if (!displayQueue || !displayQueueEmpty || !displayQueueCount) return;
   // DJ announce rows stay in the list (same as the main page's Up Next) so
-  // guests can see the DJ coming between requests.
-  const visible = tracks.slice(0, 6);
+  // guests can see the DJ coming between requests. Cap at three on the TV
+  // so Up Next + Join stay compact and leave room for lyrics.
+  const visible = tracks.slice(0, 3);
   displayQueueCount.textContent = tracks.length
     ? `${tracks.length} queued`
     : "";
