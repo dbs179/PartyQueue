@@ -7094,13 +7094,9 @@ function updateMixLabels() {
   }
   if (npGenreLabel) {
     const genre = serverMix.genreLabel;
-    if (genre) {
-      npGenreLabel.textContent = `Genre: ${genre}`;
-      npGenreLabel.hidden = false;
-    } else {
-      npGenreLabel.textContent = "";
-      npGenreLabel.hidden = true;
-    }
+    // Keep the "Genre" affordance clickable even when idle — only clear the value.
+    npGenreLabel.textContent = genre ? `Genre: ${genre}` : "Genre:";
+    npGenreLabel.hidden = false;
   }
   if (displayMixPill) {
     displayMixPill.textContent = moodText;
