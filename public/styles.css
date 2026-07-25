@@ -3277,7 +3277,9 @@ body.party-display-active > .container {
   white-space: nowrap;
 }
 
-@media (max-width: 900px), (orientation: portrait) {
+/* Width-only: Android TV / Fully Kiosk often misreports orientation:portrait
+   even on a landscape 4K screen, which used to collapse Party Display. */
+@media (max-width: 900px) {
   body.party-display-active {
     overflow: auto;
   }
