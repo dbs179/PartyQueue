@@ -1623,6 +1623,11 @@ button.guest-name:focus-visible {
   grid-template-columns: 120px minmax(165px, calc(38% + 5px)) 1fr;
 }
 
+/* Users birthday "Call them" role — wide enough for "Birthday badass". */
+.setting-row-bday-role {
+  grid-template-columns: 120px minmax(180px, 220px) 1fr;
+}
+
 .setting-row-voice .pill-btn {
   white-space: nowrap;
 }
@@ -1982,6 +1987,12 @@ button.guest-name:focus-visible {
   }
   .setting-row-tts {
     grid-template-columns: 1fr minmax(140px, 1fr);
+    grid-template-areas:
+      "label input"
+      "hint  hint";
+  }
+  .setting-row-bday-role {
+    grid-template-columns: 1fr minmax(160px, 1fr);
     grid-template-areas:
       "label input"
       "hint  hint";

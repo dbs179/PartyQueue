@@ -15,7 +15,19 @@ const STORE_FILE =
 
 export const GUEST_NOTE_MAX = 120;
 export const GUEST_NOTES_MAX_COUNT = 40;
-export const BIRTHDAY_ROLES = ["boy", "girl", "star"];
+// Spoken as "birthday {role}" in DJ shout-outs / UI (e.g. birthday badass).
+export const BIRTHDAY_ROLES = [
+  "boy",
+  "girl",
+  "star",
+  "badass",
+  "legend",
+  "boss",
+  "queen",
+  "king",
+  "champ",
+  "beast",
+];
 
 let cache = null; // { [name]: { notes: string[], birthday, birthdayRole, updatedAt } }
 
@@ -337,10 +349,8 @@ export function isGuestBirthdayToday(name, now = new Date()) {
 }
 
 export function birthdayShoutLabel(name) {
-  const role = getGuestProfile(name)?.birthdayRole || "star";
-  if (role === "boy") return "birthday boy";
-  if (role === "girl") return "birthday girl";
-  return "birthday star";
+  const role = normalizeBirthdayRole(getGuestProfile(name)?.birthdayRole) || "star";
+  return `birthday ${role}`;
 }
 
 /**

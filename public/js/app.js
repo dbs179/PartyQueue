@@ -1833,13 +1833,8 @@ function formatGuestBirthday(g) {
     "Nov",
     "Dec",
   ];
-  const role =
-    g.birthdayRole === "boy"
-      ? "birthday boy"
-      : g.birthdayRole === "girl"
-        ? "birthday girl"
-        : "birthday star";
-  return `${months[mm] || mm} ${dd} · ${role}`;
+  const roleId = String(g.birthdayRole || "star").trim().toLowerCase() || "star";
+  return `${months[mm] || mm} ${dd} · birthday ${roleId}`;
 }
 
 function guestNoteCount(g) {

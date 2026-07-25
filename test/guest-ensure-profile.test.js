@@ -68,3 +68,16 @@ test("ensureGuestProfile rejects blank and non-string names", () => {
   assert.equal(guests.ensureGuestProfile(undefined), false);
   assert.equal(guests.listGuestProfiles().length, 0);
 });
+
+test("birthday roles include classic three plus seven extras", () => {
+  assert.equal(guests.BIRTHDAY_ROLES.length, 10);
+  for (const role of ["boy", "girl", "star", "badass", "legend", "beast"]) {
+    assert.ok(guests.BIRTHDAY_ROLES.includes(role), role);
+  }
+  guests.setGuestBirthday("Alex", "07-24", "badass");
+  assert.equal(guests.birthdayShoutLabel("Alex"), "birthday badass");
+  guests.setGuestBirthday("Alex", "07-24", "queen");
+  assert.equal(guests.birthdayShoutLabel("Alex"), "birthday queen");
+  guests.setGuestBirthday("Alex", "07-24", "nope");
+  assert.equal(guests.getGuestProfile("Alex").birthdayRole, "star");
+});
