@@ -7172,6 +7172,7 @@ const GENRE_PRESETS = {
 const npMoodLabel = document.getElementById("np-mood-label");
 const npGenreLabel = document.getElementById("np-genre-label");
 const displayMixPill = document.getElementById("display-mix");
+const displayGenrePill = document.getElementById("display-genre");
 let serverMix = { genres: undefined, mood: undefined, genreLabel: undefined };
 
 npMoodLabel?.addEventListener("click", () => navigateMixPanel("mood-presets"));
@@ -7289,6 +7290,11 @@ function updateMixLabels() {
   if (displayMixPill) {
     displayMixPill.textContent = moodText;
     displayMixPill.hidden = false;
+  }
+  if (displayGenrePill) {
+    const genre = serverMix.genreLabel;
+    displayGenrePill.textContent = genre ? `Genre: ${genre}` : "Genre:";
+    displayGenrePill.hidden = false;
   }
 }
 
