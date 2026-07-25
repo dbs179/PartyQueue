@@ -161,6 +161,67 @@ test("getMoodHits prefers the set's genre lane over off-lane era hits", async ()
   assert.deepEqual(out.map((t) => t.id).sort(), ["r1", "r2"]);
 });
 
+test("getMoodHits prefers exact-lane era hits over neighbor-lane hits", async () => {
+  // Rock neighbors metal, so it "fits" the lane — but with an exact metal hit
+  // on the chart, the metal set takes the metal hit.
+  const candidates = [
+    { artist: "RockA", name: "Song 1" },
+    { artist: "MetalB", name: "Song 2" },
+  ];
+  const catalog = {
+    "rocka|||song 1": hit("r1", "RockA", "Song 1"),
+    "metalb|||song 2": hit("m1", "MetalB", "Song 2"),
+  };
+  const buckets = {
+    RockA: ["rock"],
+    MetalB: ["metal"],
+  };
+  const out = await getMoodHits(
+    {
+      mood: "80s",
+      count: 1,
+      excludeIds: [],
+      bucketsFor: async (a) => buckets[a] || [],
+      preferLane: "metal",
+    },
+    { tagCandidates: async () => candidates, resolveTrack: fakeResolver(catalog) }
+  );
+  assert.deepEqual(
+    out.map((t) => t.id),
+    ["m1"]
+  );
+});
+
+test("getMoodHits fills from neighbor-lane hits before clashing genres", async () => {
+  const candidates = [
+    { artist: "MetalB", name: "Song 1" },
+    { artist: "RockA", name: "Song 2" },
+    { artist: "CountryC", name: "Song 3" },
+  ];
+  const catalog = {
+    "metalb|||song 1": hit("m1", "MetalB", "Song 1"),
+    "rocka|||song 2": hit("r1", "RockA", "Song 2"),
+    "countryc|||song 3": hit("c1", "CountryC", "Song 3"),
+  };
+  const buckets = {
+    MetalB: ["metal"],
+    RockA: ["rock"],
+    CountryC: ["country"],
+  };
+  const out = await getMoodHits(
+    {
+      mood: "80s",
+      count: 2,
+      excludeIds: [],
+      bucketsFor: async (a) => buckets[a] || [],
+      preferLane: "metal",
+    },
+    { tagCandidates: async () => candidates, resolveTrack: fakeResolver(catalog) }
+  );
+  // Exact metal + neighbor rock; country never makes the cut at count 2.
+  assert.deepEqual(out.map((t) => t.id).sort(), ["m1", "r1"]);
+});
+
 test("getMoodHits tops up with off-lane era hits when the lane runs dry", async () => {
   const candidates = [
     { artist: "RockA", name: "Song 1" },

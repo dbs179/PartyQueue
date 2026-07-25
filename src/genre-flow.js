@@ -157,6 +157,8 @@ export function pickSetLane({
   previousLane = null,
   recentLanes = [],
   salt = 0,
+  poolCounts = null,
+  minPerLane = 3,
 } = {}) {
   let pool = Array.isArray(enabled) && enabled.length
     ? enabled.map(String)
@@ -166,6 +168,15 @@ export function pickSetLane({
     pool = pool.filter((id) => id === "kids" || id === "soundtrack");
   }
   pool = uniq(pool);
+  // Only rotate into lanes the current (filtered) pool can actually serve.
+  // Rotating into a lane with no exact tracks degrades the whole set into
+  // neighbor/fallback picks — genre chaos instead of a coherent set. When no
+  // lane qualifies (thin era-filtered library living off chart top-ups) keep
+  // the full rotation rather than pinning one lane forever.
+  if (poolCounts instanceof Map && poolCounts.size) {
+    const viable = pool.filter((id) => (poolCounts.get(id) ?? 0) >= minPerLane);
+    if (viable.length) pool = viable;
+  }
   if (!pool.length) return "rock";
   if (pool.length === 1) return pool[0];
 
@@ -219,7 +230,12 @@ export function genreFlowScore(artistBuckets, flowState) {
     if (bridgeFitsBoth(artistBuckets, previousLane, lane)) score += 40;
     else if (fitsBridge(artistBuckets, previousLane, lane)) score += 25;
   } else {
-    if (fitsLane(artistBuckets, lane)) score += 40;
+    // Exact lane membership outranks a neighbor: for broad lanes like pop the
+    // neighbor set covers most of the map, so treating both as one tier lets
+    // a set swing country → hiphop → rock while "fitting the lane".
+    const buckets = uniq(artistBuckets);
+    if (buckets.includes(lane)) score += 60;
+    else if (fitsLane(buckets, lane)) score += 40;
   }
   if (lastBuckets && lastBuckets.size && fitsNeighbor(artistBuckets, lastBuckets)) {
     score += 20;

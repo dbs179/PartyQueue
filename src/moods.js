@@ -197,9 +197,9 @@ const FALLBACK_OFFSETS = [0, 50, 100, 150];
  * `excludeIds`. Applies explicit filter, Closing Time guard, skip-cooldown
  * blocked artists, the shared Random artist budget, an in-batch per-artist
  * cap, and (when `enabledGenres`+`bucketsFor` are given) the host's genre
- * filter. When `preferLane` is set, hits that fit the set's genre lane
- * (neighbors OK) are taken first; off-lane era hits only top up a batch the
- * lane can't fill, so an era set doesn't whiplash between hard rock and
+ * filter. When `preferLane` is set, hits are tiered: exact-lane first, then
+ * lane neighbors, then off-lane — later tiers only top up a batch the earlier
+ * tiers can't fill, so an era set doesn't whiplash between hard rock and
  * country. `deps` allows tests to inject sources.
  */
 export async function getMoodHits(
@@ -309,21 +309,36 @@ export async function getMoodHits(
     return true;
   };
 
-  // Era hits that clear every guardrail except the set's genre lane. They only
-  // fill slots the lane-fitting picks couldn't, so era sets stay in-lane
-  // whenever the charts allow it.
+  // Lane tiers: exact-lane hits are accepted on sight; neighbor-lane hits
+  // (rock in a metal set) queue as the second tier; hits that clash with the
+  // lane entirely are the last resort. This keeps an era set genre-coherent
+  // whenever the charts allow it, without ever starving the batch.
+  const nearLane = [];
   const offLane = [];
-  const fillFromOffLane = () => {
-    let used = 0;
+  const laneTier = (buckets) => {
+    if (!preferLane || !buckets.length) return "exact";
+    if (buckets.includes(preferLane)) return "exact";
+    return fitsLane(buckets, preferLane) ? "near" : "off";
+  };
+  const fillFromLaneTiers = () => {
+    let nearUsed = 0;
+    let offUsed = 0;
+    for (const found of nearLane) {
+      if (chosen.length >= count) break;
+      if (!acceptable(found)) continue;
+      accept(found);
+      nearUsed += 1;
+    }
     for (const found of offLane) {
       if (chosen.length >= count) break;
       if (!acceptable(found)) continue;
       accept(found);
-      used += 1;
+      offUsed += 1;
     }
-    if (used) {
+    if (nearUsed || offUsed) {
       console.log(
-        `[moods] lane=${preferLane} thin on ${pack.id} charts — used ${used} off-lane era hit(s)`
+        `[moods] lane=${preferLane} thin on ${pack.id} charts — used ` +
+          `${nearUsed} neighbor + ${offUsed} off-lane era hit(s)`
       );
     }
   };
@@ -334,22 +349,32 @@ export async function getMoodHits(
       // Last.fm chart path: crowd-tagged era hits, resolved via Spotify search.
       // Tag membership is the era evidence — no hard year check (remaster
       // re-release dates would wrongly reject classics).
+      // Lane filtering diverts many resolves into the near/off tiers, so give
+      // it a bigger scan budget before conceding the lane.
+      const maxResolveCalls = preferLane
+        ? MAX_RESOLVE_CALLS + 10
+        : MAX_RESOLVE_CALLS;
       let resolveCalls = 0;
       for (const c of shuffled(candidates)) {
         if (chosen.length >= count) break;
-        if (resolveCalls >= MAX_RESOLVE_CALLS) break;
+        if (resolveCalls >= maxResolveCalls) break;
         resolveCalls += 1;
         const found = await resolveTrack(c.artist, c.name);
         if (!found || !acceptable(found)) continue;
         const buckets = await bucketsOf(found.artist);
         if (!passesGenres(buckets)) continue;
-        if (preferLane && buckets.length && !fitsLane(buckets, preferLane)) {
+        const tier = laneTier(buckets);
+        if (tier === "near") {
+          nearLane.push(found);
+          continue;
+        }
+        if (tier === "off") {
           offLane.push(found);
           continue;
         }
         accept(found);
       }
-      fillFromOffLane();
+      fillFromLaneTiers();
       return chosen;
     }
 
@@ -372,14 +397,19 @@ export async function getMoodHits(
         if (!acceptable(found)) continue;
         const buckets = await bucketsOf(found.artist);
         if (!passesGenres(buckets)) continue;
-        if (preferLane && buckets.length && !fitsLane(buckets, preferLane)) {
+        const tier = laneTier(buckets);
+        if (tier === "near") {
+          nearLane.push(found);
+          continue;
+        }
+        if (tier === "off") {
           offLane.push(found);
           continue;
         }
         accept(found);
       }
     }
-    fillFromOffLane();
+    fillFromLaneTiers();
   } catch (err) {
     console.error("[moods] era hits failed:", err.message);
   }

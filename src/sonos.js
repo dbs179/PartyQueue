@@ -989,7 +989,20 @@ async function addRandomFromPlaylistsUnlocked(
 
   // Genre-lane flow: rotate primary lane across sets, bridge the first picks
   // from the previous lane, soft-prefer compatible neighbors within the set.
+  // The rotation only considers lanes the filtered pool (era window, genre
+  // filter, explicit filter already applied) actually has songs for — a lane
+  // the pool can't serve turns the whole set into neighbor fallbacks.
   const enabledLanePool = Array.isArray(genres) ? genres : null;
+  const lanePoolCounts = new Map();
+  for (const pl of usable) {
+    for (const t of pl.tracks || []) {
+      let buckets = bucketsForArtistSync(t.artist);
+      if (!buckets.length) buckets = ["other"];
+      for (const b of new Set(buckets)) {
+        lanePoolCounts.set(b, (lanePoolCounts.get(b) ?? 0) + 1);
+      }
+    }
+  }
   const flowPrev = getGenreFlowState();
   const setLane = pickSetLane({
     enabled: enabledLanePool,
@@ -999,6 +1012,8 @@ async function addRandomFromPlaylistsUnlocked(
       (playlistWant || count || 0) +
       (recentBuckets.size || 0) +
       String(queueTailArtist || "").length,
+    poolCounts: lanePoolCounts,
+    minPerLane: Math.max(2, Math.min(4, playlistWant || count || 2)),
   });
   let tailBuckets = [];
   if (queueTailArtist) {

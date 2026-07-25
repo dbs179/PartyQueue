@@ -76,6 +76,108 @@ test("genreFlowScore ranks on-lane higher than clash", () => {
   assert.ok(on > off, `expected on-lane ${on} > off-lane ${off}`);
 });
 
+test("genreFlowScore ranks exact lane above a neighbor", () => {
+  const flow = {
+    lane: "metal",
+    previousLane: null,
+    bridgeLeft: 0,
+    lastBuckets: new Set(),
+  };
+  const exact = genreFlowScore(["metal"], flow);
+  const neighbor = genreFlowScore(["rock"], flow); // rock neighbors metal
+  const clash = genreFlowScore(["country"], flow);
+  assert.ok(exact > neighbor, `expected exact ${exact} > neighbor ${neighbor}`);
+  assert.ok(neighbor > clash, `expected neighbor ${neighbor} > clash ${clash}`);
+});
+
+test("pickSetLane skips lanes the pool can't serve", () => {
+  // hiphop enabled but the filtered pool has no hiphop tracks — the rotation
+  // must not land there just to "shift genres".
+  const poolCounts = new Map([
+    ["rock", 12],
+    ["pop", 8],
+    ["hiphop", 0],
+  ]);
+  for (let salt = 0; salt < 6; salt++) {
+    const lane = pickSetLane({
+      enabled: ["rock", "pop", "hiphop"],
+      previousLane: "rock",
+      recentLanes: ["rock"],
+      salt,
+      poolCounts,
+      minPerLane: 3,
+    });
+    assert.notEqual(lane, "hiphop", `salt ${salt} rotated into an empty lane`);
+  }
+});
+
+test("pickSetLane keeps the full rotation when no lane meets the minimum", () => {
+  // Thin era-filtered library living off chart top-ups: don't pin one lane.
+  const poolCounts = new Map([
+    ["rock", 1],
+    ["pop", 1],
+  ]);
+  const lane = pickSetLane({
+    enabled: ["rock", "pop", "hiphop"],
+    previousLane: "rock",
+    recentLanes: ["rock"],
+    salt: 0,
+    poolCounts,
+    minPerLane: 3,
+  });
+  assert.ok(["pop", "hiphop"].includes(lane));
+});
+
+test("sampleSongs picks exact-lane tracks before neighbor-lane tracks", () => {
+  // Rock neighbors metal, so both "fit" the lane — but with enough metal in
+  // the pool, a metal set should actually be metal.
+  const playlists = [
+    {
+      id: "m",
+      name: "metal",
+      tracks: Array.from({ length: 8 }, (_, i) => ({
+        uri: `spotify:track:metal${i}`,
+        name: `M${i}`,
+        artist: `MetalAct${i}`,
+      })),
+    },
+    {
+      id: "r",
+      name: "rock",
+      tracks: Array.from({ length: 8 }, (_, i) => ({
+        uri: `spotify:track:rock${i}`,
+        name: `R${i}`,
+        artist: `RockAct${i}`,
+      })),
+    },
+  ];
+  const bucketsFor = (artist) => {
+    const a = String(artist || "").toLowerCase();
+    if (a.startsWith("metal")) return ["metal"];
+    if (a.startsWith("rock")) return ["rock"];
+    return ["other"];
+  };
+  const flowState = {
+    lane: "metal",
+    previousLane: null,
+    bridgeLeft: 0,
+    lastBuckets: new Set(),
+  };
+  const picks = sampleSongs(playlists, new Set(), 5, {
+    bucketsFor,
+    flowState,
+  });
+  assert.equal(picks.length, 5);
+  const metalCount = picks.filter((u) =>
+    String(spotifyTrackId(u) || "").startsWith("metal")
+  ).length;
+  assert.equal(
+    metalCount,
+    5,
+    `expected an all-metal set, got ${metalCount}/5: ${picks.join(",")}`
+  );
+});
+
 test("sampleSongs with flowState soft-prefers the set lane", () => {
   // One playlist of metal, one of country — lane=metal should usually win.
   const playlists = [
