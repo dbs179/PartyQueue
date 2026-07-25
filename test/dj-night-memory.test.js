@@ -183,6 +183,53 @@ test("old DJ memory files load without global announce history", () => {
   assert.deepEqual(mem.getRecentScripts("Mark", 1), ["Legacy shout"]);
 });
 
+test("descriptor reservations cycle the whole bank before repeating, then LRU", () => {
+  const bank = Array.from({ length: 12 }, (_, i) => ({
+    id: `desc-cycle-${i}`,
+    text: `descriptor ${i}`,
+  }));
+  const now = Date.now();
+  const seen = [];
+  for (let i = 0; i < bank.length; i += 1) {
+    seen.push(
+      mem.reserveDjPhrase("descriptor", bank, { salt: i * 7, now: now + i }).id
+    );
+  }
+  assert.equal(new Set(seen).size, bank.length, "no repeats until exhaustion");
+  // Bank exhausted — the least-recently-used line recycles first.
+  assert.equal(
+    mem.reserveDjPhrase("descriptor", bank, { salt: 3, now: now + 100 }).id,
+    seen[0]
+  );
+});
+
+test("night memory holds a full night of intro/outro/descriptor reservations", () => {
+  const now = Date.now();
+  const mkBank = (prefix) =>
+    Array.from({ length: 100 }, (_, i) => ({
+      id: `${prefix}-${i}`,
+      text: `${prefix} line ${i}`,
+    }));
+  const intros = mkBank("cap-intro");
+  const outros = mkBank("cap-outro");
+  const descriptors = mkBank("cap-desc");
+  for (let i = 0; i < 100; i += 1) {
+    mem.reserveDjPhrase("intro", intros, { salt: i, now: now + i * 3 });
+    mem.reserveDjPhrase("outro", outros, { salt: i, now: now + i * 3 + 1 });
+    mem.reserveDjPhrase("descriptor", descriptors, {
+      salt: i,
+      now: now + i * 3 + 2,
+    });
+  }
+  // 300 reservations must fit without evicting the earliest ones (cap 600).
+  assert.equal(mem.getRecentDjPhraseIds("intro", 200, now + 1000).length, 100);
+  assert.equal(mem.getRecentDjPhraseIds("outro", 200, now + 1000).length, 100);
+  assert.equal(
+    mem.getRecentDjPhraseIds("descriptor", 200, now + 1000).length,
+    100
+  );
+});
+
 test("clear DJ memory also clears global phrases and scripts", () => {
   mem.reserveDjPhrase("outro", [{ id: "outro-a", text: "Keep it moving" }]);
   mem.rememberDjAnnounceScript("A recent global set script");

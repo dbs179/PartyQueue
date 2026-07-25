@@ -45,6 +45,7 @@ import {
   DJ_BOOTH_ASIDES,
   DJ_SHARED_OUTROS,
   filterIntrosByContext,
+  filterDescriptorsForMood,
 } from "./dj-phrase-bank.js";
 import {
   consumeDjNextSet,
@@ -98,110 +99,6 @@ let pending = null;
 let scriptVariant = 0;
 // Session announce ordinal — drives occasional character bits (Phase 3).
 let announceOrdinal = 0;
-// Phase 4: short session memory so openers/outros/shapes don't repeat back-to-back.
-const RECENT_SHAPE_WINDOW = 3;
-const recentAnnounceMemory = {
-  openerShapes: [],
-  bodyShapes: [],
-  beatFoci: [],
-  outros: [],
-  openerLines: [],
-};
-
-export const DJ_OPENER_SHAPES = {
-  name_intro: {
-    id: "name_intro",
-    label: "name intro",
-    instruction:
-      "Begin with exactly one of the five DJ name intros, then give the track count.",
-  },
-  cold_open: {
-    id: "cold_open",
-    label: "cold open",
-    instruction:
-      "Do not open with the DJ name. Lead with the track count or a short energy hook.",
-  },
-  artist_tease: {
-    id: "artist_tease",
-    label: "artist tease",
-    instruction:
-      "Open by teasing the FIRST sample track's artist only (that song plays first after this announce), then follow the selected count/vibe directions below. Do not open with the DJ name. Never say \"starting with\" / \"kicking off with\" for any other artist.",
-  },
-  discovery_tease: {
-    id: "discovery_tease",
-    label: "discovery tease",
-    instruction:
-      "Open by teasing that a discovery or wildcard is in this block, then follow the selected count/vibe directions below. Do not open with the DJ name.",
-  },
-};
-
-export const DJ_BODY_SHAPES = {
-  energy_first: {
-    id: "energy_first",
-    label: "energy first",
-    instruction:
-      "Lead the body with one vivid vibe/energy sentence, then optionally one artist.",
-  },
-  artist_first: {
-    id: "artist_first",
-    label: "artist first",
-    instruction:
-      "Lead the body with the FIRST sample track's artist or song title (that track plays first after this announce), then a short vibe sentence. If you say \"starting with\" / \"kicking off with\", it must be that first track only.",
-  },
-  crowd_call: {
-    id: "crowd_call",
-    label: "crowd call",
-    instruction:
-      "Lead the body with a short crowd/room call matching the mood pack, then vibe; at most one artist.",
-  },
-};
-
-// Spotify DJ X-style ingredient rotation: keep intros fresh by mixing
-// count / vibe / tagline instead of stacking all three every time.
-export const DJ_BEAT_FOCI = {
-  count_vibe: {
-    id: "count_vibe",
-    label: "count + vibe",
-    includeCount: true,
-    includeVibe: true,
-    includeOutro: false,
-    instruction:
-      "Include the track count and one vivid vibe sentence. Skip the tagline — end clean after the vibe (no stacked closers).",
-  },
-  count_tag: {
-    id: "count_tag",
-    label: "count + tag",
-    includeCount: true,
-    includeVibe: false,
-    includeOutro: true,
-    instruction:
-      "Include the track count and one short tagline/outro. Skip the vibe sentence entirely.",
-  },
-  vibe_tag: {
-    id: "vibe_tag",
-    label: "vibe + tag",
-    includeCount: false,
-    includeVibe: true,
-    includeOutro: true,
-    instruction:
-      "Include one vivid vibe sentence and a short tagline. Do NOT say the track count.",
-  },
-  count_vibe_tag: {
-    id: "count_vibe_tag",
-    label: "count + vibe + tag",
-    includeCount: true,
-    includeVibe: true,
-    includeOutro: true,
-    instruction:
-      "Full stack once in a while: track count, one short vibe, and one tagline. Keep it tight — still under the word budget.",
-  },
-};
-
-function rememberRecent(list, value, window = RECENT_SHAPE_WINDOW) {
-  if (value == null || value === "") return;
-  list.unshift(String(value));
-  while (list.length > window) list.pop();
-}
 
 export function pickAvoidingRecent(bank, recent = [], salt = 0) {
   const items = Array.isArray(bank) ? bank.filter((x) => x != null && x !== "") : [];
@@ -212,137 +109,9 @@ export function pickAvoidingRecent(bank, recent = [], salt = 0) {
   return pick(pool, salt);
 }
 
-export function getRecentAnnounceMemory() {
-  return {
-    openerShapes: [...recentAnnounceMemory.openerShapes],
-    bodyShapes: [...recentAnnounceMemory.bodyShapes],
-    beatFoci: [...recentAnnounceMemory.beatFoci],
-    outros: [...recentAnnounceMemory.outros],
-    openerLines: [...recentAnnounceMemory.openerLines],
-  };
-}
-
-export function recordAnnounceShape({
-  openerShape = null,
-  bodyShape = null,
-  beatFocus = null,
-  outro = null,
-  openerLine = null,
-} = {}) {
-  rememberRecent(recentAnnounceMemory.openerShapes, openerShape);
-  rememberRecent(recentAnnounceMemory.bodyShapes, bodyShape);
-  rememberRecent(recentAnnounceMemory.beatFoci, beatFocus);
-  rememberRecent(recentAnnounceMemory.outros, outro);
-  rememberRecent(recentAnnounceMemory.openerLines, openerLine);
-}
-
-/** Test helper — reset session announce counter + shape memory. */
+/** Test helper — reset session announce counter. */
 export function resetDjAnnounceOrdinal(value = 0) {
   announceOrdinal = Math.max(0, Math.floor(Number(value) || 0));
-  recentAnnounceMemory.openerShapes.length = 0;
-  recentAnnounceMemory.bodyShapes.length = 0;
-  recentAnnounceMemory.beatFoci.length = 0;
-  recentAnnounceMemory.outros.length = 0;
-  recentAnnounceMemory.openerLines.length = 0;
-}
-
-// Resolve opener/body shapes + outro with anti-repeat. Coordinates nameIntro
-// with opener shape (name_intro â†” forced intro). Beat focus rotates count /
-// vibe / tagline like Spotify DJ X so announces stay short and fresh.
-export function resolveAnnounceShape({
-  nameIntroForced = null,
-  nameIntroPercent = DJ_VOICE_DEFAULTS.djNameIntroPercent,
-  discoveryEnabled = false,
-  similarAdded = 0,
-  hasArtist = false,
-  salt = 0,
-  mood = "all",
-  recent = null,
-  openerShape: forcedOpener = null,
-  bodyShape: forcedBody = null,
-  outro: forcedOutro = null,
-  beatFocus: forcedBeat = null,
-  includeCount: forcedIncludeCount = null,
-  includeVibe: forcedIncludeVibe = null,
-  includeOutro: forcedIncludeOutro = null,
-} = {}) {
-  const mem = recent || recentAnnounceMemory;
-  const pack = getDjMoodVoicePack(mood);
-
-  let openerIds = [];
-  if (forcedOpener && DJ_OPENER_SHAPES[forcedOpener]) {
-    openerIds = [forcedOpener];
-  } else if (nameIntroForced === true) {
-    openerIds = ["name_intro"];
-  } else {
-    if (nameIntroForced !== false) {
-      const pct = Math.max(0, Math.min(100, Number(nameIntroPercent) || 0));
-      // Deterministic eligibility from salt so templates/tests stay stable.
-      if (Math.abs(salt) % 100 < pct) openerIds.push("name_intro");
-    }
-    openerIds.push("cold_open");
-    if (hasArtist) openerIds.push("artist_tease");
-    if (discoveryEnabled && Number(similarAdded) > 0) {
-      openerIds.push("discovery_tease");
-    }
-  }
-  const openerShape = pickAvoidingRecent(
-    openerIds,
-    mem.openerShapes,
-    salt + 2
-  );
-  const nameIntro = openerShape === "name_intro";
-
-  let bodyIds = ["energy_first", "crowd_call"];
-  if (hasArtist) bodyIds.push("artist_first");
-  if (forcedBody && DJ_BODY_SHAPES[forcedBody]) bodyIds = [forcedBody];
-  const bodyShape = pickAvoidingRecent(bodyIds, mem.bodyShapes, salt + 5);
-
-  // Explicit fixture shapes (tests / overrides) keep the full stack so
-  // forced openers/outros still behave as callers expect.
-  const guidedFixture =
-    !forcedBeat &&
-    forcedIncludeCount == null &&
-    forcedIncludeVibe == null &&
-    forcedIncludeOutro == null &&
-    !!(forcedOpener || forcedBody || forcedOutro);
-
-  let beatIds = ["count_vibe", "count_tag", "vibe_tag"];
-  // Occasional full stack (~20%) so variety still includes the classic shape.
-  if (Math.abs(salt) % 5 === 0) beatIds.push("count_vibe_tag");
-  if (guidedFixture) beatIds = ["count_vibe_tag"];
-  if (forcedBeat && DJ_BEAT_FOCI[forcedBeat]) beatIds = [forcedBeat];
-  const beatFocus = pickAvoidingRecent(beatIds, mem.beatFoci, salt + 11);
-  const beat = DJ_BEAT_FOCI[beatFocus] || DJ_BEAT_FOCI.count_vibe;
-
-  const includeCount =
-    forcedIncludeCount != null ? !!forcedIncludeCount : beat.includeCount;
-  const includeVibe =
-    forcedIncludeVibe != null ? !!forcedIncludeVibe : beat.includeVibe;
-  let includeOutro =
-    forcedIncludeOutro != null ? !!forcedIncludeOutro : beat.includeOutro;
-  if (forcedOutro != null && String(forcedOutro).trim()) includeOutro = true;
-
-  const outroBank = pack.outros || ["Here we go."];
-  const outro = !includeOutro
-    ? ""
-    : forcedOutro != null && String(forcedOutro).trim()
-      ? String(forcedOutro).trim()
-      : pickAvoidingRecent(outroBank, mem.outros, salt + 3);
-
-  return {
-    openerShape,
-    bodyShape,
-    beatFocus,
-    includeCount,
-    includeVibe,
-    includeOutro,
-    outro,
-    nameIntro,
-    opener: DJ_OPENER_SHAPES[openerShape] || DJ_OPENER_SHAPES.cold_open,
-    body: DJ_BODY_SHAPES[bodyShape] || DJ_BODY_SHAPES.energy_first,
-    beat: beat,
-  };
 }
 
 // Phase 3: character bible. Mood packs set energy; this sets who is speaking
@@ -1362,13 +1131,13 @@ function reserveOutroPhrase(pack, mood, salt) {
   );
 }
 
-function fillEnergyTemplate(template, energySignature) {
-  return fillEventName(
-    String(template || "").replaceAll(
-      "{energy}",
-      energySignature || "mixed energy"
-    )
-  );
+// Reserve the set-description descriptor ("high-octane", "windows-down", ...)
+// from night memory so it never repeats within a night. Energy-filtered so a
+// slow-burn descriptor can't land on a party set.
+function reserveSetDescriptor(mood, salt) {
+  return reserveDjPhrase("descriptor", filterDescriptorsForMood(mood), {
+    salt,
+  });
 }
 
 // Fill pack line placeholders used by template fallback (Phase 5).
@@ -1383,47 +1152,10 @@ function fillPackTemplate(template, { howMany = "", artist = "" } = {}) {
   );
 }
 
-const DEFAULT_CROWD_CALLS = [
-  "{event} — this one's for the room.",
-  "Alright. Stay with us.",
-  "This stretch is for everybody in the room.",
-];
-
 const DEFAULT_DISCOVERY_LINES = [
   " Keep an ear out for {artist} — a discovery that punches above its weight.",
   " There's a little wildcard in this set that deserves your attention.",
   " Plus a discovery cut worth hearing once before it disappears into the night.",
-];
-
-const DEFAULT_ARTIST_TEASE = [
-  "{artist} is coming up — {count} in this block.",
-  "Keep an ear out for {artist}. {Count} on deck.",
-  "{artist} is in the mix. {Count} headed your way.",
-];
-
-const DEFAULT_ARTIST_TEASE_NO_COUNT = [
-  "{artist} is coming up.",
-  "Keep an ear out for {artist}.",
-  "{artist} is in the mix.",
-];
-
-const DEFAULT_DISCOVERY_TEASE = [
-  "There's a discovery in this block — {count} total.",
-  "Wildcard energy incoming. {Count} on deck, including {artist}.",
-  "One you might not know yet is riding along. {Count} coming up.",
-];
-
-const DEFAULT_DISCOVERY_TEASE_NO_COUNT = [
-  "There's a discovery riding along.",
-  "Wildcard energy incoming, including {artist}.",
-  "One you might not know yet is in this stretch.",
-];
-
-const DEFAULT_COLD_OPEN_NO_COUNT = [
-  "Alright — stay with this stretch.",
-  "Keeping the room moving.",
-  "This one's for right now.",
-  "Lock in with us.",
 ];
 
 const GENRE_LABEL_BY_ID = Object.fromEntries(
@@ -1511,22 +1243,11 @@ export function resolveDjMoodContext({
   };
 }
 
-function moodLine(artists, salt, moodContext = null) {
-  if (artists.some((a) => /christmas|holiday|santa|noel/i.test(a))) {
-    return "a festive detour that still knows how to throw down";
-  }
-  const pack = getDjMoodVoicePack(moodContext?.mood || "all");
-  // Era mood folds into the energy read so template lines mention the decade
-  // ("80's mostly Rock") without needing their own era-aware templates.
-  const baseEnergy = moodContext?.energySignature || "mixed energy";
-  const energy = moodContext?.eraLabel
-    ? `${moodContext.eraLabel} ${baseEnergy}`
-    : baseEnergy;
-  const bank = (pack.vibeLines || []).map((line) =>
-    fillEnergyTemplate(line, energy)
-  );
-  if (bank.length) return pick(bank, salt);
-  return fillEventName(`${energy} for {event}`);
+// Short spoken read of the set's energy, with the era folded in so announces
+// mention the decade ("80's mostly Rock") without era-specific templates.
+function setEnergyLabel(moodContext) {
+  const base = moodContext?.energySignature || "mixed energy";
+  return moodContext?.eraLabel ? `${moodContext.eraLabel} ${base}` : base;
 }
 
 // Five fixed phrasings with the configured DJ name substituted in.
@@ -1607,48 +1328,32 @@ ${banLine}
 ${bitLine}`;
 }
 
-function formatAnnounceShapeForPrompt(announceShape, djName) {
-  if (!announceShape) return "";
-  const name = String(djName || DJ_VOICE_DEFAULTS.djName).trim() || DJ_VOICE_DEFAULTS.djName;
-  const intros = nameIntrosFor(name);
-  const beat = announceShape.beat || DJ_BEAT_FOCI[announceShape.beatFocus] || null;
-  const beatLine = beat
-    ? `- Flavor beat (${beat.label || announceShape.beatFocus}): ${beat.instruction}`
-    : "";
-  const closer =
-    announceShape.includeOutro === false
-      ? "Do NOT end with a tagline/outro — finish after the count and/or vibe."
-      : announceShape.outro
-        ? `Close with a short transition in this spirit (paraphrase OK, do not stack outros): "${announceShape.outro}"`
-        : "Close with exactly one short mood-matched transition phrase.";
-  const introCue = announceShape.introPhrase
-    ? `- Opening cue: ${
-        announceShape.nameIntro ? "after the DJ name intro, continue" : "begin"
-      } in this spirit (paraphrase OK): "${fillEventName(
-        announceShape.introPhrase
-      )}"`
-    : "";
-  const countLine =
-    announceShape.includeCount === false
-      ? "- Track count: omit — do not say how many tracks are coming."
-      : "- Track count: include once, naturally.";
-  const vibeLine =
-    announceShape.includeVibe === false
-      ? "- Vibe sentence: omit — no energy/mood description this time."
-      : "- Vibe: one vivid sentence only — do NOT list genres.";
-  return `Delivery shape for THIS announce (follow structure; paraphrase wording):
-${beatLine}
-${introCue}
-- Opener shape (${announceShape.opener?.label || announceShape.openerShape}): ${announceShape.opener?.instruction || ""}
-- Body shape (${announceShape.body?.label || announceShape.bodyShape}): ${announceShape.body?.instruction || ""}
+// Three-part announce: scripted Intro + AI Set Description + scripted Outro.
+// This block tells the model it owns ONLY the middle.
+function formatAnnounceStructureForPrompt(structure, djName) {
+  if (!structure) return "";
+  const name =
+    String(djName || DJ_VOICE_DEFAULTS.djName).trim() || DJ_VOICE_DEFAULTS.djName;
+  const introText = fillEventName(String(structure.intro || "").trim());
+  const outroText = fillEventName(String(structure.outro || "").trim());
+  const descriptor = String(structure.descriptor || "").trim();
+  const countLine = structure.introHasCount
+    ? "- The intro already gives the track count — do NOT repeat the number."
+    : "- Mention the track count once, naturally.";
+  const nameLine = structure.nameMention
+    ? `- Mention your DJ name (${name}) once, naturally — a quick self-reference, not a full introduction.`
+    : `- Do not say your own DJ name ("${name}").`;
+  return `STRUCTURE — THREE-PART ANNOUNCE
+Your words are only the MIDDLE of a three-part announce. The intro and outro are already scripted and will be spoken exactly as written around your part:
+- Intro (spoken right before your part): "${introText}"
+- Outro (spoken right after your part): "${outroText}"
+Write ONLY the set description that goes between them — 1 to 2 short sentences about the upcoming block of music.
+- Do NOT greet the crowd, welcome anyone, say hello, or introduce yourself. The intro slot is taken.
+- Do NOT sign off, say goodbye, wish anyone a good night, or add a closing tagline. The outro slot is taken.
+- Do NOT repeat or paraphrase the intro or outro lines above; your sentences must flow naturally between them.
+- Work this descriptor phrase into the description naturally, verbatim or near-verbatim: "${descriptor}"
 ${countLine}
-${vibeLine}
-- ${closer}
-- Name intro: ${
-    announceShape.nameIntro
-      ? `yes — begin with exactly one of: "${intros[0]}" / "${intros[1]}" / "${intros[2]}" / "${intros[3]}" / "${intros[4]}"`
-      : `no — do not open with "${name}"`
-  }`;
+${nameLine}`;
 }
 
 function buildDjSystemPrompt(
@@ -1656,20 +1361,20 @@ function buildDjSystemPrompt(
   maxWords,
   moodContext = null,
   characterMoment = null,
-  announceShape = null,
+  structure = null,
   characterKnobs = null
 ) {
   const name = String(djName || DJ_VOICE_DEFAULTS.djName).trim() || DJ_VOICE_DEFAULTS.djName;
   const softMax = Math.max(
-    28,
+    16,
     Math.min(120, Number(maxWords) || DJ_VOICE_DEFAULTS.djAnnounceMaxWords)
   );
-  const softMin = Math.min(22, Math.max(14, softMax - 25));
+  const softMin = Math.min(12, Math.max(8, softMax - 20));
   const pack = getDjMoodVoicePack(moodContext?.mood || "all");
   const event = eventDisplayName();
   const packBlock = formatVoicePackForPrompt(pack);
   const bibleBlock = formatCharacterBibleForPrompt(characterMoment, characterKnobs);
-  const shapeBlock = formatAnnounceShapeForPrompt(announceShape, name);
+  const structureBlock = formatAnnounceStructureForPrompt(structure, name);
   const hostGuidanceBlock = formatHostDjGuidance(characterKnobs);
   const moodLabel = moodContext?.moodLabel || "All genres";
   return `You are ${name}, the recurring host and DJ for ${event}. You are a real DJ in the room — not a playlist narrator, automated assistant, radio lecturer, or year-in-review host.
@@ -1677,7 +1382,7 @@ function buildDjSystemPrompt(
 ${bibleBlock}
 
 ${hostGuidanceBlock ? `${hostGuidanceBlock}\n\n` : ""}TASK
-Deliver one short, modern DJ drop that introduces the upcoming music block and keeps the room moving.
+Write the set-description middle of a three-part DJ announce (scripted intro and outro surround it) for the upcoming music block.
 
 ${formatMusicPronunciationGuide(characterKnobs?.pronunciations)}
 
@@ -1686,15 +1391,12 @@ CURRENT DIRECTION
 - Treat that mood as the primary style direction; use the upcoming songs' energy signature only to fine-tune it.
 ${packBlock}
 
-${shapeBlock}
+${structureBlock}
 
 DELIVERY
-- Follow the selected delivery shape. It decides whether to include the track count, vibe sentence, and closing transition.
-- Mention at most one artist or song unless the selected shape explicitly requires otherwise.
+- Mention at most one artist or song.
 - If you say "starting with," "kicking off with," "leading off with," or similar, name only the actual first song or artist.
-- Use no more than one vivid vibe sentence and one short closing transition.
-- Vary openings, sentence rhythm, and closers between announcements.
-- Mention a discovery or wildcard only when the playlist block says discoveries are enabled and the selected shape requests or permits it. Describe it like a recommendation from a friend, never a statistic.
+- Mention a discovery or wildcard only when the playlist block says discoveries are enabled and this block contains one. Describe it like a recommendation from a friend, never a statistic.
 
 ACCURACY AND SAFETY
 - State only facts explicitly supplied in the playlist block.
@@ -1709,149 +1411,110 @@ WRITE FOR SPEECH
 AVOID
 - Genre lists, playlist audits, scorecards, statistics, apologies, and song grading.
 - Generic filler such as "party people," "we've got," "coming up," and "in the mix" unless it genuinely fits.
-- Repeating "turn it up," "let's rock," or "here we go" as a default closer.
 - Forced in-jokes, unsupported superlatives, preachiness, or commentary about these instructions.
 
 LENGTH AND OUTPUT
-- Keep the announcement between approximately ${softMin} and ${softMax} words. Prefer the short end. Never exceed ${softMax} words.
-- Write only the spoken announcement — no notes, explanations, labels, quotes, or analysis.
+- Keep the set description between approximately ${softMin} and ${softMax} words — 1 to 2 sentences. Prefer the short end. Never exceed ${softMax} words.
+- Write only the spoken set description — no greeting, no sign-off, no notes, explanations, labels, quotes, or analysis.
 - Prefer "${event}" or no crowd nickname over a generic crowd nickname.`;
 }
 
-function buildTemplateOpener({
-  announceShape,
-  event,
-  howMany,
-  artists,
-  discArtist,
-  pack,
-  salt,
-  intros,
-  recentOpenerLines = [],
-}) {
-  const shape = announceShape?.openerShape || "cold_open";
-  const includeCount = announceShape?.includeCount !== false;
-  const sharedTemplate = String(announceShape?.introPhrase || "").trim();
-  const sharedOpener = sharedTemplate
-    ? `${fillCountTemplate(sharedTemplate, howMany)}${
-        includeCount && !/\{count\}/i.test(sharedTemplate)
-          ? ` ${howMany} queued.`
-          : ""
-      }`
-    : "";
-  if (shape === "name_intro") {
-    const nameLine = pick(intros, salt + 5);
-    if (sharedOpener) {
-      return {
-        intro: `${nameLine} `,
-        opener: sharedOpener,
-        openerKey: announceShape.introPhraseId || sharedOpener,
-      };
-    }
-    if (!includeCount) {
-      return { intro: `${nameLine} `, opener: "", openerKey: nameLine };
-    }
-    const countBank =
-      event === "session_refill"
-        ? pack.openersRefill
-        : pack.openersStart;
-    const countLine = fillCountTemplate(
-      pickAvoidingRecent(countBank || ["{Count} coming up."], recentOpenerLines, salt),
-      howMany
-    );
-    return { intro: `${nameLine} `, opener: countLine, openerKey: `${nameLine}|${countLine}` };
-  }
-  if (shape === "artist_tease" && artists[0]) {
-    const templates = includeCount
-      ? pack.artistTeaseOpeners?.length
-        ? pack.artistTeaseOpeners
-        : DEFAULT_ARTIST_TEASE
-      : DEFAULT_ARTIST_TEASE_NO_COUNT;
-    const bank = templates.map((t) =>
-      fillPackTemplate(t, { howMany, artist: artists[0] })
-    );
-    const opener = pickAvoidingRecent(bank, recentOpenerLines, salt);
-    return { intro: "", opener, openerKey: opener };
-  }
-  if (shape === "discovery_tease") {
-    const templates = includeCount
-      ? pack.discoveryTeaseOpeners?.length
-        ? pack.discoveryTeaseOpeners
-        : DEFAULT_DISCOVERY_TEASE
-      : DEFAULT_DISCOVERY_TEASE_NO_COUNT;
-    const bank = templates.map((t) =>
-      fillPackTemplate(t, { howMany, artist: discArtist })
-    );
-    const opener = pickAvoidingRecent(bank, recentOpenerLines, salt);
-    return { intro: "", opener, openerKey: opener };
-  }
-  // cold_open
-  if (sharedOpener) {
-    return {
-      intro: "",
-      opener: sharedOpener,
-      openerKey: announceShape.introPhraseId || sharedOpener,
-    };
-  }
-  if (!includeCount) {
-    const opener = pickAvoidingRecent(
-      DEFAULT_COLD_OPEN_NO_COUNT,
-      recentOpenerLines,
-      salt
-    );
-    return { intro: "", opener, openerKey: opener };
-  }
-  const openerBank =
-    event === "session_refill" ? pack.openersRefill : pack.openersStart;
-  const opener = fillCountTemplate(
-    pickAvoidingRecent(openerBank || ["{Count} coming up."], recentOpenerLines, salt),
-    howMany
-  );
-  return { intro: "", opener, openerKey: opener };
+function descriptorArticle(text) {
+  return /^[aeiou]/i.test(String(text || "").trim()) ? "an" : "a";
 }
 
-function buildTemplateBody({
-  announceShape,
-  mood,
-  artists,
-  discoverLine,
-  bitLine,
-  pack,
+// Guard for the AI-written middle: the scripted intro/outro own the greeting
+// and sign-off, so strip a leading greeting or trailing send-off sentence the
+// model sneaks in — but only when other sentences remain, so a one-sentence
+// description is never destroyed.
+const LEADING_GREETING_SENTENCE =
+  /^(?:hey|hi|hello|welcome|good (?:evening|morning|afternoon|night)|what'?s up|greetings|howdy)\b/i;
+const TRAILING_SENDOFF_SENTENCE =
+  /^(?:enjoy|let'?s go|here we go|take it away|good ?night|goodbye|see you|have (?:fun|a (?:good|great)))\b/i;
+
+export function stripEdgeCourtesies(text) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  let parts = t.match(/[^.!?]+[.!?]+["']?/g)?.map((s) => s.trim());
+  if (!parts || parts.length < 2) return t;
+  if (LEADING_GREETING_SENTENCE.test(parts[0])) parts = parts.slice(1);
+  if (
+    parts.length >= 2 &&
+    TRAILING_SENDOFF_SENTENCE.test(parts[parts.length - 1])
+  ) {
+    parts = parts.slice(0, -1);
+  }
+  return parts.join(" ");
+}
+
+// Final script = Intro (verbatim) + Set Description + Outro (verbatim).
+// Intro lines may carry {count}/{Count}/{event} tokens; outros only {event}.
+export function assembleAnnounceScript({
+  intro = "",
+  middle = "",
+  outro = "",
+  howMany = "",
+  banList = "",
+} = {}) {
+  const line = [
+    fillCountTemplate(String(intro || "").trim(), howMany),
+    String(middle || "").trim(),
+    fillEventName(String(outro || "").trim()),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return applyDjBanList(line, banList);
+}
+
+// Deterministic set-description middle for the template fallback — same
+// three-part structure as the AI path, built from the reserved descriptor
+// plus batch facts (count, energy read, first artist).
+export function buildSetDescription({
+  howMany = "",
+  descriptor = "hand-picked",
+  energyLabel = "mixed energy",
+  firstArtist = "",
+  introHasCount = false,
   salt = 0,
-}) {
-  const shape = announceShape?.bodyShape || "energy_first";
-  const includeVibe = announceShape?.includeVibe !== false;
-  const artist = artists[0] || "";
-  const artistLine = artist ? ` ${artist} is in the mix.` : "";
-  const vibeLine = includeVibe ? ` We're talking ${mood}.` : "";
-  if (shape === "artist_first" && artist) {
-    return `${artistLine}${vibeLine}${discoverLine}${bitLine}`;
-  }
-  if (shape === "crowd_call") {
-    const calls = pack?.crowdCalls?.length ? pack.crowdCalls : DEFAULT_CROWD_CALLS;
-    const call = fillEventName(pick(calls, salt + 7));
-    return ` ${call}${vibeLine}${artistLine}${discoverLine}${bitLine}`;
-  }
-  // energy_first
-  return `${vibeLine}${artistLine}${discoverLine}${bitLine}`;
+} = {}) {
+  const desc = String(descriptor || "hand-picked").trim() || "hand-picked";
+  const article = descriptorArticle(desc);
+  const Count = String(howMany).charAt(0).toUpperCase() + String(howMany).slice(1);
+  const startClause = firstArtist ? `, starting with ${firstArtist}` : "";
+  const templates = introHasCount
+    ? [
+        `This stretch is ${article} ${desc} run through ${energyLabel}${startClause}.`,
+        `Expect ${article} ${desc} feel, leaning ${energyLabel}${startClause}.`,
+        `It's ${article} ${desc} ride through ${energyLabel}${startClause}.`,
+      ]
+    : [
+        `${Count} fresh tracks — ${article} ${desc} run through ${energyLabel}${startClause}.`,
+        `${Count} songs on deck with ${article} ${desc} feel, leaning ${energyLabel}${startClause}.`,
+        `I lined up ${howMany} tracks — ${article} ${desc} stretch of ${energyLabel}${startClause}.`,
+      ];
+  return pick(templates, salt);
 }
 
-// Template fallback when the LLM is unavailable. Varies structure; only
-// mentions discoveries when discovery is enabled and similarAdded > 0.
+// Template fallback when the LLM is unavailable — same Intro + Set
+// Description + Outro structure, fully deterministic. When called without
+// reserved intro/descriptor/outro (tests, previews) it salt-picks from the
+// banks without touching night memory.
 export function buildSetScript({
   event = "session_start",
   count = 0,
   highlights = [],
   similarAdded = 0,
   discoveryEnabled = false,
-  nameIntro = null,
   djName = null,
   moodContext = null,
   characterMoment = null,
-  announceOrdinal: ordinalOverride = null,
-  announceShape = null,
-  recordMemory = false,
   characterKnobs = null,
+  intro = null,
+  descriptor = null,
+  outro = null,
+  nameMention = false,
+  recordMemory = false,
   djCharacterIntensity = null,
   djCatchphrase = null,
   djBanList = null,
@@ -1859,10 +1522,6 @@ export function buildSetScript({
   djAlwaysInstructions = null,
   djNeverInstructions = null,
   djPronunciations = null,
-  beatFocus = null,
-  includeCount = null,
-  includeVibe = null,
-  includeOutro = null,
 } = {}) {
   const knobs =
     characterKnobs ||
@@ -1878,112 +1537,76 @@ export function buildSetScript({
   const name =
     String(djName || getDjVoiceSettings().djName || DJ_VOICE_DEFAULTS.djName).trim() ||
     DJ_VOICE_DEFAULTS.djName;
-  const intros = nameIntrosFor(name);
   const n = Math.max(0, Math.floor(Number(count) || 0));
   const howMany = spokenCount(n || 25);
-  const artists = uniqueArtists(highlights, 2);
+  const artists = uniqueArtists(highlights, 1);
   const salt = (scriptVariant++ + n + artists.join("").length) % 97;
-  const pack = getDjMoodVoicePack(moodContext?.mood || "all");
-  let shape =
-    announceShape ||
-    resolveAnnounceShape({
-      nameIntroForced: nameIntro,
-      discoveryEnabled,
-      similarAdded,
-      hasArtist: artists.length > 0,
-      salt,
-      mood: moodContext?.mood || "all",
-      beatFocus,
-      includeCount,
-      includeVibe,
-      includeOutro,
-    });
-  // Subtle: drop crowd-call body shape — keep energy/artist first.
-  if (
-    knobs.intensity === "subtle" &&
-    shape.bodyShape === "crowd_call" &&
-    !announceShape
-  ) {
-    shape = {
-      ...shape,
-      bodyShape: "energy_first",
-      body: DJ_BODY_SHAPES.energy_first,
-    };
-  }
-  const mood = moodLine(artists, salt, moodContext);
-  // Bits only when writeSetScript (or tests) supply a moment / ordinal.
-  const moment =
-    characterMoment != null
-      ? characterMoment
-      : ordinalOverride != null
-        ? resolveCharacterMoment({
-            mood: moodContext?.mood || "all",
-            salt,
-            ordinal: ordinalOverride,
-            intensity: knobs.intensity,
-            catchphrase: knobs.catchphrase,
-          })
-        : { include: false, bit: null };
-  const bitLine = moment?.bit ? ` ${moment.bit}` : "";
+  const mood = moodContext?.mood || "all";
+  const pack = getDjMoodVoicePack(mood);
+
+  const introLine =
+    intro != null
+      ? String(intro)
+      : pick(
+          filterIntrosByContext(event).map((e) => e.text),
+          salt + 19
+        ) || "";
+  const outroLine =
+    outro != null
+      ? String(outro)
+      : pick(
+          [...DJ_SHARED_OUTROS.map((e) => e.text), ...(pack.outros || [])],
+          salt + 23
+        ) || "";
+  const descText =
+    String(
+      descriptor ??
+        pick(
+          filterDescriptorsForMood(mood).map((e) => e.text),
+          salt + 29
+        )
+    ).trim() || "hand-picked";
+  const introHasCount = /\{count\}/i.test(introLine);
+
   const mentionDiscoveries = !!discoveryEnabled && Number(similarAdded) > 0;
   const disc = discoveryHighlights(highlights);
   const discArtist = speakArtist(disc[0]?.artist) || "one discovery track";
-  // Skip a second discovery sentence when the opener already teased it.
-  // Discovery lines come from the mood pack so Chill/Kids don't sound like Party.
-  const discoverLine =
-    mentionDiscoveries && shape.openerShape !== "discovery_tease"
-      ? fillPackTemplate(
-          pick(
-            pack.discoveryLines?.length
-              ? pack.discoveryLines
-              : DEFAULT_DISCOVERY_LINES,
-            salt + 1
-          ),
-          { artist: discArtist }
-        )
-      : "";
-
-  const { intro, opener, openerKey } = buildTemplateOpener({
-    announceShape: shape,
-    event,
+  const discoverLine = mentionDiscoveries
+    ? fillPackTemplate(
+        pick(
+          pack.discoveryLines?.length
+            ? pack.discoveryLines
+            : DEFAULT_DISCOVERY_LINES,
+          salt + 1
+        ),
+        { artist: discArtist }
+      )
+    : "";
+  const nameLine = nameMention ? pick(nameIntrosFor(name), salt + 5) : "";
+  const description = buildSetDescription({
     howMany,
-    artists,
-    discArtist,
-    pack,
-    salt,
-    intros,
-    recentOpenerLines: recentAnnounceMemory.openerLines,
-  });
-  // Avoid double artist mention when opener already teased them.
-  const bodyArtists =
-    shape.openerShape === "artist_tease" && shape.bodyShape !== "artist_first"
-      ? []
-      : artists;
-  const body = buildTemplateBody({
-    announceShape: shape,
-    mood,
-    artists: bodyArtists,
-    discoverLine,
-    bitLine,
-    pack,
+    descriptor: descText,
+    energyLabel: setEnergyLabel(moodContext),
+    firstArtist: artists[0] || "",
+    introHasCount,
     salt,
   });
-  let line = `${intro}${opener}${body}${
-    shape.includeOutro !== false && shape.outro ? ` ${shape.outro}` : ""
-  }`
-    .replace(/\s+/g, " ")
-    .trim();
-  line = applyDjBanList(line, knobs.banList);
-  if (recordMemory) {
-    recordAnnounceShape({
-      openerShape: shape.openerShape,
-      bodyShape: shape.bodyShape,
-      beatFocus: shape.beatFocus,
-      outro: shape.outro,
-      openerLine: openerKey,
-    });
-    rememberDjAnnounceScript(line);
-  }
+  const middle = [
+    nameLine,
+    description,
+    discoverLine.trim(),
+    String(characterMoment?.bit || "").trim(),
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const line = assembleAnnounceScript({
+    intro: introLine,
+    middle,
+    outro: outroLine,
+    howMany,
+    banList: knobs.banList,
+  });
+  if (recordMemory) rememberDjAnnounceScript(line);
   return line;
 }
 
@@ -2011,12 +1634,17 @@ export function buildLlmPrompt(summary) {
     similarAdded = 0,
     discoveryEnabled = false,
     djName = DJ_VOICE_DEFAULTS.djName,
+    middleMaxWords = null,
     djAnnounceMaxWords = DJ_VOICE_DEFAULTS.djAnnounceMaxWords,
     moodContext = null,
     characterMoment = null,
-    announceShape = null,
     characterKnobs = null,
     recentAnnounceScripts = [],
+    intro = "",
+    outro = "",
+    descriptor = "",
+    nameMention = false,
+    introHasCount = false,
   } = summary;
   const name = String(djName || DJ_VOICE_DEFAULTS.djName).trim() || DJ_VOICE_DEFAULTS.djName;
   const highlightList = Array.isArray(highlights) ? highlights : [];
@@ -2055,10 +1683,10 @@ export function buildLlmPrompt(summary) {
 
   return `${buildDjSystemPrompt(
     name,
-    djAnnounceMaxWords,
+    middleMaxWords ?? djAnnounceMaxWords,
     moodContext,
     characterMoment,
-    announceShape,
+    { intro, outro, descriptor, nameMention, introHasCount },
     characterKnobs
   )}
 
@@ -2076,7 +1704,7 @@ Playlist block:
 - Sample tracks in play order (context only — mention at most 1—2 artists, never recite):
 ${tracks || "(no track titles available)"}
 
-${recentBlock ? `Already said during this party — do not reuse their wording, images, or punchlines:\n${recentBlock}\n\n` : ""}Write only the spoken announcement now. Keep it DJ X short. Follow the flavor beat, delivery shape, character bible, intensity, and mood voice pack.`;
+${recentBlock ? `Already said during this party — do not reuse their wording, images, or punchlines:\n${recentBlock}\n\n` : ""}Write only the spoken set description now — the middle sentences between the scripted intro and outro. No greeting, no sign-off.`;
 }
 
 export function buildDjEffectivePromptPreview() {
@@ -2086,20 +1714,6 @@ export function buildDjEffectivePromptPreview() {
     genres: enabledGenresFromSettings(),
     highlights: [],
     eraMood: loadSettings()?.mood ?? null,
-  });
-  const announceShape = resolveAnnounceShape({
-    nameIntroForced: false,
-    discoveryEnabled: true,
-    similarAdded: 1,
-    hasArtist: true,
-    salt: 42,
-    mood: moodContext.mood,
-    recent: {
-      openerShapes: [],
-      bodyShapes: [],
-      beatFoci: [],
-      outros: [],
-    },
   });
   return buildLlmPrompt({
     event: "session_start",
@@ -2114,15 +1728,21 @@ export function buildDjEffectivePromptPreview() {
     djAnnounceMaxWords: dj.djAnnounceMaxWords,
     moodContext,
     characterMoment: null,
-    announceShape,
     characterKnobs,
+    intro: "[scripted intro line — reserved from the intro bank]",
+    outro: "[scripted outro line — reserved from the outro bank]",
+    descriptor: "[reserved set descriptor]",
+    nameMention: false,
+    introHasCount: false,
   });
 }
 
+// Returns the AI-written MIDDLE (set description) only; the scripted
+// intro/outro are assembled around it by writeSetScript.
 async function generateScriptWithLlm(summary) {
   const prompt = buildLlmPrompt(summary);
   return generateDjSpeechFromPrompt(prompt, {
-    maxWords: summary.djAnnounceMaxWords,
+    maxWords: summary.middleMaxWords ?? summary.djAnnounceMaxWords,
     banList: summary.characterKnobs?.banList,
   });
 }
@@ -2193,7 +1813,6 @@ export async function writeSetScript(summary = {}) {
       ? Number(summary.nameIntroPercent)
       : dj.djNameIntroPercent;
   const highlights = summary.highlights ?? [];
-  const artists = uniqueArtists(highlights, 2);
   const moodContext =
     summary.moodContext ||
     resolveDjMoodContext({
@@ -2220,59 +1839,23 @@ export async function writeSetScript(summary = {}) {
       catchphrase: characterKnobs.catchphrase,
       reserve: true,
     });
-  let announceShape =
-    summary.announceShape ||
-    resolveAnnounceShape({
-      nameIntroForced: summary.nameIntro != null ? !!summary.nameIntro : null,
-      nameIntroPercent: introPercent,
-      discoveryEnabled,
-      similarAdded,
-      hasArtist: artists.length > 0,
-      salt: saltHint,
-      mood: moodContext.mood,
-      openerShape: summary.openerShape,
-      bodyShape: summary.bodyShape,
-      outro: summary.outro,
-      beatFocus: summary.beatFocus,
-      includeCount: summary.includeCount,
-      includeVibe: summary.includeVibe,
-      includeOutro: summary.includeOutro,
-    });
-  // Subtle intensity softens crowd-call bodies.
-  if (
-    characterKnobs.intensity === "subtle" &&
-    announceShape.bodyShape === "crowd_call" &&
-    !summary.bodyShape &&
-    !summary.announceShape
-  ) {
-    announceShape = {
-      ...announceShape,
-      bodyShape: "energy_first",
-      body: DJ_BODY_SHAPES.energy_first,
-    };
-  }
   const pack = getDjMoodVoicePack(moodContext.mood);
-  const nextSetLines =
-    summary.skipNextSetPack || summary.announceShape
-      ? null
-      : pickDjNextSetLines({ salt: saltHint + 41 });
+
+  // Three reserved slots: intro + descriptor + outro. Reservations go through
+  // night memory (12h window, LRU recycle) so nothing repeats within a night.
+  // A caller-supplied line or an armed next-set pack overrides the reservation.
+  let intro = summary.intro != null ? String(summary.intro).trim() : null;
+  let outro =
+    summary.outro != null && String(summary.outro).trim()
+      ? String(summary.outro).trim()
+      : null;
+  const nextSetLines = summary.skipNextSetPack
+    ? null
+    : pickDjNextSetLines({ salt: saltHint + 41 });
   if (nextSetLines) {
-    const { pack: nextPack, intro, blurb, outro } = nextSetLines;
-    if (intro) {
-      announceShape = {
-        ...announceShape,
-        introPhraseId: `set-pack-${nextPack.id}-intro`,
-        introPhrase: intro,
-      };
-    }
-    if (outro) {
-      announceShape = {
-        ...announceShape,
-        outroId: `set-pack-${nextPack.id}-outro`,
-        outro: fillEventName(outro),
-        includeOutro: true,
-      };
-    }
+    const { pack: nextPack, intro: packIntro, blurb, outro: packOutro } = nextSetLines;
+    if (packIntro) intro = packIntro;
+    if (packOutro) outro = fillEventName(packOutro);
     characterKnobs = {
       ...characterKnobs,
       alwaysInstructions: [
@@ -2293,73 +1876,71 @@ export async function writeSetScript(summary = {}) {
       `[dj-voice] using one-shot next-set pack "${nextPack.id}" for this announce`
     );
   }
-  if (
-    !announceShape.introPhrase &&
-    !summary.announceShape &&
-    ["name_intro", "cold_open"].includes(announceShape.openerShape)
-  ) {
-    const introPhrase = reserveIntroPhrase(event, saltHint + 19);
-    if (introPhrase) {
-      announceShape = {
-        ...announceShape,
-        introPhraseId: introPhrase.id,
-        introPhrase: introPhrase.text,
-      };
-    }
+  if (intro == null) {
+    intro = reserveIntroPhrase(event, saltHint + 19)?.text || "";
   }
-  if (
-    !announceShape.outro &&
-    announceShape.includeOutro !== false &&
-    !summary.announceShape &&
-    !(summary.outro != null && String(summary.outro).trim())
-  ) {
-    const outroPhrase = reserveOutroPhrase(
-      pack,
-      moodContext.mood,
-      saltHint + 23
-    );
-    if (outroPhrase) {
-      announceShape = {
-        ...announceShape,
-        outroId: outroPhrase.id,
-        outro: fillEventName(outroPhrase.text),
-      };
-    }
+  if (outro == null) {
+    const outroPhrase = reserveOutroPhrase(pack, moodContext.mood, saltHint + 23);
+    outro = outroPhrase ? fillEventName(outroPhrase.text) : "";
   }
+  const descriptor =
+    summary.descriptor != null && String(summary.descriptor).trim()
+      ? String(summary.descriptor).trim()
+      : reserveSetDescriptor(moodContext.mood, saltHint + 29)?.text ||
+        "hand-picked";
+
+  // Occasional DJ-name mention lives in the middle now (intensity/host knob).
+  const nameMention =
+    summary.nameIntro != null
+      ? !!summary.nameIntro
+      : Math.abs(saltHint) % 100 <
+        Math.max(0, Math.min(100, Number(introPercent) || 0));
+
+  const count = summary.count ?? summary.added ?? 0;
+  const howMany = spokenCount(Math.max(0, Math.floor(Number(count) || 0)) || 25);
+  const introHasCount = /\{count\}/i.test(intro);
+  const totalBudget =
+    summary.djAnnounceMaxWords ?? dj.djAnnounceMaxWords;
+  const edgeWords = `${intro} ${outro}`.split(/\s+/).filter(Boolean).length;
+  const middleMaxWords = Math.max(16, Number(totalBudget || 0) - edgeWords);
+
   const payload = {
     event,
-    count: summary.count ?? summary.added ?? 0,
+    count,
     highlights,
     similarAdded,
     discoveryEnabled,
-    nameIntro: announceShape.nameIntro,
     djName: summary.djName || dj.djName,
-    djAnnounceMaxWords: summary.djAnnounceMaxWords ?? dj.djAnnounceMaxWords,
+    djAnnounceMaxWords: totalBudget,
+    middleMaxWords,
     moodContext,
     characterMoment,
-    announceShape,
     characterKnobs,
-    announceOrdinal,
+    intro,
+    outro,
+    descriptor,
+    nameMention,
+    introHasCount,
     recordMemory: true,
     recentAnnounceScripts: getRecentDjAnnounceScripts(5),
   };
 
   try {
     try {
-      const line = await generateScriptWithLlm(payload);
-      recordAnnounceShape({
-        openerShape: announceShape.openerShape,
-        bodyShape: announceShape.bodyShape,
-        beatFocus: announceShape.beatFocus,
-        outro: announceShape.outro,
-        openerLine: announceShape.openerShape,
+      const middle = stripEdgeCourtesies(await generateScriptWithLlm(payload));
+      const line = assembleAnnounceScript({
+        intro,
+        middle,
+        outro,
+        howMany,
+        banList: characterKnobs.banList,
       });
       const bitKind = characterBitKind(
         characterMoment,
         characterKnobs.catchphrase
       );
       console.log(
-        `[dj-voice] script via OpenAI conversation (nameIntro=${announceShape.nameIntro}, dj=${payload.djName}, mood=${moodContext.mood}, intensity=${characterKnobs.intensity}, opener=${announceShape.openerShape}, body=${announceShape.bodyShape}, beat=${announceShape.beatFocus}, bit=${bitKind})`
+        `[dj-voice] script via OpenAI conversation (dj=${payload.djName}, mood=${moodContext.mood}, intensity=${characterKnobs.intensity}, descriptor="${descriptor}", nameMention=${nameMention}, bit=${bitKind})`
       );
       rememberDjAnnounceScript(line);
       return line;

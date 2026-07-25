@@ -2,6 +2,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildSetScript,
+  buildSetDescription,
+  assembleAnnounceScript,
+  stripEdgeCourtesies,
   nameIntrosFor,
   cleanSpokenScript,
   roomToSonosEntity,
@@ -13,10 +16,7 @@ import {
   shouldIncludeCharacterBit,
   pickDjCharacterBit,
   resolveCharacterMoment,
-  resolveAnnounceShape,
   pickAvoidingRecent,
-  recordAnnounceShape,
-  getRecentAnnounceMemory,
   resetDjAnnounceOrdinal,
   applyDjBanList,
   getDjIntensityProfile,
@@ -31,10 +31,12 @@ import {
   DJ_MOOD_PRESETS,
   DJ_MOOD_VOICE_PACKS,
   DJ_CHARACTER_BIBLE,
-  DJ_OPENER_SHAPES,
-  DJ_BODY_SHAPES,
   DJ_INTENSITY_PROFILES,
 } from "../src/dj-voice.js";
+import {
+  DJ_SET_DESCRIPTORS,
+  filterIntrosByContext,
+} from "../src/dj-phrase-bank.js";
 import {
   normalizeDjSilenceSec,
   normalizeDjTtsVoice,
@@ -185,55 +187,88 @@ describe("cleanSpokenScript", () => {
   });
 });
 
-describe("buildSetScript", () => {
-  it("mentions discoveries only when discovery is enabled", () => {
-    const withDisc = buildSetScript({
+describe("buildSetScript (template fallback)", () => {
+  it("assembles Intro + Set Description + Outro with the verbatim edges", () => {
+    const line = buildSetScript({
       event: "session_start",
-      count: 25,
-      similarAdded: 3,
-      discoveryEnabled: true,
-      beatFocus: "count_vibe",
-      highlights: [
-        { artist: "Foo Fighters", name: "Everlong" },
-        { artist: "Unknown Band", name: "Deep Cut", discovered: true },
-      ],
-    });
-    assert.match(withDisc, /twenty-five|25/i);
-    assert.match(withDisc, /discovery|wildcard/i);
-
-    const noDisc = buildSetScript({
-      event: "session_start",
-      count: 25,
-      similarAdded: 3,
-      discoveryEnabled: false,
-      beatFocus: "count_vibe",
-      highlights: [
-        { artist: "Foo Fighters", name: "Everlong" },
-        { artist: "Unknown Band", name: "Deep Cut", discovered: true },
-      ],
-    });
-    assert.doesNotMatch(noDisc, /discovery|wildcard|might not know/i);
-  });
-
-  it("varies refill vs fresh openers and ends with an outro", () => {
-    const refill = buildSetScript({
-      event: "session_refill",
-      count: 25,
-      discoveryEnabled: false,
-      nameIntro: false,
-      announceShape: resolveAnnounceShape({
-        nameIntroForced: false,
-        hasArtist: true,
-        salt: 1,
-        openerShape: "cold_open",
-        bodyShape: "energy_first",
-        outro: "Let's go.",
-      }),
+      count: 5,
+      intro: "The booth is awake. Let the first record speak.",
+      descriptor: "windows-down",
+      outro: "Let the melody set the pace.",
       characterMoment: { include: false, bit: null },
       highlights: [{ artist: "Prince", name: "Kiss" }],
     });
-    assert.match(refill, /more|keeping|another/i);
-    assert.match(refill, /Let's go\./i);
+    assert.ok(
+      line.startsWith("The booth is awake. Let the first record speak."),
+      line
+    );
+    assert.ok(line.endsWith("Let the melody set the pace."), line);
+    assert.match(line, /windows-down/);
+    assert.match(line, /five/i);
+    assert.match(line, /starting with Prince/i);
+  });
+
+  it("fills {Count} in the intro and skips the count in the middle", () => {
+    const line = buildSetScript({
+      event: "session_refill",
+      count: 5,
+      intro: "The next chapter has {Count} tracks and no wasted motion.",
+      descriptor: "hand-picked",
+      outro: "Onward.",
+      characterMoment: { include: false, bit: null },
+      highlights: [{ artist: "Prince", name: "Kiss" }],
+    });
+    assert.ok(
+      line.startsWith("The next chapter has Five tracks and no wasted motion."),
+      line
+    );
+    // Count spoken once (by the intro), not repeated by the description.
+    assert.equal(line.match(/five/gi)?.length, 1, line);
+  });
+
+  it("mentions discoveries only when discovery is enabled", () => {
+    const base = {
+      event: "session_start",
+      count: 25,
+      similarAdded: 3,
+      intro: "Fresh queue, open ears, first track.",
+      descriptor: "crowd-tested",
+      outro: "Enjoy the ride.",
+      characterMoment: { include: false, bit: null },
+      highlights: [
+        { artist: "Foo Fighters", name: "Everlong" },
+        { artist: "Unknown Band", name: "Deep Cut", discovered: true },
+      ],
+    };
+    const withDisc = buildSetScript({ ...base, discoveryEnabled: true });
+    assert.match(withDisc, /twenty-five|25/i);
+    assert.match(withDisc, /discovery|wildcard/i);
+
+    const noDisc = buildSetScript({ ...base, discoveryEnabled: false });
+    assert.doesNotMatch(noDisc, /discovery|wildcard|might not know/i);
+  });
+
+  it("picks intro/outro/descriptor from the banks when none are reserved", () => {
+    const line = buildSetScript({
+      event: "session_refill",
+      count: 4,
+      characterMoment: { include: false, bit: null },
+      highlights: [{ artist: "Prince", name: "Kiss" }],
+    });
+    const refillIntros = filterIntrosByContext("session_refill").map((entry) =>
+      entry.text
+        .replaceAll("{Count}", "Four")
+        .replaceAll("{count}", "four")
+        .replaceAll("{event}", eventDisplayName())
+    );
+    assert.ok(
+      refillIntros.some((intro) => line.startsWith(intro)),
+      `expected a refill-bank intro at the start of: ${line}`
+    );
+    assert.ok(
+      DJ_SET_DESCRIPTORS.some((entry) => line.includes(entry.text)),
+      `expected a bank descriptor in: ${line}`
+    );
   });
 
   it("handles a thin batch", () => {
@@ -242,53 +277,127 @@ describe("buildSetScript", () => {
       count: 1,
       highlights: [],
       discoveryEnabled: false,
-      beatFocus: "count_tag",
+      characterMoment: { include: false, bit: null },
     });
     assert.match(line, /one/i);
   });
 
-  it("uses a Party DJ name intro when nameIntro is true", () => {
+  it("weaves the DJ name into the middle when nameMention is true", () => {
     const line = buildSetScript({
       event: "session_start",
       count: 10,
       discoveryEnabled: false,
-      nameIntro: true,
-      djName: "Party DJ",
-      highlights: [{ artist: "Prince", name: "Kiss" }],
-    });
-    assert.match(
-      line,
-      /It's your boy Party DJ|Party DJ back at you|Party DJ in the building|This is Party DJ|Party DJ on the ones and twos/
-    );
-  });
-
-  it("uses a custom DJ name in intros", () => {
-    const line = buildSetScript({
-      event: "session_start",
-      count: 10,
-      discoveryEnabled: false,
-      nameIntro: true,
+      nameMention: true,
       djName: "DJ Test",
+      intro: "Fresh queue, open ears, first track.",
+      descriptor: "top-shelf",
+      outro: "Take it away, speakers.",
+      characterMoment: { include: false, bit: null },
       highlights: [{ artist: "Prince", name: "Kiss" }],
     });
     assert.match(
       line,
       /It's your boy DJ Test|DJ Test back at you|DJ Test in the building|This is DJ Test|DJ Test on the ones and twos/
     );
+    // The name lives in the middle — the scripted intro still leads.
+    assert.ok(line.startsWith("Fresh queue, open ears, first track."), line);
   });
 
-  it("skips name intro when nameIntro is false", () => {
+  it("skips the DJ name when nameMention is false", () => {
     const line = buildSetScript({
       event: "session_start",
       count: 10,
       discoveryEnabled: false,
-      nameIntro: false,
+      nameMention: false,
       djName: "Party DJ",
+      intro: "Fresh queue, open ears, first track.",
+      descriptor: "top-shelf",
+      outro: "Take it away, speakers.",
+      characterMoment: { include: false, bit: null },
       highlights: [{ artist: "Prince", name: "Kiss" }],
     });
-    assert.doesNotMatch(
+    assert.doesNotMatch(line, /Party DJ/);
+  });
+});
+
+describe("set description + assembly helpers", () => {
+  it("buildSetDescription contains descriptor, count, energy, and first artist", () => {
+    const middle = buildSetDescription({
+      howMany: "five",
+      descriptor: "neon-soaked",
+      energyLabel: "80's mostly Pop",
+      firstArtist: "Prince",
+      introHasCount: false,
+      salt: 0,
+    });
+    assert.match(middle, /neon-soaked/);
+    assert.match(middle, /five/i);
+    assert.match(middle, /80's mostly Pop/);
+    assert.match(middle, /starting with Prince/);
+  });
+
+  it("buildSetDescription omits the count when the intro already said it", () => {
+    for (let salt = 0; salt < 3; salt++) {
+      const middle = buildSetDescription({
+        howMany: "five",
+        descriptor: "slow-burn",
+        energyLabel: "mostly Rock",
+        firstArtist: "",
+        introHasCount: true,
+        salt,
+      });
+      assert.doesNotMatch(middle, /five/i);
+      assert.match(middle, /slow-burn/);
+      assert.doesNotMatch(middle, /starting with/);
+    }
+  });
+
+  it("buildSetDescription uses the right article for vowel descriptors", () => {
+    const middle = buildSetDescription({
+      howMany: "five",
+      descriptor: "all-killer",
+      energyLabel: "mixed energy",
+      salt: 0,
+    });
+    assert.match(middle, /an all-killer/);
+    assert.doesNotMatch(middle, /\ba all-killer/);
+  });
+
+  it("assembleAnnounceScript joins the three parts, fills tokens, applies ban-list", () => {
+    const line = assembleAnnounceScript({
+      intro: "The queue is back in business, carrying {Count} selections.",
+      middle: "A crowd-tested run, party people.",
+      outro: "Stay on this frequency.",
+      howMany: "six",
+      banList: "party people",
+    });
+    assert.equal(
       line,
-      /^It's your boy Party DJ|^Party DJ back at you|^Party DJ in the building|^This is Party DJ|^Party DJ on the ones and twos/
+      "The queue is back in business, carrying Six selections. A crowd-tested run. Stay on this frequency."
+    );
+  });
+
+  it("stripEdgeCourtesies removes a sneaky greeting and sign-off", () => {
+    assert.equal(
+      stripEdgeCourtesies(
+        "Hey everybody! Five neon-soaked tracks are lined up. Enjoy the night!"
+      ),
+      "Five neon-soaked tracks are lined up."
+    );
+    assert.equal(
+      stripEdgeCourtesies("Good evening! A slow-burn run through 90's rock."),
+      "A slow-burn run through 90's rock."
+    );
+  });
+
+  it("stripEdgeCourtesies never destroys a one-sentence description", () => {
+    assert.equal(
+      stripEdgeCourtesies("Welcome to a wall-to-wall run of hits."),
+      "Welcome to a wall-to-wall run of hits."
+    );
+    assert.equal(
+      stripEdgeCourtesies("Five fresh tracks with a windows-down feel."),
+      "Five fresh tracks with a windows-down feel."
     );
   });
 });
@@ -482,31 +591,34 @@ describe("DJ mood voice packs", () => {
     assert.equal(getDjMoodVoicePack("nope"), DJ_MOOD_VOICE_PACKS.all);
   });
 
-  it("template fallback uses chill outros, not crank-it-up", () => {
+  it("template fallback keeps chill sets away from crank-it-up descriptors", () => {
     const chill = resolveDjMoodContext({ genres: DJ_MOOD_PRESETS.chill });
-    const line = buildSetScript({
-      count: 5,
-      nameIntro: false,
-      moodContext: chill,
-      beatFocus: "count_vibe_tag",
-      highlights: [{ artist: "Norah Jones", name: "Don't Know Why" }],
-    });
-    assert.match(line, /five/i);
-    assert.doesNotMatch(line, /crank it up|turn it to eleven|stay loud/i);
+    for (let i = 0; i < 8; i++) {
+      const line = buildSetScript({
+        count: 5,
+        moodContext: chill,
+        characterMoment: { include: false, bit: null },
+        outro: "Ease into it.",
+        highlights: [{ artist: "Norah Jones", name: "Don't Know Why" }],
+      });
+      assert.match(line, /five/i);
+      assert.doesNotMatch(line, /crank it up|turn it to eleven|stay loud/i);
+      // Descriptor pool for chill excludes high-energy phrases.
+      assert.doesNotMatch(line, /high-octane|full-throttle|floor-shaking/i);
+      assert.ok(line.endsWith("Ease into it."), line);
+    }
     const heavy = resolveDjMoodContext({ genres: DJ_MOOD_PRESETS.heavy });
-    const heavyLine = buildSetScript({
-      count: 5,
-      nameIntro: false,
-      moodContext: heavy,
-      beatFocus: "count_vibe_tag",
-      highlights: [{ artist: "Metallica", name: "Enter Sandman" }],
-    });
-    assert.match(heavyLine, /five/i);
-    // Heavy pack closers lean loud; at least one of the vibe/outro cues should show.
-    assert.ok(
-      /loud|grit|crank|eleven|hit|teeth|weight|hot/i.test(heavyLine),
-      heavyLine
-    );
+    for (let i = 0; i < 8; i++) {
+      const heavyLine = buildSetScript({
+        count: 5,
+        moodContext: heavy,
+        characterMoment: { include: false, bit: null },
+        highlights: [{ artist: "Metallica", name: "Enter Sandman" }],
+      });
+      assert.match(heavyLine, /five/i);
+      // Low-energy descriptors never land on a heavy set.
+      assert.doesNotMatch(heavyLine, /slow-burn|candlelit|hammock-paced/i);
+    }
   });
 });
 
@@ -569,354 +681,95 @@ describe("DJ character bible", () => {
     assert.ok(moment.bit);
     const line = buildSetScript({
       count: 5,
-      nameIntro: false,
       characterMoment: moment,
       highlights: [{ artist: "Prince", name: "Kiss" }],
     });
     assert.ok(line.includes(moment.bit), line);
   });
 
-  it("template mentions at most one artist name-drop", () => {
+  it("template mentions only the first artist", () => {
     const line = buildSetScript({
       count: 10,
-      nameIntro: false,
       characterMoment: { include: false, bit: null },
-      announceShape: resolveAnnounceShape({
-        nameIntroForced: false,
-        hasArtist: true,
-        salt: 1,
-        openerShape: "cold_open",
-        bodyShape: "energy_first",
-        outro: "Here we go.",
-      }),
+      intro: "Fresh queue, open ears, first track.",
+      descriptor: "crowd-pleasing",
+      outro: "Here we go.",
       highlights: [
         { artist: "Prince", name: "Kiss" },
         { artist: "Foo Fighters", name: "Everlong" },
       ],
     });
-    assert.match(line, /Prince is in the mix/i);
+    assert.match(line, /starting with Prince/i);
     assert.doesNotMatch(line, /Foo Fighters|Expect names like/i);
   });
 });
 
-describe("DJ announce shape anti-repeat", () => {
-  it("defines opener and body shape catalogs", () => {
-    for (const id of [
-      "name_intro",
-      "cold_open",
-      "artist_tease",
-      "discovery_tease",
-    ]) {
-      assert.ok(DJ_OPENER_SHAPES[id]?.instruction);
-    }
-    for (const id of ["energy_first", "artist_first", "crowd_call"]) {
-      assert.ok(DJ_BODY_SHAPES[id]?.instruction);
-    }
-  });
-
+describe("three-part announce prompt", () => {
   it("pickAvoidingRecent skips recent values when alternatives exist", () => {
     assert.equal(pickAvoidingRecent(["a", "b", "c"], ["a", "b"], 0), "c");
     assert.equal(pickAvoidingRecent(["a"], ["a"], 0), "a");
   });
 
-  it("avoids repeating opener shape across consecutive resolves", () => {
-    resetDjAnnounceOrdinal(0);
-    const a = resolveAnnounceShape({
-      nameIntroForced: false,
-      hasArtist: true,
-      discoveryEnabled: true,
-      similarAdded: 1,
-      salt: 10,
-      mood: "party",
-    });
-    recordAnnounceShape({
-      openerShape: a.openerShape,
-      bodyShape: a.bodyShape,
-      outro: a.outro,
-    });
-    const b = resolveAnnounceShape({
-      nameIntroForced: false,
-      hasArtist: true,
-      discoveryEnabled: true,
-      similarAdded: 1,
-      salt: 10,
-      mood: "party",
-    });
-    assert.notEqual(b.openerShape, a.openerShape);
-    assert.ok(getRecentAnnounceMemory().openerShapes.includes(a.openerShape));
-  });
-
-  it("forces name_intro when nameIntro is true", () => {
-    const shape = resolveAnnounceShape({
-      nameIntroForced: true,
-      salt: 3,
-      mood: "all",
-    });
-    assert.equal(shape.openerShape, "name_intro");
-    assert.equal(shape.nameIntro, true);
-  });
-
-  it("rotates flavor beats so count/vibe/tagline are not always stacked", () => {
-    resetDjAnnounceOrdinal(0);
-    const shapes = [];
-    for (let salt = 0; salt < 12; salt++) {
-      const shape = resolveAnnounceShape({
-        nameIntroForced: false,
-        hasArtist: true,
-        salt,
-        mood: "party",
-      });
-      shapes.push(shape);
-      recordAnnounceShape({
-        openerShape: shape.openerShape,
-        bodyShape: shape.bodyShape,
-        beatFocus: shape.beatFocus,
-        outro: shape.outro,
-      });
-    }
-    const foci = new Set(shapes.map((s) => s.beatFocus));
-    assert.ok(foci.size >= 2, `expected multiple beat foci, got ${[...foci]}`);
-    assert.ok(
-      shapes.some((s) => !(s.includeCount && s.includeVibe && s.includeOutro)),
-      "expected at least one announce to drop count, vibe, or tagline"
-    );
-    const short = buildSetScript({
-      count: 5,
-      nameIntro: false,
-      beatFocus: "count_tag",
-      characterMoment: { include: false, bit: null },
-      announceShape: resolveAnnounceShape({
-        nameIntroForced: false,
-        salt: 1,
-        openerShape: "cold_open",
-        bodyShape: "energy_first",
-        beatFocus: "count_tag",
-        outro: "Let's go.",
-      }),
-      highlights: [{ artist: "Prince", name: "Kiss" }],
-    });
-    assert.match(short, /five/i);
-    assert.match(short, /Let's go/i);
-    assert.doesNotMatch(short, /We're talking/i);
-  });
-
-  it("template fallback uses selected shared intro and outro cues", () => {
-    const base = resolveAnnounceShape({
-      nameIntroForced: false,
-      salt: 2,
-      openerShape: "cold_open",
-      bodyShape: "energy_first",
-      beatFocus: "count_vibe_tag",
-      mood: "party",
-    });
-    const line = buildSetScript({
-      event: "session_refill",
-      count: 6,
-      announceShape: {
-        ...base,
-        introPhraseId: "intro-test",
-        introPhrase: "The booth has a fresh route.",
-        outroId: "outro-test",
-        outro: "Let the next track steer.",
-      },
-      characterMoment: { include: false, bit: null },
-    });
-    assert.match(line, /booth has a fresh route/i);
-    assert.match(line, /6 queued/i);
-    assert.match(line, /next track steer/i);
-  });
-
-  it("LLM prompt includes selected cues and recent-script avoidance", () => {
-    const shape = {
-      ...resolveAnnounceShape({
-        nameIntroForced: false,
-        salt: 3,
-        openerShape: "cold_open",
-        bodyShape: "energy_first",
-        beatFocus: "count_tag",
-        mood: "party",
-      }),
-      introPhrase: "Fresh signal from the booth.",
-      outro: "Give the rhythm some road.",
-    };
+  it("LLM prompt carries the scripted edges, descriptor duty, and recent-script avoidance", () => {
     const prompt = buildLlmPrompt({
       count: 4,
-      announceShape: shape,
+      intro: "Fresh signal from the booth.",
+      outro: "Give the rhythm some road.",
+      descriptor: "neon-soaked",
+      nameMention: false,
+      introHasCount: false,
       recentAnnounceScripts: [
         "The old punchline that should not return.",
         "Another recent booth image.",
       ],
     });
-    assert.match(prompt, /Fresh signal from the booth/i);
-    assert.match(prompt, /Give the rhythm some road/i);
+    assert.match(prompt, /Fresh signal from the booth/);
+    assert.match(prompt, /Give the rhythm some road/);
+    assert.match(prompt, /"neon-soaked"/);
+    assert.match(prompt, /Do NOT greet the crowd/i);
+    assert.match(prompt, /Do NOT sign off/i);
+    assert.match(prompt, /Mention the track count once/i);
     assert.match(prompt, /do not reuse their wording, images, or punchlines/i);
     assert.match(prompt, /old punchline that should not return/i);
+    assert.match(prompt, /Write only the spoken set description now/i);
   });
 
-  it("template artist_tease opener mentions the artist up front", () => {
-    resetDjAnnounceOrdinal(0);
-    const shape = resolveAnnounceShape({
-      nameIntroForced: false,
-      hasArtist: true,
-      salt: 0,
-      openerShape: "artist_tease",
-      bodyShape: "energy_first",
-      outro: "Let's go.",
+  it("LLM prompt flips count and name duties per announce", () => {
+    const prompt = buildLlmPrompt({
+      count: 6,
+      djName: "DJ Test",
+      intro: "The next chapter has Six tracks and no wasted motion.",
+      outro: "Onward.",
+      descriptor: "hand-picked",
+      nameMention: true,
+      introHasCount: true,
     });
-    const line = buildSetScript({
-      count: 5,
-      nameIntro: false,
-      announceShape: shape,
-      characterMoment: { include: false, bit: null },
-      highlights: [{ artist: "Prince", name: "Kiss" }],
+    assert.match(prompt, /intro already gives the track count/i);
+    assert.match(prompt, /Mention your DJ name \(DJ Test\) once/i);
+    const noName = buildLlmPrompt({
+      count: 6,
+      djName: "DJ Test",
+      intro: "Fresh queue, open ears, first track.",
+      outro: "Onward.",
+      descriptor: "hand-picked",
+      nameMention: false,
+      introHasCount: false,
     });
-    assert.match(line, /Prince/i);
-    assert.match(line, /five|5/i);
-  });
-
-  it("template discovery_tease opener when discoveries are enabled", () => {
-    const shape = resolveAnnounceShape({
-      nameIntroForced: false,
-      discoveryEnabled: true,
-      similarAdded: 1,
-      hasArtist: true,
-      salt: 0,
-      openerShape: "discovery_tease",
-      bodyShape: "crowd_call",
-      outro: "Here we go.",
-    });
-    const line = buildSetScript({
-      count: 5,
-      discoveryEnabled: true,
-      similarAdded: 1,
-      announceShape: shape,
-      characterMoment: { include: false, bit: null },
-      highlights: [
-        { artist: "Unknown Band", name: "Deep Cut", discovered: true },
-      ],
-    });
-    assert.match(line, /discovery|wildcard|might not know/i);
+    assert.match(noName, /Do not say your own DJ name/i);
   });
 });
 
-describe("Phase 5 template mirrors mood packs", () => {
-  const fixtures = [
-    {
-      mood: "chill",
-      artist: "Norah Jones",
-      track: "Don't Know Why",
-      must: /easy|cool|smooth|laid-back|settle|pace/i,
-      mustNot: /crank it up|turn it to eleven|stay loud|make some noise/i,
-      outroMustNot: /Crank it up|Turn it to eleven|Stay loud|Make some noise/,
-    },
-    {
-      mood: "heavy",
-      artist: "Metallica",
-      track: "Enter Sandman",
-      must: /loud|grit|heavy|teeth|weight|hot|volume|hit/i,
-      mustNot: /easy pace|cooler stretch|smile-first|settle in for this cooler/i,
-    },
-    {
-      mood: "kids",
-      artist: "The Wiggles",
-      track: "Hot Potato",
-      must: /fun|smile|silly|friends|playful|family/i,
-      mustNot: /crank it up|stay loud|turn it to eleven|drinks/i,
-    },
-    {
-      mood: "country",
-      artist: "Johnny Cash",
-      track: "Folsom Prison Blues",
-      must: /heart|road|night-drive|boots|story|wheels|ride/i,
-      mustNot: /crank it up|turn it to eleven|lock in/i,
-    },
-  ];
-
-  for (const fx of fixtures) {
-    it(`cold_open template stays in ${fx.mood} pack (no generic rock collapse)`, () => {
-      resetDjAnnounceOrdinal(0);
-      const ctx = resolveDjMoodContext({
-        genres: DJ_MOOD_PRESETS[fx.mood],
-      });
-      const pack = getDjMoodVoicePack(fx.mood);
-      const shape = resolveAnnounceShape({
-        nameIntroForced: false,
-        hasArtist: true,
-        salt: 2,
-        mood: fx.mood,
-        openerShape: "cold_open",
-        bodyShape: "energy_first",
-        outro: pack.outros[0],
-      });
-      const line = buildSetScript({
-        count: 5,
-        nameIntro: false,
-        moodContext: ctx,
-        announceShape: shape,
-        characterMoment: { include: false, bit: null },
-        highlights: [{ artist: fx.artist, name: fx.track }],
-      });
-      assert.match(line, /five/i);
-      assert.match(line, fx.must, line);
-      assert.doesNotMatch(line, fx.mustNot);
-      if (fx.outroMustNot) assert.doesNotMatch(line, fx.outroMustNot);
-      // Outro must be from this mood's pack.
-      assert.ok(
-        pack.outros.some((o) => line.endsWith(o) || line.includes(o)),
-        `outro not from ${fx.mood} pack: ${line}`
-      );
-    });
-  }
-
-  it("crowd_call uses mood pack crowdCalls, not a generic room line", () => {
-    const ctx = resolveDjMoodContext({ genres: DJ_MOOD_PRESETS.chill });
-    const pack = getDjMoodVoicePack("chill");
-    const shape = resolveAnnounceShape({
-      nameIntroForced: false,
-      hasArtist: true,
-      salt: 0,
-      mood: "chill",
-      openerShape: "cold_open",
-      bodyShape: "crowd_call",
-      outro: "Ease into it.",
-    });
-    const line = buildSetScript({
-      count: 5,
-      moodContext: ctx,
-      announceShape: shape,
-      characterMoment: { include: false, bit: null },
-      highlights: [{ artist: "Norah Jones", name: "Don't Know Why" }],
-    });
-    assert.ok(
-      pack.crowdCalls.some((c) =>
-        line.includes(c.replaceAll("{event}", eventDisplayName()))
-      ),
-      line
-    );
-    assert.doesNotMatch(line, /this one's for the floor|Make some noise/i);
-  });
-
-  it("discovery body line uses mood pack discoveryLines", () => {
+describe("template mirrors mood packs", () => {
+  it("discovery line uses mood pack discoveryLines", () => {
     const ctx = resolveDjMoodContext({ genres: DJ_MOOD_PRESETS.kids });
     const pack = getDjMoodVoicePack("kids");
-    const shape = resolveAnnounceShape({
-      nameIntroForced: false,
-      discoveryEnabled: true,
-      similarAdded: 1,
-      hasArtist: true,
-      salt: 0,
-      mood: "kids",
-      openerShape: "cold_open",
-      bodyShape: "energy_first",
-      outro: "Let's have fun.",
-    });
     const line = buildSetScript({
       count: 5,
       discoveryEnabled: true,
       similarAdded: 1,
       moodContext: ctx,
-      announceShape: shape,
       characterMoment: { include: false, bit: null },
+      outro: "Let's have fun.",
       highlights: [
         { artist: "Unknown Kids", name: "Deep Cut", discovered: true },
       ],
@@ -966,23 +819,19 @@ describe("Phase 6 character knobs", () => {
   it("template respects ban-list", () => {
     const line = buildSetScript({
       count: 5,
-      nameIntro: false,
       characterMoment: { include: false, bit: null },
-      announceShape: resolveAnnounceShape({
-        nameIntroForced: false,
-        salt: 0,
-        openerShape: "cold_open",
-        bodyShape: "energy_first",
-        outro: "Let's go.",
-      }),
+      intro: "Fresh queue, open ears, first track.",
+      descriptor: "high-octane",
+      outro: "Let's go.",
       characterKnobs: {
         intensity: "classic",
         catchphrase: "",
-        banList: "We're talking",
+        banList: "high-octane, starting with",
       },
       highlights: [{ artist: "Prince", name: "Kiss" }],
     });
-    assert.doesNotMatch(line, /We're talking/i);
+    assert.doesNotMatch(line, /high-octane|starting with/i);
+    assert.match(line, /Let's go/i);
   });
 
   it("forced bit can use favorite catchphrase", () => {

@@ -20,7 +20,9 @@ const MEMORY_FILE =
 export const NIGHT_WINDOW_HOURS = 12;
 const MAX_RECENT_SCRIPTS = 5;
 const MAX_USED_NOTES = 40;
-const MAX_GLOBAL_PHRASE_USES = 240;
+// Sized for the 100-line intro/outro/descriptor banks plus asides: a full
+// night of announces must fit without evicting reservations mid-window.
+const MAX_GLOBAL_PHRASE_USES = 600;
 const MAX_GLOBAL_ANNOUNCE_SCRIPTS = 20;
 const MAX_TAGLINE_CLIPS = 120;
 
