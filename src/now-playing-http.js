@@ -7,6 +7,7 @@ import {
   getDiscoverySettings,
   getRotationSettings,
 } from "./settings.js";
+import { isPartyOver } from "./party-rituals.js";
 import { getReactions } from "./reactions.js";
 import { spotifyTrackId } from "./sampler.js";
 import {
@@ -37,6 +38,7 @@ export function enrichNowPlaying(np) {
     randomMoodEnabled: rotation.randomMoodEnabled,
     randomDecadeEnabled: rotation.randomDecadeEnabled,
     requestsPaused: getContentSettings().requestsPaused,
+    partyOver: isPartyOver(),
     hostControlsOnly: getContentSettings().hostControlsOnly,
     closingTimeAt: getClosingTimeAt(),
     partyRecap: getLastPartyRecap(),

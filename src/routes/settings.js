@@ -35,6 +35,7 @@ import {
   setRequestsPaused,
   setKidsLock,
   getRitualState,
+  isPartyOver,
 } from "../party-rituals.js";
 import { clearHistory } from "../play-history.js";
 import { clearRequests } from "../request-log.js";
@@ -51,6 +52,9 @@ export function registerSettingsRoutes(app) {
   // Randomness knobs (song memory + per-artist budget) for the random picker.
   // Also returns the defaults so the UI can offer a "reset to defaults" action.
   function publicContentSettings() {
+    // Reading through isPartyOver() applies the 8-hour auto-expiry, so a
+    // stale lockdown clears before the booth toggle renders it.
+    isPartyOver();
     const { kidsLockSnapshot: _snap, ...rest } = getContentSettings();
     return rest;
   }

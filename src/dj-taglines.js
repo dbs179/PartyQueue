@@ -2,9 +2,11 @@
 //
 // DJ Voice clips show the host's configured DJ name on the title line; the
 // artist line used to always read "PartyQueue". Instead, each clip pulls a
-// random tagline from this pack ("DJ Spinmaster — Bringing that Heat").
-// The pick is a stable hash of the clip URL, so a clip keeps its tagline for
-// as long as it's on screen (polls every few seconds must not flicker).
+// tagline from this pack ("DJ Spinmaster — Bringing that Heat").
+// Picks are remembered in DJ night memory: the same clip keeps its line (no
+// poll flicker), and new clips prefer unused taglines until the pack cycles.
+
+import { reserveClipTagline } from "./dj-night-memory.js";
 
 /** @type {string[]} */
 export const DJ_TAGLINES = [
@@ -61,16 +63,11 @@ export const DJ_TAGLINES = [
 ];
 
 /**
- * Stable tagline for a DJ clip URL: same clip always maps to the same
- * tagline (no flicker across Now Playing polls), different clips spread
- * across the pack.
+ * Tagline for a DJ clip URL. Stable for the same clip within the night
+ * window; new clips avoid taglines already used tonight until the pack
+ * is exhausted, then recycle least-recently used.
  * @returns {string}
  */
 export function taglineForClip(uri) {
-  const key = String(uri || "");
-  let h = 0;
-  for (let i = 0; i < key.length; i++) {
-    h = (h * 31 + key.charCodeAt(i)) >>> 0;
-  }
-  return DJ_TAGLINES[h % DJ_TAGLINES.length];
+  return reserveClipTagline(uri, DJ_TAGLINES);
 }

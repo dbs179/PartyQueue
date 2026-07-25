@@ -9,7 +9,11 @@ import {
 } from "../src/lyrics.js";
 import { lookupUnisonLyrics } from "../src/unison-lyrics.js";
 import { lookupOvhLyrics } from "../src/ovh-lyrics.js";
-import { artistLookupVariants } from "../src/lyrics-variants.js";
+import {
+  artistCreditVariants,
+  artistLookupVariants,
+  titleLookupVariants,
+} from "../src/lyrics-variants.js";
 
 it("normalizes common LRC timestamp and enhanced-word variants", () => {
   assert.equal(
@@ -413,6 +417,138 @@ describe("lookupLyrics", () => {
   it("warmLyrics is a no-op for empty queries", () => {
     assert.doesNotThrow(() => warmLyrics({ title: "", artist: "" }));
   });
+
+  it("upgrades plain lyrics to synced when a featuring artist credit hid the hit", async () => {
+    const originalFetch = globalThis.fetch;
+    const lrclibSearches = [];
+    globalThis.fetch = async (url) => {
+      const value = String(url);
+      if (value.includes("unison.boidu.dev")) {
+        if (value.includes("/lyrics/search")) {
+          return jsonResponse({ success: true, data: [] });
+        }
+        return jsonResponse({ success: false }, 404);
+      }
+      if (value.includes("lyrics.ovh")) return jsonResponse({}, 404);
+      if (value.includes("/api/search?")) {
+        const decoded = decodeURIComponent(value).replace(/\+/g, " ");
+        lrclibSearches.push(decoded);
+        if (decoded.includes("artist_name=Dr. Dre feat. Eminem")) {
+          return jsonResponse([
+            {
+              trackName: "Forgot About Dre",
+              artistName: "Dr. Dre feat. Eminem",
+              duration: 222,
+              plainLyrics: "Y'all know me, still the same OG",
+            },
+          ]);
+        }
+        if (
+          decoded.includes("artist_name=Dr. Dre&") ||
+          decoded.endsWith("artist_name=Dr. Dre")
+        ) {
+          return jsonResponse([
+            {
+              trackName: "Forgot About Dre",
+              artistName: "Dr. Dre",
+              duration: 222,
+              syncedLyrics: "[00:12.00]Y'all know me, still the same OG",
+              plainLyrics: "Y'all know me, still the same OG",
+            },
+          ]);
+        }
+        return jsonResponse([]);
+      }
+      return jsonResponse(null, 404);
+    };
+
+    try {
+      const out = await lookupLyrics({
+        title: "Forgot About Dre",
+        artist: "Dr. Dre feat. Eminem",
+        duration: 222,
+      });
+      assert.equal(out.found, true);
+      assert.equal(out.provider, "lrclib");
+      assert.equal(out.syncKind, "line");
+      assert.match(out.syncedLyrics, /Y'all know me/);
+      assert.ok(
+        lrclibSearches.some((u) => u.includes("Dr. Dre feat. Eminem")),
+        "featuring credit is tried first"
+      );
+      assert.ok(
+        lrclibSearches.some(
+          (u) =>
+            (u.includes("artist_name=Dr. Dre&") ||
+              u.endsWith("artist_name=Dr. Dre")) &&
+            !u.includes("feat")
+        ),
+        "primary artist is retried for synced lyrics"
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("retries with a cleaned title when the decorated Spotify title misses", async () => {
+    const originalFetch = globalThis.fetch;
+    const lrclibSearches = [];
+    globalThis.fetch = async (url) => {
+      const value = String(url);
+      if (value.includes("unison.boidu.dev")) {
+        if (value.includes("/lyrics/search")) {
+          return jsonResponse({ success: true, data: [] });
+        }
+        return jsonResponse({ success: false }, 404);
+      }
+      if (value.includes("lyrics.ovh")) return jsonResponse({}, 404);
+      if (value.includes("/api/search?")) {
+        lrclibSearches.push(decodeURIComponent(value).replace(/\+/g, " "));
+        // Providers only index the plain title.
+        if (value.includes("Remastered")) return jsonResponse([]);
+        return jsonResponse([
+          {
+            trackName: "Peaches",
+            artistName: "The Presidents of the United States of America",
+            duration: 172,
+            plainLyrics: "Movin' to the country",
+          },
+        ]);
+      }
+      return jsonResponse(null, 404);
+    };
+
+    try {
+      const query = {
+        title: "Peaches - Remastered",
+        artist: "The Presidents of the United States of America",
+        duration: 172,
+      };
+      const out = await lookupLyrics(query);
+      assert.equal(out.found, true);
+      assert.equal(out.provider, "lrclib");
+      assert.match(out.plainLyrics, /Movin' to the country/);
+      assert.ok(
+        lrclibSearches.some((u) => u.includes("track_name=Peaches - Remastered")),
+        "original title is tried first"
+      );
+      assert.ok(
+        lrclibSearches.some(
+          (u) => u.includes("track_name=Peaches&") || u.endsWith("track_name=Peaches")
+        ),
+        "cleaned title is retried"
+      );
+
+      // The decorated query itself is now cached — no extra provider calls.
+      const callsBefore = lrclibSearches.length;
+      const cached = await lookupLyrics(query);
+      assert.equal(cached.cached, true);
+      assert.equal(cached.found, true);
+      assert.equal(lrclibSearches.length, callsBefore);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe("lookupUnisonLyrics", () => {
@@ -458,6 +594,61 @@ describe("lookupUnisonLyrics", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe("artistCreditVariants", () => {
+  it("strips featuring credits down to the primary artist", () => {
+    assert.deepEqual(artistCreditVariants("Dr. Dre feat. Eminem"), [
+      "Dr. Dre feat. Eminem",
+      "Dr. Dre",
+    ]);
+    assert.ok(
+      artistCreditVariants("Dr. Dre, Eminem").includes("Dr. Dre")
+    );
+    assert.ok(
+      artistCreditVariants("Dr. Dre & Eminem").includes("Dr. Dre")
+    );
+  });
+
+  it("keeps duo/band names with & as the first attempt", () => {
+    const variants = artistCreditVariants("Simon & Garfunkel");
+    assert.equal(variants[0], "Simon & Garfunkel");
+  });
+
+  it("does not carve up Earth, Wind & Fire", () => {
+    const variants = artistCreditVariants("Earth, Wind & Fire");
+    assert.equal(variants[0], "Earth, Wind & Fire");
+    assert.ok(!variants.includes("Earth"));
+  });
+});
+
+describe("titleLookupVariants", () => {
+  it("strips Spotify dash suffixes as a fallback variant", () => {
+    assert.deepEqual(titleLookupVariants("Peaches - Remastered"), [
+      "Peaches - Remastered",
+      "Peaches",
+    ]);
+    assert.deepEqual(titleLookupVariants("Peaches - Remastered 2004"), [
+      "Peaches - Remastered 2004",
+      "Peaches",
+    ]);
+  });
+
+  it("strips keyword-bearing trailing parentheticals", () => {
+    const variants = titleLookupVariants("Peaches (Remastered)");
+    assert.equal(variants[0], "Peaches (Remastered)");
+    assert.ok(variants.includes("Peaches"));
+    assert.ok(
+      titleLookupVariants("Umbrella (feat. JAY-Z)").includes("Umbrella")
+    );
+  });
+
+  it("keeps legit parentheticals and plain titles unchanged", () => {
+    assert.deepEqual(titleLookupVariants("Time (Clock of the Heart)"), [
+      "Time (Clock of the Heart)",
+    ]);
+    assert.deepEqual(titleLookupVariants("Peaches"), ["Peaches"]);
   });
 });
 

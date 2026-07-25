@@ -6,6 +6,7 @@ import {
   getDjVoiceSettings,
   setDjVoiceSettings,
   loadSettings,
+  PARTY_OVER_TTL_MS,
 } from "./settings.js";
 import { savePickerSelection } from "./autofill.js";
 
@@ -20,6 +21,34 @@ export function setRequestsPaused(enabled) {
     requestsPaused: setContentSettings({ requestsPaused: !!enabled })
       .requestsPaused,
   };
+}
+
+export const PARTY_OVER_MESSAGE =
+  "The party is over — you have to go home now.";
+
+/**
+ * "Party's Over" lockdown: the hard end-of-night lock. Closing Time switches
+ * it on; the host flips it off from DJ Booth → Guest access.
+ * @returns {{ partyOver: boolean, partyOverAt: number }}
+ */
+export function setPartyOver(enabled) {
+  const c = setContentSettings({ partyOver: !!enabled });
+  return { partyOver: c.partyOver, partyOverAt: c.partyOverAt };
+}
+
+/**
+ * Whether the lockdown is active right now. Auto-expires 8 hours after it was
+ * switched on (clearing the stored flag) so a forgotten toggle can't block
+ * the next event.
+ */
+export function isPartyOver(now = Date.now()) {
+  const c = getContentSettings();
+  if (!c.partyOver) return false;
+  if (c.partyOverAt && now - c.partyOverAt > PARTY_OVER_TTL_MS) {
+    setContentSettings({ partyOver: false });
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -70,6 +99,7 @@ export function getRitualState() {
   const s = loadSettings();
   return {
     requestsPaused: c.requestsPaused,
+    partyOver: c.partyOver,
     kidsLock: c.kidsLock,
     filterExplicit: c.filterExplicit,
     genres: Array.isArray(s.genres) ? s.genres : null,

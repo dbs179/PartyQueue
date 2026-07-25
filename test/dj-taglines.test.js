@@ -1,7 +1,31 @@
-import { test } from "node:test";
+import { test, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
-import { DJ_TAGLINES, taglineForClip } from "../src/dj-taglines.js";
+const TMP_MEM = path.join(
+  os.tmpdir(),
+  `pq-dj-taglines-${process.pid}-${Date.now()}.json`
+);
+process.env.PARTYQUEUE_DJ_MEMORY_FILE = TMP_MEM;
+
+const { DJ_TAGLINES, taglineForClip } = await import("../src/dj-taglines.js");
+const { clearDjNightMemory, reserveClipTagline } = await import(
+  "../src/dj-night-memory.js"
+);
+
+beforeEach(() => {
+  clearDjNightMemory();
+});
+
+after(() => {
+  try {
+    fs.rmSync(TMP_MEM, { force: true });
+  } catch {
+    /* ok */
+  }
+});
 
 test("pack holds 50 short unique taglines", () => {
   assert.equal(DJ_TAGLINES.length, 50);
@@ -22,16 +46,28 @@ test("a clip keeps the same tagline across polls", () => {
   }
 });
 
-test("different clips spread across the pack", () => {
-  const picks = new Set();
-  for (let i = 0; i < 200; i++) {
-    picks.add(taglineForClip(`http://ha.local:8123/api/tts_proxy/clip-${i}.mp3`));
+test("new clips avoid repeating taglines until the pack is exhausted", () => {
+  const picks = [];
+  for (let i = 0; i < DJ_TAGLINES.length; i++) {
+    picks.push(taglineForClip(`http://ha.local:8123/api/tts_proxy/clip-${i}.mp3`));
   }
-  assert.ok(picks.size >= 25, `expected wide spread, got ${picks.size} taglines`);
+  assert.equal(new Set(picks).size, DJ_TAGLINES.length);
+
+  // After the pack is spent, a new clip can reuse the least-recently used line.
+  const next = taglineForClip(
+    "http://ha.local:8123/api/tts_proxy/clip-overflow.mp3"
+  );
+  assert.ok(DJ_TAGLINES.includes(next));
 });
 
 test("null and empty URIs still resolve to a tagline", () => {
   assert.ok(taglineForClip(null));
   assert.ok(taglineForClip(""));
   assert.ok(taglineForClip(undefined));
+  // Empty keys share one assignment so polls stay stable.
+  assert.equal(taglineForClip(""), taglineForClip(null));
+});
+
+test("reserveClipTagline falls back when the pack is empty", () => {
+  assert.equal(reserveClipTagline("http://x/a.mp3", []), "Live from the Booth");
 });

@@ -322,6 +322,7 @@
             <span id="display-state" class="party-display-state" hidden></span>
             <span id="display-origin" class="party-display-state party-display-origin" hidden></span>
             <span id="display-mix" class="party-display-state party-display-mix" hidden></span>
+            <span id="display-party-over" class="party-display-state party-display-over" hidden>The party is over &mdash; you have to go home now.</span>
           </div>
                   <h3 id="display-title" class="party-display-title"></h3>
                   <p id="display-artist" class="party-display-artist"></p>
@@ -593,6 +594,14 @@
               <span class="autofill-text">
                 <span class="autofill-label">Pause requests</span>
                 <span class="autofill-hint">Guests can’t add songs (Random &amp; Never-Ending still work)</span>
+              </span>
+            </label>
+            <label class="autofill" title="Hard end-of-night lock — Closing Time turns this on automatically">
+              <input type="checkbox" id="party-over-toggle" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">The Party&rsquo;s Over</span>
+                <span class="autofill-hint">Guests see &ldquo;go home&rdquo; instead of &ldquo;ask the host&rdquo;; auto-clears after 8 hours</span>
               </span>
             </label>
             <label class="autofill" title="Require the host PIN for playback, queue editing, and Sonos group changes">

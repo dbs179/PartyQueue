@@ -10,6 +10,10 @@ import {
   UnisonUnavailableError,
 } from "./unison-lyrics.js";
 import { lookupOvhLyrics, OvhUnavailableError } from "./ovh-lyrics.js";
+import {
+  artistCreditVariants,
+  titleLookupVariants,
+} from "./lyrics-variants.js";
 
 const LRCLIB_BASE = "https://lrclib.net";
 const FOUND_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -254,8 +258,24 @@ function pickBestSearchHit(results, duration) {
   return best;
 }
 
+function isRicherLrclibHit(candidate, current) {
+  if (!candidate) return false;
+  if (!current) return true;
+  if (candidate.syncedLyrics && !current.syncedLyrics) return true;
+  if (
+    !current.plainLyrics &&
+    !current.syncedLyrics &&
+    (candidate.plainLyrics || candidate.syncedLyrics || candidate.instrumental)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Search-first LRClib lookup so a hung /api/get cannot burn the whole budget.
+ * Tries primary-artist credit variants when the featuring-tagged search only
+ * yields plain lyrics (Forgot About Dre / "Dr. Dre feat. Eminem").
  * @returns {Promise<{ result: object, responded: boolean }>}
  */
 async function lookupLrclib(query, deadline) {
@@ -264,18 +284,29 @@ async function lookupLrclib(query, deadline) {
   let sawSuccess = false;
   let sawError = false;
 
-  const searchParams = new URLSearchParams({
-    track_name: title,
-    artist_name: artist,
-  });
-  if (album) searchParams.set("album_name", album);
-  try {
-    const results = await lrclibFetch(`/api/search?${searchParams}`, deadline);
-    sawSuccess = true;
-    record = pickBestSearchHit(results, duration);
-  } catch (err) {
-    sawError = true;
-    console.error("[lyrics] LRClib search failed:", err.message);
+  // Original first, then stripped guest credits. Cap extra searches so a
+  // long variant list can't eat the whole lyrics budget.
+  const artists = artistCreditVariants(artist).slice(0, 3);
+  for (const artistName of artists) {
+    if (Date.now() >= deadline) break;
+    if (record?.syncedLyrics) break;
+
+    const searchParams = new URLSearchParams({
+      track_name: title,
+      artist_name: artistName,
+    });
+    if (album) searchParams.set("album_name", album);
+    try {
+      const results = await lrclibFetch(`/api/search?${searchParams}`, deadline);
+      sawSuccess = true;
+      const hit = pickBestSearchHit(results, duration);
+      if (isRicherLrclibHit(hit, record)) {
+        record = hit;
+      }
+    } catch (err) {
+      sawError = true;
+      console.error("[lyrics] LRClib search failed:", err.message);
+    }
   }
 
   const wantExact =
@@ -285,21 +316,22 @@ async function lookupLrclib(query, deadline) {
     (!record || !record.syncedLyrics) &&
     Date.now() < deadline;
   if (wantExact) {
+    // Exact get uses the best artist form we already preferred (primary when
+    // a featuring credit was stripped during search).
+    const exactArtist =
+      (record?.artistName && String(record.artistName).trim()) ||
+      artists[artists.length - 1] ||
+      artist;
     const params = new URLSearchParams({
       track_name: title,
-      artist_name: artist,
+      artist_name: exactArtist,
       album_name: album,
       duration: String(Math.round(duration)),
     });
     try {
       const exact = await lrclibFetch(`/api/get?${params}`, deadline);
       sawSuccess = true;
-      if (
-        exact &&
-        (!record ||
-          (exact.syncedLyrics && !record.syncedLyrics) ||
-          (!record.plainLyrics && exact.plainLyrics))
-      ) {
+      if (isRicherLrclibHit(exact, record)) {
         record = exact;
       }
     } catch (err) {
@@ -443,6 +475,32 @@ export async function lookupLyrics(q = {}) {
         if (!(err instanceof OvhUnavailableError)) throw err;
         ovhBackoffUntil = Date.now() + PROVIDER_BACKOFF_MS;
         console.error("[lyrics] lyrics.ovh failed:", err.message);
+      }
+    }
+
+    // Spotify decorates titles ("Peaches - Remastered") that every provider
+    // indexes under the plain name — LRClib's search returns zero rows for
+    // the suffixed form. Retry the whole chain with cleaned titles before
+    // reporting a miss. Guarded by skipTitleVariants so the retry can't recurse.
+    if (!out.found && !q.skipTitleVariants) {
+      for (const variant of titleLookupVariants(title).slice(1)) {
+        try {
+          const fallback = await lookupLyrics({
+            title: variant,
+            artist,
+            album,
+            duration,
+            skipTitleVariants: true,
+          });
+          if (fallback?.found) {
+            const { cached: _c, ...clean } = fallback;
+            writeCache(key, clean);
+            return clean;
+          }
+        } catch {
+          // Providers are struggling; surface the original miss handling.
+          break;
+        }
       }
     }
 

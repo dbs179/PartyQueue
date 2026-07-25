@@ -1072,6 +1072,8 @@ async function addRandomFromPlaylistsUnlocked(
   if (similarWant > 0 && activeMoodPack) {
     // Era mood: the outside-library slots come from the era's charts instead
     // of Songs Like, so Discover can't dilute the decade with cross-era picks.
+    // The set's genre lane still applies (soft, neighbors OK) so a decade
+    // chart can't whiplash a set between hard rock and country.
     const libraryIds = new Set();
     for (const pl of playlists) {
       for (const t of pl.tracks || []) {
@@ -1091,9 +1093,10 @@ async function addRandomFromPlaylistsUnlocked(
         blockedArtists,
         enabledGenres: Array.isArray(genres) ? genres : null,
         bucketsFor: bucketsForArtist,
+        preferLane: setLane,
       });
       console.log(
-        `[moods] ${activeMoodPack.id}: filled ${discoveries.length}/${similarWant} outside slots from era charts`
+        `[moods] ${activeMoodPack.id}: filled ${discoveries.length}/${similarWant} outside slots from era charts (lane=${setLane})`
       );
     } catch (err) {
       console.error("[moods] era slot fill failed:", err.message);
@@ -1334,6 +1337,7 @@ async function addRandomFromPlaylistsUnlocked(
         blockedArtists,
         enabledGenres: Array.isArray(genres) ? genres : null,
         bucketsFor: bucketsForArtist,
+        preferLane: setLane,
       });
       if (hits.length) {
         console.log(
@@ -1453,19 +1457,62 @@ export function interleave(base, extra) {
 
 // DJ Voice clips are HTTP TTS URLs with empty/ugly Sonos metadata. The app
 // presents them as the configured DJ name (title line) plus a fun tagline
-// from the pack on the artist line (where "PartyQueue" used to sit) — hashed
-// from the clip URL so a clip keeps its tagline across polls. Silence pads
-// playing in Now Playing reuse the tagline of the announce clip they belong
-// to (via `remember`) so the line doesn't change mid-announce.
+// from the pack on the artist line (where "PartyQueue" used to sit). Silence
+// pads (ramp/restore) must reuse the companion TTS clip's tagline — minting
+// one from the silence URL made Now Playing disagree with Up Next.
 let lastNowPlayingDjTagline = null;
-function djVoiceDisplay(uri = null, { silence = false, remember = false } = {}) {
+
+/**
+ * Find the TTS clip that belongs with a silence pad in an announce block
+ * (ramp → TTS → restore). Looks forward from a ramp, backward from restore.
+ * @param {Array<{ TrackUri?: string, uri?: string, Title?: string, title?: string }>} items
+ * @param {number} currentIndex 0-based index of the silence pad
+ * @returns {string|null}
+ */
+export function findCompanionDjTtsUri(items, currentIndex) {
+  const list = Array.isArray(items) ? items : [];
+  const idx = Math.floor(Number(currentIndex));
+  if (!Number.isFinite(idx) || idx < 0 || idx >= list.length) return null;
+
+  const uriOf = (item) => item?.TrackUri ?? item?.uri ?? null;
+  const titleOf = (item) => item?.Title ?? item?.title ?? "";
+  const isTts = (item) => {
+    const u = uriOf(item);
+    return isDjVoiceUri(u) && !isDjSilenceTrack(u, titleOf(item));
+  };
+  const isPad = (item) => isDjSilenceTrack(uriOf(item), titleOf(item));
+
+  for (let i = idx + 1; i < list.length; i++) {
+    if (isPad(list[i])) continue;
+    if (isTts(list[i])) return uriOf(list[i]);
+    break;
+  }
+  for (let i = idx - 1; i >= 0; i--) {
+    if (isPad(list[i])) continue;
+    if (isTts(list[i])) return uriOf(list[i]);
+    break;
+  }
+  return null;
+}
+
+function djVoiceDisplay(
+  uri = null,
+  { silence = false, remember = false, companionUri = null } = {}
+) {
   const dj = getDjVoiceSettings();
   let tagline;
-  if (silence && lastNowPlayingDjTagline) {
-    tagline = lastNowPlayingDjTagline;
+  if (silence) {
+    // Never taglineForClip(silenceUri) — that burns a pack slot and drifts
+    // from the Up Next TTS row during the lead-in pad.
+    if (!lastNowPlayingDjTagline && companionUri) {
+      lastNowPlayingDjTagline = taglineForClip(companionUri);
+    }
+    tagline =
+      lastNowPlayingDjTagline ||
+      (companionUri ? taglineForClip(companionUri) : "Live from the Booth");
   } else {
     tagline = taglineForClip(uri);
-    if (remember && !silence) lastNowPlayingDjTagline = tagline;
+    if (remember) lastNowPlayingDjTagline = tagline;
   }
   return {
     title: dj.djName || DJ_VOICE_DEFAULTS.djName,
@@ -1615,9 +1662,25 @@ async function getNowPlayingRaw() {
   const djClip = isDjVoiceUri(uri) && !silenceBridge;
   // Silence pad stays under the DJ persona (name + icon); guests shouldn't see
   // a blank/"silence" track flash between the announce and the first song.
+  // Resolve the companion TTS URI so the tagline matches Up Next.
+  let companionUri = null;
+  if (silenceBridge && playingFromQueue) {
+    try {
+      const queue = await coordinator.GetQueue();
+      const items = Array.isArray(queue.Result) ? queue.Result : [];
+      const trackNum = Number(pos.Track) || 0;
+      companionUri = findCompanionDjTtsUri(items, trackNum - 1);
+    } catch {
+      /* best-effort — fall back to last remembered tagline */
+    }
+  }
   const djPersona =
     djClip || silenceBridge
-      ? djVoiceDisplay(uri, { silence: silenceBridge, remember: true })
+      ? djVoiceDisplay(uri, {
+          silence: silenceBridge,
+          remember: true,
+          companionUri,
+        })
       : null;
 
   let title;

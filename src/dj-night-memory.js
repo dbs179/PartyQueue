@@ -1,5 +1,5 @@
 // Per-guest DJ memory for one party night: first-shout guarantee, birthday
-// wished once, and anti-repeat blurbs / recent scripts.
+// wished once, anti-repeat blurbs / recent scripts, and DJ Voice taglines.
 //
 // Night = rolling 12h window (same as Party Stats / Closing Time recap).
 // Backed by data/dj-night-memory.json (Docker volume). Override path with
@@ -22,6 +22,7 @@ const MAX_RECENT_SCRIPTS = 5;
 const MAX_USED_NOTES = 40;
 const MAX_GLOBAL_PHRASE_USES = 240;
 const MAX_GLOBAL_ANNOUNCE_SCRIPTS = 20;
+const MAX_TAGLINE_CLIPS = 120;
 
 let cache = null;
 
@@ -39,6 +40,7 @@ function emptyStore() {
     global: {
       phraseUses: [],
       recentAnnounceScripts: [],
+      taglineClips: [],
     },
   };
 }
@@ -118,7 +120,24 @@ function normalizeGlobal(global) {
         }))
         .slice(-MAX_GLOBAL_ANNOUNCE_SCRIPTS)
     : [];
-  return { phraseUses, recentAnnounceScripts };
+  const taglineClips = Array.isArray(global?.taglineClips)
+    ? global.taglineClips
+        .filter(
+          (item) =>
+            item &&
+            typeof item.uri === "string" &&
+            item.uri.trim() &&
+            typeof item.text === "string" &&
+            item.text.trim()
+        )
+        .map((item) => ({
+          uri: String(item.uri).trim(),
+          text: String(item.text).trim(),
+          ts: Number(item.ts) || 0,
+        }))
+        .slice(-MAX_TAGLINE_CLIPS)
+    : [];
+  return { phraseUses, recentAnnounceScripts, taglineClips };
 }
 
 function persist() {
@@ -170,6 +189,9 @@ function pruneStore(now = Date.now()) {
     recentAnnounceScripts: (store.global?.recentAnnounceScripts || [])
       .filter((item) => item.ts >= since)
       .slice(-MAX_GLOBAL_ANNOUNCE_SCRIPTS),
+    taglineClips: (store.global?.taglineClips || [])
+      .filter((item) => item.ts >= since)
+      .slice(-MAX_TAGLINE_CLIPS),
   };
   cache = next;
   return cache;
@@ -269,6 +291,65 @@ export function getRecentDjPhraseIds(category, limit = 50, now = Date.now()) {
     .filter((item) => item.category === key)
     .slice(-n)
     .map((item) => item.id);
+}
+
+function hashUri(uri) {
+  let h = 0;
+  const key = String(uri || "");
+  for (let i = 0; i < key.length; i++) {
+    h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  }
+  return h;
+}
+
+/**
+ * Pick a DJ Now Playing / queue tagline for a clip URL. Same clip keeps the
+ * same line for the night (no poll flicker); new clips prefer unused lines
+ * from `pack` until the pack is exhausted, then the least-recently used.
+ * @param {string|null|undefined} uri
+ * @param {string[]} pack
+ * @returns {string}
+ */
+export function reserveClipTagline(uri, pack, { now = Date.now() } = {}) {
+  const lines = (Array.isArray(pack) ? pack : [])
+    .map((line) => String(line || "").trim())
+    .filter(Boolean);
+  if (!lines.length) return "Live from the Booth";
+
+  const uriKey = String(uri || "").trim() || "__empty__";
+  const ts = Number(now) || Date.now();
+  const store = pruneStore(ts);
+  const clips = store.global.taglineClips || [];
+
+  const existing = clips.find((item) => item.uri === uriKey);
+  if (existing && lines.includes(existing.text)) {
+    return existing.text;
+  }
+
+  const lastUsed = new Map();
+  for (const item of clips) {
+    if (!item?.text) continue;
+    const previous = lastUsed.get(item.text);
+    if (previous == null || item.ts > previous) {
+      lastUsed.set(item.text, item.ts);
+    }
+  }
+
+  const unused = lines.filter((line) => !lastUsed.has(line));
+  let selected;
+  if (unused.length) {
+    selected = unused[hashUri(uriKey) % unused.length];
+  } else {
+    selected = [...lines].sort(
+      (a, b) => (lastUsed.get(a) || 0) - (lastUsed.get(b) || 0)
+    )[0];
+  }
+
+  clips.push({ uri: uriKey, text: selected, ts });
+  while (clips.length > MAX_TAGLINE_CLIPS) clips.shift();
+  store.global.taglineClips = clips;
+  persist();
+  return selected;
 }
 
 export function rememberDjAnnounceScript(script, now = Date.now()) {

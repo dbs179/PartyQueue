@@ -681,11 +681,14 @@ const rotationDecadePool = document.getElementById("rotation-decade-pool");
 const autofillHint = document.getElementById("autofill-hint");
 const filterExplicitInput = document.getElementById("filter-explicit-toggle");
 const requestsPausedInput = document.getElementById("requests-paused-toggle");
+const partyOverInput = document.getElementById("party-over-toggle");
 const hostControlsInput = document.getElementById("host-controls-toggle");
 const kidsLockInput = document.getElementById("kids-lock-toggle");
 const requestsPausedBanner = document.getElementById("requests-paused-banner");
+const displayPartyOverPill = document.getElementById("display-party-over");
 const npReactions = document.getElementById("np-reactions");
 let requestsPaused = false;
+let partyOver = false;
 let hostControlsOnly = false;
 const NP_REACTION_KINDS = [
   "up",
@@ -951,6 +954,7 @@ function fillSettings(s) {
     requestsPausedInput.checked = !!s.requestsPaused;
     setRequestsPausedUi(!!s.requestsPaused);
   }
+  if (s.partyOver != null) setPartyOverUi(!!s.partyOver);
   if (s.hostControlsOnly != null && hostControlsInput) {
     hostControlsOnly = !!s.hostControlsOnly;
     hostControlsInput.checked = hostControlsOnly;
@@ -1356,6 +1360,17 @@ requestsPausedInput?.addEventListener("change", () => {
   });
 });
 
+partyOverInput?.addEventListener("change", () => {
+  const on = !!partyOverInput.checked;
+  partyOverTouchedAt = Date.now();
+  setPartyOverUi(on);
+  saveSettings({ partyOver: on }, {
+    toastMessage: on
+      ? "The party is over — requests locked"
+      : "Party's back on — requests open",
+  });
+});
+
 hostControlsInput?.addEventListener("change", () => {
   const on = !!hostControlsInput.checked;
   if (on && !settingsPinRequired) {
@@ -1384,9 +1399,35 @@ kidsLockInput?.addEventListener("change", async () => {
   }
 });
 
+const GUEST_BANNER_PAUSED =
+  "Requests are paused — ask the host when you can add songs again.";
+const GUEST_BANNER_PARTY_OVER =
+  "The party is over — you have to go home now.";
+
+// One banner serves both locks; Party's Over (the hard end-of-night state)
+// wins over a plain request pause when both are set.
+function updateGuestLockBanner() {
+  if (!requestsPausedBanner) return;
+  requestsPausedBanner.hidden = !(partyOver || requestsPaused);
+  requestsPausedBanner.textContent = partyOver
+    ? GUEST_BANNER_PARTY_OVER
+    : GUEST_BANNER_PAUSED;
+  requestsPausedBanner.classList.toggle("party-over", partyOver);
+}
+
 function setRequestsPausedUi(on) {
   requestsPaused = !!on;
-  if (requestsPausedBanner) requestsPausedBanner.hidden = !requestsPaused;
+  updateGuestLockBanner();
+}
+
+// Remember when the host touched the booth toggle so an in-flight Now Playing
+// poll can't briefly flip it back (same pattern as the autofill toggle).
+let partyOverTouchedAt = 0;
+function setPartyOverUi(on) {
+  partyOver = !!on;
+  if (partyOverInput) partyOverInput.checked = partyOver;
+  if (displayPartyOverPill) displayPartyOverPill.hidden = !partyOver;
+  updateGuestLockBanner();
 }
 
 // DJ Voice: announce each new set via Home Assistant (needs HA credentials).
@@ -5056,6 +5097,10 @@ function renderResults(tracks) {
 }
 
 async function addToQueue(track, btn) {
+  if (partyOver) {
+    showToast(GUEST_BANNER_PARTY_OVER, true);
+    return;
+  }
   if (requestsPaused) {
     showToast("Requests are paused right now.", true);
     return;
@@ -6054,6 +6099,9 @@ function renderNowPlaying(transport) {
     updateMixFromServer(transport);
     if (transport.requestsPaused != null) {
       setRequestsPausedUi(!!transport.requestsPaused);
+    }
+    if (transport.partyOver != null && Date.now() - partyOverTouchedAt > 4000) {
+      setPartyOverUi(!!transport.partyOver);
     }
     if (transport.hostControlsOnly != null) {
       hostControlsOnly = !!transport.hostControlsOnly;

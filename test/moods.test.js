@@ -126,6 +126,73 @@ test("getMoodHits respects count and enabled-genre gating", async () => {
   assert.ok(out.every((t) => t.artist !== "ArtistB"));
 });
 
+test("getMoodHits prefers the set's genre lane over off-lane era hits", async () => {
+  const candidates = [
+    { artist: "RockA", name: "Song 1" },
+    { artist: "CountryB", name: "Song 2" },
+    { artist: "RockC", name: "Song 3" },
+    { artist: "CountryD", name: "Song 4" },
+  ];
+  const catalog = {
+    "rocka|||song 1": hit("r1", "RockA", "Song 1"),
+    "countryb|||song 2": hit("c1", "CountryB", "Song 2"),
+    "rockc|||song 3": hit("r2", "RockC", "Song 3"),
+    "countryd|||song 4": hit("c2", "CountryD", "Song 4"),
+  };
+  const buckets = {
+    RockA: ["rock"],
+    CountryB: ["country"],
+    RockC: ["rock"],
+    CountryD: ["country"],
+  };
+  const out = await getMoodHits(
+    {
+      mood: "90s",
+      count: 2,
+      excludeIds: [],
+      bucketsFor: async (a) => buckets[a] || [],
+      preferLane: "rock",
+    },
+    { tagCandidates: async () => candidates, resolveTrack: fakeResolver(catalog) }
+  );
+  assert.equal(out.length, 2);
+  // Country doesn't neighbor rock — with enough rock hits on the chart the
+  // whole batch stays in-lane.
+  assert.deepEqual(out.map((t) => t.id).sort(), ["r1", "r2"]);
+});
+
+test("getMoodHits tops up with off-lane era hits when the lane runs dry", async () => {
+  const candidates = [
+    { artist: "RockA", name: "Song 1" },
+    { artist: "CountryB", name: "Song 2" },
+    { artist: "CountryD", name: "Song 4" },
+  ];
+  const catalog = {
+    "rocka|||song 1": hit("r1", "RockA", "Song 1"),
+    "countryb|||song 2": hit("c1", "CountryB", "Song 2"),
+    "countryd|||song 4": hit("c2", "CountryD", "Song 4"),
+  };
+  const buckets = {
+    RockA: ["rock"],
+    CountryB: ["country"],
+    CountryD: ["country"],
+  };
+  const out = await getMoodHits(
+    {
+      mood: "90s",
+      count: 3,
+      excludeIds: [],
+      bucketsFor: async (a) => buckets[a] || [],
+      preferLane: "rock",
+      moodArtistCap: 1,
+    },
+    { tagCandidates: async () => candidates, resolveTrack: fakeResolver(catalog) }
+  );
+  // A thin lane must not starve the batch — off-lane era hits fill the rest.
+  assert.equal(out.length, 3);
+  assert.ok(out.some((t) => t.id === "r1"));
+});
+
 test("getMoodHits falls back to era-filtered Spotify search", async () => {
   const pages = {
     0: [

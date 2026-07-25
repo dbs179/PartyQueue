@@ -24,6 +24,7 @@ import {
   spendArtistBudget,
 } from "./sampler.js";
 import { isClosingTime } from "./closing-time.js";
+import { fitsLane } from "./genre-flow.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -196,8 +197,10 @@ const FALLBACK_OFFSETS = [0, 50, 100, 150];
  * `excludeIds`. Applies explicit filter, Closing Time guard, skip-cooldown
  * blocked artists, the shared Random artist budget, an in-batch per-artist
  * cap, and (when `enabledGenres`+`bucketsFor` are given) the host's genre
- * filter. Era coherence is the mood's promise, so hits are NOT gated by the
- * rotating genre lane. `deps` allows tests to inject sources.
+ * filter. When `preferLane` is set, hits that fit the set's genre lane
+ * (neighbors OK) are taken first; off-lane era hits only top up a batch the
+ * lane can't fill, so an era set doesn't whiplash between hard rock and
+ * country. `deps` allows tests to inject sources.
  */
 export async function getMoodHits(
   {
@@ -212,6 +215,7 @@ export async function getMoodHits(
     moodArtistCap = 1,
     enabledGenres = null,
     bucketsFor = null,
+    preferLane = null,
   },
   deps = {}
 ) {
@@ -253,15 +257,25 @@ export async function getMoodHits(
   const chosenIds = new Set();
   let prevArtist = lastArtist ? primaryArtist(lastArtist) : null;
 
-  const passesGenres = async (artist) => {
-    if (!enabled || typeof bucketsFor !== "function") return true;
+  const bucketCache = new Map();
+  const bucketsOf = async (artist) => {
+    const a = (artist || "").split(",")[0].trim();
+    if (!a || typeof bucketsFor !== "function") return [];
+    if (bucketCache.has(a)) return bucketCache.get(a);
     let buckets = [];
     try {
-      buckets = await bucketsFor((artist || "").split(",")[0].trim());
+      buckets = (await bucketsFor(a)) || [];
     } catch {
       buckets = [];
     }
     if (!buckets.length) buckets = ["other"];
+    bucketCache.set(a, buckets);
+    return buckets;
+  };
+
+  const passesGenres = (buckets) => {
+    if (!enabled) return true;
+    if (!buckets.length) return true; // no bucket source → don't block
     return buckets.some((b) => enabled.has(b));
   };
 
@@ -295,6 +309,25 @@ export async function getMoodHits(
     return true;
   };
 
+  // Era hits that clear every guardrail except the set's genre lane. They only
+  // fill slots the lane-fitting picks couldn't, so era sets stay in-lane
+  // whenever the charts allow it.
+  const offLane = [];
+  const fillFromOffLane = () => {
+    let used = 0;
+    for (const found of offLane) {
+      if (chosen.length >= count) break;
+      if (!acceptable(found)) continue;
+      accept(found);
+      used += 1;
+    }
+    if (used) {
+      console.log(
+        `[moods] lane=${preferLane} thin on ${pack.id} charts — used ${used} off-lane era hit(s)`
+      );
+    }
+  };
+
   try {
     const candidates = await tagCandidates(pack.id);
     if (candidates.length) {
@@ -308,9 +341,15 @@ export async function getMoodHits(
         resolveCalls += 1;
         const found = await resolveTrack(c.artist, c.name);
         if (!found || !acceptable(found)) continue;
-        if (!(await passesGenres(found.artist))) continue;
+        const buckets = await bucketsOf(found.artist);
+        if (!passesGenres(buckets)) continue;
+        if (preferLane && buckets.length && !fitsLane(buckets, preferLane)) {
+          offLane.push(found);
+          continue;
+        }
         accept(found);
       }
+      fillFromOffLane();
       return chosen;
     }
 
@@ -331,10 +370,16 @@ export async function getMoodHits(
         if (chosen.length >= count) break;
         if (!trackFitsMood(found, pack)) continue;
         if (!acceptable(found)) continue;
-        if (!(await passesGenres(found.artist))) continue;
+        const buckets = await bucketsOf(found.artist);
+        if (!passesGenres(buckets)) continue;
+        if (preferLane && buckets.length && !fitsLane(buckets, preferLane)) {
+          offLane.push(found);
+          continue;
+        }
         accept(found);
       }
     }
+    fillFromOffLane();
   } catch (err) {
     console.error("[moods] era hits failed:", err.message);
   }

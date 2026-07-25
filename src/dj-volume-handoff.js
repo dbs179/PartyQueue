@@ -297,11 +297,12 @@ export function createDjVolumeHandoff({
         } else if (onDj) {
           if (baselineVolume == null) {
             handledPad = true;
-            await holdPad(state, "DJ fallback");
+            // Do NOT pause a live TTS HTTP stream here. Sonos often restarts
+            // http:// clips from 0 on resume, which sounds like the DJ
+            // announcing twice. Capture + ramp under the already-playing clip.
             await captureBaseline();
             setPhase("ramping-up-fallback");
             await ramp(baselineVolume, announceVolume);
-            await resumeHeldPad("DJ fallback");
           }
           if (state === "PLAYING" || state === "TRANSITIONING") {
             sawDjPlaying = true;
@@ -388,15 +389,29 @@ export function createDjVolumeHandoff({
           }
           const restored = await restoreExact("absolute deadline");
           if (restored && typeof io.playAt === "function") {
-            if (onRamp && Number(ttsPosition) >= 1) {
+            // Re-read transport: the pad may have advanced while we paused for
+            // the volume restore. Seeking an already-playing TTS clip restarts
+            // it from 0 (double announce).
+            let liveUri = uri;
+            try {
+              liveUri = String((await io.getNowPlaying())?.uri || uri);
+            } catch {
+              /* keep the poll's uri */
+            }
+            const liveOnRamp = isRampSilenceUri(liveUri);
+            const liveOnDj = isDjClipUri(liveUri, publicUrl);
+            const liveOnRestore = isRestoreSilenceUri(liveUri);
+            if (liveOnRamp && Number(ttsPosition) >= 1) {
               await io.playAt(Number(ttsPosition));
-            } else if (onDj && Number(musicPosition) >= 2) {
+            } else if (liveOnDj && Number(musicPosition) >= 2) {
+              // Past the lead-in — skip forward. Never SeekTrack the TTS URI
+              // itself (that restarts the http clip from 0).
               advancedFromDj = true;
               if (typeof io.next === "function") await io.next();
               else await io.playAt(Number(musicPosition) - 1);
-            } else if (onRestore && Number(musicPosition) >= 1) {
+            } else if (liveOnRestore && Number(musicPosition) >= 1) {
               await io.playAt(Number(musicPosition));
-            } else if (!onPad) {
+            } else if (!liveOnRamp && !liveOnDj && !liveOnRestore) {
               await io.resume();
             }
           } else if (restored && !onPad) {

@@ -262,7 +262,9 @@ describe("queue routes with a fake speaker", { concurrency: false }, () => {
 
   test("adding the End of Night song locks the party down", async () => {
     const { getContentSettings } = await import("../src/settings.js");
-    const { setRequestsPaused } = await import("../src/party-rituals.js");
+    const { setPartyOver, PARTY_OVER_MESSAGE } = await import(
+      "../src/party-rituals.js"
+    );
     try {
       const res = await postJson("/api/queue", {
         uri: "spotify:track:closingtime000000000AA",
@@ -274,20 +276,45 @@ describe("queue routes with a fake speaker", { concurrency: false }, () => {
       assert.equal(res.status, 200);
       const body = await res.json();
       assert.equal(body.closingTime, true);
-      // Requests pause so nothing new can be added...
-      assert.equal(getContentSettings().requestsPaused, true);
+      // The Party's Over lockdown flips on so nothing new can be added...
+      assert.equal(getContentSettings().partyOver, true);
       const denied = await postJson("/api/queue", {
         ...TRACK_B,
         requestedBy: "Ada",
         requestedByUser: "Ada",
       });
       assert.equal(denied.status, 403);
+      const deniedBody = await denied.json();
+      assert.equal(deniedBody.code, "party_over");
+      assert.equal(deniedBody.error, PARTY_OVER_MESSAGE);
       // ...and upcoming filler (Random / Discover / era hits) gets cleared,
       // pointed at the just-added song so the recap position can adjust.
       assert.equal(fake.fillerClears.length, 1);
       assert.equal(fake.fillerClears[0].beforePosition, body.queuePosition);
     } finally {
-      setRequestsPaused(false);
+      setPartyOver(false);
+    }
+  });
+
+  test("a manually toggled Party's Over also blocks guest adds", async () => {
+    const { setPartyOver, PARTY_OVER_MESSAGE } = await import(
+      "../src/party-rituals.js"
+    );
+    try {
+      setPartyOver(true);
+      const denied = await postJson("/api/queue", {
+        uri: "spotify:track:partyoverblock000000AA",
+        name: "One More Song",
+        artist: "Somebody",
+        requestedBy: "Ada",
+        requestedByUser: "Ada",
+      });
+      assert.equal(denied.status, 403);
+      const body = await denied.json();
+      assert.equal(body.code, "party_over");
+      assert.equal(body.error, PARTY_OVER_MESSAGE);
+    } finally {
+      setPartyOver(false);
     }
   });
 

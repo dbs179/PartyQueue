@@ -1074,9 +1074,14 @@ export function setDjVoiceSettings(partial = {}) {
 export const CONTENT_DEFAULTS = {
   filterExplicit: false,
   requestsPaused: false,
+  partyOver: false,
   hostControlsOnly: false,
   kidsLock: false,
 };
+
+// "Party's Over" auto-expires so a forgotten toggle can't lock out the next
+// event (Saturday night's lockdown clears before Sunday's session).
+export const PARTY_OVER_TTL_MS = 8 * 60 * 60 * 1000;
 
 /** Never-Ending Queue on/off when settings.json has no value yet. */
 export const NEVER_ENDING_DEFAULT = true;
@@ -1092,6 +1097,9 @@ export function getContentSettings() {
       typeof s.requestsPaused === "boolean"
         ? s.requestsPaused
         : CONTENT_DEFAULTS.requestsPaused,
+    partyOver:
+      typeof s.partyOver === "boolean" ? s.partyOver : CONTENT_DEFAULTS.partyOver,
+    partyOverAt: Number(s.partyOverAt) || 0,
     hostControlsOnly:
       typeof s.hostControlsOnly === "boolean"
         ? s.hostControlsOnly
@@ -1111,6 +1119,11 @@ export function setContentSettings(partial = {}) {
   const next = { ...loadSettings() };
   if (partial.filterExplicit != null) next.filterExplicit = !!partial.filterExplicit;
   if (partial.requestsPaused != null) next.requestsPaused = !!partial.requestsPaused;
+  if (partial.partyOver != null) {
+    const on = !!partial.partyOver;
+    next.partyOver = on;
+    next.partyOverAt = on ? Date.now() : 0;
+  }
   if (partial.hostControlsOnly != null) {
     next.hostControlsOnly = !!partial.hostControlsOnly;
   }

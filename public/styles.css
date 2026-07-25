@@ -832,6 +832,12 @@ button.guest-name:focus-visible {
   display: none;
 }
 
+/* Party's Over variant: red instead of yellow — the night is done. */
+.requests-paused-banner.party-over {
+  background: rgba(244, 63, 94, 0.14);
+  color: #fda4af;
+}
+
 .queue-count {
   color: var(--muted);
   font-weight: 600;
@@ -2854,6 +2860,12 @@ body.party-display-active > .container {
 
 .party-display-state.playing {
   color: #8ef0ae;
+}
+
+/* "Party's Over" lockdown pill — reads as final, not informational. */
+.party-display-over {
+  color: #fda4af;
+  background: rgba(244, 63, 94, 0.16);
 }
 
 .party-display-title {

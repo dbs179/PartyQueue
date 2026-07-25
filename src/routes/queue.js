@@ -79,7 +79,11 @@ import {
   removeUpcomingFillerTracks,
   reorderQueueTrack,
 } from "../sonos.js";
-import { setRequestsPaused } from "../party-rituals.js";
+import {
+  setPartyOver,
+  isPartyOver,
+  PARTY_OVER_MESSAGE,
+} from "../party-rituals.js";
 import { requireHostControls } from "../http/host-controls.js";
 import { nudgeNowPlayingStream } from "../now-playing-http.js";
 
@@ -112,6 +116,9 @@ export function registerQueueRoutes(app, ctx) {
       req.body ?? {};
     if (!uri) {
       return res.status(400).json({ error: "Missing track uri." });
+    }
+    if (isPartyOver()) {
+      return res.status(403).json({ error: PARTY_OVER_MESSAGE, code: "party_over" });
     }
     if (getContentSettings().requestsPaused) {
       return res.status(403).json({ error: "Requests are paused right now." });
@@ -201,9 +208,10 @@ export function registerQueueRoutes(app, ctx) {
 
       // House ritual: hand-adding the End of Night song signals last call. We
       // announce it to everyone (via the Now Playing poll), switch off the
-      // Never-Ending Queue, pause new requests, and clear upcoming filler
-      // (Random / Discover / era hits) so only real requests play out the
-      // night. Optional Party Summary TTS is inserted before that song.
+      // Never-Ending Queue, flip on the Party's Over lockdown, and clear
+      // upcoming filler (Random / Discover / era hits) so only real requests
+      // play out the night. Optional Party Summary TTS is inserted before
+      // that song.
       let closingTime = false;
       let partyRecap = null;
       if (
@@ -211,7 +219,7 @@ export function registerQueueRoutes(app, ctx) {
         isEndOfNightTrack({ uri, name, artist })
       ) {
         if (getAutoFillState().enabled) setAutoFill(false);
-        setRequestsPaused(true);
+        setPartyOver(true);
         // Filler removals above shift the just-added song up; removedBefore
         // keeps the recap announce pointed at its live position.
         let removedBefore = 0;
