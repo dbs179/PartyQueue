@@ -65,6 +65,98 @@ const MIN_TAG_COUNT = 10;
 // Throttle Last.fm calls. Their terms ask for <= ~5 req/sec; we stay well under.
 const REQ_GAP_MS = 250;
 
+/**
+ * Host-facing Last.fm tag → bucket chart (Genres page). Keep `tags` in sync
+ * with the matchers in tagToBuckets() below.
+ */
+export const GENRE_TAG_GUIDE = [
+  {
+    id: "rock",
+    label: "Rock",
+    tags: "rock, grunge, alternative, post-grunge, hard rock, classic rock, indie rock, punk rock",
+  },
+  {
+    id: "metal",
+    label: "Metal",
+    tags: "metal, metalcore, deathcore, djent, grindcore, thrash, groove metal",
+  },
+  {
+    id: "country",
+    label: "Country",
+    tags: "country, outlaw, red dirt, americana, honky, nashville",
+  },
+  {
+    id: "hiphop",
+    label: "Hip-Hop/Rap",
+    tags: "hip-hop / hip hop, rap, trap, hyphy, drill, grime, crunk, gangsta",
+  },
+  {
+    id: "electronic",
+    label: "Electronic",
+    tags: "edm, dubstep, electro, house, techno, trance, dnb, drum and bass, electronic, dance, synthwave",
+  },
+  {
+    id: "pop",
+    label: "Pop",
+    tags: "pop, synthpop, electropop, dance pop, power pop",
+  },
+  {
+    id: "folk",
+    label: "Folk",
+    tags: "folk, singer-songwriter, acoustic, indie folk, bluegrass",
+  },
+  {
+    id: "punk",
+    label: "Punk",
+    tags: "punk, emo, hardcore, screamo, pop punk",
+  },
+  {
+    id: "soul",
+    label: "Soul/R&B/Funk",
+    tags: "soul, funk, disco, motown, rhythm and blues, rnb, r&b, neo-soul, new jack swing",
+  },
+  {
+    id: "jazz",
+    label: "Jazz",
+    tags: "jazz, swing, big band, bebop, ragtime, dixieland",
+  },
+  {
+    id: "blues",
+    label: "Blues",
+    tags: "blues, delta blues, chicago blues",
+  },
+  {
+    id: "classical",
+    label: "Classical",
+    tags: "classical, orchestral, orchestra, opera, symphony, baroque, romantic era, chamber music, choral",
+  },
+  {
+    id: "soundtrack",
+    label: "Soundtrack/Score",
+    tags: "soundtrack, film score, score, ost, film music, movie, composer, musical, cinematic",
+  },
+  {
+    id: "oldies",
+    label: "Oldies",
+    tags: "oldies, doo-wop, 50s, 1950s, 60s, rock and roll, rock 'n' roll, rockabilly",
+  },
+  {
+    id: "kids",
+    label: "Kids",
+    tags: "kids, children, childrens, nursery, disney, cartoon, baby, lullab, toddler",
+  },
+  {
+    id: "other",
+    label: "Other",
+    tags: "(no tag patterns — fallback when nothing maps)",
+  },
+];
+
+export const GENRE_TAG_RULES = {
+  topTags: TOP_TAGS,
+  minTagCount: MIN_TAG_COUNT,
+};
+
 // Map a single Last.fm tag string to zero or more buckets. A tag can land in
 // several buckets on purpose ("rap metal" -> metal + hiphop). Order does not
 // matter since we union, but specific styles are matched before generic ones.

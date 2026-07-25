@@ -560,6 +560,26 @@
           </div>
           <div id="genre-chips" class="genre-chips"></div>
           <p id="pool-size-hint" class="pool-size-hint" hidden></p>
+          <section id="genre-map-section" class="genre-map-section collapsed">
+            <h3
+              class="section-label section-toggle"
+              id="genre-map-toggle"
+              role="button"
+              tabindex="0"
+              aria-expanded="false"
+              title="Collapse / expand"
+            >
+              <span>Last.fm tag mapping</span>
+              <span class="chevron" aria-hidden="true">&#9662;</span>
+            </h3>
+            <div class="genre-map-box" id="genre-map-box">
+              <p class="settings-intro" id="genre-map-intro">
+                How Last.fm artist tags map into PartyQueue genres. Only each
+                artist&apos;s top 2 tags (count &ge; 10) are used.
+              </p>
+              <ul class="genre-map-list" id="genre-map-list"></ul>
+            </div>
+          </section>
         </div>
       </div>
 

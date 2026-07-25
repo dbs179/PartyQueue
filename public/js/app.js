@@ -342,6 +342,9 @@ wirePanelCollapse("suggestion-section", "suggestion-toggle", "pq.suggestionColla
 wirePanelCollapse("toolbar-section", "toolbar-toggle", "pq.toolbarCollapsed", {
   defaultCollapsed: true,
 });
+wirePanelCollapse("genre-map-section", "genre-map-toggle", "pq.genreMapCollapsed", {
+  defaultCollapsed: true,
+});
 
 const toolbarSonosBtn = document.getElementById("toolbar-sonos");
 const toolbarMoodBtn = document.getElementById("toolbar-mood");
@@ -7262,6 +7265,27 @@ function currentGenreIds() {
   return all.filter((id) => genreSelection.has(id));
 }
 
+function renderGenreTagGuide(guide, rules) {
+  const list = document.getElementById("genre-map-list");
+  const intro = document.getElementById("genre-map-intro");
+  if (!list) return;
+  const rows = Array.isArray(guide) ? guide : [];
+  const top = Number(rules?.topTags) || 2;
+  const min = Number(rules?.minTagCount) || 10;
+  if (intro) {
+    intro.textContent =
+      `How Last.fm artist tags map into PartyQueue genres. Only each artist's top ${top} tags (count ≥ ${min}) are used.`;
+  }
+  list.innerHTML = rows
+    .map(
+      (row) => `<li class="genre-map-row">
+        <span class="genre-map-label">${escapeHtml(row.label || row.id || "")}</span>
+        <p class="genre-map-tags">${escapeHtml(row.tags || "")}</p>
+      </li>`
+    )
+    .join("");
+}
+
 async function loadGenres() {
   try {
     const ids = currentSelectionIds();
@@ -7274,6 +7298,7 @@ async function loadGenres() {
     genreBuckets = data.buckets || [];
     genreCountsCache = data.counts || {};
     genreDataEnabled = !!data.enabled;
+    renderGenreTagGuide(data.tagGuide, data.tagRules);
     renderGenres();
     refreshPoolSizeHint();
   } catch {

@@ -1359,6 +1359,65 @@ button.guest-name:focus-visible {
   color: #f0c14b;
 }
 
+/* Collapsed Last.fm → bucket chart under the genre chips. */
+.genre-map-section {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.genre-map-section .section-toggle {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.genre-map-section.collapsed .chevron {
+  transform: rotate(-90deg);
+}
+
+.genre-map-section.collapsed .genre-map-box {
+  display: none;
+}
+
+.genre-map-box {
+  margin-top: 8px;
+}
+
+.genre-map-box .settings-intro {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+}
+
+.genre-map-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.genre-map-row {
+  display: grid;
+  grid-template-columns: minmax(5.5rem, 7.5rem) 1fr;
+  gap: 8px 10px;
+  align-items: start;
+}
+
+.genre-map-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.genre-map-tags {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.55);
+}
+
 /* Genre-tagging status pill in the Settings "Genres" section. */
 .tagging-pill {
   /* Same 34px height as other status pills; keep weight for readability. */

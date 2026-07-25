@@ -24,6 +24,8 @@ import { buildPartyRecap } from "../party-recap.js";
 import { shouldShoutOnSearch, announceRequestShout } from "../dj-shout.js";
 import {
   GENRE_BUCKETS,
+  GENRE_TAG_GUIDE,
+  GENRE_TAG_RULES,
   genreCounts,
   eligiblePoolSize,
   isGenreDataEnabled,
@@ -559,6 +561,8 @@ export function registerQueueRoutes(app, ctx) {
       res.json({
         enabled: isGenreDataEnabled(),
         buckets: GENRE_BUCKETS,
+        tagGuide: GENRE_TAG_GUIDE,
+        tagRules: GENRE_TAG_RULES,
         counts: await genreCounts({ playlistIds }),
       });
     } catch (err) {
