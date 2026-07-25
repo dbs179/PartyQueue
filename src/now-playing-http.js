@@ -2,8 +2,8 @@ import { createLogger } from "./logger.js";
 import { admitSseClient } from "./http/sse-limits.js";
 import { createNowPlayingMonitor } from "./now-playing-stream.js";
 import { getAutoFillState, getClosingTimeAt, getLastPartyRecap } from "./autofill.js";
-import { getGenreFlowState } from "./genre-flow.js";
-import { GENRE_BUCKETS } from "./genres.js";
+import { dominantBucket, getGenreFlowState } from "./genre-flow.js";
+import { bucketsForArtistSync, GENRE_BUCKETS } from "./genres.js";
 import {
   getContentSettings,
   getDiscoverySettings,
@@ -24,16 +24,61 @@ import {
 } from "./sonos.js";
 
 const GENRE_LABEL_BY_ID = new Map(GENRE_BUCKETS.map((b) => [b.id, b.label]));
+const SET_ORIGINS = new Set(["filler", "discovered", "mood"]);
+
+function labelForLane(lane) {
+  if (!lane) return null;
+  return GENRE_LABEL_BY_ID.get(lane) || String(lane);
+}
+
+/**
+ * What the Now Playing "Genre:" header should show for this track.
+ * - Random / Never-Ending / Discover / era picks → current set lane
+ * - Guest requests → that artist's mapped genre
+ * - Idle / DJ clip / unknown → hidden (do not keep a stale set lane)
+ */
+export function resolveDisplayGenre(
+  np,
+  {
+    setLane = null,
+    bucketsFor = bucketsForArtistSync,
+  } = {}
+) {
+  if (!np || np.djVoice || np.djSilence) {
+    return { mixGenreLane: null, mixGenreLabel: null };
+  }
+  const hasTrack = !!(np.uri && (np.title || np.artist));
+  if (!hasTrack) {
+    return { mixGenreLane: null, mixGenreLabel: null };
+  }
+
+  const origin = typeof np.origin === "string" ? np.origin : null;
+  if (SET_ORIGINS.has(origin)) {
+    const label = labelForLane(setLane);
+    return {
+      mixGenreLane: label ? setLane : null,
+      mixGenreLabel: label,
+    };
+  }
+  if (origin === "searched") {
+    const buckets =
+      typeof bucketsFor === "function" ? bucketsFor(np.artist) || [] : [];
+    const lane = dominantBucket(buckets);
+    if (!lane || lane === "other") {
+      return { mixGenreLane: null, mixGenreLabel: null };
+    }
+    return { mixGenreLane: lane, mixGenreLabel: labelForLane(lane) };
+  }
+  return { mixGenreLane: null, mixGenreLabel: null };
+}
 
 export function enrichNowPlaying(np) {
   const trackId = spotifyTrackId(np?.uri);
   const fill = getAutoFillState();
   const rotation = getRotationSettings();
-  const genreLane = getGenreFlowState().lastLane;
-  const mixGenreLabel =
-    genreLane && GENRE_LABEL_BY_ID.has(genreLane)
-      ? GENRE_LABEL_BY_ID.get(genreLane)
-      : genreLane || null;
+  const { mixGenreLane, mixGenreLabel } = resolveDisplayGenre(np, {
+    setLane: getGenreFlowState().lastLane,
+  });
   return {
     ...np,
     neverEnding: fill.enabled,
@@ -41,8 +86,9 @@ export function enrichNowPlaying(np) {
     // can label the current mood: enabled genre ids (null = all) + era mood.
     mixGenres: fill.genres,
     mixMood: fill.mood,
-    // Active Never-Ending set lane (null until the first set is built).
-    mixGenreLane: genreLane,
+    // Genre header: set lane while a set track plays; request artist genre
+    // while a guest request plays; cleared when idle / no relevant track.
+    mixGenreLane,
     mixGenreLabel,
     // Broadcast so the toggles reflect server truth even before host login
     // (sessions are in-memory, so every deploy used to leave them looking off).

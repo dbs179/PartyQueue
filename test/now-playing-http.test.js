@@ -22,6 +22,52 @@ test("enrichNowPlaying adds shared party flags without throwing", async () => {
   assert.ok("mixGenreLabel" in enriched);
 });
 
+test("resolveDisplayGenre hides stale set lane when idle", async () => {
+  const { resolveDisplayGenre } = await import("../src/now-playing-http.js");
+  assert.deepEqual(resolveDisplayGenre({}, { setLane: "folk" }), {
+    mixGenreLane: null,
+    mixGenreLabel: null,
+  });
+  assert.deepEqual(
+    resolveDisplayGenre(
+      { title: "X", artist: "Y", uri: "spotify:track:1", origin: null },
+      { setLane: "folk" }
+    ),
+    { mixGenreLane: null, mixGenreLabel: null }
+  );
+});
+
+test("resolveDisplayGenre uses set lane for filler and artist genre for requests", async () => {
+  const { resolveDisplayGenre } = await import("../src/now-playing-http.js");
+  assert.deepEqual(
+    resolveDisplayGenre(
+      {
+        title: "Random Song",
+        artist: "Band",
+        uri: "spotify:track:1",
+        origin: "filler",
+      },
+      { setLane: "folk" }
+    ),
+    { mixGenreLane: "folk", mixGenreLabel: "Folk" }
+  );
+  assert.deepEqual(
+    resolveDisplayGenre(
+      {
+        title: "Guest Pick",
+        artist: "Rapper",
+        uri: "spotify:track:2",
+        origin: "searched",
+      },
+      {
+        setLane: "folk",
+        bucketsFor: () => ["hiphop"],
+      }
+    ),
+    { mixGenreLane: "hiphop", mixGenreLabel: "Hip-Hop/Rap" }
+  );
+});
+
 test("position age is calculated using the server clock", async () => {
   const { addPositionAge } = await import("../src/now-playing-http.js");
   const payload = addPositionAge(
