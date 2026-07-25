@@ -6951,9 +6951,10 @@ const GENRE_PRESETS = {
 // Mix-label state (declared before the decade block below runs its initial
 // sync, which paints the label). Server-broadcast mix wins; undefined = not
 // seen yet, so local state fills in until the first Now Playing payload.
-const npMixLabel = document.getElementById("np-mix-label");
+const npMoodLabel = document.getElementById("np-mood-label");
+const npGenreLabel = document.getElementById("np-genre-label");
 const displayMixPill = document.getElementById("display-mix");
-let serverMix = { genres: undefined, mood: undefined };
+let serverMix = { genres: undefined, mood: undefined, genreLabel: undefined };
 
 // ---- Era mood (Decades) ----
 // One decade at a time (or none = off). Playlist picks stay in the era and
@@ -7053,24 +7054,51 @@ function updateMixLabels() {
   const mood = serverMix.mood !== undefined ? serverMix.mood : eraMood;
   const era = mood ? DECADE_LABELS[mood] : null;
   const preset = presetNameForIds(genres);
-  const text = era ? `Mood: ${preset} - ${era}` : `Mood: ${preset}`;
-  if (npMixLabel) {
-    npMixLabel.textContent = text;
-    npMixLabel.hidden = false;
+  const moodText = era ? `Mood: ${preset} - ${era}` : `Mood: ${preset}`;
+  if (npMoodLabel) {
+    npMoodLabel.textContent = moodText;
+    npMoodLabel.hidden = false;
+  }
+  if (npGenreLabel) {
+    const genre = serverMix.genreLabel;
+    if (genre) {
+      npGenreLabel.textContent = `Genre: ${genre}`;
+      npGenreLabel.hidden = false;
+    } else {
+      npGenreLabel.textContent = "";
+      npGenreLabel.hidden = true;
+    }
   }
   if (displayMixPill) {
-    displayMixPill.textContent = text;
+    displayMixPill.textContent = moodText;
     displayMixPill.hidden = false;
   }
 }
 
 function updateMixFromServer(np) {
-  if (!np || (!("mixGenres" in np) && !("mixMood" in np))) return;
+  if (
+    !np ||
+    (!("mixGenres" in np) &&
+      !("mixMood" in np) &&
+      !("mixGenreLabel" in np) &&
+      !("mixGenreLane" in np))
+  ) {
+    return;
+  }
   if ("mixGenres" in np) {
     serverMix.genres = Array.isArray(np.mixGenres) ? np.mixGenres : null;
   }
   if ("mixMood" in np) {
     serverMix.mood = typeof np.mixMood === "string" ? np.mixMood : null;
+  }
+  if ("mixGenreLabel" in np || "mixGenreLane" in np) {
+    const label =
+      typeof np.mixGenreLabel === "string" && np.mixGenreLabel
+        ? np.mixGenreLabel
+        : typeof np.mixGenreLane === "string" && np.mixGenreLane
+          ? np.mixGenreLane
+          : null;
+    serverMix.genreLabel = label;
   }
   updateMixLabels();
   applyServerMixToPickers();

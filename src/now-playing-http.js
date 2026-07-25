@@ -2,6 +2,8 @@ import { createLogger } from "./logger.js";
 import { admitSseClient } from "./http/sse-limits.js";
 import { createNowPlayingMonitor } from "./now-playing-stream.js";
 import { getAutoFillState, getClosingTimeAt, getLastPartyRecap } from "./autofill.js";
+import { getGenreFlowState } from "./genre-flow.js";
+import { GENRE_BUCKETS } from "./genres.js";
 import {
   getContentSettings,
   getDiscoverySettings,
@@ -21,10 +23,17 @@ import {
   onSonosSnapshotsInvalidated,
 } from "./sonos.js";
 
+const GENRE_LABEL_BY_ID = new Map(GENRE_BUCKETS.map((b) => [b.id, b.label]));
+
 export function enrichNowPlaying(np) {
   const trackId = spotifyTrackId(np?.uri);
   const fill = getAutoFillState();
   const rotation = getRotationSettings();
+  const genreLane = getGenreFlowState().lastLane;
+  const mixGenreLabel =
+    genreLane && GENRE_LABEL_BY_ID.has(genreLane)
+      ? GENRE_LABEL_BY_ID.get(genreLane)
+      : genreLane || null;
   return {
     ...np,
     neverEnding: fill.enabled,
@@ -32,6 +41,9 @@ export function enrichNowPlaying(np) {
     // can label the current mood: enabled genre ids (null = all) + era mood.
     mixGenres: fill.genres,
     mixMood: fill.mood,
+    // Active Never-Ending set lane (null until the first set is built).
+    mixGenreLane: genreLane,
+    mixGenreLabel,
     // Broadcast so the toggles reflect server truth even before host login
     // (sessions are in-memory, so every deploy used to leave them looking off).
     discoverEnabled: getDiscoverySettings().discoverEnabled,

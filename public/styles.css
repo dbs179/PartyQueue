@@ -490,7 +490,7 @@ body {
   margin: 20px 0 10px;
 }
 
-/* Now Playing header row: section title left, active Vibe label right. */
+/* Now Playing header row: Mood left, active Genre lane right. */
 .np-head-row {
   display: flex;
   align-items: baseline;
@@ -498,15 +498,24 @@ body {
   gap: 12px;
 }
 
-.np-mix-label {
+.np-mood-label,
+.np-genre-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.np-mood-label {
+  text-align: left;
+}
+
+.np-genre-label {
   text-align: right;
 }
 
-.np-mix-label[hidden] {
+.np-mood-label[hidden],
+.np-genre-label[hidden] {
   display: none;
 }
 

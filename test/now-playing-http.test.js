@@ -18,6 +18,8 @@ test("enrichNowPlaying adds shared party flags without throwing", async () => {
   assert.equal(typeof enriched.requestsPaused, "boolean");
   assert.equal(typeof enriched.hostControlsOnly, "boolean");
   assert.ok("reactions" in enriched);
+  assert.ok("mixGenreLane" in enriched);
+  assert.ok("mixGenreLabel" in enriched);
 });
 
 test("position age is calculated using the server clock", async () => {
