@@ -13,8 +13,6 @@ export const GENRE_PRESETS = {
     "electronic",
     "pop",
     "punk",
-    "soul",
-    "folk",
   ],
   chill: ["folk", "soul", "jazz", "blues", "pop", "electronic", "oldies", "other"],
   country: ["country", "folk"],
@@ -23,6 +21,43 @@ export const GENRE_PRESETS = {
   kids: ["kids", "soundtrack"],
   all: null,
 };
+
+/** Host-facing mood chip labels (Mood page chart + UI). */
+export const MOOD_PRESET_LABELS = {
+  all: "All",
+  party: "Party",
+  chill: "Chill",
+  country: "Country",
+  heavy: "Heavy",
+  rap: "Rap",
+  kids: "Kids",
+};
+
+/**
+ * Mood → genre chart rows for the Mood page.
+ * @param {(id: string) => string} [labelForGenre] maps bucket id → display label
+ */
+export function moodGenreGuide(labelForGenre = (id) => id) {
+  const labelOf = typeof labelForGenre === "function" ? labelForGenre : (id) => id;
+  const rows = [
+    {
+      id: "all",
+      label: MOOD_PRESET_LABELS.all,
+      genres: "Every genre bucket",
+    },
+  ];
+  for (const id of Object.keys(GENRE_PRESETS)) {
+    if (id === "all") continue;
+    const list = GENRE_PRESETS[id];
+    if (!Array.isArray(list)) continue;
+    rows.push({
+      id,
+      label: MOOD_PRESET_LABELS[id] || id,
+      genres: list.map((g) => labelOf(g) || g).join(", "),
+    });
+  }
+  return rows;
+}
 
 /** Preset ids that map to a concrete genre list (excludes "all"). */
 export const ROTATABLE_PRESET_IDS = Object.keys(GENRE_PRESETS).filter(

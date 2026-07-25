@@ -10,25 +10,22 @@
 //   "mood"       - an era Mood chart hit pulled from outside the library
 //                  (filler for ordering; badged with the era).
 //
-// Sonos has nowhere to stash this, so we keep a small, bounded, JSON-backed map
-// of Spotify track IDs -> { source, requestedBy?, requestedByUser?, dedication?,
-// mood?, genreLane? } (data/queue-origin.json).
+// Sonos has nowhere to stash this, so we keep a small, bounded, JSON-backed
+// list in data/queue-origin.json.
 //
-// `mood` = the decade pack id ("80s", "90s", …) the track was added under, so
-// badges keep saying "80's Hit" even after the host switches decades.
+// Searched rows may appear MULTIPLE times for the same Spotify track id so
+// Maria / Dave / Owen can each have a live copy of Nine Ball with its own
+// dedication. Filler / discovered / mood stay one row per track id.
 //
-// `genreLane` = the exact set lane id ("pop", "folk", …) used when a
-// filler/discovered/mood track was enqueued, so the Genre header stays with
-// that track after Never-Ending rotates to a new lane.
-//
-// `requestedBy` = badge text (alias, or User when alias blank).
-// `requestedByUser` = stable User for shouts/stats (optional; old rows omit it).
+// Party Stats dedications live in requests.json (one event per add) and are
+// not cleared when a live instance is consumed.
 //
 // Honors PARTYQUEUE_ORIGIN_FILE to point the store elsewhere (used by tests).
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomBytes } from "node:crypto";
 import { writeFileAtomic } from "./atomic-write.js";
 import { sanitizeDedication, sanitizeDisplayName } from "./display-name.js";
 
@@ -44,21 +41,38 @@ const VALID = new Set(["searched", "filler", "discovered", "mood"]);
 
 const SET_SOURCES = new Set(["filler", "discovered", "mood"]);
 
-let entries = null; // [{ id, source, requestedBy?, requestedByUser?, dedication?, mood?, genreLane? }]
-/** @type {Map<string, { source: string, requestedBy: string|null, requestedByUser: string|null, dedication: string|null, mood: string|null, genreLane: string|null }>|null} */
-let index = null;
+let entries = null; // [{ key, id, source, requestedBy?, requestedByUser?, dedication?, mood?, genreLane? }]
+/** @type {Map<string, object>|null} */
+let indexById = null;
+/** @type {Map<string, object[]>|null} */
+let searchedById = null;
+
+function newInstanceKey() {
+  return randomBytes(8).toString("hex");
+}
+
+function rowMeta(e) {
+  return {
+    key: e.key || null,
+    source: e.source,
+    requestedBy: e.requestedBy || null,
+    requestedByUser: e.requestedByUser || null,
+    dedication: e.dedication || null,
+    mood: e.mood || null,
+    genreLane: e.genreLane || null,
+  };
+}
 
 function buildIndex() {
-  index = new Map();
+  indexById = new Map();
+  searchedById = new Map();
   for (const e of entries) {
-    index.set(e.id, {
-      source: e.source,
-      requestedBy: e.requestedBy || null,
-      requestedByUser: e.requestedByUser || null,
-      dedication: e.dedication || null,
-      mood: e.mood || null,
-      genreLane: e.genreLane || null,
-    });
+    indexById.set(e.id, rowMeta(e));
+    if (e.source === "searched") {
+      const list = searchedById.get(e.id) || [];
+      list.push(rowMeta(e));
+      searchedById.set(e.id, list);
+    }
   }
 }
 
@@ -74,6 +88,7 @@ function load() {
       ? raw
           .filter((e) => e && typeof e.id === "string" && VALID.has(e.source))
           .map((e) => ({
+            key: typeof e.key === "string" && e.key ? e.key : newInstanceKey(),
             id: e.id,
             source: e.source,
             requestedBy: sanitizeDisplayName(e.requestedBy),
@@ -97,6 +112,7 @@ function load() {
         for (const id of old) {
           if (typeof id === "string" && id) {
             entries.push({
+              key: newInstanceKey(),
               id,
               source: "discovered",
               requestedBy: null,
@@ -118,7 +134,7 @@ function load() {
 function persist() {
   try {
     const out = (entries ?? []).map((e) => {
-      const row = { id: e.id, source: e.source };
+      const row = { key: e.key, id: e.id, source: e.source };
       if (e.requestedBy) row.requestedBy = e.requestedBy;
       if (e.requestedByUser) row.requestedByUser = e.requestedByUser;
       if (e.dedication) row.dedication = e.dedication;
@@ -132,11 +148,22 @@ function persist() {
   }
 }
 
+function trimEntries() {
+  while (entries.length > MAX) {
+    entries.shift();
+  }
+  buildIndex();
+}
+
+function removeAllForId(id) {
+  entries = entries.filter((e) => e.id !== id);
+}
+
 /**
- * Record the source for one or more track IDs (most-recent wins).
+ * Record the source for one or more track IDs.
  * @param {string[]} ids
  * @param {string} source
- * @param {{ requestedBy?: string|null, requestedByUser?: string|null, dedication?: string|null, mood?: string|null, genreLane?: string|null }} [opts]
+ * @param {{ requestedBy?: string|null, requestedByUser?: string|null, dedication?: string|null, mood?: string|null, genreLane?: string|null, appendInstance?: boolean }} [opts]
  */
 export function markOrigin(ids, source, opts = {}) {
   if (!VALID.has(source)) return;
@@ -146,31 +173,56 @@ export function markOrigin(ids, source, opts = {}) {
     source === "searched" ? sanitizeDisplayName(opts.requestedBy) : null;
   const requestedByUser =
     source === "searched" ? sanitizeDisplayName(opts.requestedByUser) : null;
-  const dedication =
-    source === "searched" ? sanitizeDedication(opts.dedication) : null;
+  const hasDedicationOpt = Object.prototype.hasOwnProperty.call(
+    opts,
+    "dedication"
+  );
+  const dedication = hasDedicationOpt
+    ? sanitizeDedication(opts.dedication)
+    : null;
   const mood =
     source === "mood" && typeof opts.mood === "string" && opts.mood
       ? opts.mood
       : null;
   const genreLaneOpt = cleanGenreLane(opts.genreLane);
+  const appendInstance = source === "searched" && !!opts.appendInstance;
   load();
   for (const id of clean) {
-    const at = entries.findIndex((e) => e.id === id);
-    const prev = at !== -1 ? entries[at] : null;
-    if (at !== -1) entries.splice(at, 1);
+    const prevSearched = (searchedById?.get(id) || []).slice();
+    const prevRollup = indexById?.get(id) || null;
+
+    if (appendInstance) {
+      // Keep existing searched copies; add another live instance.
+    } else {
+      removeAllForId(id);
+    }
+
     const by =
       requestedBy ||
-      (source === "searched" ? prev?.requestedBy || null : null);
+      (source === "searched"
+        ? prevRollup?.requestedBy || prevSearched[0]?.requestedBy || null
+        : null);
     const byUser =
       requestedByUser ||
-      (source === "searched" ? prev?.requestedByUser || null : null);
+      (source === "searched"
+        ? prevRollup?.requestedByUser ||
+          prevSearched[0]?.requestedByUser ||
+          null
+        : null);
     const ded =
-      dedication ||
-      (source === "searched" ? prev?.dedication || null : null);
+      source === "searched"
+        ? hasDedicationOpt
+          ? dedication
+          : appendInstance
+            ? null
+            : prevSearched[0]?.dedication || null
+        : null;
     const genreLane = SET_SOURCES.has(source)
-      ? genreLaneOpt || prev?.genreLane || null
+      ? genreLaneOpt || prevRollup?.genreLane || null
       : null;
+
     entries.push({
+      key: newInstanceKey(),
       id,
       source,
       requestedBy: by,
@@ -179,38 +231,34 @@ export function markOrigin(ids, source, opts = {}) {
       mood,
       genreLane,
     });
-    index.set(id, {
-      source,
-      requestedBy: by,
-      requestedByUser: byUser,
-      dedication: ded,
-      mood,
-      genreLane,
-    });
   }
-  while (entries.length > MAX) {
-    const removed = entries.shift();
-    if (removed) index.delete(removed.id);
-  }
+  trimEntries();
   persist();
 }
 
 export function originOf(id) {
   if (!id) return null;
   load();
-  return index.get(id)?.source ?? null;
+  if ((searchedById.get(id) || []).length) return "searched";
+  return indexById.get(id)?.source ?? null;
 }
 
 export function requestedByOf(id) {
   if (!id) return null;
   load();
-  return index.get(id)?.requestedBy ?? null;
+  const inst = searchedById.get(id);
+  if (inst?.length) return inst[0].requestedBy || null;
+  return indexById.get(id)?.requestedBy ?? null;
 }
 
 export function requestedByUserOf(id) {
   if (!id) return null;
   load();
-  const meta = index.get(id);
+  const inst = searchedById.get(id);
+  if (inst?.length) {
+    return inst[0].requestedByUser || inst[0].requestedBy || null;
+  }
+  const meta = indexById.get(id);
   if (!meta) return null;
   return meta.requestedByUser || meta.requestedBy || null;
 }
@@ -218,25 +266,51 @@ export function requestedByUserOf(id) {
 export function dedicationOf(id) {
   if (!id) return null;
   load();
-  return index.get(id)?.dedication ?? null;
+  const inst = searchedById.get(id);
+  if (inst?.length) return inst[0].dedication || null;
+  return indexById.get(id)?.dedication ?? null;
+}
+
+/** Live searched instances for a track id, oldest (next-up) first. */
+export function searchedInstancesOf(id) {
+  if (!id) return [];
+  load();
+  return (searchedById.get(id) || []).map((m) => ({ ...m }));
+}
+
+/**
+ * Meta for the Nth live copy of a track in queue order (0 = next / now playing).
+ * Falls back to the non-searched rollup when no searched instances remain.
+ */
+export function originMetaForOccurrence(id, occurrenceIndex = 0) {
+  if (!id) return null;
+  load();
+  const inst = searchedById.get(id) || [];
+  if (inst.length) {
+    const i = Math.max(0, Math.floor(Number(occurrenceIndex) || 0));
+    return inst[Math.min(i, inst.length - 1)] || null;
+  }
+  const rollup = indexById.get(id);
+  return rollup || null;
 }
 
 /** Decade pack id ("80s", "90s", …) an era-mood track was added under, or null. */
 export function moodOf(id) {
   if (!id) return null;
   load();
-  return index.get(id)?.mood ?? null;
+  return indexById.get(id)?.mood ?? null;
 }
 
 /** Set lane id ("pop", "folk", …) a filler/discovered/mood track was added under. */
 export function genreLaneOf(id) {
   if (!id) return null;
   load();
-  return index.get(id)?.genreLane ?? null;
+  return indexById.get(id)?.genreLane ?? null;
 }
 
 /**
- * Set or clear dedication on an existing searched origin.
+ * Set or clear dedication on the newest searched instance of a track
+ * (toast Dedicate right after Add).
  * @returns {{ ok: true, dedication: string|null } | { ok: false, error: string }}
  */
 export function setDedication(id, dedication) {
@@ -244,24 +318,39 @@ export function setDedication(id, dedication) {
     return { ok: false, error: "Missing track id." };
   }
   load();
-  const at = entries.findIndex((e) => e.id === id);
+  let at = -1;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].id === id && entries[i].source === "searched") {
+      at = i;
+      break;
+    }
+  }
   if (at === -1) {
     return { ok: false, error: "Track is not a guest request." };
   }
   const row = entries[at];
-  if (row.source !== "searched") {
-    return { ok: false, error: "Only searched requests can have dedications." };
-  }
   const ded = sanitizeDedication(dedication);
   row.dedication = ded;
-  index.set(id, {
-    source: row.source,
-    requestedBy: row.requestedBy || null,
-    requestedByUser: row.requestedByUser || null,
-    dedication: ded,
-  });
+  buildIndex();
   persist();
   return { ok: true, dedication: ded };
+}
+
+/**
+ * Drop the oldest live searched instance for this track after it leaves Now
+ * Playing (or is skipped). Stats keep dedications in requests.json.
+ */
+export function clearConsumedDedication(id) {
+  if (!id || typeof id !== "string") return;
+  load();
+  const at = entries.findIndex(
+    (e) => e.id === id && e.source === "searched"
+  );
+  if (at === -1) return;
+  // Consume the whole instance so the next copy keeps its own dedication.
+  entries.splice(at, 1);
+  buildIndex();
+  persist();
 }
 
 // Filler = anything that should sink below real requests (random/never-ending
@@ -279,8 +368,21 @@ export function isDiscovered(id) {
   return originOf(id) === "discovered";
 }
 
-// Snapshot: id -> { source, requestedBy, requestedByUser, dedication, mood, genreLane }.
+// Snapshot: id -> rollup meta (last write / first searched for badges).
 export function originSnapshot() {
   load();
-  return new Map(index);
+  const out = new Map();
+  for (const [id, meta] of indexById) {
+    const inst = searchedById.get(id);
+    if (inst?.length) {
+      out.set(id, {
+        ...inst[0],
+        source: "searched",
+        instanceCount: inst.length,
+      });
+    } else {
+      out.set(id, { ...meta, instanceCount: 0 });
+    }
+  }
+  return out;
 }

@@ -345,6 +345,9 @@ wirePanelCollapse("toolbar-section", "toolbar-toggle", "pq.toolbarCollapsed", {
 wirePanelCollapse("genre-map-section", "genre-map-toggle", "pq.genreMapCollapsed", {
   defaultCollapsed: true,
 });
+wirePanelCollapse("mood-map-section", "mood-map-toggle", "pq.moodMapCollapsed", {
+  defaultCollapsed: true,
+});
 
 const toolbarSonosBtn = document.getElementById("toolbar-sonos");
 const toolbarMoodBtn = document.getElementById("toolbar-mood");
@@ -7047,8 +7050,6 @@ const GENRE_PRESETS = {
     "electronic",
     "pop",
     "punk",
-    "soul",
-    "folk",
   ],
   chill: ["folk", "soul", "jazz", "blues", "pop", "electronic", "oldies", "other"],
   country: ["country", "folk"],
@@ -7286,6 +7287,20 @@ function renderGenreTagGuide(guide, rules) {
     .join("");
 }
 
+function renderMoodGenreGuide(guide) {
+  const list = document.getElementById("mood-map-list");
+  if (!list) return;
+  const rows = Array.isArray(guide) ? guide : [];
+  list.innerHTML = rows
+    .map(
+      (row) => `<li class="genre-map-row">
+        <span class="genre-map-label">${escapeHtml(row.label || row.id || "")}</span>
+        <p class="genre-map-tags">${escapeHtml(row.genres || "")}</p>
+      </li>`
+    )
+    .join("");
+}
+
 async function loadGenres() {
   try {
     const ids = currentSelectionIds();
@@ -7299,6 +7314,7 @@ async function loadGenres() {
     genreCountsCache = data.counts || {};
     genreDataEnabled = !!data.enabled;
     renderGenreTagGuide(data.tagGuide, data.tagRules);
+    renderMoodGenreGuide(data.moodGuide);
     renderGenres();
     refreshPoolSizeHint();
   } catch {

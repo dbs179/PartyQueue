@@ -43,7 +43,15 @@ import {
 } from "./genre-flow.js";
 import { getSimilarUris, isDiscoveryAvailable } from "./similar.js";
 import { getLaneHits } from "./lane-hits.js";
-import { markOrigin, originOf, moodOf, originSnapshot, isFiller } from "./queue-origin.js";
+import {
+  markOrigin,
+  originOf,
+  moodOf,
+  originSnapshot,
+  originMetaForOccurrence,
+  isFiller,
+  clearConsumedDedication,
+} from "./queue-origin.js";
 import { warmLyrics } from "./lyrics.js";
 import { queueWorkWasPreempted } from "./queue-preempt.js";
 
@@ -694,38 +702,39 @@ async function addTrackToQueueUnlocked(
   }
 
   let promoted = false;
+  let duplicated = false;
   const existingWasRequested =
     !!existing?.id && originOf(existing.id) === "searched";
   const byOpts = { requestedBy, requestedByUser, dedication };
-  if (existing) {
-    // Already queued. If it's filler (Random / Never-Ending / discovery), move
-    // that copy to the end of the searched block (just before the first filler)
-    // and re-tag it as searched - no duplicate. If it's already searched, leave
-    // it where it is (still no duplicate).
-    if (!existingWasRequested) {
-      let insertBefore = insertPos || items.length + 1;
-      insertBefore = Math.max(1, Math.min(insertBefore, items.length + 1));
-      if (insertBefore !== existing.pos && insertBefore !== existing.pos + 1) {
-        try {
-          await coordinator.AVTransportService.ReorderTracksInQueue({
-            InstanceID: 0,
-            StartingIndex: existing.pos,
-            NumberOfTracks: 1,
-            InsertBefore: insertBefore,
-            UpdateID: updateId,
-          });
-        } catch (err) {
-          console.error("[queue] promote reorder failed:", err.message);
-        }
+  if (existing && !existingWasRequested) {
+    // Already queued as filler (Random / Never-Ending / discovery): move that
+    // copy into the searched block and re-tag it — no duplicate.
+    let insertBefore = insertPos || items.length + 1;
+    insertBefore = Math.max(1, Math.min(insertBefore, items.length + 1));
+    if (insertBefore !== existing.pos && insertBefore !== existing.pos + 1) {
+      try {
+        await coordinator.AVTransportService.ReorderTracksInQueue({
+          InstanceID: 0,
+          StartingIndex: existing.pos,
+          NumberOfTracks: 1,
+          InsertBefore: insertBefore,
+          UpdateID: updateId,
+        });
+      } catch (err) {
+        console.error("[queue] promote reorder failed:", err.message);
       }
-      promoted = true;
     }
-    // A repeated tap on an existing guest request is an idempotent no-op. Keep
-    // the original requester attribution instead of letting another guest take
-    // ownership of that queue slot.
-    if (existing.id && !existingWasRequested) {
-      markOrigin([existing.id], "searched", byOpts);
+    promoted = true;
+    if (existing.id) markOrigin([existing.id], "searched", byOpts);
+  } else if (existing && existingWasRequested) {
+    // Already a guest request — allow another copy so Maria / Dave / Owen can
+    // each dedicate the same song with its own live note + stats row.
+    await enqueueMeta(m, meta, insertPos);
+    if (id) {
+      markOrigin([id], "searched", { ...byOpts, appendInstance: true });
     }
+    duplicated = true;
+    existing = null;
   } else {
     // Not already waiting in the queue -> insert a fresh copy ahead of filler.
     await enqueueMeta(m, meta, insertPos);
@@ -765,8 +774,9 @@ async function addTrackToQueueUnlocked(
     group: coordinator.GroupName,
     started,
     promoted,
-    requestCreated: !existing || promoted,
-    alreadyRequested: !!existing && !promoted,
+    duplicated,
+    requestCreated: !existing || promoted || duplicated,
+    alreadyRequested: false,
     queueWasEmpty,
     deferredStart: deferStartForShout,
     queuePosition,
@@ -1895,9 +1905,13 @@ async function getNowPlayingRaw() {
   // guest requests and Sonos-app picks enter song memory too. Only while the
   // local queue is the source — radio/SiriusXM shouldn't pollute the DJ memory.
   // Skip DJ TTS / silence-bridge clips so filenames don't enter song memory.
+  // When a song leaves Now Playing (next track, DJ pad, or idle), clear its
+  // live dedication so a later re-queue doesn't show yesterday's note. Stats
+  // keep dedications via the request log.
   if (playingFromQueue && uri && !djClip && !silenceBridge) {
     const id = spotifyTrackId(uri);
     if (id && id !== lastHeardTrackId) {
+      const prevId = lastHeardTrackId;
       lastHeardTrackId = id;
       // Prefer the queue-origin tag when PartyQueue added it; Sonos-app / radio
       // plays stay untagged.
@@ -1906,7 +1920,14 @@ async function getNowPlayingRaw() {
       recordPlayed([
         { id, artist: artist || "", name: title || "", source, mood },
       ]);
+      if (prevId) clearConsumedDedication(prevId);
     }
+  } else if (
+    lastHeardTrackId &&
+    (djClip || silenceBridge || !uri || !playingFromQueue)
+  ) {
+    clearConsumedDedication(lastHeardTrackId);
+    if (!djClip && !silenceBridge) lastHeardTrackId = null;
   }
 
   // Sonos reports RelTime / TrackDuration as H:MM:SS (sometimes with decimals).
@@ -1958,8 +1979,9 @@ async function getNowPlayingRaw() {
         };
       }
       const id = spotifyTrackId(uri);
-      const ometa = id ? originSnapshot().get(id) : null;
-      const source = ometa?.source ?? null;
+      // Oldest live searched instance = the copy that's now playing.
+      const ometa = id ? originMetaForOccurrence(id, 0) : null;
+      const source = ometa?.source ?? (id ? originOf(id) : null);
       const badge =
         source === "searched" ? ometa?.requestedBy || null : null;
       const user =
@@ -2030,13 +2052,26 @@ async function getQueueListRaw() {
   // `position` is the absolute 1-based spot in the full Sonos queue (not the
   // displayed index), which queue editing (delete/reorder) needs. `searched` and
   // `discovered` flag how the song was added so the UI can badge them.
-  const origin = originSnapshot();
+  // Multiple searched copies of the same Spotify id each get their own
+  // occurrence meta (Maria / Dave / Owen dedications).
+  const playingId =
+    playingFromQueue && track >= 1
+      ? spotifyTrackId(items[track - 1]?.TrackUri)
+      : null;
+  const occurrenceCursor = new Map();
+  if (playingId) occurrenceCursor.set(playingId, 1); // 0 = now playing
+  const rollup = originSnapshot();
   const tracks = upcoming.map(({ t, absoluteIndex }) => {
     const uri = t.TrackUri ?? null;
     const djClip = isDjVoiceUri(uri) && !isDjSilenceUri(uri);
     const djPersona = djClip ? djVoiceDisplay(uri) : null;
-    const meta = origin.get(spotifyTrackId(uri));
-    const source = meta?.source ?? null;
+    const id = spotifyTrackId(uri);
+    const occ = occurrenceCursor.get(id) || 0;
+    occurrenceCursor.set(id, occ + 1);
+    const meta = id
+      ? originMetaForOccurrence(id, occ) || rollup.get(id)
+      : null;
+    const source = meta?.source ?? (id ? originOf(id) : null);
     const artist = djClip ? djPersona.artist : t.Artist ?? "";
     const genre = queueTrackGenreFields(artist, meta, { djClip });
     return {
@@ -2625,7 +2660,14 @@ async function nextUnlocked() {
   await coordinator.Next();
 
   if (skipped) {
-    recordSkip(skipped);
+    const source = originOf(skipped.id) || null;
+    recordSkip({
+      ...skipped,
+      source,
+      mood: source === "mood" ? moodOf(skipped.id) : null,
+    });
+    clearConsumedDedication(skipped.id);
+    if (lastHeardTrackId === skipped.id) lastHeardTrackId = null;
   }
 
   invalidateSonosSnapshots();

@@ -8,6 +8,7 @@ import {
   normalizePresetId,
   presetGenres,
   presetIdForGenres,
+  moodGenreGuide,
 } from "../src/genre-presets.js";
 
 // The client keeps its own copy of GENRE_PRESETS (public/js/app.js); the
@@ -40,8 +41,6 @@ const PARTY = [
   "electronic",
   "pop",
   "punk",
-  "soul",
-  "folk",
 ];
 
 const CHILL = ["folk", "soul", "jazz", "blues", "pop", "electronic", "oldies", "other"];
@@ -114,4 +113,15 @@ test("preset helpers normalize, resolve, and reverse-map", () => {
   assert.equal(presetIdForGenres(["metal", "rock"]), "heavy", "order-insensitive");
   assert.equal(presetIdForGenres(["rock"]), null);
   assert.equal(presetIdForGenres(null), null);
+});
+
+test("moodGenreGuide lists All plus each named mood with genre labels", () => {
+  const guide = moodGenreGuide((id) => id.toUpperCase());
+  assert.equal(guide[0].id, "all");
+  assert.equal(guide[0].genres, "Every genre bucket");
+  const heavy = guide.find((row) => row.id === "heavy");
+  assert.ok(heavy);
+  assert.equal(heavy.label, "Heavy");
+  assert.equal(heavy.genres, "ROCK, METAL");
+  assert.equal(guide.length, 1 + ROTATABLE_PRESET_IDS.length);
 });

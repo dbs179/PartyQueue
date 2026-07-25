@@ -30,6 +30,7 @@ import {
   eligiblePoolSize,
   isGenreDataEnabled,
 } from "../genres.js";
+import { moodGenreGuide } from "../genre-presets.js";
 import { normalizeMood, moodPack } from "../moods.js";
 import {
   getRandomnessSettings,
@@ -558,11 +559,13 @@ export function registerQueueRoutes(app, ctx) {
         typeof raw === "string" && raw.trim()
           ? raw.split(",").map((s) => s.trim()).filter(Boolean)
           : null;
+      const genreLabelById = new Map(GENRE_BUCKETS.map((b) => [b.id, b.label]));
       res.json({
         enabled: isGenreDataEnabled(),
         buckets: GENRE_BUCKETS,
         tagGuide: GENRE_TAG_GUIDE,
         tagRules: GENRE_TAG_RULES,
+        moodGuide: moodGenreGuide((id) => genreLabelById.get(id) || id),
         counts: await genreCounts({ playlistIds }),
       });
     } catch (err) {
