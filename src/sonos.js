@@ -1503,13 +1503,13 @@ function djVoiceDisplay(
   let tagline;
   if (silence) {
     // Never taglineForClip(silenceUri) — that burns a pack slot and drifts
-    // from the Up Next TTS row during the lead-in pad.
-    if (!lastNowPlayingDjTagline && companionUri) {
-      lastNowPlayingDjTagline = taglineForClip(companionUri);
-    }
-    tagline =
-      lastNowPlayingDjTagline ||
-      (companionUri ? taglineForClip(companionUri) : "Live from the Booth");
+    // from the Up Next TTS row during the lead-in pad. The companion clip's
+    // tagline wins (stable per clip per night); the last remembered one is
+    // only a fallback, otherwise the intro pad shows the PREVIOUS announce's
+    // line while Up Next shows the new one.
+    const companion = companionUri ? taglineForClip(companionUri) : null;
+    tagline = companion || lastNowPlayingDjTagline || "Live from the Booth";
+    if (companion && remember) lastNowPlayingDjTagline = companion;
   } else {
     tagline = taglineForClip(uri);
     if (remember) lastNowPlayingDjTagline = tagline;
@@ -1541,6 +1541,35 @@ function isDjSilenceTrack(uri, title = "") {
       String(title || "")
     )
   );
+}
+
+/**
+ * Guest-facing view of the upcoming queue. Silence pads are always hidden
+ * (they stay in the Sonos queue for volume handoff). DJ TTS rows are kept so
+ * people see the announce coming — except while the announce block itself is
+ * playing: the block is three queue items (ramp pad → TTS → restore pad) but
+ * should read as ONE DJ entry, so once any segment is the current track the
+ * rest of that contiguous block is hidden too.
+ * @param {Array<{ TrackUri?: string, Title?: string }>} items full Sonos queue
+ * @param {number} offset 1-based index of the current track (0 = show all)
+ * @returns {Array<{ t: object, absoluteIndex: number }>}
+ */
+export function visibleUpcomingQueueItems(items, offset) {
+  const list = Array.isArray(items) ? items : [];
+  const start = Number.isFinite(Number(offset)) && offset > 0 ? Math.floor(offset) : 0;
+  const isDjItem = (t) =>
+    isDjVoiceUri(t?.TrackUri) || isDjSilenceTrack(t?.TrackUri, t?.Title);
+  const current = start >= 1 ? list[start - 1] : null;
+  let inPlayingDjBlock = !!current && isDjItem(current);
+  const upcoming = [];
+  for (let i = start; i < list.length; i++) {
+    const t = list[i];
+    if (inPlayingDjBlock && isDjItem(t)) continue;
+    inPlayingDjBlock = false;
+    if (isDjSilenceTrack(t?.TrackUri, t?.Title)) continue;
+    upcoming.push({ t, absoluteIndex: i + 1 });
+  }
+  return upcoming;
 }
 
 function albumArtUrl(albumArtUri, host) {
@@ -1830,14 +1859,7 @@ async function getQueueListRaw() {
   const playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
   const track = Number(pos.Track) || 0;
   const offset = playingFromQueue && track >= 1 ? track : 0;
-  // Hide silence bridges from the guest-facing list (still in the Sonos queue
-  // for volume handoff). Keep DJ TTS rows so people see the announce coming.
-  const upcoming = [];
-  for (let i = offset; i < items.length; i++) {
-    const t = items[i];
-    if (isDjSilenceTrack(t.TrackUri, t.Title)) continue;
-    upcoming.push({ t, absoluteIndex: i + 1 });
-  }
+  const upcoming = visibleUpcomingQueueItems(items, offset);
 
   // `position` is the absolute 1-based spot in the full Sonos queue (not the
   // displayed index), which queue editing (delete/reorder) needs. `searched` and
