@@ -153,6 +153,14 @@ describe("announceVolumeFromMusic", () => {
     assert.equal(announceVolumeFromMusic(0.15, tiers), 58);
   });
 
+  it("treats Sonos volume 1 as 1%, not a 100% fraction", () => {
+    const tiers = { lowPct: 20, midPct: 8, highPct: 4 };
+    // Regression: music <= 1 used to map 1 → 100 and blast the room.
+    assert.equal(announceVolumeFromMusic(1, tiers), 21);
+    assert.equal(announceVolumeFromMusic(0, tiers), 20);
+    assert.equal(announceVolumeFromMusic(0.2, tiers), 36);
+  });
+
   it("falls back when volume is unknown", () => {
     assert.equal(announceVolumeFromMusic(null), 25);
     assert.equal(announceVolumeFromMusic(undefined), 25);

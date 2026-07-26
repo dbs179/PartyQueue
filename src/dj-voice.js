@@ -1960,7 +1960,10 @@ export function announceVolumeFromMusic(volumeLevel, opts) {
   if (volumeLevel == null || volumeLevel === "") return ANNOUNCE_VOLUME_FALLBACK;
   const music = Number(volumeLevel);
   if (!Number.isFinite(music) || music < 0) return ANNOUNCE_VOLUME_FALLBACK;
-  const musicPct = music <= 1 ? Math.round(music * 100) : Math.round(music);
+  // HA / fraction inputs are (0, 1). Sonos absolute 0 and 1 must stay 0%/1% —
+  // `music <= 1` used to treat volume 1 as 100% and blast the announce.
+  const musicPct =
+    music > 0 && music < 1 ? Math.round(music * 100) : Math.round(music);
 
   if (typeof opts === "number") {
     const bumpN = Number.isFinite(opts) ? Math.floor(opts) : 0;

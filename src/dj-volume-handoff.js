@@ -148,8 +148,9 @@ export function createDjVolumeHandoff({
 
   const setAndCheck = async (target) => {
     const io = await getAdapter();
-    const result = await io.setVolume(clampVolume(target));
-    if (result?.locked === false) return false;
+    await io.setVolume(clampVolume(target));
+    // Trust the live read. A false `locked: false` (SOAP string vs number)
+    // must not abort restore while the room is already at the baseline.
     return clampVolume(await io.getVolume()) === clampVolume(target);
   };
 

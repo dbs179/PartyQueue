@@ -2801,18 +2801,21 @@ const MAX_PASSES = 4;
 // loop, re-asserting the target on any player that hasn't landed on it yet.
 // This guarantees the whole group ends locked to the same exact level.
 async function lockGroupVolume(members, target) {
+  const want = Math.max(0, Math.min(100, Math.round(Number(target) || 0)));
   let toSet = members;
   for (let pass = 0; pass < MAX_PASSES; pass++) {
-    await Promise.all(toSet.map((device) => setPlayerVolume(device, target)));
+    await Promise.all(toSet.map((device) => setPlayerVolume(device, want)));
     await sleep(SETTLE_MS);
 
     const after = await Promise.all(
       members.map(async (device) => ({
         device,
-        volume: await readPlayerVolume(device),
+        volume: Number(await readPlayerVolume(device)),
       }))
     );
-    toSet = after.filter((r) => r.volume !== target).map((r) => r.device);
+    // Sonos CurrentVolume is often a string ("20"); strict !== against a
+    // number falsely failed restore and left announce volume sticky/loud.
+    toSet = after.filter((r) => r.volume !== want).map((r) => r.device);
     if (toSet.length === 0) break;
   }
   return toSet.length === 0;
