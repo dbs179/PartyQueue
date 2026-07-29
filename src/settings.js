@@ -1142,7 +1142,7 @@ export const BRANDING_DEFAULTS = {
   eventName: "PartyQueue",
   subtitle: "",
   showVersion: false,
-  // Second Up Next pill: song/set genre next to Requested / Discover / Random.
+  // Up Next pills: matched genre + From Playlists next to origin badge.
   showQueueGenre: false,
   heroBanner: null, // null = built-in public/hero.jpg; otherwise a data/banners file
 };

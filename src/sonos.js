@@ -7,7 +7,7 @@
 import { SonosManager, MetaDataHelper } from "@svrooij/sonos";
 import { withSonosWriteLock, withSonosTransportLane } from "./sonos-lock.js";
 import { isDjVolumeHandoffActive } from "./dj-volume-handoff.js";
-import { buildPlaylistPool } from "./spotify.js";
+import { buildPlaylistPool, isTrackInPlaylistPool } from "./spotify.js";
 import { spotifyTrackId, pickWithRelaxation, discoveryPlan, primaryArtist, mixPlaylistAndDiscovery } from "./sampler.js";
 import {
   recentTrackIds,
@@ -1639,8 +1639,9 @@ function labelForGenreLane(lane) {
 
 /**
  * Genre pill fields for an Up Next row.
- * Uses the artist's cached top-2 buckets (up to two pills). Falls back to the
- * enqueue set lane when the artist has no mapped genres yet.
+ * Prefers the enqueue set lane ("matched" genre), else the artist's dominant
+ * cached bucket. One pill only — a second genre slot is reserved for
+ * "From Playlists".
  */
 export function queueTrackGenreFields(artist, meta, { djClip = false } = {}) {
   if (djClip) return emptyQueueGenreFields();
@@ -1679,11 +1680,12 @@ export function queueTrackGenreFields(artist, meta, { djClip = false } = {}) {
     if (dom && dom !== "other") lanes = [dom];
   }
 
-  // Matching set-lane genre first, then one other cached bucket.
+  // Matched set-lane genre wins when the artist maps to it.
   if (setLane && lanes.includes(setLane)) {
-    lanes = [setLane, ...lanes.filter((l) => l !== setLane)];
+    lanes = [setLane];
+  } else {
+    lanes = lanes.slice(0, 1);
   }
-  lanes = lanes.slice(0, 2);
 
   const labels = lanes.map(labelForGenreLane).filter(Boolean);
   if (!labels.length) return emptyQueueGenreFields();
@@ -1693,6 +1695,18 @@ export function queueTrackGenreFields(artist, meta, { djClip = false } = {}) {
     genreLanes: lanes,
     genreLabels: labels,
   };
+}
+
+/**
+ * True when the queued track came from (or also lives in) the host's playlists.
+ * Random/filler is always playlist-sourced; requests consult the warmed pool.
+ */
+export function queueTrackFromPlaylist(id, meta) {
+  const source = meta?.source ?? null;
+  if (source === "filler") return true;
+  if (source === "discovered" || source === "mood") return false;
+  if (!id) return false;
+  return isTrackInPlaylistPool(id);
 }
 
 // Quiet pads around a DJ clip (pre-ramp + post-restore). Still /media/tts
@@ -2097,6 +2111,7 @@ async function getQueueListRaw() {
           : null,
       dedication: source === "searched" ? meta?.dedication || null : null,
       djVoice: djClip,
+      fromPlaylist: !djClip && queueTrackFromPlaylist(id, meta),
       genreLane: genre.genreLane,
       genreLabel: genre.genreLabel,
       genreLanes: genre.genreLanes,

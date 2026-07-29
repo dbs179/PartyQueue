@@ -1299,7 +1299,7 @@ button.guest-name:focus-visible {
   margin-left: 0;
 }
 
-/* Song/set genre pill (optional second Up Next badge). */
+/* Song/set genre pill (optional Up Next badge — matched lane only). */
 .queue-genre-badge {
   display: inline-block;
   padding: 1px 7px;
@@ -1311,6 +1311,20 @@ button.guest-name:focus-visible {
   white-space: nowrap;
   color: #fff;
   background: linear-gradient(135deg, #0f9f9a, #0b7f8a);
+}
+
+/* Track lives in the host's Spotify playlist pool. */
+.queue-playlist-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  white-space: nowrap;
+  color: #fff;
+  background: linear-gradient(135deg, #6a8f3a, #4a6b28);
 }
 
 /* Memory list: skipped while playing. */

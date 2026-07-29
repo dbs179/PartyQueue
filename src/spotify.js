@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "./atomic-write.js";
 import { getSpotifyAppCredentials } from "./spotify-app.js";
+import { spotifyTrackId } from "./sampler.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -331,6 +332,9 @@ const POOL_TTL_MS = 6 * 60 * 60_000;
 const PLAYLISTS_TTL_MS = 6 * 60 * 60_000;
 let playlistPoolCache = { playlists: [], builtAt: 0 };
 let poolInFlight = null;
+/** Cached Set of Spotify track ids across the warmed playlist pool. */
+let libraryIdSet = null;
+let libraryIdSetBuiltAt = -1;
 
 // Cached list of the host's playlists for the UI dropdown. Refreshes at most
 // once per PLAYLISTS_TTL_MS (or when forced via re-warm), so opening the app or
@@ -452,10 +456,40 @@ export function getPoolWarmedAt() {
   return playlistPoolCache.builtAt || 0;
 }
 
+/** Build a Set of Spotify track ids from a playlist-pool shape. */
+export function trackIdsFromPlaylistPool(playlists) {
+  const ids = new Set();
+  for (const pl of playlists || []) {
+    for (const t of pl.tracks || []) {
+      const id = spotifyTrackId(t?.uri);
+      if (id) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+function libraryTrackIdSet() {
+  loadDiskCache();
+  if (libraryIdSet && libraryIdSetBuiltAt === playlistPoolCache.builtAt) {
+    return libraryIdSet;
+  }
+  libraryIdSet = trackIdsFromPlaylistPool(playlistPoolCache.playlists);
+  libraryIdSetBuiltAt = playlistPoolCache.builtAt;
+  return libraryIdSet;
+}
+
+/** True when `trackId` appears in the host's warmed Spotify playlist pool. */
+export function isTrackInPlaylistPool(trackId) {
+  if (!trackId) return false;
+  return libraryTrackIdSet().has(trackId);
+}
+
 // Drop all cached Spotify reads so the next access rebuilds from scratch.
 export function clearSpotifyCaches() {
   playlistsCache = { items: [], builtAt: 0 };
   playlistPoolCache = { playlists: [], builtAt: 0 };
+  libraryIdSet = null;
+  libraryIdSetBuiltAt = -1;
   persistDiskCache();
 }
 

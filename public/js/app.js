@@ -829,7 +829,7 @@ let settingsDefaults = {
   artistCap: 1,
   strictFill: true,
 };
-/** Guest-visible: second Up Next pill for song/set genre (DJ Booth Look). */
+/** Guest-visible: Up Next genre + From Playlists pills (DJ Booth Look). */
 let showQueueGenre = false;
 try {
   const bootBrand = window.__PQ_BRAND__;
@@ -6612,6 +6612,7 @@ function queueTrackSig(track) {
     track.artist || "",
     track.djVoice ? 1 : 0,
     showQueueGenre ? 1 : 0,
+    track.fromPlaylist ? 1 : 0,
     track.genreLane || "",
     track.genreLabel || "",
     Array.isArray(track.genreLabels) ? track.genreLabels.join(",") : "",
@@ -6648,25 +6649,26 @@ function queueOriginBadgeHtml(track) {
 
 function queueGenreBadgeHtml(track) {
   if (!showQueueGenre || track.djVoice) return "";
-  const labels = Array.isArray(track.genreLabels)
-    ? track.genreLabels.filter((x) => typeof x === "string" && x)
-    : typeof track.genreLabel === "string" && track.genreLabel
-      ? [track.genreLabel]
-      : typeof track.genreLane === "string" && track.genreLane
-        ? [track.genreLane]
-        : [];
-  if (!labels.length) return "";
-  return labels
-    .slice(0, 2)
-    .map(
-      (label) =>
-        `<span class="queue-genre-badge" title="Song genre">${escapeHtml(label)}</span>`
-    )
-    .join("");
+  // Matched / primary genre only — second genre slot is "From Playlists".
+  const label =
+    Array.isArray(track.genreLabels) && track.genreLabels[0]
+      ? track.genreLabels[0]
+      : typeof track.genreLabel === "string" && track.genreLabel
+        ? track.genreLabel
+        : typeof track.genreLane === "string" && track.genreLane
+          ? track.genreLane
+          : "";
+  if (!label) return "";
+  return `<span class="queue-genre-badge" title="Matched song genre">${escapeHtml(label)}</span>`;
+}
+
+function queuePlaylistBadgeHtml(track) {
+  if (!showQueueGenre || track.djVoice || !track.fromPlaylist) return "";
+  return `<span class="queue-playlist-badge" title="This song is in your Spotify playlists">From Playlists</span>`;
 }
 
 function queueBadgeHtml(track) {
-  return `${queueOriginBadgeHtml(track)}${queueGenreBadgeHtml(track)}`;
+  return `${queueOriginBadgeHtml(track)}${queueGenreBadgeHtml(track)}${queuePlaylistBadgeHtml(track)}`;
 }
 
 function fillQueueRow(li, track, index) {
