@@ -1294,6 +1294,23 @@ function syncDiscoverFromServer(enabled) {
   }
 }
 
+// Filter explicit / Kids lock also live on Vibe and used to stay on HTML
+// defaults until a host save hydrated fillSettings.
+let contentToggleTouchedAt = 0;
+function syncContentTogglesFromServer(payload) {
+  if (!payload || Date.now() - contentToggleTouchedAt < 3000) return;
+  if (typeof payload.filterExplicit === "boolean" && filterExplicitInput) {
+    if (filterExplicitInput.checked !== payload.filterExplicit) {
+      filterExplicitInput.checked = payload.filterExplicit;
+    }
+  }
+  if (typeof payload.kidsLock === "boolean" && kidsLockInput) {
+    if (kidsLockInput.checked !== payload.kidsLock) {
+      kidsLockInput.checked = payload.kidsLock;
+    }
+  }
+}
+
 // Persist the discovery toggle immediately so it works without hitting Save.
 // Targeted payload: this toggle lives in Vibe, where the other settings
 // inputs may never have been filled (e.g. right after a deploy logs the host
@@ -1396,6 +1413,7 @@ requestFairnessEnabledInput?.addEventListener("change", () => {
 // The explicit filter is an independent switch (like Never-Ending Queue): it
 // saves on its own and isn't touched by the Song Selection Save / Defaults.
 filterExplicitInput.addEventListener("change", () => {
+  contentToggleTouchedAt = Date.now();
   saveSettings({ filterExplicit: filterExplicitInput.checked });
 });
 
@@ -1435,6 +1453,7 @@ hostControlsInput?.addEventListener("change", () => {
 
 kidsLockInput?.addEventListener("change", async () => {
   const on = !!kidsLockInput.checked;
+  contentToggleTouchedAt = Date.now();
   kidsLockInput.disabled = true;
   try {
     await saveSettings(
@@ -4339,6 +4358,10 @@ async function submitPin() {
       setSettingsUnlocked(true);
       closePinGate();
       syncHostControlsVisibility();
+      // Host session is live — pull full settings immediately so Booth/Vibe
+      // toggles aren't stuck on HTML defaults until the next save.
+      void loadSettings();
+      void loadAutoFill();
       const action = pendingPinAction;
       pendingPinAction = null;
       if (action === "restart") {
@@ -4403,9 +4426,14 @@ let pendingQueueStreamTracks = null;
 let appReady = false;
 
 function shouldPoll() {
+  // Include Vibe (`mix`) so Discover / Never-Ending / Filter toggles keep
+  // hydrating from Now Playing while the host is adjusting the mix — otherwise
+  // phones that open straight into Vibe sit on HTML defaults until a save.
   return (
     document.visibilityState === "visible" &&
-    (currentView === "main" || currentView === "display")
+    (currentView === "main" ||
+      currentView === "display" ||
+      currentView === "mix")
   );
 }
 
@@ -4698,7 +4726,9 @@ function showView(name) {
     if (target === "booth") updateBoothHubSummaries();
     if (target === "settings-dj") updateDjHubSummaries();
     if (target === "settings-dj-advanced") void loadDjEffectivePrompt();
-    if (isSettingsArea(target)) revealSettings();
+    // Booth holds most host toggles; hydrate them the same way Settings does
+    // (eager boot loadSettings often 401s before PIN unlock).
+    if (target === "booth" || isSettingsArea(target)) revealSettings();
     if (target === "memory") loadMemory();
     if (target === "suggestions") loadSuggestions();
     // A long-lived tab can outlive the server's host session (restart or
@@ -4708,6 +4738,8 @@ function showView(name) {
   if (target === "sonos") loadGroups(true);
   if (isMusicMixArea(target)) {
     syncToolbarMoodVisibility();
+    // Public toggle hydrate — don't wait for playlists/genres.
+    void loadAutoFill();
     if (target === "playlists") loadPlaylists();
     if (target === "mix") updateMusicMixHubSummaries();
   }
@@ -6280,6 +6312,7 @@ function renderNowPlaying(transport) {
   if (transport) {
     syncAutoFillFromServer(transport.neverEnding);
     syncDiscoverFromServer(transport.discoverEnabled);
+    syncContentTogglesFromServer(transport);
     if (transport.showQueueGenre != null) {
       syncShowQueueGenre(!!transport.showQueueGenre, { rerender: true });
     }
@@ -7770,10 +7803,11 @@ async function loadAutoFill() {
       saveGenreSelection();
       if (genreBuckets.length) renderGenres();
     }
-    // Discover + rotation ride along on this public endpoint (settings are
-    // host-gated).
+    // Discover + rotation + content toggles ride along on this public endpoint
+    // (settings are host-gated).
     syncDiscoverFromServer(data.discoverEnabled);
     syncRotationFromServer(data);
+    syncContentTogglesFromServer(data);
     // Era mood: the server is the source of truth (null = off) so every
     // phone shows the same decade.
     if ("mood" in data) {
@@ -7910,11 +7944,14 @@ if (cacheRefreshBtn) {
 
 loadGroups(true);
 loadSettings();
+// Public toggle hydrate immediately — don't wait on Spotify playlist/genre
+// sweeps or phones open looking like Discover / Never-Ending are off.
+void loadAutoFill();
 // Spotify app / Last.fm / HA status: deferred until Settings opens (revealSettings).
 loadVersion();
 loadPinRequired();
 
-// Playlists + genres first, then apply the server's shared selection so every
+// Playlists + genres first, then re-apply the server's shared selection so every
 // phone lands on the same Random / Never-Ending pool.
 (async () => {
   await Promise.all([loadPlaylists(), loadGenres()]);

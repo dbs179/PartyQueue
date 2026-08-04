@@ -611,11 +611,14 @@ export function registerQueueRoutes(app, ctx) {
     // even when the host-gated /api/settings is locked (sessions reset on
     // deploy).
     const rotation = getRotationSettings();
+    const content = getContentSettings();
     res.json({
       ...getAutoFillState(),
       discoverEnabled: getDiscoverySettings().discoverEnabled,
       randomMoodEnabled: rotation.randomMoodEnabled,
       randomDecadeEnabled: rotation.randomDecadeEnabled,
+      filterExplicit: !!content.filterExplicit,
+      kidsLock: !!content.kidsLock,
     });
   });
 

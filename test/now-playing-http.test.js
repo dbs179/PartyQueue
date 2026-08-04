@@ -17,6 +17,8 @@ test("enrichNowPlaying adds shared party flags without throwing", async () => {
   assert.equal(typeof enriched.neverEnding, "boolean");
   assert.equal(typeof enriched.requestsPaused, "boolean");
   assert.equal(typeof enriched.hostControlsOnly, "boolean");
+  assert.equal(typeof enriched.filterExplicit, "boolean");
+  assert.equal(typeof enriched.kidsLock, "boolean");
   assert.ok("reactions" in enriched);
   assert.ok("mixGenreLane" in enriched);
   assert.ok("mixGenreLabel" in enriched);

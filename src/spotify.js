@@ -38,7 +38,9 @@ let tokenExpiresAt = 0;
 let userAccessToken = null;
 let userTokenExpiresAt = 0;
 
-const TOKEN_STORE = path.join(__dirname, "..", "data", "spotify-tokens.json");
+const TOKEN_STORE =
+  process.env.PARTYQUEUE_SPOTIFY_TOKENS_FILE ||
+  path.join(__dirname, "..", "data", "spotify-tokens.json");
 
 // --- Rate-limit guard -------------------------------------------------------
 // Spotify throttles with HTTP 429 + a Retry-After header. Without backoff the
@@ -325,13 +327,18 @@ function releaseYear(releaseDate) {
 // Keeping tracks grouped per playlist lets the random picker pull one song from
 // each playlist; the artist lets it avoid back-to-back same-artist picks.
 // Building it is expensive (one Spotify request per ~100 tracks), so we warm it
-// at startup and keep it for 6 hours. If it's cold/expired when "random" is
-// clicked, buildPlaylistPool rebuilds it lazily. A single unreadable playlist is
-// skipped rather than failing the whole pool.
-const POOL_TTL_MS = 6 * 60 * 60_000;
-const PLAYLISTS_TTL_MS = 6 * 60 * 60_000;
+// at startup and keep it for 24 hours. Past TTL, callers get stale-while-
+// revalidate (serve the last good pool immediately, refresh in the background)
+// so Random after a few idle days isn't blocked on a full Spotify sweep.
+const POOL_TTL_MS = 24 * 60 * 60_000;
+const PLAYLISTS_TTL_MS = 24 * 60 * 60_000;
+/** How often the background rewarm loop checks pool age. */
+const POOL_REWARM_CHECK_MS = 30 * 60_000;
+/** Start a background refresh this long before TTL expiry. */
+const POOL_REWARM_LEAD_MS = 60 * 60_000;
 let playlistPoolCache = { playlists: [], builtAt: 0 };
 let poolInFlight = null;
+let poolRewarmTimer = null;
 /** Cached Set of Spotify track ids across the warmed playlist pool. */
 let libraryIdSet = null;
 let libraryIdSetBuiltAt = -1;
@@ -347,7 +354,9 @@ let playlistsInFlight = null;
 // disk, so a server restart reuses fresh data instead of re-sweeping the whole
 // library every time - critical for fast iteration. A persisted cooldown also
 // means a restart during a Spotify timeout won't poke the API at all.
-const SPOTIFY_CACHE_FILE = path.join(__dirname, "..", "data", "spotify-cache.json");
+const SPOTIFY_CACHE_FILE =
+  process.env.PARTYQUEUE_SPOTIFY_CACHE_FILE ||
+  path.join(__dirname, "..", "data", "spotify-cache.json");
 let diskLoaded = false;
 
 // Bump when the pool track shape changes (v2 added `year` for era Moods) so an
@@ -414,15 +423,11 @@ export async function getPlaylists({ force = false } = {}) {
   return playlistsInFlight;
 }
 
-export async function buildPlaylistPool({ force = false } = {}) {
-  loadDiskCache();
-  const fresh = Date.now() - playlistPoolCache.builtAt < POOL_TTL_MS;
-  if (!force && playlistPoolCache.playlists.length && fresh) {
-    return playlistPoolCache.playlists;
-  }
+function startPoolRebuild({ force = false } = {}) {
   if (poolInFlight) return poolInFlight;
   poolInFlight = (async () => {
     try {
+      const previous = playlistPoolCache.playlists;
       const playlists = await getPlaylists({ force });
       const result = [];
       for (const pl of playlists) {
@@ -433,12 +438,30 @@ export async function buildPlaylistPool({ force = false } = {}) {
           console.error(`[pool] skipped playlist "${pl.name}":`, err.message);
         }
       }
-      // If we got throttled partway, don't trust this partial pool for the full
-      // TTL - mark it stale so it rebuilds once the cooldown clears.
+      const throttled = spotifyCooldownMs() > 0;
+      // Don't clobber a usable pool with an empty/throttled sweep — keep serving
+      // the previous library and retry on the next rewarm.
+      if (!result.length && previous.length) {
+        console.warn("[pool] rebuild empty; keeping previous pool");
+        return previous;
+      }
+      if (
+        throttled &&
+        previous.length &&
+        result.length < Math.max(1, Math.floor(previous.length * 0.5))
+      ) {
+        console.warn(
+          `[pool] rebuild throttled (${result.length}/${previous.length} playlists); keeping previous pool`
+        );
+        return previous;
+      }
       playlistPoolCache = {
         playlists: result,
-        builtAt: spotifyCooldownMs() > 0 ? 0 : Date.now(),
+        // Throttled-but-usable builds stay immediately stale so we retry soon.
+        builtAt: throttled ? 0 : Date.now(),
       };
+      libraryIdSet = null;
+      libraryIdSetBuiltAt = -1;
       persistDiskCache();
       return playlistPoolCache.playlists;
     } finally {
@@ -446,6 +469,31 @@ export async function buildPlaylistPool({ force = false } = {}) {
     }
   })();
   return poolInFlight;
+}
+
+export async function buildPlaylistPool({ force = false } = {}) {
+  loadDiskCache();
+  const hasPool = playlistPoolCache.playlists.length > 0;
+  const fresh = Date.now() - playlistPoolCache.builtAt < POOL_TTL_MS;
+
+  if (!force && hasPool && fresh) {
+    return playlistPoolCache.playlists;
+  }
+
+  // Stale-while-revalidate: Random / Never-Ending keep working from the last
+  // good pool while a background Spotify sweep refreshes it. Only a true cold
+  // start (no pool yet) or an explicit force waits on the rebuild.
+  if (!force && hasPool) {
+    if (!poolInFlight && isUserConnected()) {
+      console.log("[pool] serving stale pool; refreshing in background");
+      startPoolRebuild({ force: true }).catch((err) => {
+        console.error("[pool] background refresh failed:", err.message);
+      });
+    }
+    return playlistPoolCache.playlists;
+  }
+
+  return startPoolRebuild({ force });
 }
 
 // Timestamp (ms since epoch) of the last successful track-pool warm, or 0 if it
@@ -508,18 +556,60 @@ export async function rewarmCaches() {
 
 // Build the pool in the background (used at startup) so the first "random" click
 // is instant. No-ops when no Spotify account is connected; never throws.
+// When the on-disk pool is past TTL, forces a refresh (boot can wait in the
+// background task) so the next Random doesn't depend on SWR alone.
 export async function warmTrackPool() {
   if (!isUserConnected()) return;
   try {
-    // Not forced: reuse the disk-persisted pool when it's still fresh, so a
-    // restart (common during development) doesn't re-sweep the whole library.
-    const playlists = await buildPlaylistPool();
+    loadDiskCache();
+    const hasPool = playlistPoolCache.playlists.length > 0;
+    const age = Date.now() - (playlistPoolCache.builtAt || 0);
+    const stale = !hasPool || age >= POOL_TTL_MS;
+    const playlists = stale
+      ? await buildPlaylistPool({ force: true })
+      : await buildPlaylistPool();
     const total = playlists.reduce((n, p) => n + p.tracks.length, 0);
     console.log(
-      `[pool] warmed: ${total} tracks across ${playlists.length} playlists`
+      `[pool] warmed: ${total} tracks across ${playlists.length} playlists` +
+        (stale ? " (refreshed)" : "")
     );
   } catch (err) {
     console.error("[pool] warm failed:", err.message);
+  }
+}
+
+/**
+ * Periodically refresh the Spotify playlist pool before TTL expiry so a
+ * long-running container (days idle, Never-Ending off) never blocks the first
+ * Random on a multi-minute library sweep. Safe to call more than once.
+ */
+export function startPoolRewarmLoop() {
+  if (poolRewarmTimer) return;
+  const tick = () => {
+    if (!isUserConnected()) return;
+    if (poolInFlight) return;
+    loadDiskCache();
+    if (!playlistPoolCache.playlists.length) {
+      void warmTrackPool();
+      return;
+    }
+    const age = Date.now() - (playlistPoolCache.builtAt || 0);
+    if (age >= POOL_TTL_MS - POOL_REWARM_LEAD_MS) {
+      console.log("[pool] proactive rewarm (pool age " + Math.round(age / 3600000) + "h)");
+      startPoolRebuild({ force: true }).catch((err) => {
+        console.error("[pool] proactive rewarm failed:", err.message);
+      });
+    }
+  };
+  poolRewarmTimer = setInterval(tick, POOL_REWARM_CHECK_MS);
+  if (typeof poolRewarmTimer.unref === "function") poolRewarmTimer.unref();
+}
+
+/** Test helper: stop the rewarm interval. */
+export function stopPoolRewarmLoopForTests() {
+  if (poolRewarmTimer) {
+    clearInterval(poolRewarmTimer);
+    poolRewarmTimer = null;
   }
 }
 

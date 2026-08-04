@@ -32,7 +32,7 @@ import {
   ensureHostBootstrapCode,
   hostBootstrapFileName,
 } from "./host-auth.js";
-import { warmTrackPool } from "./spotify.js";
+import { warmTrackPool, startPoolRewarmLoop } from "./spotify.js";
 import {
   warmGenresFromPool,
   flushGenrePersist,
@@ -445,6 +445,7 @@ function runListenStartup({ seed = true, warm = true } = {}) {
       log.warn(`could not re-arm Discover: ${err.message}`, { event: "startup" });
     }
     warmTrackPool().then(() => warmGenresFromPool());
+    startPoolRewarmLoop();
     initAutoFill();
     initQueueMaintenance();
   }

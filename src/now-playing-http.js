@@ -160,6 +160,8 @@ export async function enrichNowPlaying(np) {
     showQueueGenre: !!getBrandingSettings().showQueueGenre,
     randomMoodEnabled: rotation.randomMoodEnabled,
     randomDecadeEnabled: rotation.randomDecadeEnabled,
+    filterExplicit: !!getContentSettings().filterExplicit,
+    kidsLock: !!getContentSettings().kidsLock,
     requestsPaused: getContentSettings().requestsPaused,
     partyOver: isPartyOver(),
     hostControlsOnly: getContentSettings().hostControlsOnly,
