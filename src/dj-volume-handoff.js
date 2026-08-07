@@ -1,4 +1,17 @@
 import { createLogger } from "./logger.js";
+import {
+  isDjVolumeHandoffActive,
+  setDjVolumeHandoffActive,
+} from "./dj-volume-handoff-state.js";
+
+export { isDjVolumeHandoffActive };
+
+let activeHandoff = null;
+
+/** Keep the leaf flag aligned with prior `!!activeHandoff?.isVolumeLocked()`. */
+function syncHandoffActiveFlag() {
+  setDjVolumeHandoffActive(!!activeHandoff?.isVolumeLocked());
+}
 
 const DEFAULT_POLL_MS = 150;
 const DEFAULT_RAMP_STEPS = 6;
@@ -133,6 +146,7 @@ export function createDjVolumeHandoff({
         : preservedBaseline;
     announceVolume = clampVolume(calculateTarget(baselineVolume));
     volumeLocked = true;
+    syncHandoffActiveFlag();
     deadlineAt =
       now() +
       Math.max(3000, Math.round(Number(approxDurationSec || 8) * 1000)) +
@@ -173,6 +187,7 @@ export function createDjVolumeHandoff({
   const restoreExact = async (reason = "restore") => {
     if (baselineVolume == null) {
       volumeLocked = false;
+      syncHandoffActiveFlag();
       return true;
     }
     setPhase("restoring");
@@ -180,6 +195,7 @@ export function createDjVolumeHandoff({
       try {
         if (await setAndCheck(baselineVolume)) {
           volumeLocked = false;
+          syncHandoffActiveFlag();
           setPhase("restored");
           logger.info(`restored exact baseline ${baselineVolume} (${reason})`);
           return true;
@@ -464,8 +480,6 @@ export function createDjVolumeHandoff({
   };
 }
 
-let activeHandoff = null;
-
 export async function beginDjVolumeHandoff(options = {}) {
   let preservedBaseline = null;
   if (activeHandoff) {
@@ -489,15 +503,22 @@ export async function beginDjVolumeHandoff(options = {}) {
     const running = start();
     void running.then(
       () => {
-        if (activeHandoff === handoff) activeHandoff = null;
+        if (activeHandoff === handoff) {
+          activeHandoff = null;
+          syncHandoffActiveFlag();
+        }
       },
       () => {
-        if (activeHandoff === handoff) activeHandoff = null;
+        if (activeHandoff === handoff) {
+          activeHandoff = null;
+          syncHandoffActiveFlag();
+        }
       }
     );
     return running;
   };
   activeHandoff = handoff;
+  syncHandoffActiveFlag();
   return handoff;
 }
 
@@ -505,12 +526,11 @@ export async function cancelActiveDjVolumeHandoff(reason = "queue preempted") {
   const handoff = activeHandoff;
   if (!handoff) return false;
   await handoff.cancelAndRestore(reason);
-  if (activeHandoff === handoff) activeHandoff = null;
+  if (activeHandoff === handoff) {
+    activeHandoff = null;
+    syncHandoffActiveFlag();
+  }
   return true;
-}
-
-export function isDjVolumeHandoffActive() {
-  return !!activeHandoff?.isVolumeLocked();
 }
 
 export function getDjVolumeHandoffState() {
