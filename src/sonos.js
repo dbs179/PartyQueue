@@ -6,6 +6,12 @@
 
 import { SonosManager, MetaDataHelper } from "@svrooij/sonos";
 import { withSonosWriteLock, withSonosTransportLane } from "./sonos-lock.js";
+import {
+  configureSonosManagerHealth,
+  noteSonosReadSuccess,
+  noteSonosReadFailure,
+  clearSonosUnhealthy,
+} from "./sonos-manager-health.js";
 import { isDjVolumeHandoffActive } from "./dj-volume-handoff.js";
 import { buildPlaylistPool, isTrackInPlaylistPool } from "./spotify.js";
 import { spotifyTrackId, pickWithRelaxation, discoveryPlan, primaryArtist, mixPlaylistAndDiscovery } from "./sampler.js";
@@ -63,11 +69,30 @@ const SPOTIFY_REGION_US = "3079";
 let manager = null;
 let initializing = null;
 
-/** Drop the cached SonosManager so the next call rediscovers (e.g. after SONOS_HOST change). */
-export function resetSonosManager() {
+function dropSonosManager() {
   manager = null;
   initializing = null;
 }
+
+/** Drop the cached SonosManager so the next call rediscovers (e.g. after SONOS_HOST change). */
+export function resetSonosManager() {
+  dropSonosManager();
+  // Host/config-driven reset: start a fresh unhealthy clock so auto-reset
+  // doesn't immediately fire again on the next blip.
+  clearSonosUnhealthy();
+}
+
+configureSonosManagerHealth({
+  reset: () => {
+    dropSonosManager();
+    // Bust coalesced snapshots so the next poll cannot reuse pre-reset data.
+    try {
+      invalidateSonosSnapshots();
+    } catch {
+      /* invalidate is declared later; first-call path is fine without it */
+    }
+  },
+});
 
 function resolveRegion() {
   const region = (process.env.SONOS_REGION || "NorthAmerica").toLowerCase();
@@ -100,6 +125,7 @@ async function getManager() {
 
     manager = m;
     initializing = null;
+    noteSonosReadSuccess();
     return manager;
   })();
 
@@ -107,6 +133,7 @@ async function getManager() {
     return await initializing;
   } catch (err) {
     initializing = null;
+    noteSonosReadFailure();
     throw err;
   }
 }
@@ -1829,6 +1856,7 @@ export function makeCachedReader(fn, ttlMs) {
     const request = (async () => {
       try {
         const value = await fn();
+        noteSonosReadSuccess();
         // A mutation may have invalidated snapshots while this request was in
         // flight. Return its result to the original caller, but never let that
         // stale result repopulate the shared cache.
@@ -1836,6 +1864,11 @@ export function makeCachedReader(fn, ttlMs) {
           cache = { at: Date.now(), value };
         }
         return value;
+      } catch (err) {
+        // One global health gate — NP + queue + groups all share this; many
+        // offline players cannot cascade rediscovery.
+        noteSonosReadFailure();
+        throw err;
       } finally {
         // Do not let an older invalidated request clear a newer in-flight read.
         if (inFlight === request) inFlight = null;
@@ -2197,7 +2230,14 @@ export const getNowPlaying = makeCachedReader(
 // timing needs a true live URI; a stale guest poll must not delay boost or
 // trigger an early restore.
 export async function getNowPlayingFresh() {
-  return getNowPlayingRaw();
+  try {
+    const value = await getNowPlayingRaw();
+    noteSonosReadSuccess();
+    return value;
+  } catch (err) {
+    noteSonosReadFailure();
+    throw err;
+  }
 }
 export const getQueueList = makeCachedReader(getQueueListRaw, SNAPSHOT_TTL_MS);
 export const listGroups = makeCachedReader(listGroupsRaw, SNAPSHOT_TTL_MS);

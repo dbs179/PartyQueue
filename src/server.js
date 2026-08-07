@@ -25,6 +25,7 @@ import {
   closePartySettingsStreams,
   registerPartySettingsRoutes,
 } from "./party-settings-http.js";
+import { setSonosDemandChecker } from "./sonos-manager-health.js";
 import { registerApiRoutes } from "./routes/index.js";
 import { getBrandingSettings, setDiscoverySettings } from "./settings.js";
 import {
@@ -334,6 +335,11 @@ searchLimit.displayName = "searchLimit";
 registerNowPlayingRoutes(app);
 registerQueueStreamRoutes(app);
 registerPartySettingsRoutes(app);
+// Auto-reset Sonos manager only while NP/queue clients are actively polling.
+setSonosDemandChecker(
+  () =>
+    nowPlayingMonitor.subscriberCount + queueMonitor.subscriberCount > 0
+);
 registerApiRoutes(app, {
   VERSION,
   isListening: () => !!httpServer?.listening,
