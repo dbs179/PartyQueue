@@ -47,7 +47,7 @@ function load() {
   return cache;
 }
 
-function persist() {
+function persistNow() {
   try {
     const out = (cache ?? []).map((e) => {
       const row = {
@@ -65,6 +65,38 @@ function persist() {
   } catch (err) {
     console.error("[requests] save failed:", err.message);
   }
+}
+
+// Debounce disk writes (mirrors play-history): bursty guest adds flush once.
+let persistTimer = null;
+function persist() {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    persistNow();
+  }, 1000);
+  persistTimer.unref?.();
+}
+
+function flushPersist() {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  if (cache === null) return false;
+  persistNow();
+  return true;
+}
+
+/** Flush pending request-log writes (tests / shutdown). */
+export function flushRequestsPersist() {
+  return flushPersist();
+}
+
+function cancelPersistTimer() {
+  if (!persistTimer) return;
+  clearTimeout(persistTimer);
+  persistTimer = null;
 }
 
 /**
@@ -143,6 +175,7 @@ export function getRequests() {
 
 // Forget all requests.
 export function clearRequests() {
+  cancelPersistTimer();
   cache = [];
   try {
     fs.rmSync(REQUESTS_FILE, { force: true });

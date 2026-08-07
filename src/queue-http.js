@@ -6,9 +6,47 @@ import {
   onSonosSnapshotsInvalidated,
 } from "./sonos.js";
 
+/**
+ * Compact fingerprint of queue rows that matter to the UI (order, identity,
+ * badges, DJ pads, genre pills, cover prefetch). Avoids JSON.stringify of the
+ * full track objects every monitor tick.
+ */
+function trackSignature(track) {
+  if (!track || typeof track !== "object") return "";
+  const lanes = Array.isArray(track.genreLanes)
+    ? track.genreLanes.join(",")
+    : "";
+  const labels = Array.isArray(track.genreLabels)
+    ? track.genreLabels.join(",")
+    : "";
+  return [
+    track.position ?? "",
+    track.itemId ?? "",
+    track.uri ?? "",
+    track.title ?? "",
+    track.artist ?? "",
+    track.album ?? "",
+    track.albumArt ?? "",
+    track.searched ? 1 : 0,
+    track.discovered ? 1 : 0,
+    track.moodPick ? 1 : 0,
+    track.mood ?? "",
+    track.requestedBy ?? "",
+    track.requestedByUser ?? "",
+    track.dedication ?? "",
+    track.djVoice ? 1 : 0,
+    track.fromPlaylist ? 1 : 0,
+    track.genreLane ?? "",
+    track.genreLabel ?? "",
+    lanes,
+    labels,
+  ].join("\x1f");
+}
+
 export function queueSignature(snapshot = null) {
   const tracks = Array.isArray(snapshot?.tracks) ? snapshot.tracks : [];
-  return JSON.stringify(tracks);
+  if (!tracks.length) return "0";
+  return `${tracks.length}\x1e${tracks.map(trackSignature).join("\x1e")}`;
 }
 
 export async function readQueuePayload() {

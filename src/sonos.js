@@ -1755,6 +1755,48 @@ export function visibleUpcomingQueueItems(items, offset) {
   return upcoming;
 }
 
+/**
+ * First non-DJ music track after the current queue position, shaped for the
+ * Now Playing genre header during announce/silence pads. Built from a raw
+ * GetQueue result so silence-path NP can reuse the companion-URI fetch.
+ *
+ * @param {object[]} items
+ * @param {number} trackNum 1-based Sonos Track index of the current item
+ */
+export function upcomingGenreHintFromQueueItems(items, trackNum) {
+  const track = Math.floor(Number(trackNum) || 0);
+  const offset = track >= 1 ? track : 0;
+  const upcoming = visibleUpcomingQueueItems(items, offset);
+  const rollup = originSnapshot();
+  for (const { t } of upcoming) {
+    const uri = t?.TrackUri ?? null;
+    if (!uri) continue;
+    // Up Next still lists the TTS clip; genre follows the song after the pad.
+    if (isDjVoiceUri(uri) && !isDjSilenceTrack(uri, t?.Title)) continue;
+    const title = t?.Title ?? "";
+    const artist = t?.Artist ?? "";
+    if (!title && !artist) continue;
+    const id = spotifyTrackId(uri);
+    const meta = id
+      ? originMetaForOccurrence(id, 0) || rollup.get(id) || null
+      : null;
+    const source = meta?.source ?? (id ? originOf(id) : null);
+    return {
+      uri,
+      title: title || null,
+      artist: artist || null,
+      origin: source,
+      genreLane:
+        source === "filler" ||
+        source === "discovered" ||
+        source === "mood"
+          ? meta?.genreLane || null
+          : null,
+    };
+  }
+  return null;
+}
+
 function albumArtUrl(albumArtUri, host) {
   if (!albumArtUri) return null;
   const absolute = albumArtUri.startsWith("http")
@@ -1876,12 +1918,17 @@ async function getNowPlayingRaw() {
   // a blank/"silence" track flash between the announce and the first song.
   // Resolve the companion TTS URI so the tagline matches Up Next.
   let companionUri = null;
+  /** @type {ReturnType<typeof upcomingGenreHintFromQueueItems>} */
+  let upcomingForGenre = null;
   if (silenceBridge && playingFromQueue) {
     try {
       const queue = await coordinator.GetQueue();
       const items = Array.isArray(queue.Result) ? queue.Result : [];
       const trackNum = Number(pos.Track) || 0;
       companionUri = findCompanionDjTtsUri(items, trackNum - 1);
+      // Reuse this GetQueue for the genre header so enrichNowPlaying does not
+      // trigger a second coalesced queue snapshot during silence pads.
+      upcomingForGenre = upcomingGenreHintFromQueueItems(items, trackNum);
     } catch {
       /* best-effort — fall back to last remembered tagline */
     }
@@ -1979,6 +2026,8 @@ async function getNowPlayingRaw() {
     durationSec,
     djVoice: djClip || silenceBridge,
     djSilence: silenceBridge,
+    // Internal hint for enrichNowPlaying during silence (stripped before wire).
+    ...(upcomingForGenre ? { upcomingForGenre } : {}),
     room: coordinator.Name,
     // Origin badge for the Now Playing pill (same tags as the queue list).
     ...(() => {

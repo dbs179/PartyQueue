@@ -45,6 +45,55 @@ test("queue signature changes only with queue tracks", () => {
   assert.notEqual(queueSignature({ tracks }), queueSignature({ tracks: [] }));
 });
 
+test("queue signature ignores object key order but sees badge and edit fields", () => {
+  const a = {
+    uri: "spotify:track:1",
+    title: "One",
+    artist: "A",
+    position: 2,
+    itemId: "Q:1",
+    searched: true,
+    requestedBy: "Sam",
+    dedication: "Jess",
+    genreLane: "pop",
+    genreLabel: "Pop",
+    genreLanes: ["pop"],
+    genreLabels: ["Pop"],
+  };
+  const b = {
+    dedication: "Jess",
+    genreLabels: ["Pop"],
+    genreLanes: ["pop"],
+    genreLabel: "Pop",
+    genreLane: "pop",
+    requestedBy: "Sam",
+    searched: true,
+    itemId: "Q:1",
+    position: 2,
+    artist: "A",
+    title: "One",
+    uri: "spotify:track:1",
+  };
+  assert.equal(queueSignature({ tracks: [a] }), queueSignature({ tracks: [b] }));
+
+  assert.notEqual(
+    queueSignature({ tracks: [a] }),
+    queueSignature({ tracks: [{ ...a, dedication: "Pat" }] })
+  );
+  assert.notEqual(
+    queueSignature({ tracks: [a] }),
+    queueSignature({ tracks: [{ ...a, position: 3 }] })
+  );
+  assert.notEqual(
+    queueSignature({ tracks: [a] }),
+    queueSignature({ tracks: [{ ...a, fromPlaylist: true }] })
+  );
+  assert.notEqual(
+    queueSignature({ tracks: [a] }),
+    queueSignature({ tracks: [{ ...a, moodPick: true, mood: "80s" }] })
+  );
+});
+
 test("queue SSE route sends retained data and releases demand on close", () => {
   let route = null;
   let subscribers = 0;

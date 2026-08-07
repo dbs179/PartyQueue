@@ -34,35 +34,45 @@ function labelForLane(lane) {
 }
 
 /**
- * First non-DJ upcoming queue track, shaped for resolveDisplayGenre.
+ * Shape a queue-list row (or equivalent) for resolveDisplayGenre.
  * Used while a DJ announce/silence pad is current so Genre stays on the
  * set the DJ is about to introduce.
  */
+export function shapeUpcomingForGenreDisplay(tracks) {
+  const next = (Array.isArray(tracks) ? tracks : []).find(
+    (t) => t && !t.djVoice && t.uri && (t.title || t.artist)
+  );
+  if (!next) return null;
+  const id = spotifyTrackId(next.uri);
+  const meta = id ? originSnapshot().get(id) : null;
+  const source =
+    meta?.source ||
+    (next.searched
+      ? "searched"
+      : next.discovered
+        ? "discovered"
+        : next.moodPick
+          ? "mood"
+          : typeof next.origin === "string"
+            ? next.origin
+            : null);
+  return {
+    uri: next.uri,
+    title: next.title || null,
+    artist: next.artist || null,
+    origin: source,
+    genreLane: meta?.genreLane || next.genreLane || null,
+  };
+}
+
+/**
+ * First non-DJ upcoming queue track via the coalesced queue snapshot.
+ * Prefer an attached `upcomingForGenre` from getNowPlaying (silence pads
+ * already fetched GetQueue for the companion TTS URI).
+ */
 export async function upcomingTrackForGenreDisplay() {
   try {
-    const tracks = await getQueueList();
-    const next = (Array.isArray(tracks) ? tracks : []).find(
-      (t) => t && !t.djVoice && t.uri && (t.title || t.artist)
-    );
-    if (!next) return null;
-    const id = spotifyTrackId(next.uri);
-    const meta = id ? originSnapshot().get(id) : null;
-    const source =
-      meta?.source ||
-      (next.searched
-        ? "searched"
-        : next.discovered
-          ? "discovered"
-          : next.moodPick
-            ? "mood"
-            : null);
-    return {
-      uri: next.uri,
-      title: next.title || null,
-      artist: next.artist || null,
-      origin: source,
-      genreLane: meta?.genreLane || null,
-    };
+    return shapeUpcomingForGenreDisplay(await getQueueList());
   } catch {
     return null;
   }
@@ -136,14 +146,20 @@ export async function enrichNowPlaying(np) {
   const fill = getAutoFillState();
   const rotation = getRotationSettings();
   const setLane = getGenreFlowState().lastLane;
-  const upcomingForGenre =
-    np?.djVoice || np?.djSilence ? await upcomingTrackForGenreDisplay() : null;
+  // Silence pads attach upcomingForGenre from the companion GetQueue; reuse it
+  // so we do not issue a second queue snapshot on every NP enrich tick.
+  let upcomingForGenre = null;
+  if (np?.djVoice || np?.djSilence) {
+    upcomingForGenre =
+      np.upcomingForGenre || (await upcomingTrackForGenreDisplay());
+  }
   const { mixGenreLane, mixGenreLabel } = resolveDisplayGenre(np, {
     setLane,
     upcomingForGenre,
   });
+  const { upcomingForGenre: _upcomingHint, ...publicNp } = np || {};
   return {
-    ...np,
+    ...publicNp,
     neverEnding: fill.enabled,
     // Host's Vibe mix, broadcast so every client (incl. the Party Display)
     // can label the current mood: enabled genre ids (null = all) + era mood.

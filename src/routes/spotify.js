@@ -17,9 +17,13 @@ import {
 import { getContentSettings } from "../settings.js";
 import { warmGenresFromPool } from "../genres.js";
 
-/** @param {import('express').Express} app */
-export function registerSpotifyRoutes(app) {
-  app.get("/api/search", asyncHandler(async (req, res) => {
+/**
+ * @param {import('express').Express} app
+ * @param {{ searchLimit: import('express').RequestHandler }} ctx
+ */
+export function registerSpotifyRoutes(app, ctx) {
+  const { searchLimit } = ctx;
+  app.get("/api/search", searchLimit, asyncHandler(async (req, res) => {
     const query = req.query.q;
     if (!query || !String(query).trim()) {
       return res.json({ tracks: [] });

@@ -131,7 +131,7 @@ function load() {
   buildIndex();
 }
 
-function persist() {
+function persistNow() {
   try {
     const out = (entries ?? []).map((e) => {
       const row = { key: e.key, id: e.id, source: e.source };
@@ -146,6 +146,32 @@ function persist() {
   } catch (err) {
     console.error("[queue-origin] save failed:", err.message);
   }
+}
+
+// Debounce disk writes (mirrors play-history): Random/refill bursts flush once.
+let persistTimer = null;
+function persist() {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    persistNow();
+  }, 1000);
+  persistTimer.unref?.();
+}
+
+function flushPersist() {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  if (entries === null) return false;
+  persistNow();
+  return true;
+}
+
+/** Flush pending origin writes (tests / shutdown). */
+export function flushOriginPersist() {
+  return flushPersist();
 }
 
 function trimEntries() {

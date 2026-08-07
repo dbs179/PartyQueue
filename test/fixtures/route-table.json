@@ -31,7 +31,7 @@
   "GET /api/reactions :: <anonymous>",
   "GET /api/ready :: <anonymous>",
   "GET /api/rooms :: <anonymous>",
-  "GET /api/search :: <anonymous>",
+  "GET /api/search :: searchLimit > <anonymous>",
   "GET /api/settings :: requireHost > <anonymous>",
   "GET /api/settings/pin-required :: <anonymous>",
   "GET /api/settings/pin-session :: <anonymous>",

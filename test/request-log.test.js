@@ -32,8 +32,18 @@ test("ignores requests without a valid id", () => {
 
 test("persists to disk so stats survive a restart", () => {
   reqlog.recordRequest({ id: "x", name: "X", artist: "Y" }, 1234);
+  reqlog.flushRequestsPersist();
   const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
   assert.ok(raw.some((e) => e.id === "x" && e.ts === 1234));
+});
+
+test("debounces disk writes until flush", () => {
+  reqlog.recordRequest({ id: "a", name: "A", artist: "X" }, 1);
+  reqlog.recordRequest({ id: "b", name: "B", artist: "Y" }, 2);
+  assert.equal(fs.existsSync(TMP_FILE), false);
+  assert.equal(reqlog.flushRequestsPersist(), true);
+  const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
+  assert.equal(raw.length, 2);
 });
 
 test("stores requestedBy on request events", () => {
@@ -43,6 +53,7 @@ test("stores requestedBy on request events", () => {
   );
   const all = reqlog.getRequests();
   assert.equal(all[0].requestedBy, "Pat");
+  reqlog.flushRequestsPersist();
   const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
   assert.equal(raw[0].requestedBy, "Pat");
 });
@@ -122,6 +133,7 @@ test("topRequesters aggregates by User when aliases differ", () => {
     { name: "Mark", count: 2 },
     { name: "Alex", count: 1 },
   ]);
+  reqlog.flushRequestsPersist();
   const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
   assert.equal(raw[0].requestedBy, "Mark");
   assert.equal(raw[0].alias, "Party Alex");

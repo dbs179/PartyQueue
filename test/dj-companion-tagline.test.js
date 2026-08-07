@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   findCompanionDjTtsUri,
+  upcomingGenreHintFromQueueItems,
   visibleUpcomingQueueItems,
 } from "../src/sonos.js";
 
@@ -95,4 +96,15 @@ test("a later announce block is still visible while an earlier one plays", () =>
     upcoming.map((u) => u.t.TrackUri),
     [song.TrackUri, tts2.TrackUri, song2.TrackUri]
   );
+});
+
+test("upcoming genre hint skips the announce block and returns the next song", () => {
+  const items = [song, ramp, tts, restore, song2];
+  // Current = ramp (track 2): same GetQueue the silence path already fetched.
+  const hint = upcomingGenreHintFromQueueItems(items, 2);
+  assert.equal(hint.uri, song2.TrackUri);
+  assert.equal(hint.title, "Closer");
+  // Current = TTS: still lands on the song after the pad.
+  assert.equal(upcomingGenreHintFromQueueItems(items, 3).uri, song2.TrackUri);
+  assert.equal(upcomingGenreHintFromQueueItems([], 1), null);
 });

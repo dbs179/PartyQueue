@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 
 const TMP_FILE = path.join(
   os.tmpdir(),
@@ -56,8 +55,18 @@ test("most-recent source wins when re-marked", () => {
 
 test("persists to disk so it survives a restart", async () => {
   origin.markOrigin(["p"], "searched");
+  origin.flushOriginPersist();
   const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
   assert.ok(raw.some((e) => e.id === "p" && e.source === "searched"));
+});
+
+test("debounces disk writes until flush", () => {
+  origin.markOrigin(["a"], "searched");
+  origin.markOrigin(["b"], "filler");
+  assert.equal(fs.existsSync(TMP_FILE), false);
+  assert.equal(origin.flushOriginPersist(), true);
+  const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
+  assert.equal(raw.length, 2);
 });
 
 test("ignores blank ids and unknown sources", () => {
@@ -191,6 +200,7 @@ test("stores the decade on mood origins and survives a reload", () => {
   const snap = origin.originSnapshot().get("era1");
   assert.equal(snap.source, "mood");
   assert.equal(snap.mood, "80s");
+  origin.flushOriginPersist();
   const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
   assert.ok(raw.some((e) => e.id === "era1" && e.mood === "80s"));
   origin.markOrigin(["era2"], "mood", { mood: "90s" });
@@ -203,6 +213,7 @@ test("stores the decade on mood origins and survives a reload", () => {
 test("stores the set genre lane on filler origins and survives a reload", () => {
   origin.markOrigin(["lane1"], "filler", { genreLane: "pop" });
   assert.equal(origin.genreLaneOf("lane1"), "pop");
+  origin.flushOriginPersist();
   const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
   assert.ok(raw.some((e) => e.id === "lane1" && e.genreLane === "pop"));
   origin.markOrigin(["lane2"], "discovered", { genreLane: "folk" });

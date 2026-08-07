@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createLogger, redactString } from "./logger.js";
 import { installConsoleBridge } from "./console-bridge.js";
 import { hostGuard } from "./http/host-guard.js";
+import { asyncHandler } from "./http/async-handler.js";
 import { softRateLimit } from "./rate-limit.js";
 import {
   nowPlayingMonitor,
@@ -46,6 +47,8 @@ import {
 import { flushHistoryPersist } from "./play-history.js";
 import { flushLyricsPersist } from "./lyrics.js";
 import { flushReactionsPersist } from "./reactions.js";
+import { flushOriginPersist } from "./queue-origin.js";
+import { flushRequestsPersist } from "./request-log.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -160,15 +163,16 @@ app.use((req, res, next) => {
 // Inject saved branding JSON into index.html before first paint.
 const INDEX_HTML_PATH = path.join(__dirname, "..", "public", "index.html");
 
-// Template cache: a cheap stat per request instead of re-reading ~100 KB of
-// HTML for every page load (and twice on the error path). mtime validation
-// keeps local-dev edits visible without a restart.
+// Template cache: a cheap async stat per request instead of re-reading ~100 KB
+// of HTML for every page load (and twice on the error path). mtime validation
+// keeps local-dev edits visible without a restart. Async so cold loads do not
+// block the event loop on sync disk I/O.
 let indexTemplateCache = null; // { html, mtimeMs }
-function indexTemplate() {
-  const { mtimeMs } = fs.statSync(INDEX_HTML_PATH);
+async function indexTemplate() {
+  const { mtimeMs } = await fs.promises.stat(INDEX_HTML_PATH);
   if (!indexTemplateCache || indexTemplateCache.mtimeMs !== mtimeMs) {
     indexTemplateCache = {
-      html: fs.readFileSync(INDEX_HTML_PATH, "utf8"),
+      html: await fs.promises.readFile(INDEX_HTML_PATH, "utf8"),
       mtimeMs,
     };
   }
@@ -194,15 +198,15 @@ function indexCsp(nonce) {
   ].join("; ");
 }
 
-function renderIndexHtml(brandJson) {
+async function renderIndexHtml(brandJson) {
   const nonce = crypto.randomBytes(16).toString("base64");
-  const html = indexTemplate()
+  const html = (await indexTemplate())
     .replaceAll("__PQ_BRAND_JSON__", brandJson)
     .replaceAll("__PQ_NONCE__", nonce);
   return { html, nonce };
 }
 
-function sendBrandedIndex(_req, res) {
+async function sendBrandedIndex(_req, res) {
   try {
     const { eventName, subtitle, heroBanner, showVersion, showQueueGenre } =
       getBrandingSettings();
@@ -214,14 +218,14 @@ function sendBrandedIndex(_req, res) {
       showVersion: !!showVersion,
       showQueueGenre: !!showQueueGenre,
     }).replace(/</g, "\\u003c");
-    const { html, nonce } = renderIndexHtml(brandJson);
+    const { html, nonce } = await renderIndexHtml(brandJson);
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Content-Security-Policy", indexCsp(nonce));
     res.type("html").send(html);
   } catch (err) {
     console.error("[index] brand inject failed:", err.message);
     try {
-      const { html, nonce } = renderIndexHtml("null");
+      const { html, nonce } = await renderIndexHtml("null");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Content-Security-Policy", indexCsp(nonce));
       return res.type("html").send(html);
@@ -230,7 +234,9 @@ function sendBrandedIndex(_req, res) {
     }
   }
 }
-app.get(["/", "/index.html"], sendBrandedIndex);
+const brandedIndex = asyncHandler(sendBrandedIndex);
+brandedIndex.displayName = "sendBrandedIndex";
+app.get(["/", "/index.html"], brandedIndex);
 
 // App code (HTML/CSS/JS) stays "no-cache" so deploys reach guests immediately
 // (cheap 304 revalidations). Images and vendored libs rarely change and cost
@@ -305,12 +311,20 @@ const transportLimit = softRateLimit({
   max: 4,
   message: "Easy on the controls — try again in a moment.",
 });
+// Guest search is client-debounced (~300ms); stay generous for shared NAT
+// (many phones, one public IP) while still capping Spotify spam.
+const searchLimit = softRateLimit({
+  windowMs: 10_000,
+  max: 20,
+  message: "Search is cooling down — try again in a moment.",
+});
 // Tag the limiter closures so the route-table parity test (and debuggers) can
 // tell them apart — they all share the internal name "rateLimitMiddleware".
 queueBurstLimit.displayName = "queueBurstLimit";
 queueSustainedLimit.displayName = "queueSustainedLimit";
 destructiveLimit.displayName = "destructiveLimit";
 transportLimit.displayName = "transportLimit";
+searchLimit.displayName = "searchLimit";
 
 registerNowPlayingRoutes(app);
 registerQueueStreamRoutes(app);
@@ -322,6 +336,7 @@ registerApiRoutes(app, {
   queueSustainedLimit,
   destructiveLimit,
   transportLimit,
+  searchLimit,
   requestShutdown: (opts) => {
     void shutdownServer(opts);
   },
@@ -351,6 +366,8 @@ function flushShutdownStores() {
     ["genres", flushGenrePersist],
     ["lyrics", flushLyricsPersist],
     ["reactions", flushReactionsPersist],
+    ["queue-origin", flushOriginPersist],
+    ["requests", flushRequestsPersist],
   ]) {
     try {
       flush();

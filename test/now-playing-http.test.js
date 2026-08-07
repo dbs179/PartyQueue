@@ -139,6 +139,27 @@ test("resolveDisplayGenre during DJ uses the upcoming song's set lane", async ()
   );
 });
 
+test("enrichNowPlaying reuses attached upcomingForGenre and strips it", async () => {
+  const { enrichNowPlaying } = await import("../src/now-playing-http.js");
+  const enriched = await enrichNowPlaying({
+    title: "DJ Holy Roller",
+    artist: "Live from the Booth",
+    uri: "http://10.10.1.30:8088/media/tts/silence-2s.mp3",
+    djVoice: true,
+    djSilence: true,
+    upcomingForGenre: {
+      title: "Neon",
+      artist: "DJ Artist",
+      uri: "spotify:track:neo",
+      origin: "filler",
+      genreLane: "electronic",
+    },
+  });
+  assert.equal(enriched.mixGenreLane, "electronic");
+  assert.equal(enriched.mixGenreLabel, "Electronic");
+  assert.equal("upcomingForGenre" in enriched, false);
+});
+
 test("position age is calculated using the server clock", async () => {
   const { addPositionAge } = await import("../src/now-playing-http.js");
   const payload = addPositionAge(

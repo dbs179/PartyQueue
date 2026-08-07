@@ -24,6 +24,7 @@ import { registerDjRoutes } from "./dj.js";
  *   queueSustainedLimit: import('express').RequestHandler,
  *   destructiveLimit: import('express').RequestHandler,
  *   transportLimit: import('express').RequestHandler,
+ *   searchLimit: import('express').RequestHandler,
  *   requestShutdown: (opts?: object) => void,
  *   sonos?: object,
  * }} ApiCtx
@@ -37,7 +38,7 @@ export function registerApiRoutes(app, ctx) {
   registerSystemRoutes(app, ctx);
   registerQueueRoutes(app, ctx);
   registerTransportRoutes(app, ctx);
-  registerSpotifyRoutes(app);
+  registerSpotifyRoutes(app, ctx);
   registerConnectionRoutes(app);
   registerSettingsRoutes(app);
   registerHostPinRoutes(app);

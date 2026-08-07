@@ -1,5 +1,5 @@
-// Soft per-IP rate limit for destructive / noisy APIs (clear, random, transport).
-// Blunts LAN pranks without requiring auth.
+// Soft per-IP rate limit for destructive / noisy APIs (clear, random,
+// transport, search). Blunts LAN pranks without requiring auth.
 
 /**
  * @param {{
