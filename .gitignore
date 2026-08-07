@@ -1,4 +1,6 @@
 node_modules/
+# Client bundle (built by npm run build:client / Docker multi-stage).
+public/js/dist/
 .env
 .env.*
 *.env

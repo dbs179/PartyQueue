@@ -78,6 +78,20 @@ try {
   /* version stays blank if package.json can't be read */
 }
 
+const CLIENT_BUNDLE_PATH = path.join(
+  __dirname,
+  "..",
+  "public",
+  "js",
+  "dist",
+  "main.js"
+);
+if (!fs.existsSync(CLIENT_BUNDLE_PATH)) {
+  console.warn(
+    "[server] missing public/js/dist/main.js — run `npm run build:client` (Docker builds this in the image)."
+  );
+}
+
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 let httpServer = null;
 let shuttingDown = false;
@@ -208,7 +222,9 @@ async function renderIndexHtml(brandJson) {
   const nonce = crypto.randomBytes(16).toString("base64");
   const html = (await indexTemplate())
     .replaceAll("__PQ_BRAND_JSON__", brandJson)
-    .replaceAll("__PQ_NONCE__", nonce);
+    .replaceAll("__PQ_NONCE__", nonce)
+    // Bust phone caches on deploy; matches package.json version.
+    .replaceAll("__PQ_VERSION__", VERSION || "0");
   return { html, nonce };
 }
 

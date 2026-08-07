@@ -108,7 +108,15 @@ describe("HTTP server harness", { concurrency: false }, () => {
     assert.equal(res.status, 200);
     assert.match(res.headers.get("cache-control") || "", /no-cache/i);
     const body = await res.text();
-    assert.match(body, /import\(/);
+    assert.match(body, /import\s+[\"']\.\/app\.js[\"']/);
+  });
+
+  test("branded index loads the bundled client with a version query", async () => {
+    const page = await fetch(`${baseUrl}/`);
+    assert.equal(page.status, 200);
+    const html = await page.text();
+    assert.match(html, /js\/dist\/main\.js\?v=/);
+    assert.doesNotMatch(html, /__PQ_VERSION__/);
   });
 
   test("Party Display assets and join QR are available without Sonos", async () => {

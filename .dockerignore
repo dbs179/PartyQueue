@@ -10,7 +10,9 @@ npm-debug.log
 data
 test
 e2e
-scripts
+# Keep scripts/build-client.mjs available for the client-build stage; ignore the rest.
+scripts/**
+!scripts/build-client.mjs
 test-results
 playwright-report
 .tmp-*

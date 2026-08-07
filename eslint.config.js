@@ -14,6 +14,7 @@ export default [
       "playwright-report/**",
       "test-results/**",
       "public/vendor/**", // minified third-party bundles
+      "public/js/dist/**", // esbuild client bundle + sourcemaps
     ],
   },
   js.configs.recommended,
