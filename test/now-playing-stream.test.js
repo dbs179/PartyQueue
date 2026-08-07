@@ -338,9 +338,10 @@ test("shutdown waits for an active read and rejects new subscribers", async () =
   assert.throws(() => monitor.subscribe(() => {}), /stopped/);
 });
 
-test("the fingerprint ignores playback clock fields and key order", () => {
+test("the fingerprint ignores playback clock fields and reaction key order", () => {
   const first = {
     title: "One",
+    uri: "spotify:track:1",
     reactions: { fire: 2, like: 1 },
     positionSec: 1,
     positionObservedAt: 100,
@@ -351,9 +352,37 @@ test("the fingerprint ignores playback clock fields and key order", () => {
     positionAgeSec: 0.4,
     reactions: { like: 1, fire: 2 },
     positionSec: 9,
+    uri: "spotify:track:1",
     title: "One",
   };
   assert.equal(nowPlayingSignature(first), nowPlayingSignature(second));
+});
+
+test("the fingerprint ignores party-settings fields and reacts to track changes", () => {
+  const base = {
+    uri: "spotify:track:1",
+    title: "One",
+    artist: "A",
+    state: "PLAYING",
+    mixGenreLane: "folk",
+    mixGenreLabel: "Folk",
+  };
+  assert.equal(
+    nowPlayingSignature({ ...base, neverEnding: true, kidsLock: true }),
+    nowPlayingSignature({ ...base, neverEnding: false, kidsLock: false })
+  );
+  assert.notEqual(
+    nowPlayingSignature(base),
+    nowPlayingSignature({ ...base, title: "Two" })
+  );
+  assert.notEqual(
+    nowPlayingSignature(base),
+    nowPlayingSignature({ ...base, mixGenreLane: "pop", mixGenreLabel: "Pop" })
+  );
+  assert.notEqual(
+    nowPlayingSignature({ ...base, reactions: { fire: 1 } }),
+    nowPlayingSignature({ ...base, reactions: { fire: 2 } })
+  );
 });
 
 test("clock discontinuity detection tolerates normal Sonos time quantization", () => {

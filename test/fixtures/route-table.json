@@ -25,6 +25,8 @@
   "GET /api/media-base :: <anonymous>",
   "GET /api/nowplaying :: <anonymous>",
   "GET /api/nowplaying/stream :: <anonymous>",
+  "GET /api/party :: <anonymous>",
+  "GET /api/party/stream :: <anonymous>",
   "GET /api/playlists :: <anonymous>",
   "GET /api/queue/list :: <anonymous>",
   "GET /api/queue/stream :: <anonymous>",

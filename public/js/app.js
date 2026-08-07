@@ -4400,13 +4400,16 @@ if (pinCancelBtn) {
   pinCancelBtn.addEventListener("click", dismissPinGate);
 }
 
-// ---- Shared live Now Playing + queue streams ----------------------------
+// ---- Shared live Now Playing + queue + party streams ---------------------
 // Visible main views share demand-driven server monitors through SSE. Hidden
-// tabs and sub-pages close both streams so idle phones produce no Sonos reads.
+// tabs and sub-pages close streams so idle phones produce no Sonos reads.
+// Party toggles ride /api/party (not Now Playing).
 const NOW_PLAYING_FALLBACK_MS = 15000;
 const NOW_PLAYING_FALLBACK_DELAY_MS = 5000;
 const QUEUE_FALLBACK_MS = 15000;
 const QUEUE_FALLBACK_DELAY_MS = 5000;
+const PARTY_FALLBACK_MS = 20000;
+const PARTY_FALLBACK_DELAY_MS = 5000;
 let nowPlayingSource = null;
 let nowPlayingStreamConnected = false;
 let nowPlayingFallbackTimer = null;
@@ -4423,11 +4426,18 @@ let queueStreamSequence = 0;
 let queueStreamVersion = 0;
 let queueHttpRequest = 0;
 let pendingQueueStreamTracks = null;
+let partySource = null;
+let partyStreamConnected = false;
+let partyFallbackTimer = null;
+let partyFallbackDelayTimer = null;
+let partyStreamSession = "";
+let partyStreamSequence = 0;
+let lastPartySettings = null;
 let appReady = false;
 
 function shouldPoll() {
   // Include Vibe (`mix`) so Discover / Never-Ending / Filter toggles keep
-  // hydrating from Now Playing while the host is adjusting the mix — otherwise
+  // hydrating from /api/party while the host is adjusting the mix — otherwise
   // phones that open straight into Vibe sit on HTML defaults until a save.
   return (
     document.visibilityState === "visible" &&
@@ -4675,6 +4685,147 @@ function closeQueueStream() {
   }
 }
 
+function stopPartyFallback() {
+  if (partyFallbackDelayTimer) {
+    clearTimeout(partyFallbackDelayTimer);
+    partyFallbackDelayTimer = null;
+  }
+  if (partyFallbackTimer) {
+    clearInterval(partyFallbackTimer);
+    partyFallbackTimer = null;
+  }
+}
+
+function startPartyFallback() {
+  if (
+    !shouldPoll() ||
+    partyStreamConnected ||
+    partyFallbackDelayTimer ||
+    partyFallbackTimer
+  ) {
+    return;
+  }
+  partyFallbackDelayTimer = setTimeout(() => {
+    partyFallbackDelayTimer = null;
+    if (!shouldPoll() || partyStreamConnected) return;
+    void loadPartySettings();
+    partyFallbackTimer = setInterval(loadPartySettings, PARTY_FALLBACK_MS);
+  }, PARTY_FALLBACK_DELAY_MS);
+}
+
+/** Apply guest-safe party flags from /api/party (SSE or HTTP). */
+function applyPartySettings(payload) {
+  if (!payload || typeof payload !== "object") return;
+  lastPartySettings = payload;
+  if ("neverEnding" in payload) syncAutoFillFromServer(payload.neverEnding);
+  if ("discoverEnabled" in payload) {
+    syncDiscoverFromServer(payload.discoverEnabled);
+  }
+  syncContentTogglesFromServer(payload);
+  if (payload.showQueueGenre != null) {
+    syncShowQueueGenre(!!payload.showQueueGenre, { rerender: true });
+  }
+  syncRotationFromServer(payload);
+  updateMixSelectionFromServer(payload);
+  if (payload.requestsPaused != null) {
+    setRequestsPausedUi(!!payload.requestsPaused);
+  }
+  if (payload.partyOver != null && Date.now() - partyOverTouchedAt > 4000) {
+    setPartyOverUi(!!payload.partyOver);
+  }
+  if (payload.hostControlsOnly != null) {
+    hostControlsOnly = !!payload.hostControlsOnly;
+    if (hostControlsInput) hostControlsInput.checked = hostControlsOnly;
+    syncHostControlsVisibility();
+  }
+  maybeAnnounceClosingTime(payload.closingTimeAt, payload.partyRecap);
+}
+
+function applyPartyStreamSnapshot(snapshot) {
+  const session =
+    typeof snapshot?.streamSession === "string" ? snapshot.streamSession : "";
+  const sequence = Number(snapshot?.streamSequence);
+  if (
+    session &&
+    session === partyStreamSession &&
+    Number.isFinite(sequence) &&
+    sequence <= partyStreamSequence
+  ) {
+    return;
+  }
+  if (session && session !== partyStreamSession) {
+    partyStreamSession = session;
+    partyStreamSequence = 0;
+  }
+  if (Number.isFinite(sequence)) partyStreamSequence = sequence;
+  applyPartySettings(snapshot);
+}
+
+async function loadPartySettings() {
+  try {
+    const res = await fetch("/api/party");
+    if (!res.ok) return;
+    applyPartySettings(await res.json());
+  } catch {
+    /* leave toggles as-is on transient errors */
+  }
+}
+
+function openPartyStream() {
+  if (partySource || !shouldPoll()) return;
+  void loadPartySettings();
+  if (typeof EventSource !== "function") {
+    startPartyFallback();
+    return;
+  }
+  partyStreamSession = "";
+  partyStreamSequence = 0;
+  const source = new EventSource("/api/party/stream");
+  partySource = source;
+  source.onopen = () => {
+    if (partySource !== source) return;
+    partyStreamConnected = true;
+    stopPartyFallback();
+  };
+  source.addEventListener("party-status", (event) => {
+    if (partySource !== source) return;
+    try {
+      const health = JSON.parse(event.data);
+      if (health?.status === "disconnected") {
+        partyStreamConnected = false;
+        startPartyFallback();
+      } else if (health?.status === "connected") {
+        partyStreamConnected = true;
+        stopPartyFallback();
+      }
+    } catch {
+      /* ignore malformed status events */
+    }
+  });
+  source.onmessage = (event) => {
+    if (partySource !== source) return;
+    try {
+      applyPartyStreamSnapshot(JSON.parse(event.data));
+    } catch {
+      /* ignore malformed stream events */
+    }
+  };
+  source.onerror = () => {
+    if (partySource !== source) return;
+    partyStreamConnected = false;
+    startPartyFallback();
+  };
+}
+
+function closePartyStream() {
+  partyStreamConnected = false;
+  stopPartyFallback();
+  if (partySource) {
+    partySource.close();
+    partySource = null;
+  }
+}
+
 // Open/close live streams to match the active visible view. An initial HTTP
 // read paints immediately while SSE establishes and remains the fallback path.
 function syncPolling() {
@@ -4683,9 +4834,11 @@ function syncPolling() {
     if (currentView !== "display") void loadGroups();
     openNowPlayingStream();
     openQueueStream();
+    openPartyStream();
   } else {
     closeNowPlayingStream();
     closeQueueStream();
+    closePartyStream();
   }
 }
 
@@ -6261,9 +6414,9 @@ function beginOptimisticSkipFromQueue() {
   if (!next) return false;
   optimisticNp = queueTrackAsNowPlaying(next, {
     room: lastConfirmedNp?.room || lastTransportNp?.room || null,
-    neverEnding: lastTransportNp?.neverEnding,
-    requestsPaused: lastTransportNp?.requestsPaused,
-    hostControlsOnly: lastTransportNp?.hostControlsOnly,
+    neverEnding: lastPartySettings?.neverEnding,
+    requestsPaused: lastPartySettings?.requestsPaused,
+    hostControlsOnly: lastPartySettings?.hostControlsOnly,
   });
   if (lastTransportNp) renderNowPlaying(lastTransportNp);
   else {
@@ -6309,28 +6462,9 @@ function adoptTransportConfirmation(transport) {
 
 function renderNowPlaying(transport) {
   lastTransportNp = transport || null;
-  if (transport) {
-    syncAutoFillFromServer(transport.neverEnding);
-    syncDiscoverFromServer(transport.discoverEnabled);
-    syncContentTogglesFromServer(transport);
-    if (transport.showQueueGenre != null) {
-      syncShowQueueGenre(!!transport.showQueueGenre, { rerender: true });
-    }
-    syncRotationFromServer(transport);
-    updateMixFromServer(transport);
-    if (transport.requestsPaused != null) {
-      setRequestsPausedUi(!!transport.requestsPaused);
-    }
-    if (transport.partyOver != null && Date.now() - partyOverTouchedAt > 4000) {
-      setPartyOverUi(!!transport.partyOver);
-    }
-    if (transport.hostControlsOnly != null) {
-      hostControlsOnly = !!transport.hostControlsOnly;
-      if (hostControlsInput) hostControlsInput.checked = hostControlsOnly;
-      syncHostControlsVisibility();
-    }
-    maybeAnnounceClosingTime(transport.closingTimeAt, transport.partyRecap);
-  }
+  // Party toggles / Vibe selection / Closing Time arrive via /api/party.
+  // NP only owns the per-track Genre header (and reactions further below).
+  if (transport) updateMixGenreHeaderFromServer(transport);
 
   adoptTransportConfirmation(transport);
   const resolved = resolveNowPlayingDisplay({
@@ -7334,33 +7468,36 @@ function updateMixLabels() {
   }
 }
 
-function updateMixFromServer(np) {
-  if (
-    !np ||
-    (!("mixGenres" in np) &&
-      !("mixMood" in np) &&
-      !("mixGenreLabel" in np) &&
-      !("mixGenreLane" in np))
-  ) {
-    return;
+/** Vibe mix selection (genres + era mood) — owned by /api/party. */
+function updateMixSelectionFromServer(party) {
+  if (!party || (!("mixGenres" in party) && !("mixMood" in party))) return;
+  if ("mixGenres" in party) {
+    serverMix.genres = Array.isArray(party.mixGenres) ? party.mixGenres : null;
   }
-  if ("mixGenres" in np) {
-    serverMix.genres = Array.isArray(np.mixGenres) ? np.mixGenres : null;
-  }
-  if ("mixMood" in np) {
-    serverMix.mood = typeof np.mixMood === "string" ? np.mixMood : null;
-  }
-  if ("mixGenreLabel" in np || "mixGenreLane" in np) {
-    const label =
-      typeof np.mixGenreLabel === "string" && np.mixGenreLabel
-        ? np.mixGenreLabel
-        : typeof np.mixGenreLane === "string" && np.mixGenreLane
-          ? np.mixGenreLane
-          : null;
-    serverMix.genreLabel = label;
+  if ("mixMood" in party) {
+    serverMix.mood = typeof party.mixMood === "string" ? party.mixMood : null;
   }
   updateMixLabels();
   applyServerMixToPickers();
+}
+
+/** Per-track Genre header — owned by Now Playing. */
+function updateMixGenreHeaderFromServer(np) {
+  if (!np || (!("mixGenreLabel" in np) && !("mixGenreLane" in np))) return;
+  const label =
+    typeof np.mixGenreLabel === "string" && np.mixGenreLabel
+      ? np.mixGenreLabel
+      : typeof np.mixGenreLane === "string" && np.mixGenreLane
+        ? np.mixGenreLane
+        : null;
+  serverMix.genreLabel = label;
+  updateMixLabels();
+}
+
+/** @deprecated Prefer updateMixSelectionFromServer / updateMixGenreHeaderFromServer */
+function updateMixFromServer(payload) {
+  updateMixSelectionFromServer(payload);
+  updateMixGenreHeaderFromServer(payload);
 }
 
 // When the server changes the mix underneath us (Random Mood / Random Decade
@@ -7947,6 +8084,7 @@ loadSettings();
 // Public toggle hydrate immediately — don't wait on Spotify playlist/genre
 // sweeps or phones open looking like Discover / Never-Ending are off.
 void loadAutoFill();
+void loadPartySettings();
 // Spotify app / Last.fm / HA status: deferred until Settings opens (revealSettings).
 loadVersion();
 loadPinRequired();

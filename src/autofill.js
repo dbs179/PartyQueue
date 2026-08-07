@@ -251,6 +251,11 @@ export async function rotateSelectionIfDue(deps = {}) {
     if (nextDecade !== undefined) setsSinceDecadeRotation = 0;
     else if (rot.randomDecadeEnabled) setsSinceDecadeRotation += 1;
 
+    // Dynamic import avoids a cycle (party-settings-http reads autofill state).
+    import("./party-settings-http.js")
+      .then((m) => m.nudgePartySettingsStream())
+      .catch(() => {});
+
     console.log(
       "[rotate] " +
         [

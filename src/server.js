@@ -20,6 +20,11 @@ import {
   closeQueueStreams,
   registerQueueStreamRoutes,
 } from "./queue-http.js";
+import {
+  partySettingsMonitor,
+  closePartySettingsStreams,
+  registerPartySettingsRoutes,
+} from "./party-settings-http.js";
 import { registerApiRoutes } from "./routes/index.js";
 import { getBrandingSettings, setDiscoverySettings } from "./settings.js";
 import {
@@ -328,6 +333,7 @@ searchLimit.displayName = "searchLimit";
 
 registerNowPlayingRoutes(app);
 registerQueueStreamRoutes(app);
+registerPartySettingsRoutes(app);
 registerApiRoutes(app, {
   VERSION,
   isListening: () => !!httpServer?.listening,
@@ -545,11 +551,13 @@ export async function shutdownServer({
   stopGenreWarm();
   closeNowPlayingStreams();
   closeQueueStreams();
+  closePartySettingsStreams();
   const pendingShutdown = [
     stopAutoFillMonitor(),
     stopQueueMaintenance(),
     nowPlayingMonitor.stop(),
     queueMonitor.stop(),
+    partySettingsMonitor.stop(),
   ];
 
   if (httpServer?.listening) {

@@ -46,6 +46,10 @@ export function isPartyOver(now = Date.now()) {
   if (!c.partyOver) return false;
   if (c.partyOverAt && now - c.partyOverAt > PARTY_OVER_TTL_MS) {
     setContentSettings({ partyOver: false });
+    // Dynamic import avoids a cycle (party-settings-http reads isPartyOver).
+    import("./party-settings-http.js")
+      .then((m) => m.nudgePartySettingsStream())
+      .catch(() => {});
     return false;
   }
   return true;

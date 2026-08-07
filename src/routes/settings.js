@@ -46,6 +46,7 @@ import {
 } from "../reactions.js";
 import { clearSuggestions } from "../suggestion-box.js";
 import { nudgeNowPlayingStream } from "../now-playing-http.js";
+import { nudgePartySettingsStream } from "../party-settings-http.js";
 
 /** @param {import('express').Express} app */
 export function registerSettingsRoutes(app) {
@@ -108,7 +109,8 @@ export function registerSettingsRoutes(app) {
       setContentSettings(body);
       setDjVoiceSettings(body);
       setBrandingSettings(body);
-      nudgeNowPlayingStream();
+      // Party-wide toggles/mix live on /api/party — not Now Playing.
+      nudgePartySettingsStream();
       res.json({
         ok: true,
         ...getRandomnessSettings(),

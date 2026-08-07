@@ -1,16 +1,8 @@
 import { createLogger } from "./logger.js";
 import { admitSseClient } from "./http/sse-limits.js";
 import { createNowPlayingMonitor } from "./now-playing-stream.js";
-import { getAutoFillState, getClosingTimeAt, getLastPartyRecap } from "./autofill.js";
 import { dominantBucket, getGenreFlowState } from "./genre-flow.js";
 import { bucketsForArtistSync, GENRE_BUCKETS } from "./genres.js";
-import {
-  getBrandingSettings,
-  getContentSettings,
-  getDiscoverySettings,
-  getRotationSettings,
-} from "./settings.js";
-import { isPartyOver } from "./party-rituals.js";
 import { getReactions } from "./reactions.js";
 import { originSnapshot } from "./queue-origin.js";
 import { spotifyTrackId } from "./sampler.js";
@@ -143,8 +135,6 @@ export function resolveDisplayGenre(
 
 export async function enrichNowPlaying(np) {
   const trackId = spotifyTrackId(np?.uri);
-  const fill = getAutoFillState();
-  const rotation = getRotationSettings();
   const setLane = getGenreFlowState().lastLane;
   // Silence pads attach upcomingForGenre from the companion GetQueue; reuse it
   // so we do not issue a second queue snapshot on every NP enrich tick.
@@ -158,31 +148,12 @@ export async function enrichNowPlaying(np) {
     upcomingForGenre,
   });
   const { upcomingForGenre: _upcomingHint, ...publicNp } = np || {};
+  // Party-wide toggles / Vibe selection / Closing Time live on /api/party.
+  // NP enrich stays track-scoped: Genre header + reactions for this song.
   return {
     ...publicNp,
-    neverEnding: fill.enabled,
-    // Host's Vibe mix, broadcast so every client (incl. the Party Display)
-    // can label the current mood: enabled genre ids (null = all) + era mood.
-    mixGenres: fill.genres,
-    mixMood: fill.mood,
-    // Genre header: set lane while a set track plays; request artist genre
-    // while a guest request plays; next-up lane while DJ announces; cleared
-    // when idle / no relevant track.
     mixGenreLane,
     mixGenreLabel,
-    // Broadcast so the toggles reflect server truth even before host login
-    // (sessions are in-memory, so every deploy used to leave them looking off).
-    discoverEnabled: getDiscoverySettings().discoverEnabled,
-    showQueueGenre: !!getBrandingSettings().showQueueGenre,
-    randomMoodEnabled: rotation.randomMoodEnabled,
-    randomDecadeEnabled: rotation.randomDecadeEnabled,
-    filterExplicit: !!getContentSettings().filterExplicit,
-    kidsLock: !!getContentSettings().kidsLock,
-    requestsPaused: getContentSettings().requestsPaused,
-    partyOver: isPartyOver(),
-    hostControlsOnly: getContentSettings().hostControlsOnly,
-    closingTimeAt: getClosingTimeAt(),
-    partyRecap: getLastPartyRecap(),
     reactions: trackId ? getReactions(trackId) : getReactions(""),
   };
 }

@@ -89,6 +89,7 @@ import {
 } from "../party-rituals.js";
 import { requireHostControls } from "../http/host-controls.js";
 import { nudgeNowPlayingStream } from "../now-playing-http.js";
+import { nudgePartySettingsStream } from "../party-settings-http.js";
 
 /** @param {import('express').Express} app @param {import('./api.js').ApiCtx} ctx */
 export function registerQueueRoutes(app, ctx) {
@@ -334,7 +335,10 @@ export function registerQueueRoutes(app, ctx) {
         );
       }
 
-      if (closingTime) nudgeNowPlayingStream();
+      if (closingTime) {
+        nudgePartySettingsStream();
+        nudgeNowPlayingStream();
+      }
       res.json({
         ok: true,
         ...result,
@@ -632,7 +636,7 @@ export function registerQueueRoutes(app, ctx) {
       const genreIds = Array.isArray(genres) ? genres : undefined;
       // `mood` absent = unchanged; null (or unknown id) = clear.
       const state = setAutoFill(!!enabled, ids, genreIds, mood);
-      nudgeNowPlayingStream();
+      nudgePartySettingsStream();
       res.json({ ok: true, ...state });
     } catch (err) {
       console.error("[autofill]", err.message);
@@ -648,8 +652,8 @@ export function registerQueueRoutes(app, ctx) {
       const ids = Array.isArray(playlistIds) ? playlistIds : undefined;
       const genreIds = Array.isArray(genres) ? genres : undefined;
       const saved = savePickerSelection(ids, genreIds, mood);
-      // Broadcast so the Now Playing / Party Display mix labels update live.
-      nudgeNowPlayingStream();
+      // Broadcast so Party Display / Vibe mix labels update live.
+      nudgePartySettingsStream();
       res.json({ ok: true, ...saved });
     } catch (err) {
       console.error("[selection]", err.message);

@@ -12,18 +12,48 @@ function stableValue(value) {
   );
 }
 
+function reactionsSignature(reactions) {
+  if (!reactions || typeof reactions !== "object") return "";
+  return JSON.stringify(stableValue(reactions));
+}
+
+/**
+ * Track / transport fingerprint only. Party-wide toggles live on /api/party
+ * and must not force NP republish (or deep-clone) every settings poll.
+ */
 export function nowPlayingSignature(snapshot = null) {
   if (!snapshot || typeof snapshot !== "object") return "";
-  const {
-    positionSec: _positionSec,
-    positionObservedAt: _positionObservedAt,
-    positionAgeSec: _positionAgeSec,
-    streamSession: _streamSession,
-    streamSequence: _streamSequence,
-    streamSentAt: _streamSentAt,
-    ...meaningful
-  } = snapshot;
-  return JSON.stringify(stableValue(meaningful));
+  return [
+    snapshot.uri ?? "",
+    snapshot.title ?? "",
+    snapshot.artist ?? "",
+    snapshot.album ?? "",
+    snapshot.albumArt ?? "",
+    snapshot.state ?? "",
+    snapshot.isPlaying ? 1 : 0,
+    snapshot.queuePlaying ? 1 : 0,
+    snapshot.muted ? 1 : 0,
+    snapshot.shuffle ? 1 : 0,
+    snapshot.queueTrack ?? "",
+    snapshot.room ?? "",
+    snapshot.durationSec ?? "",
+    snapshot.origin ?? "",
+    snapshot.searched ? 1 : 0,
+    snapshot.discovered ? 1 : 0,
+    snapshot.moodPick ? 1 : 0,
+    snapshot.mood ?? "",
+    snapshot.genreLane ?? "",
+    snapshot.requestedBy ?? "",
+    snapshot.requestedByUser ?? "",
+    snapshot.dedication ?? "",
+    snapshot.djVoice ? 1 : 0,
+    snapshot.djSilence ? 1 : 0,
+    snapshot.mixGenreLane ?? "",
+    snapshot.mixGenreLabel ?? "",
+    snapshot.metadataPending ? 1 : 0,
+    snapshot.updating ? 1 : 0,
+    reactionsSignature(snapshot.reactions),
+  ].join("\x1f");
 }
 
 export function nowPlayingClockDiscontinuous(previous, next) {

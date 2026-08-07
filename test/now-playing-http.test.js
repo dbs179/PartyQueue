@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-test("enrichNowPlaying adds shared party flags without throwing", async () => {
+test("enrichNowPlaying stays track-scoped (party flags live on /api/party)", async () => {
   const { enrichNowPlaying } = await import("../src/now-playing-http.js");
   const enriched = await enrichNowPlaying({
     title: "Test",
@@ -14,14 +14,15 @@ test("enrichNowPlaying adds shared party flags without throwing", async () => {
     uri: "spotify:track:abc",
   });
   assert.equal(enriched.title, "Test");
-  assert.equal(typeof enriched.neverEnding, "boolean");
-  assert.equal(typeof enriched.requestsPaused, "boolean");
-  assert.equal(typeof enriched.hostControlsOnly, "boolean");
-  assert.equal(typeof enriched.filterExplicit, "boolean");
-  assert.equal(typeof enriched.kidsLock, "boolean");
   assert.ok("reactions" in enriched);
   assert.ok("mixGenreLane" in enriched);
   assert.ok("mixGenreLabel" in enriched);
+  assert.equal("neverEnding" in enriched, false);
+  assert.equal("discoverEnabled" in enriched, false);
+  assert.equal("kidsLock" in enriched, false);
+  assert.equal("partyOver" in enriched, false);
+  assert.equal("closingTimeAt" in enriched, false);
+  assert.equal("mixGenres" in enriched, false);
 });
 
 test("resolveDisplayGenre hides stale set lane when idle", async () => {

@@ -20,7 +20,7 @@ import {
   isValidHostToken,
 } from "../host-auth.js";
 import { setContentSettings } from "../settings.js";
-import { nudgeNowPlayingStream } from "../now-playing-http.js";
+import { nudgePartySettingsStream } from "../party-settings-http.js";
 
 const PIN_MAX_FAILS = 5; // failures before a short lockout kicks in
 const PIN_LOCK_MS = 30_000;
@@ -177,7 +177,7 @@ export function registerHostPinRoutes(app) {
       return res.status(400).json({ ok: false, error: result.error, ...hostPinStatus() });
     }
     setContentSettings({ hostControlsOnly: false });
-    nudgeNowPlayingStream();
+    nudgePartySettingsStream();
     clearHostSessionCookie(res);
     res.json({ ok: true, ...hostPinStatus() });
   });
