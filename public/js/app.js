@@ -1,16 +1,4 @@
-import {
-  attachModal,
-  isModalOpen,
-} from "./modal.js";
-import {
-  sanitizeDisplayName,
-  getDisplayName,
-  getDisplayAlias,
-  setDisplayName,
-  setDisplayAlias,
-  guestBadgeName as guestBadgeNameFrom,
-  guestIdentityPayload as guestIdentityPayloadFrom,
-} from "./guest.js";
+import { isModalOpen } from "./modal.js";
 import { createGuestHubUi } from "./guest-hub-ui.js";
 import {
   mediaIdentity,
@@ -18,24 +6,11 @@ import {
   queueTrackAsNowPlaying,
   resolveNowPlayingDisplay,
 } from "./now-playing-utils.js";
-import { escapeHtml } from "./format.js";
-import {
-  DECADE_LABELS,
-  sameIdSet,
-  presetIdsFor as presetIdsForBuckets,
-  moodLabelForIds,
-  loadEraMood,
-  saveEraMood as persistEraMood,
-} from "./genre-presets.js";
-import {
-  loadPlaylistSelection,
-  savePlaylistSelection,
-  reconcilePlaylistSelection,
-} from "./playlist-selection.js";
 import { showToast } from "./toast.js";
 import { wirePanelCollapse } from "./panel-collapse.js";
 import { createConfirmModal } from "./confirm-modal.js";
 import { createHostPinUi } from "./host-pin-ui.js";
+import { createGuestNameUi } from "./guest-name-ui.js";
 import { loadMemory as loadMemoryUi } from "./memory-ui.js";
 import { createPartyRecapUi } from "./party-recap.js";
 import { createSonosGroups } from "./sonos-groups.js";
@@ -54,6 +29,8 @@ import { createReactionsUi } from "./reactions-ui.js";
 import { createQueueUi } from "./queue-ui.js";
 import { createLyricsUi } from "./lyrics-ui.js";
 import { createLiveStreams } from "./live-streams.js";
+import { createMusicMixUi } from "./music-mix-ui.js";
+import { createPlaylistsUi } from "./playlists-ui.js";
 import {
   SUGGESTION_TEXT_MAX,
   wireSuggestionCharCount,
@@ -70,15 +47,6 @@ import {
   karaokeRowsHtml,
   statsEmptyMessage,
 } from "./stats-ui.js";
-import {
-  resolveActiveEraMoodId,
-  buildMixLabelTexts,
-  resolveMixGenreLabelFromNowPlaying,
-  mixSelectionPatchFromParty,
-  formatMixHubMoodLine,
-  formatSelectedOfTotal,
-  paintMixLabels,
-} from "./mix-labels.js";
 import { createDjBoothUi } from "./dj-booth-ui.js";
 import {
   isSettingsArea,
@@ -170,156 +138,27 @@ const {
   }
 );
 
-const nameOverlay = document.getElementById("name-overlay");
-const nameTitle = document.getElementById("name-title");
-const nameInput = document.getElementById("name-input");
-const aliasInput = document.getElementById("alias-input");
-const nameUserHint = document.getElementById("name-user-hint");
-const nameError = document.getElementById("name-error");
-const nameSaveBtn = document.getElementById("name-save");
-const nameCancelBtn = document.getElementById("name-cancel");
-const guestNameBtn = document.getElementById("guest-name");
+const {
+  ensureDisplayName,
+  guestBadgeName,
+  guestIdentityPayload,
+} = createGuestNameUi({
+  nameOverlay: document.getElementById("name-overlay"),
+  nameTitle: document.getElementById("name-title"),
+  nameInput: document.getElementById("name-input"),
+  aliasInput: document.getElementById("alias-input"),
+  nameUserHint: document.getElementById("name-user-hint"),
+  nameError: document.getElementById("name-error"),
+  nameSaveBtn: document.getElementById("name-save"),
+  nameCancelBtn: document.getElementById("name-cancel"),
+  guestNameBtn: document.getElementById("guest-name"),
+});
 
 const dedicationOverlay = document.getElementById("dedication-overlay");
 const dedicationInput = document.getElementById("dedication-input");
 const dedicationError = document.getElementById("dedication-error");
 const dedicationSaveBtn = document.getElementById("dedication-save");
 const dedicationCancelBtn = document.getElementById("dedication-cancel");
-
-/** Badge / “Searched by” label: alias if set, else User. */
-function guestBadgeName() {
-  return guestBadgeNameFrom(sessionDisplayName, sessionDisplayAlias);
-}
-
-/** Payload fields for queue / suggestion APIs. */
-function guestIdentityPayload() {
-  return guestIdentityPayloadFrom(sessionDisplayName, sessionDisplayAlias);
-}
-
-/** @type {string} */
-let sessionDisplayName = getDisplayName();
-/** @type {string} */
-let sessionDisplayAlias = getDisplayAlias();
-/** @type {Promise<string>|null} */
-let nameGatePromise = null;
-
-function syncGuestNameLabel() {
-  if (!guestNameBtn) return;
-  const label = guestBadgeName();
-  if (sessionDisplayName) {
-    guestNameBtn.textContent = `Adding as ${label}`;
-    guestNameBtn.setAttribute(
-      "aria-label",
-      `Adding as ${label} — tap to change your name or alias`
-    );
-  } else {
-    guestNameBtn.textContent = "Set your name";
-    guestNameBtn.setAttribute(
-      "aria-label",
-      "Set your name to request songs"
-    );
-  }
-}
-
-/**
- * Show the User + alias modal when User is missing, or when `edit` is true.
- * Resolves with the stable User name (required for adds).
- * @param {{ edit?: boolean, required?: boolean }} [opts]
- *   required=true (Add): cancel hidden — must enter a name to continue.
- *   edit / soft prompt: cancel allowed (browse without a name).
- */
-function ensureDisplayName({ edit = false, required = false } = {}) {
-  if (!edit && !required && sessionDisplayName) {
-    return Promise.resolve(sessionDisplayName);
-  }
-  if (!edit && required && sessionDisplayName) {
-    return Promise.resolve(sessionDisplayName);
-  }
-  if (nameGatePromise) return nameGatePromise;
-  if (!nameOverlay || !nameInput || !nameSaveBtn) {
-    return Promise.resolve(sessionDisplayName || "");
-  }
-
-  nameGatePromise = new Promise((resolve) => {
-    const editing = !!edit && !!sessionDisplayName;
-    const mustName = !!required && !sessionDisplayName;
-    nameError.hidden = true;
-    nameInput.value = editing || sessionDisplayName ? sessionDisplayName : "";
-    if (aliasInput) {
-      aliasInput.value = editing || sessionDisplayAlias ? sessionDisplayAlias : "";
-    }
-    if (nameUserHint) nameUserHint.hidden = !editing;
-    if (nameTitle) {
-      nameTitle.textContent = editing
-        ? "Change your name?"
-        : "Who’s requesting?";
-    }
-    // Cancel OK unless this is a required first-Add gate.
-    if (nameCancelBtn) nameCancelBtn.hidden = mustName;
-
-    let session = null;
-    const finish = (value) => {
-      session?.close();
-      session = null;
-      cleanup();
-      resolve(value);
-    };
-    const cleanup = () => {
-      nameSaveBtn.removeEventListener("click", onSave);
-      nameInput.removeEventListener("keydown", onKey);
-      if (aliasInput) aliasInput.removeEventListener("keydown", onKey);
-      if (nameCancelBtn) nameCancelBtn.removeEventListener("click", onCancel);
-    };
-    const onSave = () => {
-      const cleaned = sanitizeDisplayName(nameInput.value);
-      if (!cleaned) {
-        nameError.textContent = "Please enter your real name.";
-        nameError.hidden = false;
-        nameInput.focus();
-        return;
-      }
-      const alias = sanitizeDisplayName(aliasInput?.value || "");
-      setDisplayName(cleaned);
-      setDisplayAlias(alias);
-      sessionDisplayName = cleaned;
-      sessionDisplayAlias = alias;
-      syncGuestNameLabel();
-      finish(cleaned);
-    };
-    const onCancel = () => {
-      if (mustName) return;
-      finish(sessionDisplayName || "");
-    };
-    const onKey = (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        onSave();
-      }
-    };
-    nameSaveBtn.addEventListener("click", onSave);
-    nameInput.addEventListener("keydown", onKey);
-    if (aliasInput) aliasInput.addEventListener("keydown", onKey);
-    if (nameCancelBtn) nameCancelBtn.addEventListener("click", onCancel);
-    session = attachModal(nameOverlay, {
-      initialFocus: nameInput,
-      onEscape: mustName ? null : onCancel,
-      allowBackdrop: !mustName,
-      onBackdrop: onCancel,
-    });
-  }).finally(() => {
-    nameGatePromise = null;
-  });
-
-  return nameGatePromise;
-}
-
-syncGuestNameLabel();
-if (guestNameBtn) {
-  guestNameBtn.addEventListener("click", () =>
-    ensureDisplayName({ edit: true }).then(syncGuestNameLabel)
-  );
-}
-// Lazy name gate: no modal on first open — prompt only on Add (or heading tap).
 
 const npCard = document.getElementById("np-card") || document.querySelector(".np-card");
 const npArt = document.getElementById("np-art");
@@ -382,13 +221,10 @@ const cacheStatus = document.getElementById("cache-status");
 const cacheWarmed = document.getElementById("cache-warmed");
 const spotifyStatus = document.getElementById("spotify-status");
 
-// Which playlists are included in the "random" picker. Persisted in the browser.
-// `null` means "not chosen yet" -> defaults to all playlists on first render.
-let currentPlaylists = [];
-let selectedPlaylistIds = loadPlaylistSelection();
-
-function saveSelection() {
-  savePlaylistSelection(selectedPlaylistIds);
+// Late-bound playlists UI (created with Music Mix).
+let playlistsUi = null;
+function loadPlaylists() {
+  return playlistsUi?.loadPlaylists();
 }
 
 // Collapse/expand Up Next + main-page panels (Controls, Suggestion Box, …).
@@ -426,13 +262,50 @@ const toolbarDisplayBtn = document.getElementById("toolbar-display");
 const moodNeedSpotify = document.getElementById("mood-need-spotify");
 const musicMixHub = document.getElementById("music-mix-hub");
 
-/** Vibe toolbar button stays visible; only the Mood/Genres/Playlists hub is Spotify-gated. */
+// Late-bound Music Mix (created after navigateMixPanel + playlist state exist).
+let musicMix = null;
+
 function syncToolbarMoodVisibility() {
-  if (!randomBar) return;
-  const connected = !randomBar.hidden;
-  if (toolbarMoodBtn) toolbarMoodBtn.hidden = false;
-  if (musicMixHub) musicMixHub.hidden = !connected;
-  if (moodNeedSpotify) moodNeedSpotify.hidden = connected;
+  musicMix?.syncToolbarMoodVisibility();
+}
+function loadGenres() {
+  return musicMix?.loadGenres();
+}
+function loadAutoFill() {
+  return musicMix?.loadAutoFill();
+}
+function setAutofillToggle(checked) {
+  musicMix?.setAutofillToggle(checked);
+}
+function syncAutoFillFromServer(enabled) {
+  musicMix?.syncAutoFillFromServer(enabled);
+}
+function updateMixSelectionFromServer(party) {
+  musicMix?.updateMixSelectionFromServer(party);
+}
+function updateMixGenreHeaderFromServer(np) {
+  musicMix?.updateMixGenreHeaderFromServer(np);
+}
+function updateMusicMixHubSummaries() {
+  musicMix?.updateMusicMixHubSummaries();
+}
+function refreshPoolSizeHint() {
+  musicMix?.refreshPoolSizeHint();
+}
+function syncPickerSelection() {
+  musicMix?.syncPickerSelection();
+}
+function syncAutoFillSelection() {
+  musicMix?.syncAutoFillSelection();
+}
+function activeEraMoodId() {
+  return musicMix?.activeEraMoodId() ?? null;
+}
+function currentGenreIds() {
+  return musicMix?.currentGenreIds() ?? [];
+}
+function currentMoodId() {
+  return musicMix?.currentMoodId() ?? null;
 }
 
 if (toolbarSonosBtn) {
@@ -776,12 +649,7 @@ function fillSettings(s) {
     kidsLockInput.checked = !!s.kidsLock;
   }
   if (Array.isArray(s.genres)) {
-    genreSelection = new Set(s.genres);
-    saveGenreSelection();
-    if (genreBuckets.length) {
-      renderGenres();
-      refreshPoolSizeHint();
-    }
+    musicMix?.applyGenresFromSettings(s.genres);
   }
   applyDjFromSettings(s);
   if (s.eventName != null) eventNameInput.value = s.eventName;
@@ -1821,6 +1689,65 @@ function navigateMixPanelBack() {
   navigate(back);
 }
 
+playlistsUi = createPlaylistsUi(
+  {
+    playlistConnect,
+    playlistBox,
+    playlistsList,
+    playlistsEmpty,
+    toggleAllBtn,
+    selectedCountEl,
+    randomBar,
+    controlsRandom,
+    randomButtons,
+    connectSpotifyBtn,
+  },
+  {
+    hostFetch,
+    showToast,
+    confirmModal,
+    refreshSonos,
+    syncToolbarMoodVisibility: () => syncToolbarMoodVisibility(),
+    updateMusicMixHubSummaries: () => updateMusicMixHubSummaries(),
+    syncAutoFillSelection: () => syncAutoFillSelection(),
+    getGenreIds: () => currentGenreIds(),
+    getMoodId: () => currentMoodId(),
+    getGenreBucketCount: () => musicMix?.getGenreBucketCount() ?? 0,
+  }
+);
+
+musicMix = createMusicMixUi(
+  {
+    genreChips: document.getElementById("genre-chips"),
+    genrePresets: document.getElementById("genre-presets"),
+    poolSizeHint: document.getElementById("pool-size-hint"),
+    taggingPill: document.getElementById("tagging-pill"),
+    genreToggleAll: document.getElementById("genre-toggle-all"),
+    decadeChips: document.getElementById("decade-chips"),
+    npMoodLabel: document.getElementById("np-mood-label"),
+    npGenreLabel: document.getElementById("np-genre-label"),
+    displayMixPill: document.getElementById("display-mix"),
+    displayGenrePill: document.getElementById("display-genre"),
+    autofillToggle,
+    musicMixHub,
+    moodNeedSpotify,
+    randomBar,
+  },
+  {
+    hostFetch,
+    showToast,
+    navigateMixPanel,
+    getPlaylistIds: () => playlistsUi.getSelectedIds(),
+    getPlaylistHubStats: () => playlistsUi.getHubStats(),
+    setPlaylistIdsFromServer: (ids) => playlistsUi.setSelectedIdsFromServer(ids),
+    renderPlaylistsIfLoaded: () => playlistsUi.renderIfLoaded(),
+    syncDiscoverFromServer,
+    syncRotationFromServer,
+    syncContentTogglesFromServer,
+  }
+);
+syncToolbarMoodVisibility();
+
 document.querySelectorAll("[data-settings-panel]").forEach((btn) => {
   btn.addEventListener("click", () => {
     const panel = btn.getAttribute("data-settings-panel");
@@ -2622,738 +2549,6 @@ groupAllBtn.addEventListener("click", () => {
     loadGroups(true);
     showToast(`Grouped ${d.players} speakers · Volume ${d.volume}`);
   });
-});
-
-function songCount(n) {
-  return n === 1 ? "1 song" : `${n} songs`;
-}
-
-async function loadPlaylists() {
-  try {
-    const res = await fetch("/api/playlists");
-    const data = await res.json();
-    const connected = !!data.connected;
-    if (playlistConnect) playlistConnect.hidden = connected;
-    if (playlistBox) playlistBox.hidden = !connected;
-    if (randomBar) randomBar.hidden = !connected;
-    if (controlsRandom) controlsRandom.hidden = !connected;
-    syncToolbarMoodVisibility();
-    if (!connected) {
-      if (playlistsList) playlistsList.innerHTML = "";
-      if (playlistsEmpty) playlistsEmpty.hidden = true;
-      updateMusicMixHubSummaries();
-      return;
-    }
-    renderPlaylists(data.playlists || []);
-  } catch {
-    /* leave previous state on transient errors */
-  } finally {
-    syncToolbarMoodVisibility();
-    updateMusicMixHubSummaries();
-  }
-}
-
-function renderPlaylists(playlists) {
-  // Alphabetical order for a predictable dropdown.
-  playlists = [...playlists].sort((a, b) =>
-    (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" })
-  );
-  currentPlaylists = playlists;
-  selectedPlaylistIds = reconcilePlaylistSelection(
-    playlists,
-    selectedPlaylistIds
-  );
-
-  playlistsList.innerHTML = "";
-  playlistsEmpty.hidden = playlists.length > 0;
-
-  for (const pl of playlists) {
-    const li = document.createElement("li");
-    li.className = "track";
-    const art = pl.image
-      ? `<img src="${pl.image}" alt="" loading="lazy" />`
-      : `<div class="art-fallback"></div>`;
-    const checked = selectedPlaylistIds.has(pl.id) ? "checked" : "";
-    li.innerHTML = `
-      <input type="checkbox" class="pl-check" ${checked} aria-label="Include ${escapeHtml(pl.name)} in random" />
-      ${art}
-      <div class="meta">
-        <div class="title">${escapeHtml(pl.name)}</div>
-        <div class="artist">${songCount(pl.trackCount)}</div>
-      </div>
-      <button class="add-btn" type="button">Add</button>
-    `;
-    const check = li.querySelector(".pl-check");
-    check.addEventListener("change", () => {
-      if (check.checked) selectedPlaylistIds.add(pl.id);
-      else selectedPlaylistIds.delete(pl.id);
-      saveSelection();
-      updateSelectionUi();
-      syncAutoFillSelection();
-    });
-    const btn = li.querySelector(".add-btn");
-    btn.addEventListener("click", () => addPlaylist(pl, btn));
-    playlistsList.appendChild(li);
-  }
-
-  updateSelectionUi();
-}
-
-// Sync the "Check/Uncheck All" button label and the "x of y selected" count.
-function updateSelectionUi() {
-  const ids = currentPlaylists.map((p) => p.id);
-  const selected = ids.filter((id) => selectedPlaylistIds.has(id)).length;
-  const allChecked = ids.length > 0 && selected === ids.length;
-  if (toggleAllBtn) toggleAllBtn.textContent = allChecked ? "Uncheck All" : "Check All";
-  if (selectedCountEl) {
-    selectedCountEl.textContent = ids.length
-      ? `${selected} of ${ids.length} selected`
-      : "";
-  }
-  updateMusicMixHubSummaries();
-}
-
-toggleAllBtn?.addEventListener("click", () => {
-  const ids = currentPlaylists.map((p) => p.id);
-  const allChecked = ids.length > 0 && ids.every((id) => selectedPlaylistIds.has(id));
-  selectedPlaylistIds = allChecked ? new Set() : new Set(ids);
-  saveSelection();
-  renderPlaylists(currentPlaylists);
-  syncAutoFillSelection();
-});
-
-async function addPlaylist(pl, btn) {
-  const ok = await confirmModal(
-    `Add ${songCount(pl.trackCount)} to the queue?`,
-    "Add"
-  );
-  if (!ok) return;
-
-  btn.disabled = true;
-  btn.textContent = "Adding...";
-  try {
-    const res = await hostFetch("/api/queue/playlist", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uri: pl.uri }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not add playlist.");
-
-    btn.textContent = "Added";
-    btn.classList.add("added");
-    showToast(`Added "${pl.name}" (${songCount(pl.trackCount)})`);
-    refreshSonos();
-  } catch (err) {
-    btn.disabled = false;
-    btn.textContent = "Add";
-    showToast(err.message, true);
-  }
-}
-
-async function addRandom(btn) {
-  const count = parseInt(btn.dataset.count, 10) || 50;
-  const ids = selectedPlaylistIds ? [...selectedPlaylistIds] : null;
-  if (ids && ids.length === 0) {
-    showToast("Check at least one playlist for random.", true);
-    return;
-  }
-  const genres = currentGenreIds();
-  if (genreBuckets.length && genres.length === 0) {
-    showToast("Turn on at least one genre for random.", true);
-    return;
-  }
-
-  const ok = await confirmModal(
-    `Add ${count} random songs from your selected playlists?`,
-    "Add"
-  );
-  if (!ok) return;
-
-  randomButtons.forEach((b) => (b.disabled = true));
-  const original = btn.innerHTML;
-  btn.textContent = "Adding...";
-  try {
-    const payload = { count };
-    if (ids) payload.playlistIds = ids;
-    if (genres.length) payload.genres = genres;
-    if (currentMoodId()) payload.mood = currentMoodId();
-    const res = await fetch("/api/queue/random", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not add random songs.");
-
-    const playlistAdded = Math.max(
-      0,
-      (data.added || 0) - (data.similarAdded || 0) - (data.moodAdded || 0)
-    );
-    let msg = `Added ${data.added} ${data.added === 1 ? "song" : "songs"}`;
-    if (data.moodAdded) {
-      const era = DECADE_LABELS[data.mood] || "era";
-      msg += ` (${playlistAdded} from playlists + ${data.moodAdded} ${era} hits)`;
-    } else if (data.similarAdded) {
-      msg += ` (${playlistAdded} from playlists + ${data.similarAdded} from Discover)`;
-    }
-    if (data.added < data.requested) msg += " — pool ran short";
-    if (data.relaxedMemory && data.memoryReuseCount) {
-      msg += ` · reused ${data.memoryReuseCount} from memory`;
-    } else if (data.relaxedArtist) {
-      msg += " · relaxed artist limit";
-    }
-    if (data.started) msg += " — now playing";
-    showToast(msg);
-    refreshSonos();
-  } catch (err) {
-    showToast(err.message, true);
-  } finally {
-    randomButtons.forEach((b) => (b.disabled = false));
-    btn.innerHTML = original;
-  }
-}
-
-randomButtons.forEach((btn) =>
-  btn.addEventListener("click", () => addRandom(btn))
-);
-
-// ---- Genre filters ----
-// Toggle which broad genres feed Random / Never-Ending. Selection persists in
-// the browser AND on the server so every phone shares one host pool.
-// `null` = not chosen yet -> all on.
-const genreChips = document.getElementById("genre-chips");
-const genrePresets = document.getElementById("genre-presets");
-const poolSizeHint = document.getElementById("pool-size-hint");
-const taggingPill = document.getElementById("tagging-pill");
-const genreToggleAll = document.getElementById("genre-toggle-all");
-const GENRE_KEY = "pq.genres";
-let genreBuckets = [];
-let genreCountsCache = {};
-let genreDataEnabled = true;
-let genreSelection = loadGenreSelection();
-let poolSizeTimer = null;
-
-// Mix-label state (declared before the decade block below runs its initial
-// sync, which paints the label). Server-broadcast mix wins; undefined = not
-// seen yet, so local state fills in until the first Now Playing payload.
-const npMoodLabel = document.getElementById("np-mood-label");
-const npGenreLabel = document.getElementById("np-genre-label");
-const displayMixPill = document.getElementById("display-mix");
-const displayGenrePill = document.getElementById("display-genre");
-let serverMix = { genres: undefined, mood: undefined, genreLabel: undefined };
-
-npMoodLabel?.addEventListener("click", () => navigateMixPanel("mood-presets"));
-npGenreLabel?.addEventListener("click", () => navigateMixPanel("genres"));
-
-// ---- Era mood (Decades) ----
-// One decade at a time (or none = off). Playlist picks stay in the era and
-// shortfalls fill with era hits from outside the library. Persists locally +
-// on the server so Random and Never-Ending share it across phones.
-const decadeChips = document.getElementById("decade-chips");
-let eraMood = loadEraMood();
-
-function saveEraMood() {
-  persistEraMood(eraMood);
-}
-function currentMoodId() {
-  return eraMood;
-}
-function syncDecadeChips() {
-  if (!decadeChips) return;
-  for (const btn of decadeChips.querySelectorAll("[data-mood]")) {
-    const on = btn.dataset.mood === eraMood;
-    btn.classList.toggle("on", on);
-    btn.setAttribute("aria-pressed", on ? "true" : "false");
-  }
-  updateMusicMixHubSummaries();
-}
-if (decadeChips) {
-  decadeChips.addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-mood]");
-    if (!btn) return;
-    eraMood = eraMood === btn.dataset.mood ? null : btn.dataset.mood;
-    saveEraMood();
-    syncDecadeChips();
-    syncPickerSelection();
-    refreshPoolSizeHint();
-  });
-  syncDecadeChips();
-}
-
-// ---- Mix label ("MOOD: PARTY - 80'S") over Now Playing + on Party Display ----
-/** Active decade mood id preferring the server-broadcast mix. */
-function activeEraMoodId() {
-  return resolveActiveEraMoodId(serverMix.mood, eraMood);
-}
-
-function updateMixLabels() {
-  paintMixLabels(
-    { npMoodLabel, npGenreLabel, displayMixPill, displayGenrePill },
-    buildMixLabelTexts(serverMix, {
-      localGenres: currentGenreIds(),
-      localMood: eraMood,
-      allBucketIds: genreBuckets.map((b) => b.id),
-    })
-  );
-}
-
-/** Vibe mix selection (genres + era mood) — owned by /api/party. */
-function updateMixSelectionFromServer(party) {
-  const patch = mixSelectionPatchFromParty(party);
-  if (!patch) return;
-  if ("genres" in patch) serverMix.genres = patch.genres;
-  if ("mood" in patch) serverMix.mood = patch.mood;
-  updateMixLabels();
-  applyServerMixToPickers();
-}
-
-/** Per-track Genre header — owned by Now Playing. */
-function updateMixGenreHeaderFromServer(np) {
-  const label = resolveMixGenreLabelFromNowPlaying(np);
-  if (label === undefined) return;
-  serverMix.genreLabel = label;
-  updateMixLabels();
-}
-
-// When the server changes the mix underneath us (Random Mood / Random Decade
-// rotating between sets), follow along: repaint the decade chips, genre chips
-// + preset highlight, and local storage. Guarded by the recent-touch window
-// so a host mid-tap isn't fought by an in-flight poll.
-let mixTouchedAt = 0;
-function applyServerMixToPickers() {
-  if (Date.now() - mixTouchedAt < 3000) return;
-  if (serverMix.mood !== undefined) {
-    const m =
-      serverMix.mood && DECADE_LABELS[serverMix.mood] ? serverMix.mood : null;
-    if (m !== eraMood) {
-      eraMood = m;
-      saveEraMood();
-      syncDecadeChips();
-    }
-  }
-  if (serverMix.genres !== undefined && genreBuckets.length) {
-    const want = Array.isArray(serverMix.genres)
-      ? serverMix.genres
-      : genreBuckets.map((b) => b.id);
-    if (!sameIdSet(currentGenreIds(), want)) {
-      genreSelection = new Set(want);
-      saveGenreSelection();
-      renderGenres();
-    }
-  }
-}
-
-function loadGenreSelection() {
-  try {
-    const raw = localStorage.getItem(GENRE_KEY);
-    return raw == null ? null : new Set(JSON.parse(raw));
-  } catch {
-    return null;
-  }
-}
-function saveGenreSelection() {
-  try {
-    localStorage.setItem(GENRE_KEY, JSON.stringify([...genreSelection]));
-  } catch {
-    /* ignore storage errors */
-  }
-}
-
-// The enabled genre ids to send the server (always explicit, so toggling all
-// back on is honored by the Never-Ending state too).
-function currentGenreIds() {
-  const all = genreBuckets.map((b) => b.id);
-  if (genreSelection === null) return all;
-  return all.filter((id) => genreSelection.has(id));
-}
-
-function renderGenreTagGuide(guide, rules) {
-  const list = document.getElementById("genre-map-list");
-  const intro = document.getElementById("genre-map-intro");
-  if (!list) return;
-  const rows = Array.isArray(guide) ? guide : [];
-  const top = Number(rules?.topTags) || 2;
-  const min = Number(rules?.minTagCount) || 10;
-  if (intro) {
-    intro.textContent =
-      `How Last.fm artist tags map into PartyQueue genres. Only each artist's top ${top} tags (count ≥ ${min}) are used.`;
-  }
-  list.innerHTML = rows
-    .map(
-      (row) => `<li class="genre-map-row">
-        <span class="genre-map-label">${escapeHtml(row.label || row.id || "")}</span>
-        <p class="genre-map-tags">${escapeHtml(row.tags || "")}</p>
-      </li>`
-    )
-    .join("");
-}
-
-function renderMoodGenreGuide(guide) {
-  const list = document.getElementById("mood-map-list");
-  if (!list) return;
-  const rows = Array.isArray(guide) ? guide : [];
-  list.innerHTML = rows
-    .map(
-      (row) => `<li class="genre-map-row">
-        <span class="genre-map-label">${escapeHtml(row.label || row.id || "")}</span>
-        <p class="genre-map-tags">${escapeHtml(row.genres || "")}</p>
-      </li>`
-    )
-    .join("");
-}
-
-async function loadGenres() {
-  try {
-    const ids = currentSelectionIds();
-    const qs = ids.length
-      ? `?playlistIds=${encodeURIComponent(ids.join(","))}`
-      : "";
-    const res = await fetch(`/api/genres${qs}`);
-    if (!res.ok) return;
-    const data = await res.json();
-    genreBuckets = data.buckets || [];
-    genreCountsCache = data.counts || {};
-    genreDataEnabled = !!data.enabled;
-    renderGenreTagGuide(data.tagGuide, data.tagRules);
-    renderMoodGenreGuide(data.moodGuide);
-    renderGenres();
-    refreshPoolSizeHint();
-  } catch {
-    /* leave previous genre UI on transient errors */
-  }
-}
-
-function renderGenres() {
-  // First run (or stored ids that no longer exist): default to all on.
-  if (genreSelection === null) {
-    genreSelection = new Set(genreBuckets.map((b) => b.id));
-  } else {
-    genreSelection = new Set(
-      [...genreSelection].filter((id) => genreBuckets.some((b) => b.id === id))
-    );
-  }
-
-  if (genreChips) {
-    genreChips.innerHTML = "";
-    for (const b of genreBuckets) {
-      const on = genreSelection.has(b.id);
-      const count = genreCountsCache[b.id] ?? 0;
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "genre-chip" + (on ? " on" : "");
-      chip.setAttribute("aria-pressed", on ? "true" : "false");
-      chip.title = on
-        ? `Include ${b.label} (${count} tracks)`
-        : `Exclude ${b.label} (${count} tracks)`;
-      chip.innerHTML = `<span class="genre-name">${escapeHtml(b.label)}</span><span class="genre-cnt">${count}</span>`;
-      chip.addEventListener("click", () => {
-        if (genreSelection.has(b.id)) genreSelection.delete(b.id);
-        else genreSelection.add(b.id);
-        saveGenreSelection();
-        renderGenres();
-        syncPickerSelection();
-        refreshPoolSizeHint();
-      });
-      genreChips.appendChild(chip);
-    }
-  }
-
-  const all = genreBuckets.map((b) => b.id);
-  const allOn = all.length && all.every((id) => genreSelection.has(id));
-  if (genreToggleAll) genreToggleAll.textContent = allOn ? "Uncheck All" : "Check All";
-  syncGenrePresetHighlight();
-
-  if (taggingPill) {
-    taggingPill.textContent = genreDataEnabled ? "Tagging: On" : "Tagging: Off";
-    taggingPill.classList.toggle("status-connected", genreDataEnabled);
-    taggingPill.classList.toggle("status-disconnected", !genreDataEnabled);
-    taggingPill.classList.remove("status-unknown");
-    taggingPill.title = genreDataEnabled
-      ? "Genre tagging is active (Last.fm key detected)."
-      : "Genre tagging is off \u2014 add a LASTFM_API_KEY to tag songs by genre.";
-  }
-}
-
-function presetIdsFor(name) {
-  return presetIdsForBuckets(
-    name,
-    genreBuckets.map((b) => b.id)
-  );
-}
-
-function syncGenrePresetHighlight() {
-  if (genrePresets) {
-    const current = currentGenreIds();
-    for (const btn of genrePresets.querySelectorAll("[data-preset]")) {
-      const ids = presetIdsFor(btn.dataset.preset);
-      const on = ids.length > 0 && sameIdSet(current, ids);
-      btn.classList.toggle("on", on);
-      btn.setAttribute("aria-pressed", on ? "true" : "false");
-    }
-  }
-  updateMusicMixHubSummaries();
-}
-
-/** Active mood preset label, or "Custom" when genres don't match a preset. */
-function currentMoodLabel() {
-  return moodLabelForIds(
-    currentGenreIds(),
-    genreBuckets.map((b) => b.id)
-  );
-}
-
-function updateMusicMixHubSummaries() {
-  const moodEl = document.getElementById("mix-stat-mood");
-  const genresEl = document.getElementById("mix-stat-genres");
-  const playlistsEl = document.getElementById("mix-stat-playlists");
-
-  if (moodEl) {
-    const era = eraMood ? DECADE_LABELS[eraMood] : null;
-    moodEl.textContent = formatMixHubMoodLine(currentMoodLabel(), era);
-  }
-
-  if (genresEl) {
-    const total = genreBuckets.length;
-    genresEl.textContent = formatSelectedOfTotal(
-      currentGenreIds().length,
-      total
-    );
-  }
-
-  if (playlistsEl) {
-    const total = currentPlaylists.length;
-    if (!total || selectedPlaylistIds == null) {
-      playlistsEl.textContent = "—";
-    } else {
-      const ids = currentPlaylists.map((p) => p.id);
-      const selected = ids.filter((id) => selectedPlaylistIds.has(id)).length;
-      playlistsEl.textContent = formatSelectedOfTotal(selected, total);
-    }
-  }
-
-  updateMixLabels();
-}
-
-function applyGenrePreset(name) {
-  const ids = presetIdsFor(name);
-  if (!ids.length) return;
-  genreSelection = new Set(ids);
-  saveGenreSelection();
-  renderGenres();
-  syncPickerSelection();
-  refreshPoolSizeHint();
-}
-
-if (genrePresets) {
-  genrePresets.addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-preset]");
-    if (!btn) return;
-    applyGenrePreset(btn.dataset.preset);
-  });
-}
-
-function refreshPoolSizeHint() {
-  if (!poolSizeHint) return;
-  clearTimeout(poolSizeTimer);
-  poolSizeTimer = setTimeout(async () => {
-    try {
-      const res = await fetch("/api/pool-size", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          playlistIds: currentSelectionIds(),
-          genres: currentGenreIds(),
-          mood: currentMoodId(),
-        }),
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      // Keep genre chip numbers scoped to the same playlist selection.
-      if (data.counts && typeof data.counts === "object") {
-        genreCountsCache = data.counts;
-        updateGenreChipCounts();
-      }
-      const n = data.tracks ?? 0;
-      if (n <= 0) {
-        poolSizeHint.hidden = false;
-        poolSizeHint.classList.add("warn");
-        poolSizeHint.textContent =
-          "No eligible tracks with the current playlists + genres.";
-        return;
-      }
-      const formatted = n.toLocaleString();
-      poolSizeHint.hidden = false;
-      poolSizeHint.classList.toggle("warn", !!data.warn);
-      poolSizeHint.textContent = data.warn
-        ? `~${formatted} eligible tracks \u2014 repeats more likely (widen genres or playlists).`
-        : `~${formatted} eligible tracks after filters.`;
-    } catch {
-      /* leave previous hint on transient errors */
-    }
-  }, 250);
-}
-
-// Update the number on each genre chip without rebuilding the whole row
-// (avoids flicker / focus loss when playlist selection changes).
-function updateGenreChipCounts() {
-  if (!genreChips) return;
-  const chips = genreChips.querySelectorAll(".genre-chip");
-  for (let i = 0; i < chips.length && i < genreBuckets.length; i++) {
-    const b = genreBuckets[i];
-    const count = genreCountsCache[b.id] ?? 0;
-    const cnt = chips[i].querySelector(".genre-cnt");
-    if (cnt) cnt.textContent = String(count);
-    const on = chips[i].classList.contains("on");
-    chips[i].title = on
-      ? `Include ${b.label} (${count} tracks)`
-      : `Exclude ${b.label} (${count} tracks)`;
-  }
-}
-
-genreToggleAll?.addEventListener("click", () => {
-  const all = genreBuckets.map((b) => b.id);
-  const allOn = all.length && all.every((id) => genreSelection.has(id));
-  genreSelection = allOn ? new Set() : new Set(all);
-  saveGenreSelection();
-  renderGenres();
-  syncPickerSelection();
-  refreshPoolSizeHint();
-});
-
-// The list of playlist IDs the random/never-ending picker should draw from.
-function currentSelectionIds() {
-  return selectedPlaylistIds ? [...selectedPlaylistIds] : [];
-}
-
-// Set the toggle's checked state and remember when, so an in-flight Now Playing
-// poll can't briefly flip it back right after a manual change (see syncAutoFill).
-let autofillTouchedAt = 0;
-function setAutofillToggle(checked) {
-  autofillToggle.checked = checked;
-  autofillTouchedAt = Date.now();
-}
-
-// Keep the toggle in sync with the server state broadcast in the Now Playing
-// poll, so every guest sees it flip (e.g. when "Closing Time" turns it off).
-// Skipped briefly after a local change to avoid a flip-flop with a stale poll.
-function syncAutoFillFromServer(enabled) {
-  if (typeof enabled !== "boolean") return;
-  if (Date.now() - autofillTouchedAt < 3000) return;
-  if (autofillToggle.checked !== enabled) autofillToggle.checked = enabled;
-}
-
-// Reflect the server-side never-ending-queue state in the toggle on load, and
-// prefer the server's saved playlist/genre selection so every phone matches.
-async function loadAutoFill() {
-  try {
-    const res = await fetch("/api/autofill");
-    const data = await res.json();
-    autofillToggle.checked = !!data.enabled;
-    let playlistsChanged = false;
-    if (Array.isArray(data.playlistIds) && data.playlistIds.length) {
-      selectedPlaylistIds = new Set(data.playlistIds);
-      saveSelection();
-      playlistsChanged = true;
-    }
-    if (Array.isArray(data.genres) && data.genres.length) {
-      genreSelection = new Set(data.genres);
-      saveGenreSelection();
-      if (genreBuckets.length) renderGenres();
-    }
-    // Discover + rotation + content toggles ride along on this public endpoint
-    // (settings are host-gated).
-    syncDiscoverFromServer(data.discoverEnabled);
-    syncRotationFromServer(data);
-    syncContentTogglesFromServer(data);
-    // Era mood: the server is the source of truth (null = off) so every
-    // phone shows the same decade.
-    if ("mood" in data) {
-      eraMood = typeof data.mood === "string" && DECADE_LABELS[data.mood] ? data.mood : null;
-      saveEraMood();
-      syncDecadeChips();
-    }
-    // Re-render checkboxes if playlists already painted with a stale local set.
-    if (playlistsChanged && currentPlaylists.length) {
-      renderPlaylists(currentPlaylists);
-    }
-    refreshPoolSizeHint();
-  } catch {
-    /* leave the toggle as-is on transient errors */
-  }
-}
-
-async function setAutoFill(enabled) {
-  const res = await hostFetch("/api/autofill", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      enabled,
-      playlistIds: currentSelectionIds(),
-      genres: currentGenreIds(),
-      mood: currentMoodId(),
-    }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "Could not update Never-Ending Queue.");
-  return data;
-}
-
-autofillToggle.addEventListener("change", async () => {
-  const enabled = autofillToggle.checked;
-  if (enabled && (!selectedPlaylistIds || selectedPlaylistIds.size === 0)) {
-    autofillToggle.checked = false;
-    showToast("Check at least one playlist for random.", true);
-    return;
-  }
-  if (enabled && genreBuckets.length && currentGenreIds().length === 0) {
-    autofillToggle.checked = false;
-    showToast("Turn on at least one genre for random.", true);
-    return;
-  }
-  autofillToggle.disabled = true;
-  autofillTouchedAt = Date.now();
-  try {
-    await setAutoFill(enabled);
-    showToast(
-      enabled ? "Never-Ending Queue on" : "Never-Ending Queue off"
-    );
-  } catch (err) {
-    autofillToggle.checked = !enabled; // revert on failure
-    showToast(err.message, true);
-  } finally {
-    autofillToggle.disabled = false;
-  }
-});
-
-// Always push playlist + genre selection to the server so Random and
-// Never-Ending share one host pool across phones (fire-and-forget).
-function syncPickerSelection() {
-  // Optimistic: show the new mix immediately; the server broadcast follows.
-  mixTouchedAt = Date.now();
-  serverMix = { genres: currentGenreIds(), mood: currentMoodId() };
-  updateMixLabels();
-  hostFetch("/api/selection", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      playlistIds: currentSelectionIds(),
-      genres: currentGenreIds(),
-      mood: currentMoodId(),
-    }),
-  }).catch(() => {});
-  // When Never-Ending is on, also refresh its live monitor state.
-  if (autofillToggle.checked) setAutoFill(true).catch(() => {});
-}
-
-// Back-compat alias used by playlist checkbox handlers.
-function syncAutoFillSelection() {
-  syncPickerSelection();
-  refreshPoolSizeHint();
-}
-
-connectSpotifyBtn.addEventListener("click", () => {
-  window.open("/auth/login", "_blank", "noopener");
 });
 
 // Re-check the connection (and refresh playlists) when returning to the tab,
