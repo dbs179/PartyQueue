@@ -13,6 +13,8 @@ import {
   setDisplayAlias,
   guestBadgeName as guestBadgeNameFrom,
   guestIdentityPayload as guestIdentityPayloadFrom,
+  guestHubStat,
+  guestHubDesc,
 } from "./guest.js";
 import {
   mediaIdentity,
@@ -23,8 +25,6 @@ import {
   serverPlaybackPosition,
 } from "./now-playing-utils.js";
 import {
-  formatDuration,
-  formatTimeAgo,
   formatSuggestionWhen,
   escapeHtml,
 } from "./format.js";
@@ -47,6 +47,25 @@ import { showToast } from "./toast.js";
 import { wirePanelCollapse } from "./panel-collapse.js";
 import { speakersFromGroups } from "./speakers.js";
 import { memorySourceBadge } from "./memory-badges.js";
+import {
+  applySpotifyAppStatus as paintSpotifyAppStatus,
+  applyLastfmStatus as paintLastfmStatus,
+  applyHaStatus as paintHaStatus,
+  applySonosConnStatus as paintSonosConnStatus,
+  applySpotifyAccountStatus as paintSpotifyAccountStatus,
+  paintConnStatusUnavailable,
+  paintSpotifyAccountUnavailable,
+} from "./connection-status.js";
+import {
+  createStreamCursor,
+  resetStreamCursor,
+  advanceStreamCursor,
+} from "./stream-cursor.js";
+import {
+  buildBannerGalleryItems,
+  buildDjIconGalleryItems,
+  mountThumbGallery,
+} from "./asset-gallery.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -1818,48 +1837,6 @@ function fillGuestBirthdayForm(g) {
   if (guestBdayRole) guestBdayRole.value = g?.birthdayRole || "star";
 }
 
-function formatGuestBirthday(g) {
-  if (!g?.birthday) return "";
-  const [mm, dd] = String(g.birthday).split("-").map(Number);
-  if (!mm || !dd) return "";
-  const months = [
-    "",
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-  const roleId = String(g.birthdayRole || "star").trim().toLowerCase() || "star";
-  return `${months[mm] || mm} ${dd} · birthday ${roleId}`;
-}
-
-function guestNoteCount(g) {
-  const notes = Array.isArray(g?.notes) ? g.notes : g?.notes ? [g.notes] : [];
-  return notes.length;
-}
-
-function guestHubStat(g) {
-  const n = guestNoteCount(g);
-  const notesLabel = n === 1 ? "1 note" : `${n} notes`;
-  const bday = formatGuestBirthday(g);
-  return bday ? `${notesLabel} · ${bday}` : `${notesLabel} · No birthday`;
-}
-
-function guestHubDesc(g) {
-  const notes = Array.isArray(g?.notes) ? g.notes : g?.notes ? [g.notes] : [];
-  const first = String(notes[0] || "").trim();
-  if (!first) return "Tap to add notes or a birthday";
-  return first.length > 72 ? `${first.slice(0, 71)}…` : first;
-}
-
 function setGuests(guests) {
   cachedGuests = Array.isArray(guests) ? guests : [];
   renderGuestHub(cachedGuests);
@@ -2161,45 +2138,16 @@ if (guestBdayForgetBtn) {
 // ---- DJ icon picker (Settings page; same pattern as banners) ------------
 function renderDjIcons(data) {
   if (!djIconGallery) return;
-  const active = data.active ?? data.djIcon ?? null;
-  activeDjIconName = active || null;
+  const { active, items } = buildDjIconGalleryItems(data, {
+    defaultIconName: settingsDefaults?.djIcon || "dj-icon-flat.png",
+  });
+  activeDjIconName = active;
   updateDjHubSummaries();
-  const defaultUrl = data.defaultUrl || "/dj-icons/flat.png";
-  const defaultIconName =
-    settingsDefaults?.djIcon || "dj-icon-flat.png";
-  djIconGallery.innerHTML = "";
-
-  const tiles = [{ name: null, url: defaultUrl, starter: true }];
-  for (const b of data.icons || []) {
-    // Default tile already represents the seeded flat starter.
-    if (b.name === defaultIconName) continue;
-    tiles.push({ name: b.name, url: b.url, starter: !!b.starter });
-  }
-
-  for (const t of tiles) {
-    const isActive =
-      t.name === null
-        ? !active || active === defaultIconName
-        : active === t.name;
-    const isStarter = !!t.starter;
-    const tile = document.createElement("div");
-    tile.className = "banner-thumb" + (isActive ? " active" : "");
-    const tag = isActive ? "Active" : t.name === null ? "Default" : "";
-    tile.innerHTML = `
-      <img src="${t.url}" alt="" loading="lazy" />
-      ${t.name && !isStarter ? '<button class="banner-del" type="button" aria-label="Delete DJ icon" title="Delete">\u00d7</button>' : ""}
-      ${tag ? `<span class="banner-tag">${tag}</span>` : ""}
-    `;
-    tile.addEventListener("click", () => selectDjIcon(t.name));
-    const del = tile.querySelector(".banner-del");
-    if (del) {
-      del.addEventListener("click", (e) => {
-        e.stopPropagation();
-        deleteDjIcon(t.name);
-      });
-    }
-    djIconGallery.appendChild(tile);
-  }
+  mountThumbGallery(djIconGallery, items, {
+    deleteAriaLabel: "Delete DJ icon",
+    onSelect: selectDjIcon,
+    onDelete: deleteDjIcon,
+  });
 }
 
 async function loadDjIcons() {
@@ -2314,36 +2262,11 @@ const MAX_BANNER_BYTES = 8 * 1024 * 1024;
 
 function renderBanners(data) {
   if (!bannerGallery) return;
-  const active = data.active ?? null;
-  const defaultUrl = data.defaultUrl || "hero.jpg";
-  bannerGallery.innerHTML = "";
-
-  const tiles = [{ name: null, url: defaultUrl, starter: true }];
-  for (const b of data.banners || []) {
-    tiles.push({ name: b.name, url: b.url, starter: !!b.starter });
-  }
-
-  for (const t of tiles) {
-    const isActive = active === t.name;
-    const isStarter = !!t.starter;
-    const tile = document.createElement("div");
-    tile.className = "banner-thumb" + (isActive ? " active" : "");
-    const tag = isActive ? "Active" : t.name === null ? "Default" : "";
-    tile.innerHTML = `
-      <img src="${t.url}" alt="" loading="lazy" />
-      ${t.name && !isStarter ? '<button class="banner-del" type="button" aria-label="Delete banner" title="Delete">\u00d7</button>' : ""}
-      ${tag ? `<span class="banner-tag">${tag}</span>` : ""}
-    `;
-    tile.addEventListener("click", () => selectBanner(t.name));
-    const del = tile.querySelector(".banner-del");
-    if (del) {
-      del.addEventListener("click", (e) => {
-        e.stopPropagation();
-        deleteBanner(t.name);
-      });
-    }
-    bannerGallery.appendChild(tile);
-  }
+  mountThumbGallery(bannerGallery, buildBannerGalleryItems(data), {
+    deleteAriaLabel: "Delete banner",
+    onSelect: selectBanner,
+    onDelete: deleteBanner,
+  });
 }
 
 async function loadBanners() {
@@ -2367,50 +2290,19 @@ const spotifySecretHint = document.getElementById("spotify-secret-hint");
 const spotifyAppSaveBtn = document.getElementById("spotify-app-save");
 const spotifyAppTestBtn = document.getElementById("spotify-app-test");
 const spotifyAppClearBtn = document.getElementById("spotify-app-clear");
+const spotifyAppEls = {
+  statusEl: spotifyAppStatusEl,
+  clientIdInput: spotifyClientIdInput,
+  clientSecretInput: spotifyClientSecretInput,
+  redirectInput: spotifyRedirectInput,
+  marketInput: spotifyMarketInput,
+  secretHint: spotifySecretHint,
+  saveBtn: spotifyAppSaveBtn,
+  clearBtn: spotifyAppClearBtn,
+};
 
 function applySpotifyAppStatus(data) {
-  if (!spotifyAppStatusEl) return;
-  spotifyAppStatusEl.classList.remove(
-    "status-connected",
-    "status-limited",
-    "status-disconnected",
-    "status-unknown"
-  );
-  if (data.configured) {
-    spotifyAppStatusEl.classList.add("status-connected");
-    spotifyAppStatusEl.textContent = "Credentials OK";
-  } else {
-    spotifyAppStatusEl.classList.add("status-disconnected");
-    spotifyAppStatusEl.textContent = "Credentials missing";
-  }
-  if (spotifyClientIdInput && document.activeElement !== spotifyClientIdInput) {
-    spotifyClientIdInput.value = data.clientId || "";
-    spotifyClientIdInput.readOnly = false;
-  }
-  if (spotifyClientSecretInput && document.activeElement !== spotifyClientSecretInput) {
-    // Mask only — never the real secret. All-asterisks means "already saved".
-    spotifyClientSecretInput.value = data.clientSecretSet ? "********" : "";
-    spotifyClientSecretInput.placeholder = data.clientSecretSet
-      ? ""
-      : "Paste Client Secret";
-    spotifyClientSecretInput.readOnly = false;
-  }
-  if (spotifyRedirectInput && document.activeElement !== spotifyRedirectInput) {
-    // Prefer saved URI; otherwise suggest this host's callback for Spotify Dashboard.
-    spotifyRedirectInput.value =
-      data.redirectUri || `${window.location.origin}/auth/callback`;
-    spotifyRedirectInput.readOnly = false;
-  }
-  if (spotifyMarketInput && document.activeElement !== spotifyMarketInput) {
-    spotifyMarketInput.value = data.market || "US";
-    spotifyMarketInput.readOnly = false;
-  }
-  if (spotifySecretHint) {
-    spotifySecretHint.textContent =
-      "Dots mean a client secret is already saved.";
-  }
-  if (spotifyAppSaveBtn) spotifyAppSaveBtn.disabled = false;
-  if (spotifyAppClearBtn) spotifyAppClearBtn.disabled = false;
+  paintSpotifyAppStatus(spotifyAppEls, data);
 }
 
 async function loadSpotifyAppStatus() {
@@ -2421,13 +2313,7 @@ async function loadSpotifyAppStatus() {
     if (!res.ok) throw new Error(data.error || "Could not load Spotify app status.");
     applySpotifyAppStatus(data);
   } catch {
-    spotifyAppStatusEl.classList.remove(
-      "status-connected",
-      "status-limited",
-      "status-disconnected"
-    );
-    spotifyAppStatusEl.classList.add("status-unknown");
-    spotifyAppStatusEl.textContent = "Unavailable";
+    paintConnStatusUnavailable(spotifyAppStatusEl);
   }
 }
 
@@ -2515,32 +2401,16 @@ const lastfmKeyHint = document.getElementById("lastfm-key-hint");
 const lastfmSaveBtn = document.getElementById("lastfm-save");
 const lastfmTestBtn = document.getElementById("lastfm-test");
 const lastfmClearBtn = document.getElementById("lastfm-clear");
+const lastfmEls = {
+  statusEl: lastfmStatusEl,
+  keyInput: lastfmKeyInput,
+  keyHint: lastfmKeyHint,
+  saveBtn: lastfmSaveBtn,
+  clearBtn: lastfmClearBtn,
+};
 
 function applyLastfmStatus(data) {
-  if (!lastfmStatusEl) return;
-  lastfmStatusEl.classList.remove(
-    "status-connected",
-    "status-limited",
-    "status-disconnected",
-    "status-unknown"
-  );
-  if (data.configured) {
-    lastfmStatusEl.classList.add("status-connected");
-    lastfmStatusEl.textContent = "Credentials OK";
-  } else {
-    lastfmStatusEl.classList.add("status-disconnected");
-    lastfmStatusEl.textContent = "Credentials missing";
-  }
-  if (lastfmKeyInput && document.activeElement !== lastfmKeyInput) {
-    lastfmKeyInput.value = data.apiKeySet ? "********" : "";
-    lastfmKeyInput.placeholder = data.apiKeySet ? "" : "Paste Last.fm API key";
-    lastfmKeyInput.readOnly = false;
-  }
-  if (lastfmKeyHint) {
-    lastfmKeyHint.textContent = "Dots mean an API key is already saved.";
-  }
-  if (lastfmSaveBtn) lastfmSaveBtn.disabled = false;
-  if (lastfmClearBtn) lastfmClearBtn.disabled = false;
+  paintLastfmStatus(lastfmEls, data);
 }
 
 async function loadLastfmStatus() {
@@ -2551,13 +2421,7 @@ async function loadLastfmStatus() {
     if (!res.ok) throw new Error(data.error || "Could not load Last.fm status.");
     applyLastfmStatus(data);
   } catch {
-    lastfmStatusEl.classList.remove(
-      "status-connected",
-      "status-limited",
-      "status-disconnected"
-    );
-    lastfmStatusEl.classList.add("status-unknown");
-    lastfmStatusEl.textContent = "Unavailable";
+    paintConnStatusUnavailable(lastfmStatusEl);
   }
 }
 
@@ -2640,36 +2504,17 @@ const haTokenHint = document.getElementById("ha-token-hint");
 const haSaveBtn = document.getElementById("ha-save");
 const haTestBtn = document.getElementById("ha-test");
 const haClearBtn = document.getElementById("ha-clear");
+const haEls = {
+  statusEl: haStatusEl,
+  urlInput: haUrlInput,
+  tokenInput: haTokenInput,
+  tokenHint: haTokenHint,
+  saveBtn: haSaveBtn,
+  clearBtn: haClearBtn,
+};
 
 function applyHaStatus(data) {
-  if (!haStatusEl) return;
-  haStatusEl.classList.remove(
-    "status-connected",
-    "status-limited",
-    "status-disconnected",
-    "status-unknown"
-  );
-  if (data.configured) {
-    haStatusEl.classList.add("status-connected");
-    haStatusEl.textContent = "Credentials OK";
-  } else {
-    haStatusEl.classList.add("status-disconnected");
-    haStatusEl.textContent = "Credentials missing";
-  }
-  if (haUrlInput && document.activeElement !== haUrlInput) {
-    haUrlInput.value = data.url || "";
-    haUrlInput.readOnly = false;
-  }
-  if (haTokenInput && document.activeElement !== haTokenInput) {
-    haTokenInput.value = data.tokenSet ? "********" : "";
-    haTokenInput.placeholder = data.tokenSet ? "" : "Paste long-lived token";
-    haTokenInput.readOnly = false;
-  }
-  if (haTokenHint) {
-    haTokenHint.textContent = "Dots mean a token is already saved.";
-  }
-  if (haSaveBtn) haSaveBtn.disabled = false;
-  if (haClearBtn) haClearBtn.disabled = false;
+  paintHaStatus(haEls, data);
 }
 
 async function loadHaStatus() {
@@ -2680,13 +2525,7 @@ async function loadHaStatus() {
     if (!res.ok) throw new Error(data.error || "Could not load Home Assistant status.");
     applyHaStatus(data);
   } catch {
-    haStatusEl.classList.remove(
-      "status-connected",
-      "status-limited",
-      "status-disconnected"
-    );
-    haStatusEl.classList.add("status-unknown");
-    haStatusEl.textContent = "Unavailable";
+    paintConnStatusUnavailable(haStatusEl);
   }
 }
 
@@ -2765,30 +2604,16 @@ const sonosRoomInput = document.getElementById("set-sonos-room");
 const sonosConnSaveBtn = document.getElementById("sonos-conn-save");
 const sonosConnTestBtn = document.getElementById("sonos-conn-test");
 const sonosConnClearBtn = document.getElementById("sonos-conn-clear");
+const sonosConnEls = {
+  statusEl: sonosConnStatusEl,
+  hostInput: sonosHostInput,
+  roomInput: sonosRoomInput,
+  saveBtn: sonosConnSaveBtn,
+  clearBtn: sonosConnClearBtn,
+};
 
 function applySonosConnStatus(data) {
-  if (!sonosConnStatusEl) return;
-  sonosConnStatusEl.classList.remove(
-    "status-connected",
-    "status-limited",
-    "status-disconnected",
-    "status-unknown"
-  );
-  if (data.hostSet) {
-    sonosConnStatusEl.classList.add("status-connected");
-    sonosConnStatusEl.textContent = "Pinned IP";
-  } else {
-    sonosConnStatusEl.classList.add("status-limited");
-    sonosConnStatusEl.textContent = "Discovery";
-  }
-  if (sonosHostInput && document.activeElement !== sonosHostInput) {
-    sonosHostInput.value = data.host || "";
-  }
-  if (sonosRoomInput && document.activeElement !== sonosRoomInput) {
-    sonosRoomInput.value = data.room || "";
-  }
-  if (sonosConnSaveBtn) sonosConnSaveBtn.disabled = false;
-  if (sonosConnClearBtn) sonosConnClearBtn.disabled = false;
+  paintSonosConnStatus(sonosConnEls, data);
 }
 
 async function loadSonosConnStatus() {
@@ -2799,13 +2624,7 @@ async function loadSonosConnStatus() {
     if (!res.ok) throw new Error(data.error || "Could not load Sonos settings.");
     applySonosConnStatus(data);
   } catch {
-    sonosConnStatusEl.classList.remove(
-      "status-connected",
-      "status-limited",
-      "status-disconnected"
-    );
-    sonosConnStatusEl.classList.add("status-unknown");
-    sonosConnStatusEl.textContent = "Unavailable";
+    paintConnStatusUnavailable(sonosConnStatusEl);
   }
 }
 
@@ -2886,45 +2705,19 @@ if (sonosConnClearBtn) {
 // Update the Settings "Spotify" indicator: connected (green), rate-limited
 // (amber, with how long is left), or not connected (red). Reads local server
 // state only - never triggers a Spotify call.
+const spotifyAccountEls = {
+  statusEl: spotifyStatus,
+  cacheWarmed,
+};
+
 async function loadSpotifyStatus() {
   if (!spotifyStatus) return;
   try {
     const res = await fetch("/api/spotify/status");
     const data = await res.json();
-    spotifyStatus.classList.remove(
-      "status-connected",
-      "status-limited",
-      "status-disconnected",
-      "status-unknown"
-    );
-    if (!data.connected) {
-      spotifyStatus.classList.add("status-disconnected");
-      spotifyStatus.textContent = "Account not linked";
-    } else if (data.rateLimited) {
-      spotifyStatus.classList.add("status-limited");
-      spotifyStatus.textContent = `Rate-limited \u2014 retry in ${formatDuration(data.cooldownSeconds)}`;
-    } else {
-      spotifyStatus.classList.add("status-connected");
-      spotifyStatus.textContent = "Account linked";
-    }
-    if (cacheWarmed) {
-      if (data.connected && data.poolWarmedAt) {
-        cacheWarmed.value = formatTimeAgo(data.poolWarmedAt);
-      } else if (data.connected) {
-        cacheWarmed.value = "Never";
-      } else {
-        cacheWarmed.value = "Account not linked";
-      }
-    }
+    paintSpotifyAccountStatus(spotifyAccountEls, data);
   } catch {
-    spotifyStatus.classList.remove(
-      "status-connected",
-      "status-limited",
-      "status-disconnected"
-    );
-    spotifyStatus.classList.add("status-unknown");
-    spotifyStatus.textContent = "Status unavailable";
-    if (cacheWarmed) cacheWarmed.value = "Unavailable";
+    paintSpotifyAccountUnavailable(spotifyAccountEls);
   }
 }
 
@@ -4265,15 +4058,13 @@ let nowPlayingSource = null;
 let nowPlayingStreamConnected = false;
 let nowPlayingFallbackTimer = null;
 let nowPlayingFallbackDelayTimer = null;
-let nowPlayingStreamSession = "";
-let nowPlayingStreamSequence = 0;
+let nowPlayingStreamCursor = createStreamCursor();
 let nowPlayingStreamVersion = 0;
 let queueSource = null;
 let queueStreamConnected = false;
 let queueFallbackTimer = null;
 let queueFallbackDelayTimer = null;
-let queueStreamSession = "";
-let queueStreamSequence = 0;
+let queueStreamCursor = createStreamCursor();
 let queueStreamVersion = 0;
 let queueHttpRequest = 0;
 let pendingQueueStreamTracks = null;
@@ -4281,8 +4072,7 @@ let partySource = null;
 let partyStreamConnected = false;
 let partyFallbackTimer = null;
 let partyFallbackDelayTimer = null;
-let partyStreamSession = "";
-let partyStreamSequence = 0;
+let partyStreamCursor = createStreamCursor();
 let lastPartySettings = null;
 let appReady = false;
 
@@ -4326,23 +4116,9 @@ function startNowPlayingFallback() {
 }
 
 function applyNowPlayingStreamSnapshot(snapshot) {
-  const session = typeof snapshot?.streamSession === "string"
-    ? snapshot.streamSession
-    : "";
-  const sequence = Number(snapshot?.streamSequence);
-  if (
-    session &&
-    session === nowPlayingStreamSession &&
-    Number.isFinite(sequence) &&
-    sequence <= nowPlayingStreamSequence
-  ) {
-    return;
-  }
-  if (session && session !== nowPlayingStreamSession) {
-    nowPlayingStreamSession = session;
-    nowPlayingStreamSequence = 0;
-  }
-  if (Number.isFinite(sequence)) nowPlayingStreamSequence = sequence;
+  const next = advanceStreamCursor(nowPlayingStreamCursor, snapshot);
+  if (!next.accept) return;
+  nowPlayingStreamCursor = next.cursor;
   nowPlayingStreamVersion += 1;
   renderNowPlaying(snapshot);
 }
@@ -4381,8 +4157,7 @@ function openNowPlayingStream() {
   }
   // A new connection's initial event is also a clock resynchronization. Accept
   // it even when its track-change sequence matches the prior connection.
-  nowPlayingStreamSession = "";
-  nowPlayingStreamSequence = 0;
+  nowPlayingStreamCursor = resetStreamCursor();
   const source = new EventSource("/api/nowplaying/stream");
   nowPlayingSource = source;
   source.onopen = () => {
@@ -4455,22 +4230,9 @@ function startQueueFallback() {
 }
 
 function applyQueueStreamSnapshot(snapshot) {
-  const session =
-    typeof snapshot?.streamSession === "string" ? snapshot.streamSession : "";
-  const sequence = Number(snapshot?.streamSequence);
-  if (
-    session &&
-    session === queueStreamSession &&
-    Number.isFinite(sequence) &&
-    sequence <= queueStreamSequence
-  ) {
-    return;
-  }
-  if (session && session !== queueStreamSession) {
-    queueStreamSession = session;
-    queueStreamSequence = 0;
-  }
-  if (Number.isFinite(sequence)) queueStreamSequence = sequence;
+  const next = advanceStreamCursor(queueStreamCursor, snapshot);
+  if (!next.accept) return;
+  queueStreamCursor = next.cursor;
   queueStreamVersion += 1;
   const tracks = Array.isArray(snapshot?.tracks) ? snapshot.tracks : [];
   if (queueEditMode) {
@@ -4488,8 +4250,7 @@ function openQueueStream() {
     startQueueFallback();
     return;
   }
-  queueStreamSession = "";
-  queueStreamSequence = 0;
+  queueStreamCursor = resetStreamCursor();
   const source = new EventSource("/api/queue/stream");
   queueSource = source;
   source.onopen = () => {
@@ -4593,22 +4354,9 @@ function applyPartySettings(payload) {
 }
 
 function applyPartyStreamSnapshot(snapshot) {
-  const session =
-    typeof snapshot?.streamSession === "string" ? snapshot.streamSession : "";
-  const sequence = Number(snapshot?.streamSequence);
-  if (
-    session &&
-    session === partyStreamSession &&
-    Number.isFinite(sequence) &&
-    sequence <= partyStreamSequence
-  ) {
-    return;
-  }
-  if (session && session !== partyStreamSession) {
-    partyStreamSession = session;
-    partyStreamSequence = 0;
-  }
-  if (Number.isFinite(sequence)) partyStreamSequence = sequence;
+  const next = advanceStreamCursor(partyStreamCursor, snapshot);
+  if (!next.accept) return;
+  partyStreamCursor = next.cursor;
   applyPartySettings(snapshot);
 }
 
@@ -4629,8 +4377,7 @@ function openPartyStream() {
     startPartyFallback();
     return;
   }
-  partyStreamSession = "";
-  partyStreamSequence = 0;
+  partyStreamCursor = resetStreamCursor();
   const source = new EventSource("/api/party/stream");
   partySource = source;
   source.onopen = () => {

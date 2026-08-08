@@ -74,3 +74,51 @@ export function guestIdentityPayload(sessionDisplayName, sessionDisplayAlias) {
     requestedByUser: user,
   };
 }
+
+const BIRTHDAY_MONTHS = [
+  "",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/** @param {{ birthday?: string, birthdayRole?: string }|null|undefined} g */
+export function formatGuestBirthday(g) {
+  if (!g?.birthday) return "";
+  const [mm, dd] = String(g.birthday).split("-").map(Number);
+  if (!mm || !dd) return "";
+  const roleId =
+    String(g.birthdayRole || "star").trim().toLowerCase() || "star";
+  return `${BIRTHDAY_MONTHS[mm] || mm} ${dd} · birthday ${roleId}`;
+}
+
+/** @param {{ notes?: string|string[] }|null|undefined} g */
+export function guestNoteCount(g) {
+  const notes = Array.isArray(g?.notes) ? g.notes : g?.notes ? [g.notes] : [];
+  return notes.length;
+}
+
+/** Hub card subtitle: notes count + birthday summary. */
+export function guestHubStat(g) {
+  const n = guestNoteCount(g);
+  const notesLabel = n === 1 ? "1 note" : `${n} notes`;
+  const bday = formatGuestBirthday(g);
+  return bday ? `${notesLabel} · ${bday}` : `${notesLabel} · No birthday`;
+}
+
+/** Hub card description: first note, truncated. */
+export function guestHubDesc(g) {
+  const notes = Array.isArray(g?.notes) ? g.notes : g?.notes ? [g.notes] : [];
+  const first = String(notes[0] || "").trim();
+  if (!first) return "Tap to add notes or a birthday";
+  return first.length > 72 ? `${first.slice(0, 71)}…` : first;
+}
