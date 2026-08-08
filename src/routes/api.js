@@ -12,7 +12,6 @@ import { registerHostPinRoutes } from "./host-pin.js";
 import { registerGuestRoutes } from "./guests.js";
 import { registerMediaRoutes } from "./media.js";
 import { registerDjRoutes } from "./dj.js";
-import { registerSameArtistBatchRoutes } from "./same-artist-batch.js";
 
 /**
  * Shared route context from server.js.
@@ -46,5 +45,4 @@ export function registerApiRoutes(app, ctx) {
   registerGuestRoutes(app);
   registerMediaRoutes(app);
   registerDjRoutes(app);
-  registerSameArtistBatchRoutes(app);
 }

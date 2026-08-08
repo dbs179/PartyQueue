@@ -290,12 +290,12 @@ const REQUEST_FAIRNESS_BOUNDS = {
 export const SET_REQUEST_FAIRNESS_DEFAULTS = {
   setRequestFairnessEnabled: true,
   setRequestFairnessMax: 1,
-  setRequestFairnessWindowHours: 1,
+  setRequestFairnessWindowMinutes: 60,
 };
 
 const SET_REQUEST_FAIRNESS_BOUNDS = {
   setRequestFairnessMax: { min: 1, max: 10 },
-  setRequestFairnessWindowHours: { min: 1, max: 24 },
+  setRequestFairnessWindowMinutes: { min: 1, max: 1440 },
 };
 
 export function getRequestFairnessSettings() {
@@ -366,10 +366,15 @@ export function getSetRequestFairnessSettings() {
       SET_REQUEST_FAIRNESS_DEFAULTS.setRequestFairnessMax,
       SET_REQUEST_FAIRNESS_BOUNDS.setRequestFairnessMax
     ),
-    setRequestFairnessWindowHours: clampInt(
-      s.setRequestFairnessWindowHours,
-      SET_REQUEST_FAIRNESS_DEFAULTS.setRequestFairnessWindowHours,
-      SET_REQUEST_FAIRNESS_BOUNDS.setRequestFairnessWindowHours
+    setRequestFairnessWindowMinutes: clampInt(
+      // Migrate pre-10.1.x hour setting (1 hour → 60 minutes).
+      s.setRequestFairnessWindowMinutes != null
+        ? s.setRequestFairnessWindowMinutes
+        : s.setRequestFairnessWindowHours != null
+          ? Number(s.setRequestFairnessWindowHours) * 60
+          : SET_REQUEST_FAIRNESS_DEFAULTS.setRequestFairnessWindowMinutes,
+      SET_REQUEST_FAIRNESS_DEFAULTS.setRequestFairnessWindowMinutes,
+      SET_REQUEST_FAIRNESS_BOUNDS.setRequestFairnessWindowMinutes
     ),
     // Host PIN bypass is shared with song-request fairness.
     requestFairnessHostBypass: song.requestFairnessHostBypass,

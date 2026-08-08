@@ -1,10 +1,10 @@
 /**
  * Same-artist showcase batches for Random / Never-Ending.
  *
- * A) Automatic every-N when settings.sameArtistBatchEnabled
- * B) Host one-shot arm (Booth picker) — wins over A for the next batch
+ * Automatic every-N when settings.sameArtistBatchEnabled — picks an artist
+ * from the current Mood/Genre playlist pool.
  *
- * Counter + arm are in-memory (like mood rotation / DJ set packs).
+ * Counter is in-memory (like mood rotation / DJ set packs).
  */
 
 import { primaryArtist } from "./sampler.js";
@@ -13,27 +13,8 @@ import { buildPlaylistPool } from "./spotify.js";
 import { artistMatchesGenres } from "./genres.js";
 import { moodPack as eraMoodPack, trackFitsMood } from "./moods.js";
 
-const ARM_TTL_MS = 15 * 60 * 1000;
-
 /** @type {number} */
 let setsSinceLastShowcase = 0;
-
-/**
- * @typedef {{
- *   artistKey: string,
- *   artistName: string,
- *   spotifyArtistId: string|null,
- *   armedAt: number,
- *   expiresAt: number,
- * }} SameArtistArm
- * @type {SameArtistArm|null}
- */
-let armed = null;
-
-function expireIfStale(now = Date.now()) {
-  if (!armed) return;
-  if (now >= armed.expiresAt) armed = null;
-}
 
 /** @param {string} name */
 export function artistKeyFromName(name) {
@@ -57,7 +38,6 @@ export function listPoolArtists(playlists) {
       const row = map.get(key);
       if (row) {
         row.trackCount += 1;
-        // Prefer a longer display name if we only had a short one.
         if (display.length > row.name.length) row.name = display;
       } else {
         map.set(key, { key, name: display, trackCount: 1 });
@@ -125,136 +105,20 @@ export function noteRandomSetBuilt({ wasShowcase = false } = {}) {
 
 export function resetSameArtistBatchCountersForTests() {
   setsSinceLastShowcase = 0;
-  armed = null;
 }
 
-/**
- * @param {{
- *   artistKey: string,
- *   artistName?: string,
- *   spotifyArtistId?: string|null,
- *   now?: number,
- *   ttlMs?: number,
- * }} opts
- */
-export function armSameArtistBatch({
-  artistKey,
-  artistName = "",
-  spotifyArtistId = null,
-  now = Date.now(),
-  ttlMs = ARM_TTL_MS,
-} = {}) {
-  const key = primaryArtist(artistKey);
-  if (!key) {
-    const err = new Error("Pick an artist for the next same-artist set.");
-    err.statusCode = 400;
-    throw err;
-  }
-  const name = String(artistName || artistKey || key).trim() || key;
-  const spotifyId = String(spotifyArtistId || "").trim() || null;
-  const ttl = Math.max(60_000, Number(ttlMs) || ARM_TTL_MS);
-  armed = {
-    artistKey: key,
-    artistName: name,
-    spotifyArtistId: spotifyId,
-    armedAt: now,
-    expiresAt: now + ttl,
-  };
-  return getSameArtistBatchState(now);
-}
-
-export function clearSameArtistBatch() {
-  armed = null;
-  return getSameArtistBatchState();
-}
-
-/** Peek without consuming (expires stale arms). */
-export function peekSameArtistBatch(now = Date.now()) {
-  expireIfStale(now);
-  if (!armed) return null;
-  return {
-    artistKey: armed.artistKey,
-    artistName: armed.artistName,
-    spotifyArtistId: armed.spotifyArtistId || null,
-    armedAt: armed.armedAt,
-    expiresAt: armed.expiresAt,
-  };
-}
-
-/** Consume the one-shot arm (call after a successful showcase batch). */
-export function consumeSameArtistBatch(now = Date.now()) {
-  expireIfStale(now);
-  const had = armed;
-  armed = null;
-  return had
-    ? {
-        artistKey: had.artistKey,
-        artistName: had.artistName,
-        spotifyArtistId: had.spotifyArtistId || null,
-      }
-    : null;
-}
-
-export function getSameArtistBatchState(now = Date.now()) {
-  expireIfStale(now);
+export function getSameArtistBatchState() {
   const cfg = getRandomnessSettings();
-  const pending = peekSameArtistBatch(now);
   return {
     enabled: !!cfg.sameArtistBatchEnabled,
     everyN: cfg.sameArtistBatchEveryN,
     setsSince: setsSinceLastShowcase,
-    armed: !!pending,
-    artist: pending?.artistName || null,
-    artistKey: pending?.artistKey || null,
-    spotifyArtistId: pending?.spotifyArtistId || null,
-    armedAt: pending?.armedAt ?? null,
-    expiresAt: pending?.expiresAt ?? null,
   };
 }
 
 /**
- * Merge library-filtered playlists with Spotify top tracks for a showcase.
- * Prefers library URIs, then fills from Spotify.
- * @param {Array<{ tracks?: object[] }>} libraryPlaylists
- * @param {Array<{ uri?: string, name?: string, artist?: string, explicit?: boolean }>} spotifyTracks
- * @param {{ artistName?: string, spotifyArtistId?: string|null }} [meta]
- */
-export function mergeArtistShowcasePlaylists(
-  libraryPlaylists,
-  spotifyTracks,
-  meta = {}
-) {
-  const seen = new Set();
-  const tracks = [];
-  for (const p of Array.isArray(libraryPlaylists) ? libraryPlaylists : []) {
-    for (const t of p.tracks || []) {
-      if (!t?.uri || seen.has(t.uri)) continue;
-      seen.add(t.uri);
-      tracks.push(t);
-    }
-  }
-  for (const t of Array.isArray(spotifyTracks) ? spotifyTracks : []) {
-    if (!t?.uri || seen.has(t.uri)) continue;
-    seen.add(t.uri);
-    tracks.push(t);
-  }
-  if (!tracks.length) return [];
-  const id =
-    meta.spotifyArtistId
-      ? `spotify-artist:${meta.spotifyArtistId}`
-      : `same-artist:${primaryArtist(meta.artistName) || "set"}`;
-  return [
-    {
-      id,
-      name: String(meta.artistName || "Same artist").trim() || "Same artist",
-      tracks,
-    },
-  ];
-}
-
-/**
  * Build the same filtered playlist pool Random uses (playlists → genres →
- * explicit → era mood). Shared by the Booth artist picker and Random.
+ * explicit → era mood). Shared by Random showcase picking.
  * @param {{
  *   playlistIds?: string[]|null,
  *   genres?: string[]|null,

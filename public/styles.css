@@ -1795,82 +1795,6 @@ button.guest-name:focus-visible {
   padding: 6px 0;
 }
 
-/* Booth same-artist next-set: stacked full-width picker (not the 96px number grid). */
-.booth-same-artist-next {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
-  padding: 10px 0 4px;
-}
-.booth-same-artist-next .setting-label {
-  margin: 0;
-}
-.booth-same-artist-intro {
-  margin: 0;
-}
-.booth-same-artist-lookup {
-  position: relative;
-  width: 100%;
-  max-width: 420px;
-}
-.booth-same-artist-select {
-  width: 100%;
-  max-width: 420px;
-  min-height: 40px;
-}
-.booth-same-artist-results {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 4px 0;
-  max-height: 220px;
-  overflow: auto;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  background: rgba(12, 14, 20, 0.96);
-}
-.booth-same-artist-results[hidden] {
-  display: none;
-}
-.booth-same-artist-results button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  margin: 0;
-  padding: 8px 12px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.booth-same-artist-results button:hover,
-.booth-same-artist-results button:focus-visible {
-  background: rgba(255, 255, 255, 0.08);
-  outline: none;
-}
-.booth-same-artist-results img,
-.booth-same-artist-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  object-fit: cover;
-  flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.08);
-  display: inline-block;
-}
-.booth-same-artist-selected {
-  margin: 2px 0 0;
-}
-.booth-same-artist-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 2px;
-}
-
 /* Cache warmed value + Re-warm button on one row. */
 .setting-row-cache {
   display: grid;
@@ -2490,17 +2414,6 @@ button.guest-name:focus-visible {
   opacity: 0.75;
   margin-bottom: 2px;
 }
-.booth-set-request-hours {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0 2px;
-}
-.booth-set-request-hours .setting-input-num {
-  width: 4.5rem;
-}
-
 .toast {
   position: fixed;
   left: 50%;

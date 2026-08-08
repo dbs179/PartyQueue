@@ -9,7 +9,7 @@ import {
   isDjSilenceUri,
   isDjSilenceTrack,
 } from "./sonos-queue-policy.js";
-import { buildPlaylistPool, getArtistTopTracks } from "./spotify.js";
+import { buildPlaylistPool } from "./spotify.js";
 import {
   spotifyTrackId,
   pickWithRelaxation,
@@ -21,13 +21,10 @@ import {
   allowSameArtistBatch,
 } from "./sampler.js";
 import {
-  peekSameArtistBatch,
-  consumeSameArtistBatch,
   noteRandomSetBuilt,
   getSetsSinceLastSameArtistBatch,
   pickShowcaseArtistFromPlaylists,
   filterPlaylistsByPrimaryArtist,
-  mergeArtistShowcasePlaylists,
 } from "./same-artist-batch.js";
 import {
   recentTrackIds,
@@ -191,21 +188,11 @@ async function addRandomFromPlaylistsUnlocked(
   cfg.bucketsFor = bucketsForArtistSync;
   cfg.lastArtist = queueTailArtist;
 
-  // Same-artist showcase: host-armed next-set wins; else automatic every-N
-  // from the current Mood/Genre pool. Host arms can be any Spotify artist —
-  // library tracks are preferred, then Spotify top tracks fill the gap.
-  // Discover / lane-hits / era top-ups are off for this batch.
+  // Same-artist showcase: automatic every-N from the current Mood/Genre pool.
+  // Filters the pool to one artist; Discover / lane-hits / era top-ups off.
   let showcaseArtistKey = null;
   let showcaseArtistName = null;
-  let showcaseFromHost = false;
-  let showcaseSpotifyId = null;
-  const pendingShowcase = peekSameArtistBatch();
-  if (pendingShowcase?.artistKey) {
-    showcaseArtistKey = pendingShowcase.artistKey;
-    showcaseArtistName = pendingShowcase.artistName;
-    showcaseSpotifyId = pendingShowcase.spotifyArtistId || null;
-    showcaseFromHost = true;
-  } else if (allowSameArtistBatch(cfg, getSetsSinceLastSameArtistBatch())) {
+  if (allowSameArtistBatch(cfg, getSetsSinceLastSameArtistBatch())) {
     const picked = pickShowcaseArtistFromPlaylists(usable, {
       minTracks: Math.min(3, Math.max(2, Number(count) || 2)),
       excludeKeys: blockedArtists,
@@ -216,45 +203,20 @@ async function addRandomFromPlaylistsUnlocked(
     }
   }
   if (showcaseArtistKey) {
-    let filtered = filterPlaylistsByPrimaryArtist(usable, showcaseArtistKey);
-    let n = filtered.reduce((sum, p) => sum + (p.tracks?.length || 0), 0);
-    const need = Math.max(1, Number(count) || 1);
-    if (n < need && showcaseSpotifyId) {
-      try {
-        const top = await getArtistTopTracks(showcaseSpotifyId, {
-          filterExplicit: !!opts.filterExplicit,
-        });
-        filtered = mergeArtistShowcasePlaylists(filtered, top, {
-          artistName: showcaseArtistName,
-          spotifyArtistId: showcaseSpotifyId,
-        });
-        n = filtered.reduce((sum, p) => sum + (p.tracks?.length || 0), 0);
-        console.log(
-          `[random] same-artist Spotify fill: ${showcaseArtistName}` +
-            ` (+${top.length} top tracks → ${n} usable)`
-        );
-      } catch (err) {
-        console.warn(
-          `[random] same-artist Spotify fill failed: ${err.message}`
-        );
-      }
-    }
+    const filtered = filterPlaylistsByPrimaryArtist(usable, showcaseArtistKey);
+    const n = filtered.reduce((sum, p) => sum + (p.tracks?.length || 0), 0);
     if (n >= 1) {
       usable = filtered;
       cfg.artistCap = Math.max(cfg.artistCap, Math.max(1, Number(count) || 1));
       console.log(
-        `[random] same-artist showcase: ${showcaseArtistName} (${n} tracks` +
-          `${showcaseFromHost ? ", host-armed" : ", auto"})`
+        `[random] same-artist showcase: ${showcaseArtistName} (${n} tracks, auto)`
       );
     } else {
       console.warn(
         `[random] same-artist showcase skipped — no tracks for ${showcaseArtistName}`
       );
-      if (showcaseFromHost) consumeSameArtistBatch();
       showcaseArtistKey = null;
       showcaseArtistName = null;
-      showcaseFromHost = false;
-      showcaseSpotifyId = null;
     }
   }
 
@@ -856,7 +818,6 @@ async function addRandomFromPlaylistsUnlocked(
   }));
 
   if (showcaseArtistKey) {
-    if (showcaseFromHost) consumeSameArtistBatch();
     if (added > 0) noteRandomSetBuilt({ wasShowcase: true });
   } else if (added > 0) {
     noteRandomSetBuilt({ wasShowcase: false });

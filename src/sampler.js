@@ -106,7 +106,7 @@ export function enforceUniqueArtistsInBatch(
 
 /**
  * Automatic same-artist showcase gate (Booth: Same-artist sets + every N).
- * Host-armed next-set is handled separately in same-artist-batch.js / Random.
+ * Guest Set Request (main search) is separate — this only gates Random auto sets.
  *
  * @param {{ sameArtistBatchEnabled?: boolean, sameArtistBatchEveryN?: number }} settings
  * @param {number} [setsSinceLastSameArtistBatch]

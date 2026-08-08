@@ -470,7 +470,7 @@ export function registerQueueRoutes(app, ctx) {
             code: denied.code,
             rollingCount: denied.rollingCount,
             rollingMax: denied.rollingMax,
-            windowHours: denied.windowHours,
+            windowMinutes: denied.windowMinutes,
             retryAt: denied.retryAt,
           });
         }

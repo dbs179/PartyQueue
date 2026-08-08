@@ -336,8 +336,21 @@ export function createDjVolumeHandoff({
             (typeof io.next === "function" || typeof io.playAt === "function")
           ) {
             handledPad = true;
-            if (typeof io.next === "function") await io.next();
-            else await io.playAt(Number(musicPosition) - 1);
+            // Next from a STOPPED/PAUSED TTS clip often leaves the transport
+            // idle on the restore pad — always Play after advancing or the
+            // room stays paused after the DJ (Set Request / mid-set shouts).
+            if (typeof io.next === "function") {
+              await io.next();
+              try {
+                await io.resume();
+              } catch (error) {
+                logger.warn(
+                  `resume after DJ advance failed: ${error.message}`
+                );
+              }
+            } else {
+              await io.playAt(Number(musicPosition) - 1);
+            }
             advancedFromDj = true;
             logger.info("advanced completed DJ clip to post-silence");
           }
@@ -427,8 +440,16 @@ export function createDjVolumeHandoff({
               // Past the lead-in — skip forward. Never SeekTrack the TTS URI
               // itself (that restarts the http clip from 0).
               advancedFromDj = true;
-              if (typeof io.next === "function") await io.next();
-              else await io.playAt(Number(musicPosition) - 1);
+              if (typeof io.next === "function") {
+                await io.next();
+                try {
+                  await io.resume();
+                } catch {
+                  /* best effort */
+                }
+              } else {
+                await io.playAt(Number(musicPosition) - 1);
+              }
             } else if (liveOnRestore && Number(musicPosition) >= 1) {
               await io.playAt(Number(musicPosition));
             } else if (!liveOnRamp && !liveOnDj && !liveOnRestore) {

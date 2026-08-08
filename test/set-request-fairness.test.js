@@ -7,11 +7,11 @@ import { findInsertPosition } from "../src/sonos-queue-policy.js";
 const setEnabled = {
   setRequestFairnessEnabled: true,
   setRequestFairnessMax: 1,
-  setRequestFairnessWindowHours: 1,
+  setRequestFairnessWindowMinutes: 60,
   requestFairnessHostBypass: true,
 };
 
-test("set request fairness allows first set then blocks within the hour", () => {
+test("set request fairness allows first set then blocks within the window", () => {
   const now = Date.now();
   const first = evaluateSetRequestFairness({
     settings: setEnabled,

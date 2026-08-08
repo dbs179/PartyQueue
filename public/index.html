@@ -708,29 +708,6 @@
                 <span class="autofill-hint">Automatic showcase batches — tune “every N” under Queue</span>
               </span>
             </label>
-            <div class="booth-same-artist-next">
-              <label class="setting-label" for="same-artist-search">Next artist set</label>
-              <p class="setting-hint booth-same-artist-intro">
-                Search Spotify for any artist, then arm them for the next Random or Never-Ending batch.
-              </p>
-              <div class="booth-same-artist-lookup">
-                <input
-                  id="same-artist-search"
-                  class="setting-input booth-same-artist-select"
-                  type="search"
-                  autocomplete="off"
-                  spellcheck="false"
-                  placeholder="Search Spotify artists…"
-                />
-                <ul id="same-artist-results" class="booth-same-artist-results" hidden></ul>
-                <p id="same-artist-selected" class="setting-hint booth-same-artist-selected" hidden></p>
-              </div>
-              <div class="booth-same-artist-actions">
-                <button id="same-artist-arm" type="button" class="pill-btn success">Arm next set</button>
-                <button id="same-artist-clear" type="button" class="pill-btn" hidden>Clear</button>
-              </div>
-              <span id="same-artist-armed-hint" class="setting-hint" hidden></span>
-            </div>
             <label class="autofill" title="Prevent one guest from filling the searched queue">
               <input type="checkbox" id="set-request-fairness-enabled" class="autofill-input" />
               <span class="autofill-switch" aria-hidden="true"></span>
@@ -752,22 +729,9 @@
               <span class="autofill-switch" aria-hidden="true"></span>
               <span class="autofill-text">
                 <span class="autofill-label">Enable Set Request fairness</span>
-                <span class="autofill-hint">Separate from song requests — default one set per hour</span>
+                <span class="autofill-hint">Separate from song requests — tune the window under Queue</span>
               </span>
             </label>
-            <div class="setting-row booth-set-request-hours">
-              <label class="setting-label" for="set-set-request-fairness-hours">Set Request every</label>
-              <input
-                id="set-set-request-fairness-hours"
-                class="setting-input setting-input-num"
-                type="number"
-                min="1"
-                max="24"
-                step="1"
-                value="1"
-              />
-              <span class="setting-hint">hours (per guest)</span>
-            </div>
           </div>
         </div>
         <div class="controls-divider" aria-hidden="true"></div>
@@ -893,7 +857,7 @@
 
           <div class="controls-divider" aria-hidden="true"></div>
           <p class="section-label settings-banner-label">Request fairness</p>
-          <p class="settings-intro">Per-User limits for searched song requests. The Strict fill, fairness, and Host bypass switches live on the Booth page; limits below use each guest&apos;s User name, not their optional queue alias.</p>
+          <p class="settings-intro">Per-User limits for searched song requests and Set Requests. Fairness toggles live on the Booth page; limits below use each guest&apos;s User name, not their optional queue alias.</p>
           <div id="request-fairness-fields">
             <div class="setting-row">
               <label class="setting-label" for="set-request-fairness-threshold">Limit starts at</label>
@@ -914,6 +878,11 @@
               <label class="setting-label" for="set-request-fairness-window">Rolling window</label>
               <input type="number" id="set-request-fairness-window" class="setting-input" min="1" max="1440" step="1" inputmode="numeric" />
               <span class="setting-hint">minutes before an older request stops counting (default 30)</span>
+            </div>
+            <div class="setting-row">
+              <label class="setting-label" for="set-set-request-fairness-window">Set Request window</label>
+              <input type="number" id="set-set-request-fairness-window" class="setting-input" min="1" max="1440" step="1" inputmode="numeric" />
+              <span class="setting-hint">minutes between Set Requests per guest when Set Request fairness is on (default 60)</span>
             </div>
           </div>
 

@@ -185,6 +185,14 @@ test("advances a completed STOPPED DJ clip instead of replaying it", async () =>
     []
   );
   assert.equal(run.calls.filter(([name]) => name === "next").length, 2);
+  // Next from a STOPPED DJ clip must Play the following pad or the room
+  // stays paused after the announce (Set Request / mid-set shouts).
+  const firstNext = run.calls.findIndex(([name]) => name === "next");
+  const resumeAfterDj = run.calls.findIndex(
+    ([name], i) => i > firstNext && name === "resume"
+  );
+  assert.ok(firstNext >= 0);
+  assert.ok(resumeAfterDj > firstNext);
   assert.equal(run.getVolume(), 10);
 });
 

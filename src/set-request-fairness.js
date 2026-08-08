@@ -1,6 +1,6 @@
 /**
  * Set Request fairness — independent of individual song-request quotas.
- * Default: 1 set per hour when enabled.
+ * Default: 1 set per 60 minutes when enabled.
  */
 
 import { sanitizeDisplayName } from "./display-name.js";
@@ -13,7 +13,7 @@ const userKey = (value) =>
  *   settings?: {
  *     setRequestFairnessEnabled?: boolean,
  *     setRequestFairnessMax?: number,
- *     setRequestFairnessWindowHours?: number,
+ *     setRequestFairnessWindowMinutes?: number,
  *     requestFairnessHostBypass?: boolean,
  *   },
  *   user?: string,
@@ -51,11 +51,11 @@ export function evaluateSetRequestFairness({
     1,
     Math.floor(Number(policy.setRequestFairnessMax) || 1)
   );
-  const windowHours = Math.max(
+  const windowMinutes = Math.max(
     1,
-    Math.floor(Number(policy.setRequestFairnessWindowHours) || 1)
+    Math.floor(Number(policy.setRequestFairnessWindowMinutes) || 1)
   );
-  const windowMs = windowHours * 60 * 60_000;
+  const windowMs = windowMinutes * 60_000;
   const recent = (Array.isArray(events) ? events : [])
     .filter(
       (event) =>
@@ -70,19 +70,18 @@ export function evaluateSetRequestFairness({
     const retryAt = Number(recent[recent.length - rollingMax]?.ts) + windowMs;
     const retryAfterSec = Math.max(1, Math.ceil((retryAt - now) / 1000));
     const retryMinutes = Math.max(1, Math.ceil(retryAfterSec / 60));
-    const hourLabel = windowHours === 1 ? "hour" : `${windowHours} hours`;
     return {
       allowed: false,
       status: 429,
       code: "set_request_quota",
       rollingCount: recent.length,
       rollingMax,
-      windowHours,
+      windowMinutes,
       retryAt,
       retryAfterSec,
       error: `You’ve reached ${rollingMax} Set Request${
         rollingMax === 1 ? "" : "s"
-      } per ${hourLabel}. Try again in about ${retryMinutes} minute${
+      } per ${windowMinutes} minutes. Try again in about ${retryMinutes} minute${
         retryMinutes === 1 ? "" : "s"
       }.`,
     };
@@ -93,6 +92,6 @@ export function evaluateSetRequestFairness({
     requestCreated: true,
     rollingCount: recent.length,
     rollingMax,
-    windowHours,
+    windowMinutes,
   };
 }
