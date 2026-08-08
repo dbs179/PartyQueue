@@ -22,6 +22,12 @@ import {
   resolveNowPlayingDisplay,
   serverPlaybackPosition,
 } from "./now-playing-utils.js";
+import {
+  formatDuration,
+  formatTimeAgo,
+  formatSuggestionWhen,
+  escapeHtml,
+} from "./format.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -2418,30 +2424,6 @@ async function loadBanners() {
   }
 }
 
-// Friendly "Xh Ym" / "Ym Zs" from seconds, for the rate-limit countdown.
-function formatDuration(totalSeconds) {
-  const s = Math.max(0, Math.round(totalSeconds));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  if (h) return `${h}h ${m}m`;
-  if (m) return `${m}m ${sec}s`;
-  return `${sec}s`;
-}
-
-// "2h ago", "5m ago", "just now" - for the cache last-warmed indicator.
-function formatTimeAgo(ts) {
-  if (!ts) return "never warmed";
-  const sec = Math.max(0, Math.round((Date.now() - ts) / 1000));
-  if (sec < 45) return "just now";
-  const m = Math.round(sec / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ${m % 60}m ago`;
-  const d = Math.floor(h / 24);
-  return `${d}d ${h % 24}h ago`;
-}
-
 // Spotify Developer app credentials (DJ Booth → Connections).
 // Client secret is write-only — status never returns the secret.
 const spotifyAppStatusEl = document.getElementById("spotify-app-status");
@@ -3349,25 +3331,6 @@ const suggestionsCountEl = document.getElementById("suggestions-count");
 const SUGGESTION_TEXT_MAX = 280;
 let suggestionsCache = [];
 let suggestionsFilter = "open";
-
-function formatSuggestionWhen(ts) {
-  const t = Number(ts) || 0;
-  if (!t) return "";
-  const diff = Date.now() - t;
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  try {
-    return new Date(t).toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
-  }
-}
 
 function syncSuggestionCharCount() {
   if (!suggestionCharCount || !suggestionText) return;
@@ -7494,12 +7457,6 @@ function updateMixGenreHeaderFromServer(np) {
   updateMixLabels();
 }
 
-/** @deprecated Prefer updateMixSelectionFromServer / updateMixGenreHeaderFromServer */
-function updateMixFromServer(payload) {
-  updateMixSelectionFromServer(payload);
-  updateMixGenreHeaderFromServer(payload);
-}
-
 // When the server changes the mix underneath us (Random Mood / Random Decade
 // rotating between sets), follow along: repaint the decade chips, genre chips
 // + preset highlight, and local storage. Guarded by the recent-touch window
@@ -8182,10 +8139,3 @@ function showToast(message, isError = false, durationMs = 2600, opts = {}) {
   }, ms);
 }
 
-function escapeHtml(str) {
-  return String(str)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
