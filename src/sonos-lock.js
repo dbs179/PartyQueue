@@ -8,13 +8,22 @@
 // - withSonosTransportLane: transport-level commands (play/pause/next/volume/
 //   shuffle/mute). They never touch queue contents, so they must not wait
 //   behind a long Never-Ending refill — pause has to work mid-fill.
+//
+// Transport lane is reentrant: Skip→cancel handoff→setVolume must not
+// deadlock waiting on the same lane that Skip already holds.
 
-function makeLane() {
+import { AsyncLocalStorage } from "node:async_hooks";
+
+function makeLane({ reentrant = false } = {}) {
   let chain = Promise.resolve();
+  const als = reentrant ? new AsyncLocalStorage() : null;
   return (fn) => {
+    if (als?.getStore()) {
+      return Promise.resolve().then(() => fn());
+    }
     const run = chain.then(
-      () => fn(),
-      () => fn()
+      () => (als ? als.run({}, () => fn()) : fn()),
+      () => (als ? als.run({}, () => fn()) : fn())
     );
     // Keep the chain alive even if this call rejects.
     chain = run.then(
@@ -40,4 +49,4 @@ export const withSonosWriteLock = makeLane();
  * @param {() => Promise<T>|T} fn
  * @returns {Promise<T>}
  */
-export const withSonosTransportLane = makeLane();
+export const withSonosTransportLane = makeLane({ reentrant: true });

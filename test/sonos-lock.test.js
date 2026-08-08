@@ -48,3 +48,13 @@ test("a rejected operation does not break its lane", async () => {
   );
   assert.equal(await withSonosWriteLock(() => "ok"), "ok");
 });
+
+test("transport lane is reentrant (nested setVolume during next)", async () => {
+  const order = [];
+  await withSonosTransportLane(async () => {
+    order.push("outer");
+    await withSonosTransportLane(() => order.push("inner"));
+    order.push("after");
+  });
+  assert.deepEqual(order, ["outer", "inner", "after"]);
+});

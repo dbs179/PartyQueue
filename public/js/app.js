@@ -2507,9 +2507,22 @@ prevBtn.addEventListener("click", () => {
 });
 
 nextBtn.addEventListener("click", () => {
-  beginOptimisticSkipFromQueue();
+  const onAnnounce = !!(
+    lastConfirmedNp?.djVoice ||
+    lastTransportNp?.djVoice ||
+    optimisticNp?.djVoice
+  );
+  const nextHead = Array.isArray(lastQueueTracks) ? lastQueueTracks[0] : null;
+  // Next visible row is a DJ clip → server seeks near end of this song.
+  // Don't paint the post-announce music yet.
+  const nextIsAnnounce = !!nextHead?.djVoice;
+  if (onAnnounce || !nextIsAnnounce) {
+    beginOptimisticSkipFromQueue();
+  }
   postControl(nextBtn, "/api/next", (d) => {
-    if (d.skipped) showToast("Skipped — remembered for the DJ");
+    if (d.abortedAnnounce) showToast("Skipped DJ announce");
+    else if (d.seekNearEnd) showToast("Cueing DJ announce…");
+    else if (d.skipped) showToast("Skipped — remembered for the DJ");
   });
 });
 

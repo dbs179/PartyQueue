@@ -9,6 +9,16 @@ import { assertManualVolumeAvailable } from "./sonos-volume.js";
 import { spotifyTrackId } from "./sampler.js";
 import { recordSkip } from "./play-history.js";
 import { originOf, moodOf, clearConsumedDedication } from "./queue-origin.js";
+import {
+  cancelActiveDjVolumeHandoff,
+  isDjVolumeHandoffActive,
+} from "./dj-volume-handoff.js";
+import { isAnnounceQueuePad } from "./sonos-queue-policy.js";
+import {
+  decideSkipAnnounceAction,
+  findNextMusicTrackNumber,
+  formatSonosRelTime,
+} from "./skip-announce-policy.js";
 
 /**
  * Live queue context for DJ volume handoff: current track index, next URI,
@@ -139,44 +149,151 @@ async function pauseUnlocked() {
 // Transport: skip to the next track in the group's queue. Treats the skip as
 // DJ feedback: the current song enters song memory and its artist is cooled
 // down for a few upcoming auto-picks so Random doesn't lean on them again.
+//
+// Announce-aware policy (see skip-announce-policy.js):
+// - Music with next = announce pad → seek near end (natural handoff into DJ).
+// - Already on announce pads / volume-locked handoff → jump to next music.
 export async function next(...args) {
   return withSonosTransportLane(() => nextUnlocked(...args));
+}
+
+function rememberSkippedTrack(skipped) {
+  if (!skipped?.id) return;
+  const source = originOf(skipped.id) || null;
+  recordSkip({
+    ...skipped,
+    source,
+    mood: source === "mood" ? moodOf(skipped.id) : null,
+  });
+  clearConsumedDedication(skipped.id);
+  clearLastHeardIf(skipped.id);
 }
 
 async function nextUnlocked() {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
 
-  // Snapshot what's playing before we skip so we can remember it.
   let skipped = null;
+  let decision = { action: "normalNext" };
+  let queueItems = [];
+  let track = 0;
+  let playingFromQueue = false;
+  let currentIsAnnouncePad = false;
+
   try {
-    const pos = await coordinator.AVTransportService.GetPositionInfo();
+    const [pos, media, queue] = await Promise.all([
+      coordinator.AVTransportService.GetPositionInfo(),
+      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(
+        () => ({ CurrentURI: "" })
+      ),
+      coordinator.GetQueue().catch(() => ({ Result: [] })),
+    ]);
     const meta = typeof pos.TrackMetaData === "object" ? pos.TrackMetaData : null;
     const uri = pos.TrackURI ?? null;
+    const title = meta?.Title ?? "";
     const id = spotifyTrackId(uri);
     if (id) {
       skipped = {
         id,
         artist: meta?.Artist ?? "",
-        name: meta?.Title ?? "",
+        name: title,
       };
     }
-  } catch {
-    /* best-effort — still skip even if we can't read now-playing */
+    currentIsAnnouncePad = isAnnounceQueuePad(uri, title);
+
+    queueItems = Array.isArray(queue.Result) ? queue.Result : [];
+    track = Number(pos.Track) || 0;
+    playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
+    const nextItem =
+      playingFromQueue && track >= 1 && track < queueItems.length
+        ? queueItems[track]
+        : null;
+    decision = decideSkipAnnounceAction({
+      currentUri: uri,
+      currentTitle: title,
+      nextUri: nextItem?.TrackUri ?? nextItem?.uri ?? "",
+      nextTitle: nextItem?.Title ?? nextItem?.title ?? "",
+      durationSec: parseSonosTime(pos.TrackDuration),
+      positionSec: parseSonosTime(pos.RelTime),
+      volumeLocked: isDjVolumeHandoffActive(),
+    });
+  } catch (err) {
+    console.error("[next] announce context failed:", err.message);
+    decision = { action: "normalNext" };
+  }
+
+  if (decision.action === "seekNearEnd") {
+    try {
+      if (!decision.alreadyNearEnd) {
+        await coordinator.SeekPosition(
+          formatSonosRelTime(decision.targetSec)
+        );
+      }
+      // Keep transport rolling into the handoff pads.
+      try {
+        const transport =
+          await coordinator.AVTransportService.GetTransportInfo();
+        const state = String(transport.CurrentTransportState || "");
+        if (state === "STOPPED" || state === "PAUSED_PLAYBACK") {
+          await coordinator.Play();
+        }
+      } catch {
+        /* best-effort */
+      }
+      rememberSkippedTrack(skipped);
+      invalidateSonosSnapshots();
+      return {
+        room: coordinator.Name,
+        skipped: !!skipped,
+        seekNearEnd: true,
+        alreadyNearEnd: !!decision.alreadyNearEnd,
+      };
+    } catch (err) {
+      console.error(
+        "[next] seek-near-end failed; jumping announce:",
+        err.message
+      );
+      decision = { action: "jumpAnnounce" };
+    }
+  }
+
+  if (decision.action === "jumpAnnounce") {
+    try {
+      await cancelActiveDjVolumeHandoff("host skip announce");
+      const musicTrack = playingFromQueue
+        ? findNextMusicTrackNumber(queueItems, track)
+        : null;
+      if (musicTrack != null) {
+        await playUnlocked({ trackNumber: musicTrack });
+      } else {
+        // No music ahead — leave the pad/handoff cancelled at baseline.
+        try {
+          await coordinator.Play();
+        } catch {
+          /* ignore */
+        }
+      }
+      // Pads / DJ clips are not song skips for DJ memory. Jumping *from*
+      // music (e.g. missing duration before an announce) still counts.
+      if (skipped && !currentIsAnnouncePad) {
+        rememberSkippedTrack(skipped);
+      }
+      invalidateSonosSnapshots();
+      return {
+        room: coordinator.Name,
+        skipped: !!(skipped && !currentIsAnnouncePad),
+        abortedAnnounce: true,
+        jumpedToTrack: musicTrack,
+      };
+    } catch (err) {
+      console.error("[next] jump announce failed:", err.message);
+      // Fall through to raw Next only as last resort.
+    }
   }
 
   await coordinator.Next();
 
-  if (skipped) {
-    const source = originOf(skipped.id) || null;
-    recordSkip({
-      ...skipped,
-      source,
-      mood: source === "mood" ? moodOf(skipped.id) : null,
-    });
-    clearConsumedDedication(skipped.id);
-    clearLastHeardIf(skipped.id);
-  }
+  rememberSkippedTrack(skipped);
 
   invalidateSonosSnapshots();
   return { room: coordinator.Name, skipped: !!skipped };
