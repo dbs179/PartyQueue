@@ -61,9 +61,8 @@ export function bustSettingsCache() {
 //   artistCap          - max plays of any one artist within that window
 //   endlessQueueCount  - songs Never-Ending Queue adds on each refill
 //   strictFill         - when true, never drop song memory just to fill a short batch
-//   sameArtistBatchEnabled / sameArtistBatchEveryN — reserved for a future Booth
-//     toggle: allow a Random/Never-Ending set by one artist every N sets (overrides
-//     the normal “unique artist per batch” harden). No UI yet; always off by default.
+  //   sameArtistBatchEnabled / sameArtistBatchEveryN — Booth: automatic same-artist
+  //     showcase every N Random/Never-Ending sets (overrides unique-artist harden).
 export const RANDOMNESS_DEFAULTS = {
   songMemory: 500,
   artistWindow: 30,

@@ -359,6 +359,12 @@ invalidateGroups = invalidateGroupsImpl;
 const songMemoryInput = document.getElementById("set-song-memory");
 const artistWindowInput = document.getElementById("set-artist-window");
 const artistCapInput = document.getElementById("set-artist-cap");
+const sameArtistBatchInput = document.getElementById("set-same-artist-batch");
+const sameArtistEveryInput = document.getElementById("set-same-artist-every");
+const sameArtistPicker = document.getElementById("same-artist-picker");
+const sameArtistArmBtn = document.getElementById("same-artist-arm");
+const sameArtistClearBtn = document.getElementById("same-artist-clear");
+const sameArtistArmedHint = document.getElementById("same-artist-armed-hint");
 const strictFillInput = document.getElementById("set-strict-fill");
 const settingsSaveBtn = document.getElementById("settings-save");
 const settingsResetBtn = document.getElementById("settings-reset");
@@ -587,6 +593,12 @@ function fillSettings(s) {
   if (s.artistWindow != null) artistWindowInput.value = s.artistWindow;
   if (s.artistCap != null) artistCapInput.value = s.artistCap;
   if (s.strictFill != null) strictFillInput.checked = !!s.strictFill;
+  if (s.sameArtistBatchEnabled != null && sameArtistBatchInput) {
+    sameArtistBatchInput.checked = !!s.sameArtistBatchEnabled;
+  }
+  if (s.sameArtistBatchEveryN != null && sameArtistEveryInput) {
+    sameArtistEveryInput.value = s.sameArtistBatchEveryN;
+  }
   if (s.discoverEnabled != null) discoverEnabledInput.checked = !!s.discoverEnabled;
   if (s.randomMoodEnabled != null && randomMoodToggle) {
     randomMoodToggle.checked = !!s.randomMoodEnabled;
@@ -706,6 +718,7 @@ function currentSettingsPayload() {
     artistWindow: Number(artistWindowInput.value),
     artistCap: Number(artistCapInput.value),
     strictFill: strictFillInput.checked,
+    sameArtistBatchEveryN: Number(sameArtistEveryInput?.value),
     discoverEnabled: discoverEnabledInput.checked,
     similarCount: Number(similarCountInput.value),
     endlessQueueCount: Number(endlessCountInput?.value),
@@ -815,6 +828,102 @@ wireRotationPool(rotationDecadePool, "data-pool-decade", (ids) => {
 strictFillInput.addEventListener("change", () => {
   saveSettings({ strictFill: strictFillInput.checked });
 });
+
+sameArtistBatchInput?.addEventListener("change", () => {
+  saveSettings({ sameArtistBatchEnabled: !!sameArtistBatchInput.checked });
+});
+
+function paintSameArtistArmed(state) {
+  if (!sameArtistArmedHint || !sameArtistClearBtn) return;
+  if (state?.armed && state.artist) {
+    sameArtistArmedHint.hidden = false;
+    sameArtistArmedHint.textContent = `Armed: next Random/Never-Ending set is ${state.artist}`;
+    sameArtistClearBtn.hidden = false;
+  } else {
+    sameArtistArmedHint.hidden = true;
+    sameArtistArmedHint.textContent = "";
+    sameArtistClearBtn.hidden = true;
+  }
+}
+
+async function loadSameArtistPicker() {
+  if (!sameArtistPicker) return;
+  try {
+    const [artistsRes, stateRes] = await Promise.all([
+      hostFetch("/api/same-artist-batch/artists"),
+      hostFetch("/api/same-artist-batch"),
+    ]);
+    const artistsData = await artistsRes.json().catch(() => ({}));
+    const stateData = await stateRes.json().catch(() => ({}));
+    if (!artistsRes.ok) {
+      sameArtistPicker.innerHTML =
+        `<option value="">${artistsData.error || "Could not load artists"}</option>`;
+      return;
+    }
+    const artists = Array.isArray(artistsData.artists) ? artistsData.artists : [];
+    const armedKey = stateData.artistKey || "";
+    const esc = (v) =>
+      String(v ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/"/g, "&quot;");
+    sameArtistPicker.innerHTML =
+      `<option value="">Select an artist…</option>` +
+      artists
+        .map(
+          (a) =>
+            `<option value="${esc(a.key)}"${
+              a.key === armedKey ? " selected" : ""
+            }>${esc(a.name)} (${Number(a.trackCount) || 0})</option>`
+        )
+        .join("");
+    paintSameArtistArmed(stateData);
+  } catch (err) {
+    sameArtistPicker.innerHTML = `<option value="">${err.message}</option>`;
+  }
+}
+
+sameArtistArmBtn?.addEventListener("click", async () => {
+  const artist = sameArtistPicker?.value;
+  if (!artist) {
+    showToast("Pick an artist first.", true);
+    return;
+  }
+  sameArtistArmBtn.disabled = true;
+  try {
+    const res = await hostFetch("/api/same-artist-batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ artist }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not arm set.");
+    paintSameArtistArmed(data);
+    showToast(`Next set: ${data.artist}`);
+  } catch (err) {
+    showToast(err.message, true);
+  } finally {
+    sameArtistArmBtn.disabled = false;
+  }
+});
+
+sameArtistClearBtn?.addEventListener("click", async () => {
+  try {
+    const res = await hostFetch("/api/same-artist-batch", { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not clear.");
+    paintSameArtistArmed(data);
+    showToast("Cleared next artist set");
+  } catch (err) {
+    showToast(err.message, true);
+  }
+});
+
+// Refresh the picker when opening Booth (pool follows Mood/Genre).
+toolbarBoothBtn?.addEventListener("click", () => {
+  void loadSameArtistPicker();
+});
+void loadSameArtistPicker();
 
 // Host bypass lives on the Booth page now, away from the Queue panel's Save
 // button, so it saves on flip like the other Booth switches.

@@ -21,6 +21,14 @@ import {
   allowSameArtistBatch,
 } from "./sampler.js";
 import {
+  peekSameArtistBatch,
+  consumeSameArtistBatch,
+  noteRandomSetBuilt,
+  getSetsSinceLastSameArtistBatch,
+  pickShowcaseArtistFromPlaylists,
+  filterPlaylistsByPrimaryArtist,
+} from "./same-artist-batch.js";
+import {
   recentTrackIds,
   recentEntries,
   artistCountsInWindow,
@@ -182,11 +190,56 @@ async function addRandomFromPlaylistsUnlocked(
   cfg.bucketsFor = bucketsForArtistSync;
   cfg.lastArtist = queueTailArtist;
 
+  // Same-artist showcase: host-armed next-set wins; else automatic every-N
+  // from the current Mood/Genre pool. Filters the pool to one artist and
+  // turns off Discover / lane-hits / era top-ups for this batch.
+  let showcaseArtistKey = null;
+  let showcaseArtistName = null;
+  let showcaseFromHost = false;
+  const pendingShowcase = peekSameArtistBatch();
+  if (pendingShowcase?.artistKey) {
+    showcaseArtistKey = pendingShowcase.artistKey;
+    showcaseArtistName = pendingShowcase.artistName;
+    showcaseFromHost = true;
+  } else if (allowSameArtistBatch(cfg, getSetsSinceLastSameArtistBatch())) {
+    const picked = pickShowcaseArtistFromPlaylists(usable, {
+      minTracks: Math.min(3, Math.max(2, Number(count) || 2)),
+      excludeKeys: blockedArtists,
+    });
+    if (picked) {
+      showcaseArtistKey = picked.key;
+      showcaseArtistName = picked.name;
+    }
+  }
+  if (showcaseArtistKey) {
+    const filtered = filterPlaylistsByPrimaryArtist(usable, showcaseArtistKey);
+    const n = filtered.reduce((sum, p) => sum + (p.tracks?.length || 0), 0);
+    if (n >= 1) {
+      usable = filtered;
+      cfg.artistCap = Math.max(cfg.artistCap, Math.max(1, Number(count) || 1));
+      console.log(
+        `[random] same-artist showcase: ${showcaseArtistName} (${n} tracks` +
+          `${showcaseFromHost ? ", host-armed" : ", auto"})`
+      );
+    } else {
+      console.warn(
+        `[random] same-artist showcase skipped — no tracks for ${showcaseArtistName}`
+      );
+      if (showcaseFromHost) consumeSameArtistBatch();
+      showcaseArtistKey = null;
+      showcaseArtistName = null;
+      showcaseFromHost = false;
+    }
+  }
+
   // Discovery is carved out of the requested count, with at least half of every
   // batch retained for selected playlists (Random 2 => one playlist + one discovery).
+  // Showcase batches are playlist-only for that artist.
   const plan = discoveryPlan(
     count,
-    Math.max(0, Math.min(50, Math.round(opts.similarCount || 0)))
+    showcaseArtistKey
+      ? 0
+      : Math.max(0, Math.min(50, Math.round(opts.similarCount || 0)))
   );
   const similarWant = plan.similarWant;
   const playlistWant = plan.playlistWant;
@@ -197,6 +250,7 @@ async function addRandomFromPlaylistsUnlocked(
   // The rotation only considers lanes the filtered pool (era window, genre
   // filter, explicit filter already applied) actually has songs for — a lane
   // the pool can't serve turns the whole set into neighbor fallbacks.
+  // Showcase: no lane hard-filter (pool is already one artist).
   const enabledLanePool = Array.isArray(genres) ? genres : null;
   const lanePoolCounts = new Map();
   for (const pl of usable) {
@@ -227,15 +281,20 @@ async function addRandomFromPlaylistsUnlocked(
   } else if (recentBuckets.size) {
     tailBuckets = [...recentBuckets];
   }
-  cfg.flowState = {
-    lane: setLane,
-    previousLane: flowPrev.lastLane,
-    bridgeLeft: 0,
-    lastBuckets: new Set(tailBuckets),
-  };
+  if (showcaseArtistKey) {
+    cfg.flowState = null;
+  } else {
+    cfg.flowState = {
+      lane: setLane,
+      previousLane: flowPrev.lastLane,
+      bridgeLeft: 0,
+      lastBuckets: new Set(tailBuckets),
+    };
+  }
   console.log(
-    `[random] genre lane=${setLane} exact` +
-      (flowPrev.lastLane ? ` (was ${flowPrev.lastLane})` : "")
+    `[random] genre lane=${setLane || "?"} exact` +
+      (flowPrev.lastLane ? ` (was ${flowPrev.lastLane})` : "") +
+      (showcaseArtistKey ? ` showcase=${showcaseArtistName}` : "")
   );
 
   const artistByUri = new Map();
@@ -270,9 +329,9 @@ async function addRandomFromPlaylistsUnlocked(
     if (id) exclude.add(id);
   }
 
-  // Per-batch unique artists (playlist + Discover + lane/mood). Future
-  // same-artist showcase batches can opt out via allowSameArtistBatch().
-  const allowSameArtist = allowSameArtistBatch(cfg, 0);
+  // Per-batch unique artists (playlist + Discover + lane/mood). Showcase
+  // batches keep multiple tracks by the same artist.
+  const allowSameArtist = !!showcaseArtistKey;
   const batchArtists = new Set();
   const claimBatchArtist = (artist) => {
     const a = primaryArtist(artist);
@@ -311,7 +370,7 @@ async function addRandomFromPlaylistsUnlocked(
       if (id) libraryIds.add(id);
     }
   }
-  if (similarWant > 0 && activeMoodPack) {
+  if (!showcaseArtistKey && similarWant > 0 && activeMoodPack) {
     try {
       discoveries = await getMoodHits({
         mood: activeMoodPack.id,
@@ -333,7 +392,7 @@ async function addRandomFromPlaylistsUnlocked(
     } catch (err) {
       console.error("[moods] era slot fill failed:", err.message);
     }
-  } else if (similarWant > 0 && isDiscoveryAvailable()) {
+  } else if (!showcaseArtistKey && similarWant > 0 && isDiscoveryAvailable()) {
     const discExclude = new Set([...libraryIds, ...exclude, ...recentIds]);
     // Prefer seeds already on the exact lane so Songs Like stays in-family.
     const seeds = [];
@@ -414,7 +473,7 @@ async function addRandomFromPlaylistsUnlocked(
       0,
       totalTarget - playlistUris.length - discoveries.length
     );
-    if (need > 0 && setLane && !wasPreempted()) {
+    if (!showcaseArtistKey && need > 0 && setLane && !wasPreempted()) {
       try {
         const hits = await getLaneHits({
           lane: setLane,
@@ -595,7 +654,7 @@ async function addRandomFromPlaylistsUnlocked(
       if (filler2.length) markOrigin(filler2, "filler", laneOpts);
     }
     if (added >= totalTarget || wasPreempted()) break;
-    if (!setLane) break;
+    if (showcaseArtistKey || !setLane) break;
     batchArtistSeed = syncBatchArtistBlocks();
     let hits = [];
     try {
@@ -667,7 +726,7 @@ async function addRandomFromPlaylistsUnlocked(
   // from outside the library. Excludes everything queued this batch plus the
   // song-memory window; the library itself is fair game here (anything still
   // eligible would already have been picked above).
-  if (activeMoodPack && added < totalTarget && !wasPreempted()) {
+  if (!showcaseArtistKey && activeMoodPack && added < totalTarget && !wasPreempted()) {
     try {
       batchArtistSeed = syncBatchArtistBlocks();
       const hits = await getMoodHits({
@@ -770,6 +829,13 @@ async function addRandomFromPlaylistsUnlocked(
     discovered: !!t.discovered,
   }));
 
+  if (showcaseArtistKey) {
+    if (showcaseFromHost) consumeSameArtistBatch();
+    if (added > 0) noteRandomSetBuilt({ wasShowcase: true });
+  } else if (added > 0) {
+    noteRandomSetBuilt({ wasShowcase: false });
+  }
+
   if (added > 0) {
     const short = Math.max(0, totalTarget - added);
     console.log(
@@ -777,6 +843,7 @@ async function addRandomFromPlaylistsUnlocked(
         `playlist=${added - similarAdded - moodAdded} ` +
         `discover=${similarAdded} laneHits=${laneHitAdded}` +
         (activeMoodPack ? ` mood=${activeMoodPack.id} (${moodAdded} era hits)` : "") +
+        (showcaseArtistKey ? ` showcase=${showcaseArtistName}` : "") +
         (short ? ` short=${short}` : "")
     );
   }
@@ -798,6 +865,13 @@ async function addRandomFromPlaylistsUnlocked(
     relaxedMemory,
     memoryReuseCount,
     genreLane: setLane,
+    sameArtistBatch: showcaseArtistKey
+      ? {
+          artist: showcaseArtistName,
+          key: showcaseArtistKey,
+          hostArmed: showcaseFromHost,
+        }
+      : null,
     preempted: wasPreempted(),
   };
 }

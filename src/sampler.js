@@ -105,8 +105,8 @@ export function enforceUniqueArtistsInBatch(
 }
 
 /**
- * Future hook: host may allow a full set by one artist every N Random sets.
- * Until that UI lands, `sameArtistBatchEnabled` stays false and this is always off.
+ * Automatic same-artist showcase gate (Booth: Same-artist sets + every N).
+ * Host-armed next-set is handled separately in same-artist-batch.js / Random.
  *
  * @param {{ sameArtistBatchEnabled?: boolean, sameArtistBatchEveryN?: number }} settings
  * @param {number} [setsSinceLastSameArtistBatch]

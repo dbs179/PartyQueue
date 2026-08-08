@@ -52,6 +52,7 @@ export {
   pause,
   resumeQueuePlayback,
   next,
+  advanceQueueTrack,
   previous,
   toggleShuffle,
   toggleMute,

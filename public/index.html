@@ -700,6 +700,25 @@
                 <span class="autofill-hint">Never re-add remembered songs just to fill a short batch</span>
               </span>
             </label>
+            <label class="autofill" title="Every so often, Random/Never-Ending plays a mini-set by one artist from the current Mood or Genre pool">
+              <input type="checkbox" id="set-same-artist-batch" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Same-artist sets</span>
+                <span class="autofill-hint">Automatic showcase batches — tune “every N” under Queue</span>
+              </span>
+            </label>
+            <div class="setting-row booth-same-artist-next">
+              <label class="setting-label" for="same-artist-picker">Next artist set</label>
+              <select id="same-artist-picker" class="setting-input">
+                <option value="">Loading artists…</option>
+              </select>
+              <div class="settings-actions" style="margin-top:0.5rem;gap:0.5rem;display:flex;flex-wrap:wrap;">
+                <button id="same-artist-arm" type="button" class="pill-btn success">Arm next set</button>
+                <button id="same-artist-clear" type="button" class="pill-btn" hidden>Clear</button>
+              </div>
+              <span id="same-artist-armed-hint" class="setting-hint" hidden></span>
+            </div>
             <label class="autofill" title="Prevent one guest from filling the searched queue">
               <input type="checkbox" id="set-request-fairness-enabled" class="autofill-input" />
               <span class="autofill-switch" aria-hidden="true"></span>
@@ -821,6 +840,11 @@
             <label class="setting-label" for="set-artist-cap">Artist limit</label>
             <input type="number" id="set-artist-cap" class="setting-input" min="1" max="100" step="1" inputmode="numeric" />
             <span class="setting-hint">max plays per artist within that window</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="set-same-artist-every">Same-artist every</label>
+            <input type="number" id="set-same-artist-every" class="setting-input" min="1" max="100" step="1" inputmode="numeric" />
+            <span class="setting-hint">Random/Never-Ending sets between automatic same-artist showcases (default 8). Toggle lives on Booth.</span>
           </div>
 
           <div class="setting-row">

@@ -153,8 +153,19 @@ async function pauseUnlocked() {
 // Announce-aware policy (see skip-announce-policy.js):
 // - Music with next = announce pad → seek near end (natural handoff into DJ).
 // - Already on announce pads / volume-locked handoff → jump to next music.
+//
+// Pass `{ announceAware: false }` (or use advanceQueueTrack) for internal
+// handoff advances — announce-aware Skip must never run from inside the
+// volume handoff (it would cancel itself and leave the room paused).
 export async function next(...args) {
   return withSonosTransportLane(() => nextUnlocked(...args));
+}
+
+/** Raw Sonos Next() for DJ volume handoff pad advances (no announce policy). */
+export async function advanceQueueTrack() {
+  return withSonosTransportLane(() =>
+    nextUnlocked({ announceAware: false })
+  );
 }
 
 function rememberSkippedTrack(skipped) {
@@ -169,9 +180,16 @@ function rememberSkippedTrack(skipped) {
   clearLastHeardIf(skipped.id);
 }
 
-async function nextUnlocked() {
+async function nextUnlocked(opts = {}) {
+  const announceAware = opts?.announceAware !== false;
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
+
+  if (!announceAware) {
+    await coordinator.Next();
+    invalidateSonosSnapshots();
+    return { room: coordinator.Name, skipped: false, raw: true };
+  }
 
   let skipped = null;
   let decision = { action: "normalNext" };

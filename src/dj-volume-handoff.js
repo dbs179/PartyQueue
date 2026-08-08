@@ -74,7 +74,8 @@ async function defaultAdapter() {
     pause: sonos.pause,
     resume: sonos.resumeQueuePlayback,
     playAt: (trackNumber) => sonos.play({ trackNumber }),
-    next: sonos.next,
+    // Raw Next — never host announce-aware Skip (that cancels this handoff).
+    next: sonos.advanceQueueTrack,
   };
 }
 
@@ -268,6 +269,8 @@ export function createDjVolumeHandoff({
     const remaining = Math.max(0, Math.round(silenceSec * 1000) - elapsed);
     if (remaining) await sleep(remaining);
     const io = await getAdapter();
+    // io.next must be a raw queue advance (see defaultAdapter) — never host
+    // announce-aware Skip, which would cancel this handoff mid-restore.
     if (nextTransition && typeof io.next === "function") {
       await io.next();
       await io.resume();
