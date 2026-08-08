@@ -69,6 +69,16 @@ export function serverPlaybackPosition(np, maxAgeSec = 10) {
 /** Build a Now Playing-shaped object from a queue list row (optimistic skip). */
 export function queueTrackAsNowPlaying(track, extras = {}) {
   if (!track) return null;
+  const origin =
+    typeof track.origin === "string"
+      ? track.origin
+      : track.searched
+        ? "searched"
+        : track.discovered
+          ? "discovered"
+          : track.moodPick
+            ? "mood"
+            : null;
   return {
     title: track.title || "",
     artist: track.artist || "",
@@ -86,6 +96,16 @@ export function queueTrackAsNowPlaying(track, extras = {}) {
     queueTrack: Number(track.position) || 0,
     metadataPending: false,
     optimistic: true,
+    // Keep queue origin so the NP pill can show Requested/Discover/Random
+    // immediately instead of flashing grey "Updating" with no origin.
+    origin,
+    searched: !!track.searched,
+    discovered: !!track.discovered,
+    moodPick: !!track.moodPick,
+    mood: track.mood || null,
+    requestedBy: track.requestedBy || "",
+    dedication: track.dedication || "",
+    genreLane: track.genreLane || null,
     reactions: {},
     ...extras,
   };

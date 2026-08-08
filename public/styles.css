@@ -772,8 +772,20 @@ button.guest-name:focus-visible {
 }
 
 .np-state.playing,
-.np-state.paused {
+.np-state.paused,
+.np-state.updating {
   background: rgba(148, 163, 184, 0.16);
+}
+
+.np-state.playing {
+  color: #3ddc84;
+}
+
+.np-state.paused {
+  color: #f87171;
+}
+
+.np-state.updating {
   color: var(--muted);
 }
 
@@ -3010,7 +3022,15 @@ body.party-display-active > .container {
 }
 
 .party-display-state.playing {
-  color: #8ef0ae;
+  color: #3ddc84;
+}
+
+.party-display-state.paused {
+  color: #f87171;
+}
+
+.party-display-state.updating {
+  color: var(--muted);
 }
 
 /* "Party's Over" lockdown pill — reads as final, not informational. */

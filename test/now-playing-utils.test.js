@@ -98,6 +98,22 @@ test("resolveNowPlayingDisplay keeps confirmed paint while transport is pending"
   assert.equal(resolved.display.positionSec, 40);
 });
 
+test("queueTrackAsNowPlaying preserves origin fields for NP pills", () => {
+  const np = queueTrackAsNowPlaying({
+    title: "Thunderstruck",
+    artist: "AC/DC",
+    uri: "spotify:track:thunder",
+    position: 1,
+    searched: true,
+    requestedBy: "Dave",
+    dedication: "For the birthday kid",
+  });
+  assert.equal(np.origin, "searched");
+  assert.equal(np.searched, true);
+  assert.equal(np.requestedBy, "Dave");
+  assert.equal(np.dedication, "For the birthday kid");
+});
+
 test("resolveNowPlayingDisplay prefers optimistic next until transport catches up", () => {
   const confirmed = {
     title: "Old",

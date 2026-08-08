@@ -5965,23 +5965,30 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
   if (displayArtist) displayArtist.textContent = np.artist || "";
   if (displayAlbum) displayAlbum.textContent = np.album || "";
   bindNowPlayingArtwork(displayArt, np);
+  // Match main NP: only grey "Updating" while holding the prior confirmed
+  // track through a Sonos metadata gap — not for optimistic next-track.
+  const stateUpdating =
+    nowPlayingDisplayMode === "converging" &&
+    !!lastConfirmedNp &&
+    mediaIdentity(np) === mediaIdentity(lastConfirmedNp);
   if (displayState) {
     displayState.hidden = false;
     const playing = !!np.isPlaying;
-    const updating = !!np.updating || nowPlayingDisplayMode === "optimistic";
-    displayState.textContent = updating
+    displayState.textContent = stateUpdating
       ? "Updating"
       : playing
         ? "Now Playing"
         : "Paused";
-    displayState.classList.toggle("playing", playing && !updating);
+    displayState.classList.toggle("playing", playing && !stateUpdating);
+    displayState.classList.toggle("paused", !playing && !stateUpdating);
+    displayState.classList.toggle("updating", stateUpdating);
   }
   if (displayReactions) {
     displayReactions.hidden = !!np.djVoice || !!np.updating;
   }
   if (displayOriginPill) {
     // Same "how it got here" tag as the Up Next rows; DJ clips aren't songs.
-    const hide = !!np.djVoice || !!np.updating;
+    const hide = !!np.djVoice || stateUpdating;
     displayOriginPill.hidden = hide;
     if (!hide) displayOriginPill.textContent = displayOriginLabel(np);
   }
@@ -6076,6 +6083,13 @@ function renderNowPlaying(transport) {
   shuffleBtn.setAttribute("aria-pressed", shuffling ? "true" : "false");
 
   const updating = !!np?.updating || nowPlayingDisplayMode === "optimistic";
+  // Grey "Updating" only while we are still holding the prior confirmed track
+  // through a Sonos metadata gap. Optimistic next-track (and first paint of the
+  // new title) already know the song — show Playing/Paused + origin instead.
+  const stateUpdating =
+    nowPlayingDisplayMode === "converging" &&
+    !!lastConfirmedNp &&
+    mediaIdentity(np) === mediaIdentity(lastConfirmedNp);
   const nextNpId = hasTrack && !updating ? trackIdFromUri(np.uri) : null;
   if (nextNpId !== npReactionsSyncedFor) {
     npMyMood = null;
@@ -6091,16 +6105,19 @@ function renderNowPlaying(transport) {
   npState.hidden = !hasTrack;
   if (hasTrack) {
     const transportPlaying = !!(transport?.isPlaying ?? np.isPlaying);
-    npState.textContent = updating
+    npState.textContent = stateUpdating
       ? "Updating"
       : transportPlaying
         ? "Playing"
         : "Paused";
-    npState.classList.toggle("playing", transportPlaying && !updating);
-    npState.classList.toggle("paused", !transportPlaying || updating);
+    npState.classList.toggle("playing", transportPlaying && !stateUpdating);
+    npState.classList.toggle("paused", !transportPlaying && !stateUpdating);
+    npState.classList.toggle("updating", stateUpdating);
   }
   if (npOrigin) {
-    const origin = nowPlayingOriginLabel(np, hasTrack && !updating);
+    // Keep origin visible whenever we know it (incl. optimistic skip). Only
+    // suppress while holding the prior track under a grey Updating state.
+    const origin = nowPlayingOriginLabel(np, hasTrack && !stateUpdating);
     if (origin) {
       npOrigin.hidden = false;
       npOrigin.textContent = origin.text;
