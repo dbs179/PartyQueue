@@ -109,6 +109,19 @@ import {
   isMusicMixArea,
   isHostArea,
 } from "./view-areas.js";
+import {
+  paintRotationPool,
+  wireRotationPool,
+} from "./rotation-pool.js";
+import {
+  GUEST_BANNER_PARTY_OVER,
+  guestLockBannerView,
+  paintGuestLockBanner,
+} from "./guest-lock-banner.js";
+import {
+  paintDjTtsProviderRows,
+  paintDjShoutModeRows,
+} from "./dj-form-ui.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -1328,31 +1341,12 @@ randomDecadeToggle?.addEventListener("change", () => {
 // Rotation pool chips (Booth > Queue): what Random Mood / Random Decade may
 // pick from. Chips save on tap; the server echoes the effective pools back
 // through fillSettings, which repaints via paintRotationPool.
-function paintRotationPool(container, attr, ids) {
-  if (!container) return;
-  const set = new Set(Array.isArray(ids) ? ids : []);
-  for (const btn of container.querySelectorAll(`[${attr}]`)) {
-    const on = set.has(btn.getAttribute(attr));
-    btn.classList.toggle("on", on);
-    btn.setAttribute("aria-pressed", on ? "true" : "false");
-  }
-}
-function wireRotationPool(container, attr, settingsKey) {
-  if (!container) return;
-  container.addEventListener("click", (e) => {
-    const btn = e.target.closest(`[${attr}]`);
-    if (!btn) return;
-    const on = !btn.classList.contains("on");
-    btn.classList.toggle("on", on);
-    btn.setAttribute("aria-pressed", on ? "true" : "false");
-    const ids = [...container.querySelectorAll(`[${attr}].on`)].map((b) =>
-      b.getAttribute(attr)
-    );
-    saveSettings({ [settingsKey]: ids });
-  });
-}
-wireRotationPool(rotationMoodPool, "data-pool-preset", "randomMoodPool");
-wireRotationPool(rotationDecadePool, "data-pool-decade", "randomDecadePool");
+wireRotationPool(rotationMoodPool, "data-pool-preset", (ids) => {
+  saveSettings({ randomMoodPool: ids });
+});
+wireRotationPool(rotationDecadePool, "data-pool-decade", (ids) => {
+  saveSettings({ randomDecadePool: ids });
+});
 
 // Strict fill also saves immediately — it's a safety switch like Discover.
 // Targeted payload: the toggle sits on the Booth page, so don't send the whole
@@ -1435,20 +1429,13 @@ kidsLockInput?.addEventListener("change", async () => {
   }
 });
 
-const GUEST_BANNER_PAUSED =
-  "Requests are paused — ask the host when you can add songs again.";
-const GUEST_BANNER_PARTY_OVER =
-  "The party is over — you have to go home now.";
-
 // One banner serves both locks; Party's Over (the hard end-of-night state)
 // wins over a plain request pause when both are set.
 function updateGuestLockBanner() {
-  if (!requestsPausedBanner) return;
-  requestsPausedBanner.hidden = !(partyOver || requestsPaused);
-  requestsPausedBanner.textContent = partyOver
-    ? GUEST_BANNER_PARTY_OVER
-    : GUEST_BANNER_PAUSED;
-  requestsPausedBanner.classList.toggle("party-over", partyOver);
+  paintGuestLockBanner(
+    requestsPausedBanner,
+    guestLockBannerView({ partyOver, requestsPaused })
+  );
 }
 
 function setRequestsPausedUi(on) {
@@ -1474,16 +1461,23 @@ if (djVoiceToggle) {
 }
 
 function syncDjTtsProviderUi() {
-  const provider = djTtsProviderInput?.value || "elevenlabs_ha";
-  const eleven = provider === "elevenlabs_ha";
-  if (djTtsVoiceOpenaiRow) djTtsVoiceOpenaiRow.hidden = eleven;
-  if (djTtsVoiceElevenlabsRow) djTtsVoiceElevenlabsRow.hidden = !eleven;
+  paintDjTtsProviderRows(
+    {
+      openaiRow: djTtsVoiceOpenaiRow,
+      elevenlabsRow: djTtsVoiceElevenlabsRow,
+    },
+    djTtsProviderInput?.value
+  );
 }
 
 function syncDjShoutModeUi() {
-  const every = (djShoutModeInput?.value || "every") === "every";
-  if (djShoutPercentRow) djShoutPercentRow.hidden = every;
-  if (djShoutEveryRow) djShoutEveryRow.hidden = !every;
+  paintDjShoutModeRows(
+    {
+      percentRow: djShoutPercentRow,
+      everyRow: djShoutEveryRow,
+    },
+    djShoutModeInput?.value
+  );
 }
 
 function currentDjVoicePayload() {
