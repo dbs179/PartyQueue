@@ -5,6 +5,7 @@ import {
   formatTimeAgo,
   formatSuggestionWhen,
   escapeHtml,
+  formatTrackTime,
 } from "../public/js/format.js";
 
 test("formatDuration renders hours, minutes, and seconds", () => {
@@ -35,3 +36,11 @@ test("escapeHtml encodes markup characters", () => {
     "&lt;b a=&quot;x&quot;&gt;&amp;&lt;/b&gt;"
   );
 });
+
+test("formatTrackTime renders mm:ss and h:mm:ss", () => {
+  assert.equal(formatTrackTime(0), "0:00");
+  assert.equal(formatTrackTime(65), "1:05");
+  assert.equal(formatTrackTime(3661), "1:01:01");
+  assert.equal(formatTrackTime("nope"), "0:00");
+});
+

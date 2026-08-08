@@ -26,12 +26,12 @@ import {
 } from "./now-playing-utils.js";
 import {
   escapeHtml,
+  formatTrackTime,
 } from "./format.js";
 import {
   DECADE_LABELS,
   sameIdSet,
   presetIdsFor as presetIdsForBuckets,
-  presetNameForIds as presetNameForIdList,
   moodLabelForIds,
   trackEraDisplayLabel,
   loadEraMood,
@@ -86,6 +86,24 @@ import {
   karaokeRowsHtml,
   statsEmptyMessage,
 } from "./stats-ui.js";
+import {
+  resolveActiveEraMoodId,
+  buildMixLabelTexts,
+  resolveMixGenreLabelFromNowPlaying,
+  mixSelectionPatchFromParty,
+  formatMixHubMoodLine,
+  formatSelectedOfTotal,
+  paintMixLabels,
+} from "./mix-labels.js";
+import {
+  formatDjIconLabel,
+  formatDjVoiceHubLine,
+  formatDjAdvancedHubLine,
+  formatDjVolumeHubLine,
+  formatDjShoutsHubLine,
+  formatDjLastCallHubLine,
+  formatEndOfNightLabel,
+} from "./dj-hub-summaries.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -1106,17 +1124,6 @@ function fillSettings(s) {
   updateDjHubSummaries();
 }
 
-function formatDjIconLabel(name) {
-  if (!name) return "Default";
-  const base = String(name)
-    .replace(/\.[^.]+$/, "")
-    .replace(/^dj-icon-(?:\d+-)?/i, "")
-    .replace(/[-_]+/g, " ")
-    .trim();
-  const label = base || String(name);
-  return label.length > 28 ? `${label.slice(0, 27)}…` : label;
-}
-
 function updateDjHubSummaries() {
   // The Sonos media URL card lives on this hub now.
   void refreshBoothMediaUrl();
@@ -1135,67 +1142,48 @@ function updateDjHubSummaries() {
   }
 
   if (voiceEl) {
-    const intensity = String(djIntensityInput?.value || "classic");
-    const intensityLabel =
-      intensity.charAt(0).toUpperCase() + intensity.slice(1);
-    const provider =
-      (djTtsProviderInput?.value || "elevenlabs_ha") === "openai_ha"
-        ? "OpenAI"
-        : "ElevenLabs";
-    const speed = Number(djTtsSpeedInput?.value ?? 1);
-    const speedLabel = Number.isFinite(speed) ? `${speed}×` : "1×";
-    voiceEl.textContent = `${intensityLabel} · ${provider} · ${speedLabel}`;
+    voiceEl.textContent = formatDjVoiceHubLine({
+      intensity: djIntensityInput?.value,
+      provider: djTtsProviderInput?.value,
+      speed: djTtsSpeedInput?.value ?? 1,
+    });
   }
 
   if (advancedEl) {
-    const customSections = [
-      djPersonaNotesInput?.value,
-      djAlwaysInstructionsInput?.value,
-      djNeverInstructionsInput?.value,
-    ].filter((value) => String(value || "").trim()).length;
-    const pronunciationCount = String(djPronunciationsInput?.value || "")
-      .split(/\r?\n/)
-      .filter((line) => /(?:=>|=)/.test(line)).length;
-    advancedEl.textContent =
-      customSections || pronunciationCount
-        ? `${customSections} guidance · ${pronunciationCount} pronunciations`
-        : "Core locked";
+    advancedEl.textContent = formatDjAdvancedHubLine({
+      personaNotes: djPersonaNotesInput?.value,
+      alwaysInstructions: djAlwaysInstructionsInput?.value,
+      neverInstructions: djNeverInstructionsInput?.value,
+      pronunciations: djPronunciationsInput?.value,
+    });
   }
 
   if (volumeEl) {
-    const low = djVolumeLowInput?.value ?? "—";
-    const mid = djVolumeMidInput?.value ?? "—";
-    const high = djVolumeHighInput?.value ?? "—";
-    const silence = djSilenceInput?.value ?? "—";
-    volumeEl.textContent = `${low}/${mid}/${high}% · ${silence}s`;
+    volumeEl.textContent = formatDjVolumeHubLine({
+      low: djVolumeLowInput?.value ?? "—",
+      mid: djVolumeMidInput?.value ?? "—",
+      high: djVolumeHighInput?.value ?? "—",
+      silence: djSilenceInput?.value ?? "—",
+    });
   }
 
   if (shoutsEl) {
-    const mode = djShoutModeInput?.value || "every";
-    if (mode === "every") {
-      const n = djShoutEveryInput?.value || "5";
-      shoutsEl.textContent = `Every ${n}`;
-    } else {
-      const pct = djShoutPercentInput?.value ?? "25";
-      shoutsEl.textContent = `${pct}% of the time`;
-    }
+    shoutsEl.textContent = formatDjShoutsHubLine({
+      mode: djShoutModeInput?.value,
+      everyN: djShoutEveryInput?.value || "5",
+      percent: djShoutPercentInput?.value ?? "25",
+    });
   }
 
   const lastCallEl = document.getElementById("dj-stat-lastcall");
   if (lastCallEl) {
-    const title = (endOfNightTrack.name || "Closing Time").trim();
-    lastCallEl.textContent = title.length > 22 ? `${title.slice(0, 20)}…` : title;
+    lastCallEl.textContent = formatDjLastCallHubLine(endOfNightTrack.name);
   }
 }
 
 function paintEndOfNightLabel() {
-  const name = (endOfNightTrack.name || "Closing Time").trim();
-  const artist = (endOfNightTrack.artist || "").trim();
-  const label = artist ? `${name} — ${artist}` : name;
   if (endOfNightLabelEl) {
-    endOfNightLabelEl.textContent = endOfNightTrack.uri
-      ? label
-      : `${label} (default)`;
+    endOfNightLabelEl.textContent = formatEndOfNightLabel(endOfNightTrack);
   }
   updateDjHubSummaries();
 }
@@ -5253,16 +5241,6 @@ function estimatedPositionSec() {
   return pos;
 }
 
-function formatTrackTime(value) {
-  const total = Math.max(0, Math.floor(Number(value) || 0));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = String(total % 60).padStart(2, "0");
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}`
-    : `${minutes}:${seconds}`;
-}
-
 function paintTrackProgress(container, fill, elapsed, total, position, duration) {
   if (!container || !fill || !elapsed || !total) return;
   const available = Number.isFinite(duration) && duration > 0;
@@ -6740,7 +6718,7 @@ if (decadeChips) {
 // ---- Mix label ("MOOD: PARTY - 80'S") over Now Playing + on Party Display ----
 /** Active decade mood id preferring the server-broadcast mix. */
 function activeEraMoodId() {
-  return serverMix.mood !== undefined ? serverMix.mood : eraMood;
+  return resolveActiveEraMoodId(serverMix.mood, eraMood);
 }
 
 /**
@@ -6752,63 +6730,31 @@ function trackEraLabel(track) {
   return trackEraDisplayLabel(track, activeEraMoodId());
 }
 
-function presetNameForIds(ids) {
-  return presetNameForIdList(
-    ids,
-    genreBuckets.map((b) => b.id)
-  );
-}
-
 function updateMixLabels() {
-  const genres =
-    serverMix.genres !== undefined ? serverMix.genres : currentGenreIds();
-  const mood = serverMix.mood !== undefined ? serverMix.mood : eraMood;
-  const era = mood ? DECADE_LABELS[mood] : null;
-  const preset = presetNameForIds(genres);
-  const moodText = era ? `Mood: ${preset} - ${era}` : `Mood: ${preset}`;
-  if (npMoodLabel) {
-    npMoodLabel.textContent = moodText;
-    npMoodLabel.hidden = false;
-  }
-  if (npGenreLabel) {
-    const genre = serverMix.genreLabel;
-    // Keep the "Genre" affordance clickable even when idle — only clear the value.
-    npGenreLabel.textContent = genre ? `Genre: ${genre}` : "Genre:";
-    npGenreLabel.hidden = false;
-  }
-  if (displayMixPill) {
-    displayMixPill.textContent = moodText;
-    displayMixPill.hidden = false;
-  }
-  if (displayGenrePill) {
-    const genre = serverMix.genreLabel;
-    displayGenrePill.textContent = genre ? `Genre: ${genre}` : "Genre:";
-    displayGenrePill.hidden = false;
-  }
+  paintMixLabels(
+    { npMoodLabel, npGenreLabel, displayMixPill, displayGenrePill },
+    buildMixLabelTexts(serverMix, {
+      localGenres: currentGenreIds(),
+      localMood: eraMood,
+      allBucketIds: genreBuckets.map((b) => b.id),
+    })
+  );
 }
 
 /** Vibe mix selection (genres + era mood) — owned by /api/party. */
 function updateMixSelectionFromServer(party) {
-  if (!party || (!("mixGenres" in party) && !("mixMood" in party))) return;
-  if ("mixGenres" in party) {
-    serverMix.genres = Array.isArray(party.mixGenres) ? party.mixGenres : null;
-  }
-  if ("mixMood" in party) {
-    serverMix.mood = typeof party.mixMood === "string" ? party.mixMood : null;
-  }
+  const patch = mixSelectionPatchFromParty(party);
+  if (!patch) return;
+  if ("genres" in patch) serverMix.genres = patch.genres;
+  if ("mood" in patch) serverMix.mood = patch.mood;
   updateMixLabels();
   applyServerMixToPickers();
 }
 
 /** Per-track Genre header — owned by Now Playing. */
 function updateMixGenreHeaderFromServer(np) {
-  if (!np || (!("mixGenreLabel" in np) && !("mixGenreLane" in np))) return;
-  const label =
-    typeof np.mixGenreLabel === "string" && np.mixGenreLabel
-      ? np.mixGenreLabel
-      : typeof np.mixGenreLane === "string" && np.mixGenreLane
-        ? np.mixGenreLane
-        : null;
+  const label = resolveMixGenreLabelFromNowPlaying(np);
+  if (label === undefined) return;
   serverMix.genreLabel = label;
   updateMixLabels();
 }
@@ -7006,19 +6952,16 @@ function updateMusicMixHubSummaries() {
   const playlistsEl = document.getElementById("mix-stat-playlists");
 
   if (moodEl) {
-    const label = currentMoodLabel();
     const era = eraMood ? DECADE_LABELS[eraMood] : null;
-    moodEl.textContent = [label, era].filter(Boolean).join(" \u00b7 ") || "—";
+    moodEl.textContent = formatMixHubMoodLine(currentMoodLabel(), era);
   }
 
   if (genresEl) {
     const total = genreBuckets.length;
-    if (!total) {
-      genresEl.textContent = "—";
-    } else {
-      const selected = currentGenreIds().length;
-      genresEl.textContent = `${selected} of ${total} selected`;
-    }
+    genresEl.textContent = formatSelectedOfTotal(
+      currentGenreIds().length,
+      total
+    );
   }
 
   if (playlistsEl) {
@@ -7028,7 +6971,7 @@ function updateMusicMixHubSummaries() {
     } else {
       const ids = currentPlaylists.map((p) => p.id);
       const selected = ids.filter((id) => selectedPlaylistIds.has(id)).length;
-      playlistsEl.textContent = `${selected} of ${total} selected`;
+      playlistsEl.textContent = formatSelectedOfTotal(selected, total);
     }
   }
 
