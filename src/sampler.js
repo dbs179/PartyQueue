@@ -67,6 +67,59 @@ export function spendArtistBudget(artist, artistCount) {
   return a;
 }
 
+/** Shallow copy of an artist→count map, re-keyed with primaryArtist. */
+export function cloneArtistCountMap(seed = null) {
+  const m = new Map();
+  if (!seed) return m;
+  for (const [artist, n] of seed) {
+    const a = primaryArtist(artist);
+    if (!a) continue;
+    m.set(a, Math.max(0, Math.floor(Number(n) || 0)));
+  }
+  return m;
+}
+
+/**
+ * Hard unique-artist filter for one Random / Never-Ending batch.
+ * Keeps the first track per primary artist; drops later duplicates.
+ * When `allowSameArtist` is true (future same-artist showcase batches), returns
+ * a shallow copy unchanged.
+ */
+export function enforceUniqueArtistsInBatch(
+  items,
+  { allowSameArtist = false } = {}
+) {
+  const list = Array.isArray(items) ? items : [];
+  if (allowSameArtist) return list.slice();
+  const seen = new Set();
+  const out = [];
+  for (const item of list) {
+    const a = primaryArtist(item?.artist);
+    if (a) {
+      if (seen.has(a)) continue;
+      seen.add(a);
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+/**
+ * Future hook: host may allow a full set by one artist every N Random sets.
+ * Until that UI lands, `sameArtistBatchEnabled` stays false and this is always off.
+ *
+ * @param {{ sameArtistBatchEnabled?: boolean, sameArtistBatchEveryN?: number }} settings
+ * @param {number} [setsSinceLastSameArtistBatch]
+ */
+export function allowSameArtistBatch(settings = {}, setsSinceLastSameArtistBatch = 0) {
+  if (!settings?.sameArtistBatchEnabled) return false;
+  const every = Math.max(
+    1,
+    Math.floor(Number(settings.sameArtistBatchEveryN) || 1)
+  );
+  return Math.max(0, Math.floor(Number(setsSinceLastSameArtistBatch) || 0)) >= every;
+}
+
 // Soft mood continuity: does this track share any genre bucket with the recent
 // session tags? `bucketsFor` is injected so the pure sampler stays I/O-free.
 export function sharesMood(track, recentBuckets, bucketsFor) {

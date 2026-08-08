@@ -8,6 +8,10 @@ import {
   discoverySlots,
   discoveryPlan,
   sharesMood,
+  enforceUniqueArtistsInBatch,
+  allowSameArtistBatch,
+  cloneArtistCountMap,
+  primaryArtist,
 } from "../src/sampler.js";
 
 // Build a playlist pool from a compact spec: { name: [[id, artist], ...] }.
@@ -283,4 +287,48 @@ test("mood continuity soft-prefers matching genre buckets", () => {
   for (const id of idsOf(picks)) {
     assert.ok(id.startsWith("r"), `expected rock pick, got ${id}`);
   }
+});
+
+test("enforceUniqueArtistsInBatch drops later same-artist tracks", () => {
+  const items = [
+    { id: "a", artist: "Hollywood Undead", discovered: true },
+    { id: "b", artist: "Hollywood Undead", discovered: false },
+    { id: "c", artist: "Paramore", discovered: false },
+  ];
+  const out = enforceUniqueArtistsInBatch(items);
+  assert.deepEqual(
+    out.map((x) => x.id),
+    ["a", "c"]
+  );
+  assert.equal(
+    enforceUniqueArtistsInBatch(items, { allowSameArtist: true }).length,
+    3
+  );
+});
+
+test("allowSameArtistBatch stays off until enabled and every-N is due", () => {
+  assert.equal(allowSameArtistBatch({}, 99), false);
+  assert.equal(
+    allowSameArtistBatch({ sameArtistBatchEnabled: false, sameArtistBatchEveryN: 2 }, 10),
+    false
+  );
+  assert.equal(
+    allowSameArtistBatch({ sameArtistBatchEnabled: true, sameArtistBatchEveryN: 8 }, 7),
+    false
+  );
+  assert.equal(
+    allowSameArtistBatch({ sameArtistBatchEnabled: true, sameArtistBatchEveryN: 8 }, 8),
+    true
+  );
+});
+
+test("cloneArtistCountMap re-keys featured artists", () => {
+  const seed = cloneArtistCountMap(
+    new Map([
+      ["Tyga, Doja Cat", 1],
+      ["Paramore", 2],
+    ])
+  );
+  assert.equal(seed.get(primaryArtist("Tyga")), 1);
+  assert.equal(seed.get("paramore"), 2);
 });

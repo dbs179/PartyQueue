@@ -61,12 +61,17 @@ export function bustSettingsCache() {
 //   artistCap          - max plays of any one artist within that window
 //   endlessQueueCount  - songs Never-Ending Queue adds on each refill
 //   strictFill         - when true, never drop song memory just to fill a short batch
+//   sameArtistBatchEnabled / sameArtistBatchEveryN — reserved for a future Booth
+//     toggle: allow a Random/Never-Ending set by one artist every N sets (overrides
+//     the normal “unique artist per batch” harden). No UI yet; always off by default.
 export const RANDOMNESS_DEFAULTS = {
   songMemory: 500,
   artistWindow: 30,
   artistCap: 1,
   endlessQueueCount: 5,
   strictFill: true,
+  sameArtistBatchEnabled: false,
+  sameArtistBatchEveryN: 8,
 };
 
 // Generous sanity bounds so a typo can't wedge the picker (e.g. a 10-million
@@ -76,6 +81,7 @@ const RANDOMNESS_BOUNDS = {
   artistWindow: { min: 1, max: 1000 },
   artistCap: { min: 1, max: 100 },
   endlessQueueCount: { min: 1, max: 100 },
+  sameArtistBatchEveryN: { min: 1, max: 100 },
 };
 
 const RANDOMNESS_INT_KEYS = [
@@ -83,6 +89,7 @@ const RANDOMNESS_INT_KEYS = [
   "artistWindow",
   "artistCap",
   "endlessQueueCount",
+  "sameArtistBatchEveryN",
 ];
 
 function clampInt(value, fallback, { min, max }) {
@@ -100,6 +107,10 @@ export function getRandomnessSettings() {
   }
   out.strictFill =
     typeof s.strictFill === "boolean" ? s.strictFill : RANDOMNESS_DEFAULTS.strictFill;
+  out.sameArtistBatchEnabled =
+    typeof s.sameArtistBatchEnabled === "boolean"
+      ? s.sameArtistBatchEnabled
+      : RANDOMNESS_DEFAULTS.sameArtistBatchEnabled;
   return out;
 }
 
@@ -1246,6 +1257,9 @@ export function setRandomnessSettings(partial = {}) {
     }
   }
   if (partial.strictFill != null) next.strictFill = !!partial.strictFill;
+  if (partial.sameArtistBatchEnabled != null) {
+    next.sameArtistBatchEnabled = !!partial.sameArtistBatchEnabled;
+  }
   saveSettings(next);
   return getRandomnessSettings();
 }

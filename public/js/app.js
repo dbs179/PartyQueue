@@ -104,6 +104,11 @@ import {
   formatDjLastCallHubLine,
   formatEndOfNightLabel,
 } from "./dj-hub-summaries.js";
+import {
+  isSettingsArea,
+  isMusicMixArea,
+  isHostArea,
+} from "./view-areas.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -3380,34 +3385,6 @@ const VIEWS = {
 let currentView = "main";
 /** Last non-Settings view — PIN Cancel returns here (fallback: main). */
 let lastNonSettingsView = "main";
-
-function isSettingsArea(name) {
-  return name === "settings" || String(name || "").startsWith("settings-");
-}
-
-function isMusicMixArea(name) {
-  return (
-    name === "mix" ||
-    name === "mood-presets" ||
-    name === "genres" ||
-    name === "playlists"
-  );
-}
-
-/**
- * Everything behind the DJ Booth — the hub itself plus every page it links to
- * (Look, Queue, DJ, Users, Connections, Reset, Memory, Suggestions). All of it
- * asks for the host PIN when one is configured, even when a page is reached
- * directly by URL hash or a toast shortcut.
- */
-function isHostArea(name) {
-  return (
-    name === "booth" ||
-    name === "memory" ||
-    name === "suggestions" ||
-    isSettingsArea(name)
-  );
-}
 
 function syncHostControlsVisibility() {
   const body = document.getElementById("controls-body");

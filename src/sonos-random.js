@@ -16,6 +16,9 @@ import {
   discoveryPlan,
   primaryArtist,
   mixPlaylistAndDiscovery,
+  cloneArtistCountMap,
+  enforceUniqueArtistsInBatch,
+  allowSameArtistBatch,
 } from "./sampler.js";
 import {
   recentTrackIds,
@@ -267,12 +270,35 @@ async function addRandomFromPlaylistsUnlocked(
     if (id) exclude.add(id);
   }
 
+  // Per-batch unique artists (playlist + Discover + lane/mood). Future
+  // same-artist showcase batches can opt out via allowSameArtistBatch().
+  const allowSameArtist = allowSameArtistBatch(cfg, 0);
+  const batchArtists = new Set();
+  const claimBatchArtist = (artist) => {
+    const a = primaryArtist(artist);
+    if (a) batchArtists.add(a);
+    return a;
+  };
+  const syncBatchArtistBlocks = () => {
+    if (allowSameArtist) {
+      cfg.blockedArtists = blockedArtists;
+      return cloneArtistCountMap(artistCountsInWindow(cfg.artistWindow));
+    }
+    cfg.blockedArtists = new Set([...blockedArtists, ...batchArtists]);
+    const seed = cloneArtistCountMap(artistCountsInWindow(cfg.artistWindow));
+    for (const a of batchArtists) {
+      seed.set(a, Math.max(seed.get(a) ?? 0, cfg.artistCap));
+    }
+    return seed;
+  };
+
   // Prefer discoveries from a different artist than the last playlist pick.
   let lastPlaylistArtist = queueTailArtist;
   for (const uri of playlistUris) {
-    const artist = primaryArtist(artistByUri.get(uri));
+    const artist = claimBatchArtist(artistByUri.get(uri));
     if (artist) lastPlaylistArtist = artist;
   }
+  let batchArtistSeed = syncBatchArtistBlocks();
 
   // 2) Outside-library slots: era charts (mood on) or Songs Like Discover.
   // Exact lane only — no neighbor soft-fit and no off-lane Discover retry.
@@ -293,9 +319,10 @@ async function addRandomFromPlaylistsUnlocked(
         excludeIds: new Set([...libraryIds, ...exclude, ...recentIds]),
         filterExplicit: !!opts.filterExplicit,
         artistCap: cfg.artistCap,
+        artistSeedCounts: batchArtistSeed,
         lastArtist: lastPlaylistArtist,
         moodArtistCap: 1,
-        blockedArtists,
+        blockedArtists: cfg.blockedArtists,
         enabledGenres: Array.isArray(genres) ? genres : null,
         bucketsFor: bucketsForArtist,
         preferLane: setLane,
@@ -333,10 +360,10 @@ async function addRandomFromPlaylistsUnlocked(
         enabledGenres: Array.isArray(genres) ? genres : null,
         filterExplicit: !!opts.filterExplicit,
         artistCap: cfg.artistCap,
-        artistSeedCounts: null,
+        artistSeedCounts: batchArtistSeed,
         lastArtist: lastPlaylistArtist,
         discoveryArtistCap: 1,
-        blockedArtists,
+        blockedArtists: cfg.blockedArtists,
         flowState: cfg.flowState,
         count: similarWant,
         preferLane: setLane,
@@ -349,26 +376,32 @@ async function addRandomFromPlaylistsUnlocked(
     }
   }
 
+  for (const d of discoveries) {
+    const artist = claimBatchArtist(d.artist);
+    if (artist) lastPlaylistArtist = artist;
+  }
+  batchArtistSeed = syncBatchArtistBlocks();
+
   // If discovery came up short, try more exact-lane playlist picks first.
   const discoveryShortfall = Math.max(0, similarWant - discoveries.length);
   if (discoveryShortfall > 0) {
-    artistSeed = artistCountsInWindow(cfg.artistWindow);
     cfg.lastArtist = lastPlaylistArtist;
     const fill = pickWithRelaxation(
       usable,
       exclude,
       discoveryShortfall,
       recentIds,
-      artistSeed,
+      batchArtistSeed,
       cfg
     );
     for (const uri of fill.uris) {
       playlistUris.push(uri);
       const id = spotifyTrackId(uri);
       if (id) exclude.add(id);
-      const artist = primaryArtist(artistByUri.get(uri));
+      const artist = claimBatchArtist(artistByUri.get(uri));
       if (artist) lastPlaylistArtist = artist;
     }
+    batchArtistSeed = syncBatchArtistBlocks();
     relaxedArtist = relaxedArtist || fill.relaxedArtist;
     relaxedMemory = relaxedMemory || fill.relaxedMemory;
     memoryReuseCount += fill.memoryReuseCount;
@@ -389,20 +422,22 @@ async function addRandomFromPlaylistsUnlocked(
           excludeIds: new Set([...libraryIds, ...exclude, ...recentIds]),
           filterExplicit: !!opts.filterExplicit,
           artistCap: cfg.artistCap,
+          artistSeedCounts: batchArtistSeed,
           lastArtist: lastPlaylistArtist,
           laneArtistCap: 1,
-          blockedArtists,
+          blockedArtists: cfg.blockedArtists,
           enabledGenres: Array.isArray(genres) ? genres : null,
           bucketsFor: bucketsForArtist,
         });
         if (hits.length) {
           for (const h of hits) {
             if (h.id) exclude.add(h.id);
-            const artist = primaryArtist(h.artist);
+            const artist = claimBatchArtist(h.artist);
             if (artist) lastPlaylistArtist = artist;
           }
           discoveries = discoveries.concat(hits);
           laneHitAdded += hits.length;
+          batchArtistSeed = syncBatchArtistBlocks();
           console.log(
             `[lane-hits] lane=${setLane} filled ${hits.length}/${need} Spotify exact-lane hit(s)`
           );
@@ -437,7 +472,18 @@ async function addRandomFromPlaylistsUnlocked(
     discovered: !activeMoodPack,
     moodPick: !!activeMoodPack,
   }));
-  const order = mixPlaylistAndDiscovery(playlistItems, discoveryItems);
+  let order = mixPlaylistAndDiscovery(playlistItems, discoveryItems);
+  const beforeUnique = order.length;
+  order = enforceUniqueArtistsInBatch(order, { allowSameArtist });
+  if (order.length < beforeUnique) {
+    console.log(
+      `[random] dropped ${beforeUnique - order.length} same-artist duplicate(s) from batch`
+    );
+  }
+  // Re-sync claimed artists from the final order (unique filter may have dropped).
+  batchArtists.clear();
+  for (const item of order) claimBatchArtist(item.artist);
+  batchArtistSeed = syncBatchArtistBlocks();
 
   // 4) Enqueue in that order. `added` = total enqueued (playlist + discovery);
   // `similarAdded` is the discovery subset so the UI can badge the mix.
@@ -492,13 +538,14 @@ async function addRandomFromPlaylistsUnlocked(
   // 5) Top up if some enqueues failed (or we are still under totalTarget).
   // Exact-lane playlist leftovers first, then Spotify lane hits — never off-lane.
   while (added < totalTarget && !wasPreempted()) {
-    artistSeed = artistCountsInWindow(cfg.artistWindow);
+    batchArtistSeed = syncBatchArtistBlocks();
+    cfg.lastArtist = lastPlaylistArtist;
     const more = pickWithRelaxation(
       usable,
       exclude,
       totalTarget - added,
       recentIds,
-      artistSeed,
+      batchArtistSeed,
       cfg
     );
     let progressed = false;
@@ -511,19 +558,31 @@ async function addRandomFromPlaylistsUnlocked(
       for (const uri of more.uris) {
         if (wasPreempted()) break;
         const id = spotifyTrackId(uri);
+        const artistName = artistByUri.get(uri) ?? "";
+        const artist = primaryArtist(artistName);
+        if (
+          !allowSameArtist &&
+          artist &&
+          batchArtists.has(artist)
+        ) {
+          if (id) exclude.add(id);
+          continue;
+        }
         exclude.add(id);
         try {
           const meta = MetaDataHelper.GuessMetaDataAndTrackUri(uri, resolveRegion());
           await enqueueMeta(m, meta);
           added++;
           progressed = true;
+          claimBatchArtist(artistName);
+          if (artist) lastPlaylistArtist = artist;
           if (id) {
             recentIds.add(id);
             filler2.push(id);
           }
           rec2.push({
             id,
-            artist: artistByUri.get(uri) ?? "",
+            artist: artistName,
             name: nameByUri.get(uri) ?? "",
             source: "filler",
           });
@@ -537,6 +596,7 @@ async function addRandomFromPlaylistsUnlocked(
     }
     if (added >= totalTarget || wasPreempted()) break;
     if (!setLane) break;
+    batchArtistSeed = syncBatchArtistBlocks();
     let hits = [];
     try {
       hits = await getLaneHits({
@@ -545,10 +605,10 @@ async function addRandomFromPlaylistsUnlocked(
         excludeIds: new Set([...libraryIds, ...exclude, ...recentIds]),
         filterExplicit: !!opts.filterExplicit,
         artistCap: cfg.artistCap,
-        artistSeedCounts: artistCountsInWindow(cfg.artistWindow),
+        artistSeedCounts: batchArtistSeed,
         lastArtist: lastPlaylistArtist,
         laneArtistCap: 1,
-        blockedArtists,
+        blockedArtists: cfg.blockedArtists,
         enabledGenres: Array.isArray(genres) ? genres : null,
         bucketsFor: bucketsForArtist,
       });
@@ -561,6 +621,11 @@ async function addRandomFromPlaylistsUnlocked(
     const discIds = [];
     for (const h of hits) {
       if (wasPreempted()) break;
+      const artist = primaryArtist(h.artist);
+      if (!allowSameArtist && artist && batchArtists.has(artist)) {
+        if (h.id) exclude.add(h.id);
+        continue;
+      }
       try {
         const meta = MetaDataHelper.GuessMetaDataAndTrackUri(h.uri, resolveRegion());
         await enqueueMeta(m, meta);
@@ -568,12 +633,12 @@ async function addRandomFromPlaylistsUnlocked(
         similarAdded++;
         laneHitAdded += 1;
         progressed = true;
+        claimBatchArtist(h.artist);
         if (h.id) {
           exclude.add(h.id);
           recentIds.add(h.id);
           discIds.push(h.id);
         }
-        const artist = primaryArtist(h.artist);
         if (artist) lastPlaylistArtist = artist;
         recHits.push({
           id: h.id,
@@ -604,16 +669,17 @@ async function addRandomFromPlaylistsUnlocked(
   // eligible would already have been picked above).
   if (activeMoodPack && added < totalTarget && !wasPreempted()) {
     try {
+      batchArtistSeed = syncBatchArtistBlocks();
       const hits = await getMoodHits({
         mood: activeMoodPack.id,
         count: totalTarget - added,
         excludeIds: new Set([...exclude, ...recentIds]),
         filterExplicit: !!opts.filterExplicit,
         artistCap: cfg.artistCap,
-        artistSeedCounts: artistCountsInWindow(cfg.artistWindow),
+        artistSeedCounts: batchArtistSeed,
         lastArtist: lastPlaylistArtist,
         moodArtistCap: 1,
-        blockedArtists,
+        blockedArtists: cfg.blockedArtists,
         enabledGenres: Array.isArray(genres) ? genres : null,
         bucketsFor: bucketsForArtist,
         preferLane: setLane,
@@ -627,11 +693,18 @@ async function addRandomFromPlaylistsUnlocked(
       const moodIds3 = [];
       for (const h of hits) {
         if (wasPreempted()) break;
+        const artist = primaryArtist(h.artist);
+        if (!allowSameArtist && artist && batchArtists.has(artist)) {
+          if (h.id) exclude.add(h.id);
+          continue;
+        }
         try {
           const meta = MetaDataHelper.GuessMetaDataAndTrackUri(h.uri, resolveRegion());
           await enqueueMeta(m, meta);
           added++;
           moodAdded++;
+          claimBatchArtist(h.artist);
+          if (artist) lastPlaylistArtist = artist;
           if (h.id) {
             exclude.add(h.id);
             recentIds.add(h.id);
