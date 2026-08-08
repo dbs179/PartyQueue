@@ -1,12 +1,9 @@
 import {
   attachModal,
   isModalOpen,
-  prefersReducedMotion,
 } from "./modal.js";
 import {
   sanitizeDisplayName,
-  sanitizeDedication,
-  dedicationDisplayLabel,
   getDisplayName,
   getDisplayAlias,
   setDisplayName,
@@ -18,21 +15,15 @@ import { createGuestHubUi } from "./guest-hub-ui.js";
 import {
   mediaIdentity,
   playbackIdentity,
-  parseSyncedLyrics,
   queueTrackAsNowPlaying,
   resolveNowPlayingDisplay,
-  serverPlaybackPosition,
 } from "./now-playing-utils.js";
-import {
-  escapeHtml,
-  formatTrackTime,
-} from "./format.js";
+import { escapeHtml } from "./format.js";
 import {
   DECADE_LABELS,
   sameIdSet,
   presetIdsFor as presetIdsForBuckets,
   moodLabelForIds,
-  trackEraDisplayLabel,
   loadEraMood,
   saveEraMood as persistEraMood,
 } from "./genre-presets.js";
@@ -64,6 +55,9 @@ import {
 } from "./now-playing-origin.js";
 import { trackIdFromUri } from "./search-track.js";
 import { createSearchUi } from "./search-ui.js";
+import { createReactionsUi } from "./reactions-ui.js";
+import { createQueueUi } from "./queue-ui.js";
+import { createLyricsUi } from "./lyrics-ui.js";
 import {
   SUGGESTION_TEXT_MAX,
   wireSuggestionCharCount,
@@ -375,15 +369,6 @@ const queueToggle = document.getElementById("queue-toggle");
 const queueEditToggle = document.getElementById("queue-edit-toggle");
 const queueEditHint = document.getElementById("queue-edit-hint");
 
-// Edit lives inside the collapsible header row; it's hidden both while the
-// queue is empty and while host-only controls lock guests out.
-let queueEditLockedForGuests = false;
-let queueHasTracks = false;
-function syncQueueEditButton() {
-  if (queueEditToggle)
-    queueEditToggle.hidden = queueEditLockedForGuests || !queueHasTracks;
-}
-
 const randomBar = document.getElementById("random-bar");
 const controlsRandom = document.getElementById("controls-random");
 const randomButtons = [...document.querySelectorAll(".random-btn")];
@@ -551,43 +536,9 @@ const hostControlsInput = document.getElementById("host-controls-toggle");
 const kidsLockInput = document.getElementById("kids-lock-toggle");
 const requestsPausedBanner = document.getElementById("requests-paused-banner");
 const displayPartyOverPill = document.getElementById("display-party-over");
-const npReactions = document.getElementById("np-reactions");
 let requestsPaused = false;
 let partyOver = false;
 let hostControlsOnly = false;
-const NP_REACTION_KINDS = [
-  "up",
-  "down",
-  "heart",
-  "fire",
-  "laugh",
-  "vomit",
-  "party",
-  "mic",
-];
-const NP_MOOD_REACTION_KINDS = NP_REACTION_KINDS.filter((k) => k !== "mic");
-const REACT_GUEST_KEY = "pq.reactGuestId";
-let npReactionCounts = Object.fromEntries(NP_REACTION_KINDS.map((k) => [k, 0]));
-let npMyMood = null;
-let npMyMic = false;
-let npReactBusy = false;
-let npReactionsSyncedFor = null;
-
-function getReactGuestId() {
-  try {
-    let id = localStorage.getItem(REACT_GUEST_KEY) || "";
-    if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
-      id =
-        typeof crypto !== "undefined" && crypto.randomUUID
-          ? crypto.randomUUID().replace(/-/g, "")
-          : `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-      localStorage.setItem(REACT_GUEST_KEY, id);
-    }
-    return id;
-  } catch {
-    return `g${Date.now().toString(36)}`;
-  }
-}
 // DJ booth UI bound after branding (selectDjIcon) is created
 let updateDjHubSummaries = () => {};
 let setActiveDjIconName = () => {};
@@ -645,7 +596,8 @@ function syncShowQueueGenre(enabled, { rerender = true } = {}) {
   if (showQueueGenreInput) showQueueGenreInput.checked = enabled;
   persistBrandingCache({ showQueueGenre: enabled });
   if (rerender && Array.isArray(lastQueueTracks)) {
-    renderQueue(lastQueueTracks);
+    queueUi.render(lastQueueTracks);
+    queueUi.renderPartyDisplay(lastQueueTracks);
   }
 }
 
@@ -1278,51 +1230,6 @@ settingsClearDjMemoryBtn?.addEventListener("click", async () => {
 
 settingsClearSuggestionsBtn?.addEventListener("click", () => clearAllSuggestions(settingsClearSuggestionsBtn));
 
-settingsClearReactionsBtn?.addEventListener("click", async () => {
-  const ok = await confirmModal(
-    "Reset reactions? Clears Now Playing mood reactions. Karaoke mic tags stay.",
-    "Reset reactions"
-  );
-  if (!ok) return;
-  settingsClearReactionsBtn.disabled = true;
-  try {
-    const res = await hostFetch("/api/settings/clear-reactions", { method: "POST" });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not clear reactions.");
-    showToast("Mood reactions cleared");
-    npReactionsSyncedFor = null;
-    if (searchUi.getNowPlayingId()) void syncMyReactions(searchUi.getNowPlayingId());
-    else paintNpReactions({ mine: null, micMine: false });
-    if (currentView === "stats") loadStats();
-  } catch (err) {
-    showToast(err.message, true);
-  } finally {
-    settingsClearReactionsBtn.disabled = false;
-  }
-});
-
-settingsClearKaraokeBtn?.addEventListener("click", async () => {
-  const ok = await confirmModal(
-    "Reset Karaoke list? Clears mic tags. Mood reactions stay.",
-    "Reset Karaoke list"
-  );
-  if (!ok) return;
-  settingsClearKaraokeBtn.disabled = true;
-  try {
-    const res = await hostFetch("/api/settings/clear-karaoke", { method: "POST" });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not clear Karaoke list.");
-    showToast("Karaoke list cleared");
-    npReactionsSyncedFor = null;
-    if (searchUi.getNowPlayingId()) void syncMyReactions(searchUi.getNowPlayingId());
-    if (currentView === "stats") loadStats();
-  } catch (err) {
-    showToast(err.message, true);
-  } finally {
-    settingsClearKaraokeBtn.disabled = false;
-  }
-});
-
 async function clearAllSuggestions(btn = null) {
   const ok = await confirmModal(
     "Reset suggestions? Clears all open and done ideas from the guest inbox.",
@@ -1685,7 +1592,6 @@ const displayProgressElapsed = document.getElementById(
 const displayProgressDuration = document.getElementById(
   "display-progress-duration"
 );
-const displayReactions = document.getElementById("display-reactions");
 const displayQueueCount = document.getElementById("display-queue-count");
 const displayQueue = document.getElementById("display-queue");
 const displayQueueEmpty = document.getElementById("display-queue-empty");
@@ -1752,17 +1658,7 @@ function syncHostControlsVisibility() {
   if (body) body.hidden = false;
   if (protectedControls) protectedControls.hidden = locked;
   if (lock) lock.hidden = !locked;
-  queueEditLockedForGuests = locked;
-  syncQueueEditButton();
-  if (locked && queueEditMode) {
-    queueEditMode = false;
-    queueEditToggle?.classList.remove("active");
-    queueEditToggle?.setAttribute("aria-pressed", "false");
-    if (queueEditToggle) queueEditToggle.textContent = "Edit";
-    if (queueEditHint) queueEditHint.hidden = true;
-    syncSortable();
-    void loadQueue(true);
-  }
+  queueUi.setGuestEditLocked(locked);
 }
 
 // ---- Shared live Now Playing + queue + party streams ---------------------
@@ -1788,7 +1684,6 @@ let queueFallbackDelayTimer = null;
 let queueStreamCursor = createStreamCursor();
 let queueStreamVersion = 0;
 let queueHttpRequest = 0;
-let pendingQueueStreamTracks = null;
 let partySource = null;
 let partyStreamConnected = false;
 let partyFallbackTimer = null;
@@ -1846,12 +1741,7 @@ function applyNowPlayingStreamSnapshot(snapshot) {
 
 function setNowPlayingConnectionStatus(status, message = "") {
   const disconnected = status === "disconnected";
-  if (disconnected && npIsPlayingOverlay) {
-    npPositionBase = estimatedPositionSec();
-    npPositionAt = playbackClockNow();
-    npIsPlayingOverlay = false;
-    updateTrackProgress();
-  }
+  if (disconnected) lyricsUi.freezePlayhead();
   npCard?.classList.toggle("is-stale", disconnected);
   if (npConnectionStatus) {
     npConnectionStatus.hidden = !disconnected;
@@ -1956,11 +1846,11 @@ function applyQueueStreamSnapshot(snapshot) {
   queueStreamCursor = next.cursor;
   queueStreamVersion += 1;
   const tracks = Array.isArray(snapshot?.tracks) ? snapshot.tracks : [];
-  if (queueEditMode) {
-    pendingQueueStreamTracks = tracks;
+  if (queueUi.isEditMode()) {
+    queueUi.setPendingStreamTracks(tracks);
     return;
   }
-  pendingQueueStreamTracks = null;
+  queueUi.clearPendingStreamTracks();
   applyQueueTracks(tracks);
 }
 
@@ -2187,13 +2077,7 @@ function showView(name) {
     displayEventName.textContent =
       document.getElementById("event-name")?.textContent?.trim() || "PartyQueue";
   }
-  if (target === "display") {
-    syncNowPlayingLyrics(lastNowPlaying);
-  } else if (previousView === "display" && !npOverlayOpen) {
-    clearLyricsRetry();
-    stopLyricTicker();
-    npLyricsFetchId += 1;
-  }
+  lyricsUi.onViewChange({ target, previous: previousView });
   if (!hostLocked) {
     if (target === "booth") updateBoothHubSummaries();
     if (target === "settings-dj") updateDjHubSummaries();
@@ -2551,6 +2435,52 @@ const searchUi = createSearchUi(
   }
 );
 
+
+const reactionsUi = createReactionsUi(
+  {
+    npReactions: document.getElementById("np-reactions"),
+    displayReactions: document.getElementById("display-reactions"),
+    clearReactionsBtn: settingsClearReactionsBtn,
+    clearKaraokeBtn: settingsClearKaraokeBtn,
+  },
+  {
+    hostFetch,
+    showToast,
+    confirmModal,
+    getNowPlayingId: () => searchUi.getNowPlayingId(),
+    getNowPlayingMeta: () => ({
+      title: lastNowPlaying?.title || "",
+      artist: lastNowPlaying?.artist || "",
+    }),
+    ensureDisplayName,
+    guestBadgeName,
+    getCurrentView: () => currentView,
+    loadStats: () => loadStats(),
+  }
+);
+
+const queueUi = createQueueUi(
+  {
+    queueList,
+    queueCount,
+    queueEmpty,
+    queueEditToggle,
+    queueEditHint,
+    displayQueue,
+    displayQueueCount,
+    displayQueueEmpty,
+  },
+  {
+    hostFetch,
+    showToast,
+    getShowQueueGenre: () => showQueueGenre,
+    getActiveEraMoodId: () => activeEraMoodId(),
+    getLastQueueTracks: () => lastQueueTracks,
+    applyQueueTracks: (tracks) => applyQueueTracks(tracks),
+    loadQueue: (force) => loadQueue(force),
+  }
+);
+
 clearBtn.addEventListener("click", async () => {
   // Double confirm — intentional; Clear Queue is open to the party but destructive.
   const first = await confirmModal("Are you sure you want to clear the Queue?");
@@ -2591,9 +2521,6 @@ let optimisticNp = null;
 let nowPlayingDisplayMode = "empty";
 let lastQueueTracks = [];
 let nowPlayingHttpRequest = 0;
-// Queue editing (delete + drag-reorder). Off by default.
-let queueEditMode = false;
-let sortable = null;
 let lastArtPrefetchKey = "";
 
 /** Skip art prefetch on Save-Data / very slow cellular. */
@@ -2629,346 +2556,6 @@ function prefetchUpcomingAlbumArt(queueTracks = lastQueueTracks) {
     img.src = t.albumArt;
   }
 }
-let npOverlayOpen = false;
-let npLyricsKey = "";
-let npLyricsFetchId = 0;
-/** @type {{ t: number, text: string }[]|null} */
-let npSyncedLines = null;
-let npPositionBase = 0;
-let npPositionAt = 0;
-let npIsPlayingOverlay = false;
-let npProgressClockKey = "";
-let npLyricTick = null;
-let npLyricsRetryTimer = null;
-let npOverlayHistoryPushed = false;
-
-function playbackClockNow() {
-  return globalThis.performance?.now?.() ?? Date.now();
-}
-
-function lyricsTrackKey(np) {
-  return playbackIdentity(np);
-}
-
-function lyricsActive() {
-  return npOverlayOpen || currentView === "display";
-}
-
-function lyricsContainers() {
-  return [npFsLyrics, displayLyrics].filter(Boolean);
-}
-
-function lyricsContainerHasPaint(el) {
-  return !!el?.querySelector(
-    ".np-fs-lyrics-synced, .np-fs-lyrics-plain, .np-fs-lyrics-status"
-  );
-}
-
-/** Copy a filled lyrics panel into any empty sibling targets. */
-function mirrorLyricsContainers() {
-  const containers = lyricsContainers();
-  const source = containers.find((el) => lyricsContainerHasPaint(el));
-  if (!source) return;
-  for (const el of containers) {
-    if (el === source || lyricsContainerHasPaint(el)) continue;
-    // Party Display uses a 3-line window for synced lyrics — not a full list clone.
-    if (
-      el === displayLyrics &&
-      npSyncedLines &&
-      source.querySelector(".np-fs-lyrics-synced")
-    ) {
-      continue;
-    }
-    el.innerHTML = source.innerHTML;
-  }
-}
-
-/**
- * Party Display karaoke window: previous / current / next only.
- * Avoids scrollIntoView, which can shove the TV layout off-screen.
- */
-function paintDisplayLyricWindow(activeIdx) {
-  if (!displayLyrics || !npSyncedLines) return;
-  const ul = document.createElement("ul");
-  ul.className = "np-fs-lyrics-synced party-display-lyrics-window";
-  const slots = [
-    { i: activeIdx - 1, cls: "is-past" },
-    { i: activeIdx, cls: "is-active" },
-    { i: activeIdx + 1, cls: "is-next" },
-  ];
-  for (const slot of slots) {
-    const li = document.createElement("li");
-    li.className = "np-fs-line";
-    const line =
-      slot.i >= 0 && slot.i < npSyncedLines.length
-        ? npSyncedLines[slot.i]
-        : null;
-    if (line) {
-      li.textContent = line.text;
-      if (slot.cls === "is-active") li.classList.add("is-active");
-      else if (slot.cls === "is-past") li.classList.add("is-past");
-      else li.classList.add("is-next");
-    } else {
-      li.classList.add("is-empty");
-      li.innerHTML = "&nbsp;";
-    }
-    ul.appendChild(li);
-  }
-  displayLyrics.replaceChildren(ul);
-}
-
-function setNpFsLyricsStatus(msg) {
-  npSyncedLines = null;
-  const html = `<p class="np-fs-lyrics-status">${escapeHtml(msg)}</p>`;
-  for (const el of lyricsContainers()) el.innerHTML = html;
-}
-
-function renderPlainLyrics(text) {
-  npSyncedLines = null;
-  for (const el of lyricsContainers()) {
-    const pre = document.createElement("pre");
-    pre.className = "np-fs-lyrics-plain";
-    pre.textContent = text;
-    el.innerHTML = "";
-    el.appendChild(pre);
-  }
-}
-
-function renderSyncedLyrics(lines) {
-  npSyncedLines = lines;
-  // Full scrolling sheet for the phone overlay; TV uses a 3-line window.
-  if (npFsLyrics) {
-    const ul = document.createElement("ul");
-    ul.className = "np-fs-lyrics-synced";
-    for (const line of lines) {
-      const li = document.createElement("li");
-      li.className = "np-fs-line";
-      li.textContent = line.text;
-      ul.appendChild(li);
-    }
-    npFsLyrics.replaceChildren(ul);
-  }
-  updateSyncedHighlight(true);
-}
-
-function renderLyricsAttribution(data) {
-  if (!data || !npFsLyrics) return;
-  // Attribution stays on the phone overlay only — keep the TV lyrics box compact.
-  const isPlain = data.syncKind === "plain" || !data.syncedLyrics;
-  const attribution = data.provider === "unison" ? data.attribution : null;
-  if (!isPlain && !attribution) return;
-
-  const note = document.createElement("p");
-  note.className = "np-fs-lyrics-attribution";
-  if (isPlain) note.append("Plain lyrics");
-  if (attribution?.url) {
-    if (isPlain) note.append(" · ");
-    const link = document.createElement("a");
-    link.href = attribution.url;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = attribution.text || "Lyrics from Unison";
-    note.appendChild(link);
-  } else if (attribution?.text) {
-    if (isPlain) note.append(" · ");
-    note.append(attribution.text);
-  }
-  npFsLyrics.prepend(note);
-}
-
-function estimatedPositionSec() {
-  let pos = npPositionBase;
-  if (npIsPlayingOverlay && npPositionAt) {
-    pos += (playbackClockNow() - npPositionAt) / 1000;
-  }
-  return pos;
-}
-
-function paintTrackProgress(container, fill, elapsed, total, position, duration) {
-  if (!container || !fill || !elapsed || !total) return;
-  const available = Number.isFinite(duration) && duration > 0;
-  container.hidden = !available;
-  if (!available) return;
-  const current = Math.max(0, Math.min(duration, position));
-  const percent = Math.max(0, Math.min(100, (current / duration) * 100));
-  fill.style.transform = `scaleX(${percent / 100})`;
-  elapsed.textContent = formatTrackTime(current);
-  total.textContent = formatTrackTime(duration);
-  const bar = container.querySelector('[role="progressbar"]');
-  bar?.setAttribute("aria-valuenow", String(Math.round(percent)));
-  bar?.setAttribute(
-    "aria-valuetext",
-    `${formatTrackTime(current)} of ${formatTrackTime(duration)}`
-  );
-}
-
-function updateTrackProgress() {
-  const isAnnouncement =
-    !!lastNowPlaying?.djVoice || !!lastNowPlaying?.djSilence;
-  // Keep the bar visible during transitions; duration may be unknown for
-  // optimistic queue rows until Sonos confirms.
-  const duration = isAnnouncement
-    ? Number.NaN
-    : Number(lastNowPlaying?.durationSec);
-  const position = estimatedPositionSec();
-  paintTrackProgress(
-    npProgress,
-    npProgressFill,
-    npProgressElapsed,
-    npProgressDuration,
-    position,
-    duration
-  );
-  paintTrackProgress(
-    npFsProgress,
-    npFsProgressFill,
-    npFsProgressElapsed,
-    npFsProgressDuration,
-    position,
-    duration
-  );
-  paintTrackProgress(
-    displayProgress,
-    displayProgressFill,
-    displayProgressElapsed,
-    displayProgressDuration,
-    position,
-    duration
-  );
-}
-
-// Advance synced lyrics slightly to offset Sonos reporting, polling, ticker,
-// and display latency. This affects lyric highlighting only, not playback.
-const LYRICS_LEAD_SEC = 0.75;
-
-/**
- * Keep a smooth local playhead. Sonos provides sparse position anchors, so the
- * browser advances them using a monotonic clock. Resync only on initial load,
- * track/play-state changes, or a real seek (large drift).
- */
-function applyPlaybackClock(np, { force = false } = {}) {
-  const clockNow = playbackClockNow();
-  // Display models already strip metadataPending; keep the playhead moving
-  // through converging/optimistic phases.
-  const playing = !!(np && np.isPlaying && !np.djVoice);
-  // Snapshot age is calculated server-side; never compare server wall time with
-  // the phone clock.
-  const serverPos = serverPlaybackPosition(np);
-  const hasServer = serverPos != null;
-
-  if (force || !npPositionAt) {
-    npPositionBase = hasServer ? serverPos : 0;
-    npPositionAt = clockNow;
-    npIsPlayingOverlay = playing;
-    return;
-  }
-
-  const estimated = estimatedPositionSec();
-
-  if (!hasServer) {
-    if (playing !== npIsPlayingOverlay && !playing) {
-      npPositionBase = estimated;
-      npPositionAt = clockNow;
-    }
-    npIsPlayingOverlay = playing;
-    return;
-  }
-
-  const drift = Math.abs(serverPos - estimated);
-  const playChanged = playing !== npIsPlayingOverlay;
-  // Replayed SSE anchors (reconnect / retained snapshot) can be older than the
-  // local playhead. Never yank time backward for the same track — only snap on
-  // pause/play changes, forward seeks, or large forward drift.
-  const staleReplay = playing && !playChanged && serverPos + 0.75 < estimated;
-  if (playChanged || !playing) {
-    npPositionBase = hasServer ? serverPos : estimated;
-    npPositionAt = clockNow;
-  } else if (!staleReplay && drift > 1.5) {
-    npPositionBase = serverPos;
-    npPositionAt = clockNow;
-  }
-  npIsPlayingOverlay = playing;
-}
-
-function shouldScrollLyricsRoot(root) {
-  if (root === npFsLyrics) return npOverlayOpen;
-  if (root === displayLyrics) return currentView === "display";
-  return false;
-}
-
-function updateSyncedHighlight(forceScroll) {
-  if (!npSyncedLines) return;
-  const pos = estimatedPositionSec();
-  let idx = -1;
-  for (let i = 0; i < npSyncedLines.length; i++) {
-    if (npSyncedLines[i].t <= pos + LYRICS_LEAD_SEC) idx = i;
-    else break;
-  }
-  if (currentView === "display") paintDisplayLyricWindow(idx);
-  if (!npFsLyrics) return;
-  const ul = npFsLyrics.querySelector(".np-fs-lyrics-synced");
-  if (!ul) return;
-  const kids = ul.children;
-  let activeEl = null;
-  let becameActive = false;
-  for (let i = 0; i < kids.length; i++) {
-    const el = kids[i];
-    const wasActive = el.classList.contains("is-active");
-    el.classList.toggle("is-active", i === idx);
-    el.classList.toggle("is-past", i < idx);
-    if (i === idx) {
-      activeEl = el;
-      if (!wasActive) becameActive = true;
-    }
-  }
-  if (
-    activeEl &&
-    (becameActive || forceScroll) &&
-    shouldScrollLyricsRoot(npFsLyrics)
-  ) {
-    activeEl.scrollIntoView({
-      block: "center",
-      behavior: forceScroll ? "auto" : "smooth",
-    });
-  }
-}
-
-function startLyricTicker() {
-  stopLyricTicker();
-  if (!lyricsActive() || !npSyncedLines) return;
-  let lastIdx = -1;
-  const tick = () => {
-    if (!lyricsActive() || !npSyncedLines) return;
-    const pos = estimatedPositionSec();
-    let idx = -1;
-    for (let i = 0; i < npSyncedLines.length; i++) {
-      if (npSyncedLines[i].t <= pos + LYRICS_LEAD_SEC) idx = i;
-      else break;
-    }
-    if (idx !== lastIdx) {
-      lastIdx = idx;
-      updateSyncedHighlight(false);
-    }
-    npLyricTick = setTimeout(tick, 250);
-  };
-  updateSyncedHighlight(true);
-  npLyricTick = setTimeout(tick, 250);
-}
-
-function stopLyricTicker() {
-  if (npLyricTick) {
-    clearTimeout(npLyricTick);
-    npLyricTick = null;
-  }
-}
-
-function clearLyricsRetry() {
-  if (npLyricsRetryTimer) {
-    clearTimeout(npLyricsRetryTimer);
-    npLyricsRetryTimer = null;
-  }
-}
-
 const artworkRequests = new WeakMap();
 
 function bindNowPlayingArtwork(img, np) {
@@ -3031,244 +2618,38 @@ function bindNowPlayingArtwork(img, np) {
     });
 }
 
-function fillNpOverlayMeta(np) {
-  if (!npFsTitle) return;
-  const hasTrack = np && (np.title || np.artist);
-  npFsTitle.textContent = hasTrack ? np.title || "" : "";
-  npFsArtist.textContent = hasTrack ? np.artist || "" : "";
-  npFsAlbum.textContent = hasTrack ? np.album || "" : "";
-  bindNowPlayingArtwork(npFsArt, np);
-}
 
-function lyricsMissMessage(data) {
-  if (data?.degraded) {
-    return "No lyrics found — providers are having trouble";
+const lyricsUi = createLyricsUi(
+  {
+    npOverlay,
+    npOverlayClose,
+    npFsArt,
+    npFsTitle,
+    npFsArtist,
+    npFsAlbum,
+    npFsProgress,
+    npFsProgressFill,
+    npFsProgressElapsed,
+    npFsProgressDuration,
+    npFsLyrics,
+    displayLyrics,
+    npProgress,
+    npProgressFill,
+    npProgressElapsed,
+    npProgressDuration,
+    displayProgress,
+    displayProgressFill,
+    displayProgressElapsed,
+    displayProgressDuration,
+    npCard,
+  },
+  {
+    getLastNowPlaying: () => lastNowPlaying,
+    getCurrentView: () => currentView,
+    isModalOpen,
+    bindArtwork: bindNowPlayingArtwork,
   }
-  return "No lyrics found";
-}
-
-async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
-  clearLyricsRetry();
-  const fetchId = ++npLyricsFetchId;
-  if (!np || np.djVoice || !(np.title && np.artist)) {
-    setNpFsLyricsStatus(
-      np?.djVoice ? "DJ Voice — no lyrics" : "No lyrics for this track"
-    );
-    return;
-  }
-  // Keep an already-painted lyric sheet visible while a quiet refresh runs.
-  const hasPaintedLyrics = lyricsContainers().some((el) =>
-    el.querySelector(".np-fs-lyrics-synced, .np-fs-lyrics-plain")
-  );
-  if (!hasPaintedLyrics) setNpFsLyricsStatus("Loading lyrics…");
-  const params = new URLSearchParams({
-    title: np.title,
-    artist: np.artist,
-  });
-  if (np.album) params.set("album", np.album);
-  if (np.uri) params.set("uri", np.uri);
-  if (np.durationSec != null && Number.isFinite(np.durationSec) && np.durationSec > 0) {
-    params.set("duration", String(Math.round(np.durationSec)));
-  }
-  try {
-    const res = await fetch(`/api/lyrics?${params}`);
-    const data = await res.json();
-    if (fetchId !== npLyricsFetchId) return;
-    if (!res.ok) {
-      const error = new Error(data.error || "Could not load lyrics.");
-      error.status = res.status;
-      error.retryAfterSec = Number(data.retryAfterSec);
-      throw error;
-    }
-    if (data.instrumental) {
-      setNpFsLyricsStatus("Instrumental");
-      return;
-    }
-    if (!data.found) {
-      setNpFsLyricsStatus(lyricsMissMessage(data));
-      return;
-    }
-    const synced = parseSyncedLyrics(data.syncedLyrics);
-    if (synced) {
-      renderSyncedLyrics(synced);
-      renderLyricsAttribution(data);
-      startLyricTicker();
-    } else if (data.plainLyrics) {
-      renderPlainLyrics(data.plainLyrics);
-      renderLyricsAttribution(data);
-    } else {
-      setNpFsLyricsStatus(lyricsMissMessage(data));
-    }
-  } catch (err) {
-    if (fetchId !== npLyricsFetchId) return;
-    if (err.status === 503 && retryCount < 2 && lyricsActive()) {
-      const retryAfterSec = Number.isFinite(err.retryAfterSec)
-        ? Math.max(1, Math.min(30, err.retryAfterSec))
-        : 10;
-      if (!hasPaintedLyrics) {
-        setNpFsLyricsStatus(
-          `Lyrics service is busy — retrying in ${retryAfterSec}s…`
-        );
-      }
-      npLyricsRetryTimer = setTimeout(() => {
-        npLyricsRetryTimer = null;
-        if (lyricsActive() && lyricsTrackKey(lastNowPlaying) === npLyricsKey) {
-          loadOverlayLyrics(lastNowPlaying, { retryCount: retryCount + 1 });
-        }
-      }, retryAfterSec * 1000);
-      return;
-    }
-    if (!hasPaintedLyrics) {
-      setNpFsLyricsStatus(err.message || "Could not load lyrics");
-    }
-  }
-}
-
-/** Keep overlay + Party Display lyrics in sync with the current track. */
-function syncNowPlayingLyrics(np) {
-  if (!lyricsActive()) return;
-  const key = lyricsTrackKey(np);
-  const trackChanged = key !== npLyricsKey;
-  if (npOverlayOpen) fillNpOverlayMeta(np);
-  // Only refetch when the displayed track identity changes. Brief updating /
-  // converging toggles must not wipe a successful lyric paint.
-  if (trackChanged) {
-    npLyricsKey = key;
-    clearLyricsRetry();
-    stopLyricTicker();
-    loadOverlayLyrics(np);
-    return;
-  }
-  mirrorLyricsContainers();
-  if (npSyncedLines) startLyricTicker();
-}
-
-function syncNpOverlay(np) {
-  syncNowPlayingLyrics(np);
-}
-
-function openNpOverlay() {
-  const np = lastNowPlaying;
-  if (!np || !(np.title || np.artist) || !npOverlay) return;
-  npOverlayOpen = true;
-  npOverlay.hidden = false;
-  document.body.classList.add("np-overlay-open");
-  npLyricsKey = lyricsTrackKey(np);
-  // The overlay is another view of the shared playhead. Re-anchoring from
-  // lastNowPlaying here can move time backward when its SSE payload is old.
-  fillNpOverlayMeta(np);
-  updateTrackProgress();
-  loadOverlayLyrics(np);
-  try {
-    history.pushState({ npOverlay: true }, "");
-    npOverlayHistoryPushed = true;
-  } catch {
-    npOverlayHistoryPushed = false;
-  }
-  npOverlayClose?.focus();
-}
-
-function closeNpOverlay({ fromPopstate = false } = {}) {
-  if (!npOverlayOpen) return;
-  npOverlayOpen = false;
-  if (!lyricsActive()) {
-    clearLyricsRetry();
-    stopLyricTicker();
-    npLyricsFetchId += 1;
-  }
-  if (npOverlay) npOverlay.hidden = true;
-  document.body.classList.remove("np-overlay-open");
-  if (!fromPopstate && npOverlayHistoryPushed && history.state?.npOverlay) {
-    npOverlayHistoryPushed = false;
-    history.back();
-  } else {
-    npOverlayHistoryPushed = false;
-  }
-}
-
-if (npCard) {
-  npCard.addEventListener("click", () => {
-    if (npCard.classList.contains("is-empty")) return;
-    openNpOverlay();
-  });
-  npCard.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter" && e.key !== " ") return;
-    if (npCard.classList.contains("is-empty")) return;
-    e.preventDefault();
-    openNpOverlay();
-  });
-}
-
-npOverlayClose?.addEventListener("click", () => closeNpOverlay());
-
-npOverlay?.addEventListener("click", (e) => {
-  if (e.target === npOverlay) closeNpOverlay();
-});
-
-window.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && npOverlayOpen && !isModalOpen()) {
-    e.preventDefault();
-    closeNpOverlay();
-  }
-});
-
-window.addEventListener("popstate", () => {
-  if (npOverlayOpen) closeNpOverlay({ fromPopstate: true });
-});
-
-function paintNpReactions(data) {
-  npReactionCounts = Object.fromEntries(
-    NP_REACTION_KINDS.map((k) => [k, Math.max(0, Number(data?.[k]) || 0)])
-  );
-  if (data && Object.prototype.hasOwnProperty.call(data, "mine")) {
-    npMyMood =
-      data.mine && NP_MOOD_REACTION_KINDS.includes(data.mine) ? data.mine : null;
-  }
-  if (data && Object.prototype.hasOwnProperty.call(data, "micMine")) {
-    npMyMic = !!data.micMine;
-  }
-  if (!npReactions) return;
-  for (const el of npReactions.querySelectorAll("[data-count]")) {
-    const kind = el.getAttribute("data-count");
-    el.textContent = String(npReactionCounts[kind] || 0);
-  }
-  for (const btn of npReactions.querySelectorAll("[data-react]")) {
-    const kind = btn.getAttribute("data-react");
-    const on = kind === "mic" ? npMyMic : kind === npMyMood;
-    btn.classList.toggle("is-active", on);
-    btn.setAttribute("aria-pressed", on ? "true" : "false");
-  }
-  if (displayReactions) {
-    for (const el of displayReactions.querySelectorAll("[data-display-count]")) {
-      const kind = el.getAttribute("data-display-count");
-      el.textContent = String(npReactionCounts[kind] || 0);
-    }
-  }
-}
-
-async function syncMyReactions(trackId) {
-  if (!trackId) {
-    npMyMood = null;
-    npMyMic = false;
-    npReactionsSyncedFor = null;
-    paintNpReactions({});
-    return;
-  }
-  if (npReactionsSyncedFor === trackId) return;
-  try {
-    const qs = new URLSearchParams({
-      id: trackId,
-      guestId: getReactGuestId(),
-    });
-    const res = await fetch(`/api/reactions?${qs}`);
-    if (!res.ok) return;
-    const data = await res.json();
-    npReactionsSyncedFor = trackId;
-    paintNpReactions(data);
-  } catch {
-    /* keep prior paint */
-  }
-}
+);
 
 function renderPartyDisplayNowPlaying(np, hasTrack) {
   if (!displayTitle || !displayEmpty || !displayArt) return;
@@ -3281,10 +2662,8 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
     if (displayAlbum) displayAlbum.textContent = "";
     if (displayState) displayState.hidden = true;
     if (displayOriginPill) displayOriginPill.hidden = true;
-    if (displayReactions) displayReactions.hidden = true;
-    if (displayLyrics && currentView === "display") {
-      displayLyrics.innerHTML = "";
-    }
+    reactionsUi.setDisplayHidden(true);
+    if (currentView === "display") lyricsUi.clearDisplay();
     return;
   }
 
@@ -3311,9 +2690,7 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
     displayState.classList.toggle("paused", !playing && !stateUpdating);
     displayState.classList.toggle("updating", stateUpdating);
   }
-  if (displayReactions) {
-    displayReactions.hidden = !!np.djVoice || !!np.updating;
-  }
+  reactionsUi.setDisplayHidden(!!np.djVoice || !!np.updating);
   if (displayOriginPill) {
     // Same "how it got here" tag as the Up Next rows; DJ clips aren't songs.
     const hide = !!np.djVoice || stateUpdating;
@@ -3396,12 +2773,8 @@ function renderNowPlaying(transport) {
   lastNowPlaying = np;
 
   const hasTrack = !!(np && (np.title || np.artist || np.albumArt));
-  const progressClockKey = lyricsTrackKey(np);
-  applyPlaybackClock(np, {
-    force: progressClockKey !== npProgressClockKey,
-  });
-  npProgressClockKey = progressClockKey;
-  updateTrackProgress();
+  lyricsUi.applyPlaybackClock(np);
+  lyricsUi.updateTrackProgress();
   // Transport owns play/pause affordances so Skip optimism cannot hide Pause.
   npIsPlaying = !!(transport && transport.queuePlaying);
   npToggle.textContent = npIsPlaying ? "\u23F8\uFE0F" : "\u25B6\uFE0F";
@@ -3421,11 +2794,7 @@ function renderNowPlaying(transport) {
     !!lastConfirmedNp &&
     mediaIdentity(np) === mediaIdentity(lastConfirmedNp);
   const nextNpId = hasTrack && !updating ? trackIdFromUri(np.uri) : null;
-  if (nextNpId !== npReactionsSyncedFor) {
-    npMyMood = null;
-    npMyMic = false;
-    npReactionsSyncedFor = null;
-  }
+  reactionsUi.noteTrackChange(nextNpId);
   searchUi.setNowPlaying(hasTrack ? np : null, {
     includeId: hasTrack && !updating,
   });
@@ -3475,16 +2844,7 @@ function renderNowPlaying(transport) {
     npArtist.textContent = np.artist || "";
     npAlbum.textContent = np.album || "";
     bindNowPlayingArtwork(npArt, np);
-    if (npReactions) npReactions.hidden = updating;
-    if (np?.reactions) {
-      // Poll has counts only; keep local mine/micMine until sync finishes.
-      paintNpReactions({
-        ...np.reactions,
-        mine: npMyMood,
-        micMine: npMyMic,
-      });
-    }
-    if (!updating) void syncMyReactions(searchUi.getNowPlayingId());
+    reactionsUi.applyFromNowPlaying(np, { hasTrack: true, updating });
   } else {
     npCard.classList.add("is-empty");
     npTitle.hidden = true;
@@ -3493,86 +2853,14 @@ function renderNowPlaying(transport) {
     bindNowPlayingArtwork(npArt, null);
     npEmpty.hidden = false;
     npEmpty.textContent = EMPTY_MESSAGE;
-    if (npReactions) npReactions.hidden = true;
-    npReactionsSyncedFor = null;
-    paintNpReactions({ mine: null, micMine: false });
-    if (npOverlayOpen) closeNpOverlay();
+    reactionsUi.applyFromNowPlaying(null, { hasTrack: false, updating: false });
+    if (lyricsUi.isOpen()) lyricsUi.close();
   }
 
   renderPartyDisplayNowPlaying(np, hasTrack);
-  syncNpOverlay(np);
+  lyricsUi.sync(np);
   prefetchUpcomingAlbumArt(lastQueueTracks);
 }
-
-window.setInterval(
-  updateTrackProgress,
-  prefersReducedMotion() ? 1000 : 250
-);
-
-npReactions?.addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-react]");
-  if (!btn || npReactBusy) return;
-  e.preventDefault();
-  e.stopPropagation();
-  const kind = btn.getAttribute("data-react");
-  const id = searchUi.getNowPlayingId();
-  if (!id || !NP_REACTION_KINDS.includes(kind)) return;
-
-  const displayName = await ensureDisplayName({ required: true });
-  if (!displayName) return;
-
-  npReactBusy = true;
-  btn.disabled = true;
-
-  // Optimistic: mood is exclusive; mic toggles on its own.
-  const next = { ...npReactionCounts };
-  let nextMine = npMyMood;
-  let nextMic = npMyMic;
-  if (kind === "mic") {
-    nextMic = !npMyMic;
-    next.mic = Math.max(0, (next.mic || 0) + (nextMic ? 1 : -1));
-  } else if (npMyMood === kind) {
-    nextMine = null;
-    next[kind] = Math.max(0, (next[kind] || 0) - 1);
-  } else {
-    if (npMyMood) next[npMyMood] = Math.max(0, (next[npMyMood] || 0) - 1);
-    nextMine = kind;
-    next[kind] = (next[kind] || 0) + 1;
-  }
-  paintNpReactions({ ...next, mine: nextMine, micMine: nextMic });
-
-  try {
-    const res = await fetch("/api/reactions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id,
-        kind,
-        guestId: getReactGuestId(),
-        by: guestBadgeName() || displayName,
-        name: lastNowPlaying?.title || "",
-        artist: lastNowPlaying?.artist || "",
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "Could not react.");
-    npReactionsSyncedFor = id;
-    paintNpReactions(data);
-    if (kind === "mic") {
-      showToast(
-        data.micMine ? "Added to the Karaoke List" : "Removed from the Karaoke List"
-      );
-    }
-    if (currentView === "stats") loadStats();
-  } catch (err) {
-    npReactionsSyncedFor = null;
-    void syncMyReactions(id);
-    showToast(err.message || "Could not react.", true);
-  } finally {
-    btn.disabled = false;
-    npReactBusy = false;
-  }
-});
 
 async function loadNowPlaying() {
   const requestId = ++nowPlayingHttpRequest;
@@ -3593,53 +2881,11 @@ async function loadNowPlaying() {
   }
 }
 
-function renderPartyDisplayQueue(tracks) {
-  if (!displayQueue || !displayQueueEmpty || !displayQueueCount) return;
-  // DJ announce rows stay in the list (same as the main page's Up Next) so
-  // guests can see the DJ coming between requests. Cap at three on the TV
-  // so Up Next + Join stay compact and leave room for lyrics.
-  const visible = tracks.slice(0, 3);
-  displayQueueCount.textContent = tracks.length
-    ? `${tracks.length} queued`
-    : "";
-  displayQueueEmpty.hidden = visible.length > 0;
-  displayQueueEmpty.textContent = "The queue is empty.";
-  displayQueue.innerHTML = "";
-
-  visible.forEach((track, index) => {
-    const row = document.createElement("li");
-    const number = document.createElement("span");
-    number.className = "party-display-queue-index";
-    number.textContent = String(index + 1);
-
-    const meta = document.createElement("div");
-    meta.className = "party-display-queue-meta";
-    const title = document.createElement("strong");
-    title.textContent = track.title || "Untitled";
-    const artist = document.createElement("span");
-    artist.textContent = track.artist || "";
-    meta.append(title, artist);
-
-    // Tag every song row with how it got here (same precedence as the main
-    // queue badges): dedication > requested > era hit > Discover > Random.
-    // DJ clips aren't songs — no origin tag, matching the main page.
-    if (!track.djVoice) {
-      const source = document.createElement("span");
-      source.className = "party-display-queue-source";
-      source.textContent = displayOriginLabel(track, activeEraMoodId());
-      meta.appendChild(source);
-    }
-
-    row.append(number, meta);
-    displayQueue.appendChild(row);
-  });
-}
-
 function applyQueueTracks(tracks) {
   lastQueueTracks = tracks;
   searchUi.setQueuedTracks(tracks);
-  renderQueue(tracks);
-  renderPartyDisplayQueue(tracks);
+  queueUi.render(tracks);
+  queueUi.renderPartyDisplay(tracks);
   prefetchUpcomingAlbumArt(tracks);
 }
 
@@ -3647,7 +2893,7 @@ async function loadQueue(force = false) {
   // While editing, don't let fallback HTTP rebuild the list under the user's
   // hands (it would interrupt a drag or wipe the delete buttons). Explicit
   // reconciliation calls pass force=true.
-  if (queueEditMode && !force) return;
+  if (queueUi.isEditMode() && !force) return;
   const requestId = ++queueHttpRequest;
   const streamVersionAtStart = queueStreamVersion;
   try {
@@ -3665,158 +2911,6 @@ async function loadQueue(force = false) {
   } catch {
     /* leave previous queue on transient errors */
   }
-}
-
-function queueTrackSig(track) {
-  return [
-    track.uri || "",
-    track.position || "",
-    track.searched ? 1 : 0,
-    track.discovered ? 1 : 0,
-    track.moodPick ? 1 : 0,
-    track.mood || "",
-    track.requestedBy || "",
-    track.dedication || "",
-    track.title || "",
-    track.artist || "",
-    track.djVoice ? 1 : 0,
-    showQueueGenre ? 1 : 0,
-    track.fromPlaylist ? 1 : 0,
-    track.genreLane || "",
-    track.genreLabel || "",
-    Array.isArray(track.genreLabels) ? track.genreLabels.join(",") : "",
-  ].join("\0");
-}
-
-function queueOriginBadgeHtml(track) {
-  const requester = sanitizeDisplayName(track.requestedBy || "");
-  const dedication = sanitizeDedication(track.dedication || "");
-  if (track.moodPick) {
-    const era = trackEraLabel(track);
-    const label = era ? `${era} Hit` : "Era Hit";
-    return `<span class="mood-badge" title="Era hit added by the Decades mood (from outside your playlists)">\u{1F4FC} ${escapeHtml(label)}</span>`;
-  }
-  if (track.discovered) {
-    return `<span class="songs-like-badge" title="Added by Discover (similar to your music)">\u2728 Discover</span>`;
-  }
-  if (track.searched) {
-    if (dedication) {
-      const label = dedicationDisplayLabel(dedication, requester);
-      return `<span class="searched-badge" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`;
-    }
-    const tip = requester
-      ? `Requested by ${escapeHtml(requester)}`
-      : "A guest searched and added this song (plays before auto-added songs)";
-    const label = requester
-      ? `\u{1F50D} Requested \u00b7 ${escapeHtml(requester)}`
-      : `\u{1F50D} Requested`;
-    return `<span class="searched-badge" title="${tip}">${label}</span>`;
-  }
-  if (track.djVoice) return "";
-  return `<span class="memory-random-badge" title="Added by Random / Never-Ending">\u{1F3B2} Random</span>`;
-}
-
-function queueGenreBadgeHtml(track) {
-  if (!showQueueGenre || track.djVoice) return "";
-  // Matched / primary genre only — second genre slot is "From Playlists".
-  const label =
-    Array.isArray(track.genreLabels) && track.genreLabels[0]
-      ? track.genreLabels[0]
-      : typeof track.genreLabel === "string" && track.genreLabel
-        ? track.genreLabel
-        : typeof track.genreLane === "string" && track.genreLane
-          ? track.genreLane
-          : "";
-  if (!label) return "";
-  return `<span class="queue-genre-badge" title="Matched song genre">${escapeHtml(label)}</span>`;
-}
-
-function queuePlaylistBadgeHtml(track) {
-  if (!showQueueGenre || track.djVoice || !track.fromPlaylist) return "";
-  return `<span class="queue-playlist-badge" title="This song is in your Spotify playlists">From Playlists</span>`;
-}
-
-function queueBadgeHtml(track) {
-  return `${queueOriginBadgeHtml(track)}${queueGenreBadgeHtml(track)}${queuePlaylistBadgeHtml(track)}`;
-}
-
-function fillQueueRow(li, track, index) {
-  li.className = "track track-noart" + (queueEditMode ? " editing" : "");
-  li.dataset.uri = track.uri || "";
-  li.dataset.position = String(track.position || index + 1);
-  li.dataset.sig = queueTrackSig(track);
-  const del = queueEditMode
-    ? `<button class="track-delete" type="button" aria-label="Remove from queue" title="Remove from queue">&times;</button>`
-    : "";
-  const badge = queueBadgeHtml(track);
-  li.innerHTML = `
-      <span class="queue-index">${index + 1}</span>
-      <div class="meta">
-        <div class="title">${escapeHtml(track.title)}</div>
-        <div class="artist">${escapeHtml(track.artist)}</div>
-        ${badge ? `<div class="queue-tag">${badge}</div>` : ""}
-      </div>
-      ${del}
-    `;
-  if (queueEditMode) {
-    li.querySelector(".track-delete").addEventListener("click", () =>
-      removeQueueItem(li)
-    );
-  }
-}
-
-function renderQueue(tracks) {
-  queueCount.textContent = tracks.length ? `(${tracks.length})` : "";
-  if (queueEmpty) {
-    queueEmpty.textContent = "The queue is empty.";
-    queueEmpty.hidden = tracks.length > 0;
-  }
-  queueHasTracks = tracks.length > 0;
-  syncQueueEditButton();
-
-  const wantEdit = queueEditMode;
-  const kids = [...queueList.children];
-  // Rows still dressed for editing (delete X + drag border) must be rebuilt,
-  // not patched — their data-sig matches, so patching would leave the edit
-  // chrome visible after tapping Done.
-  const canPatch =
-    !wantEdit &&
-    kids.length === tracks.length &&
-    kids.every(
-      (li) =>
-        li.classList.contains("track") && !li.classList.contains("editing")
-    );
-
-  if (canPatch) {
-    let changed = false;
-    tracks.forEach((track, i) => {
-      const li = kids[i];
-      const sig = queueTrackSig(track);
-      if (li.dataset.sig !== sig) {
-        fillQueueRow(li, track, i);
-        changed = true;
-      } else {
-        const idxEl = li.querySelector(".queue-index");
-        if (idxEl && idxEl.textContent !== String(i + 1)) {
-          idxEl.textContent = String(i + 1);
-          changed = true;
-        }
-        li.dataset.position = String(track.position || i + 1);
-      }
-    });
-    if (!changed) return;
-    syncSortable();
-    return;
-  }
-
-  // Full rebuild when length changes or edit mode needs delete handles.
-  queueList.innerHTML = "";
-  tracks.forEach((track, i) => {
-    const li = document.createElement("li");
-    fillQueueRow(li, track, i);
-    queueList.appendChild(li);
-  });
-  syncSortable();
 }
 
 function refreshSonos() {
@@ -3904,93 +2998,6 @@ groupAllBtn.addEventListener("click", () => {
     loadGroups(true);
     showToast(`Grouped ${d.players} speakers · Volume ${d.volume}`);
   });
-});
-
-// Queue editing listeners (state declared near lastQueueTracks).
-
-// Create/destroy the drag-reorder behavior to match the current edit mode.
-function syncSortable() {
-  if (sortable) {
-    sortable.destroy();
-    sortable = null;
-  }
-  if (queueEditMode && window.Sortable && queueList.children.length) {
-    sortable = window.Sortable.create(queueList, {
-      animation: 150,
-      filter: ".track-delete", // taps on the X delete, don't start a drag
-      preventOnFilter: false,
-      delay: 200, // hold-to-drag on touch so the page can still scroll
-      delayOnTouchOnly: true,
-      onEnd: onQueueReorder,
-    });
-  }
-}
-
-async function onQueueReorder(evt) {
-  if (evt.oldIndex === evt.newIndex) return;
-  const li = evt.item;
-  const before = li.nextElementSibling;
-  const body = {
-    uri: li.dataset.uri,
-    fromPosition: Number(li.dataset.position),
-    beforeUri: before ? before.dataset.uri : null,
-    beforePosition: before ? Number(before.dataset.position) : null,
-  };
-  try {
-    const res = await hostFetch("/api/queue/reorder", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not move the song.");
-    showToast("Moved");
-  } catch (err) {
-    showToast(err.message, true);
-  } finally {
-    loadQueue(true); // reconcile order + refresh positions
-  }
-}
-
-async function removeQueueItem(li) {
-  const title = li.querySelector(".title")?.textContent || "song";
-  const body = {
-    uri: li.dataset.uri,
-    position: Number(li.dataset.position),
-  };
-  li.style.opacity = "0.4";
-  try {
-    const res = await hostFetch("/api/queue/remove", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not remove the song.");
-    showToast(`Removed "${title}"`);
-  } catch (err) {
-    showToast(err.message, true);
-  } finally {
-    loadQueue(true); // refresh positions after the change
-  }
-}
-
-queueEditToggle.addEventListener("click", () => {
-  queueEditMode = !queueEditMode;
-  queueEditToggle.classList.toggle("active", queueEditMode);
-  queueEditToggle.setAttribute("aria-pressed", String(queueEditMode));
-  queueEditToggle.textContent = queueEditMode ? "Done" : "Edit";
-  queueEditHint.hidden = !queueEditMode;
-  if (!queueEditMode && pendingQueueStreamTracks) {
-    const tracks = pendingQueueStreamTracks;
-    pendingQueueStreamTracks = null;
-    applyQueueTracks(tracks);
-  } else {
-    // Flip the edit chrome immediately from what we already have on screen —
-    // waiting on the reconcile fetch left delete buttons visible after Done.
-    renderQueue(lastQueueTracks);
-    loadQueue(true); // enter edit fresh, or reconcile when no event arrived
-  }
 });
 
 function songCount(n) {
@@ -4254,15 +3261,6 @@ if (decadeChips) {
 /** Active decade mood id preferring the server-broadcast mix. */
 function activeEraMoodId() {
   return resolveActiveEraMoodId(serverMix.mood, eraMood);
-}
-
-/**
- * Era label for one queued track. Prefers the decade stamped on the track at
- * add time (survives the host switching decades mid-party); falls back to the
- * active decade only for rows queued before per-track stamping existed.
- */
-function trackEraLabel(track) {
-  return trackEraDisplayLabel(track, activeEraMoodId());
 }
 
 function updateMixLabels() {

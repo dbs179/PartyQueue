@@ -1,0 +1,84 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  mainQueueCountLabel,
+  partyQueueCountLabel,
+  queueTrackSig,
+  queueOriginBadgeHtml,
+  queueGenreBadgeHtml,
+  queuePlaylistBadgeHtml,
+  queueBadgeHtml,
+} from "../public/js/queue-ui.js";
+
+test("count labels", () => {
+  assert.equal(mainQueueCountLabel(0), "");
+  assert.equal(mainQueueCountLabel(3), "(3)");
+  assert.equal(partyQueueCountLabel(0), "");
+  assert.equal(partyQueueCountLabel(2), "2 queued");
+});
+
+test("queueTrackSig changes with genre flag and badges inputs", () => {
+  const track = {
+    uri: "spotify:track:1",
+    position: 2,
+    title: "A",
+    artist: "B",
+    searched: true,
+    requestedBy: "Dave",
+  };
+  const a = queueTrackSig(track, { showQueueGenre: false });
+  const b = queueTrackSig(track, { showQueueGenre: true });
+  assert.notEqual(a, b);
+  assert.equal(queueTrackSig(track, { showQueueGenre: false }), a);
+});
+
+test("queueOriginBadgeHtml covers dedication, request, discover, era, random", () => {
+  assert.match(
+    queueOriginBadgeHtml({ moodPick: true }, { eraLabel: "80s" }),
+    /80s Hit/
+  );
+  assert.match(queueOriginBadgeHtml({ discovered: true }), /Discover/);
+  assert.match(
+    queueOriginBadgeHtml({ searched: true, dedication: "For Sam", requestedBy: "Alex" }),
+    /For Sam/
+  );
+  assert.match(
+    queueOriginBadgeHtml({ searched: true, requestedBy: "Alex" }),
+    /Requested/
+  );
+  assert.equal(queueOriginBadgeHtml({ djVoice: true }), "");
+  assert.match(queueOriginBadgeHtml({}), /Random/);
+});
+
+test("genre and playlist badges respect showQueueGenre", () => {
+  const track = {
+    genreLabel: "Pop",
+    fromPlaylist: true,
+  };
+  assert.equal(queueGenreBadgeHtml(track, { showQueueGenre: false }), "");
+  assert.match(queueGenreBadgeHtml(track, { showQueueGenre: true }), /Pop/);
+  assert.equal(queuePlaylistBadgeHtml(track, { showQueueGenre: false }), "");
+  assert.match(
+    queuePlaylistBadgeHtml(track, { showQueueGenre: true }),
+    /From Playlists/
+  );
+  assert.equal(
+    queueGenreBadgeHtml({ ...track, djVoice: true }, { showQueueGenre: true }),
+    ""
+  );
+});
+
+test("queueBadgeHtml concatenates origin + genre + playlist", () => {
+  const html = queueBadgeHtml(
+    {
+      searched: true,
+      requestedBy: "Alex",
+      genreLabel: "Rock",
+      fromPlaylist: true,
+    },
+    { showQueueGenre: true }
+  );
+  assert.match(html, /Requested/);
+  assert.match(html, /Rock/);
+  assert.match(html, /From Playlists/);
+});
