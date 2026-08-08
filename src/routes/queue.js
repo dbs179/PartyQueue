@@ -303,10 +303,22 @@ export function registerQueueRoutes(app, ctx) {
             }
           } else {
             // Mid-set request: await TTS insert so the playhead can't race past
-            // the shout (song is often next-up after promote-ahead-of-filler).
-            // Script re-reads dedicationOf at write time so a toast Dedicate can
-            // still land while TTS is generating.
+            // the shout. When next-up with little time left, demote behind one
+            // non-request track first (music keeps playing). Last-song / no
+            // buffer still uses the imminent pause inside announceOnSonos.
             try {
+              let shoutPos = pos;
+              try {
+                const lead = await sonos.ensureShoutLeadBuffer(pos);
+                if (Number.isFinite(lead?.absoluteQueuePosition)) {
+                  shoutPos = lead.absoluteQueuePosition;
+                }
+              } catch (err) {
+                console.warn(
+                  "[queue] shout lead buffer skipped:",
+                  err.message
+                );
+              }
               await announceRequestShout({
                 name,
                 artist,
@@ -314,7 +326,7 @@ export function registerQueueRoutes(app, ctx) {
                 dedication: note,
                 uri,
                 trackId: reqId,
-                queuePosition: pos,
+                queuePosition: shoutPos,
                 startPlayback: false,
                 preemptGeneration,
               });
@@ -377,17 +389,31 @@ export function registerQueueRoutes(app, ctx) {
         const { findUpcomingTrackPosition } = await import("../sonos.js");
         const pos = await findUpcomingTrackPosition({ name, artist });
         if (pos != null && pos >= 1) {
-          void announceRequestShout({
-            name,
-            artist,
-            requestedBy: by,
-            dedication: forWho,
-            uri,
-            trackId: id,
-            queuePosition: pos,
-            startPlayback: false,
-            preemptGeneration,
-          }).catch((err) =>
+          void (async () => {
+            let shoutPos = pos;
+            try {
+              const lead = await sonos.ensureShoutLeadBuffer(pos);
+              if (Number.isFinite(lead?.absoluteQueuePosition)) {
+                shoutPos = lead.absoluteQueuePosition;
+              }
+            } catch (err) {
+              console.warn(
+                "[queue] dedication shout lead buffer skipped:",
+                err.message
+              );
+            }
+            await announceRequestShout({
+              name,
+              artist,
+              requestedBy: by,
+              dedication: forWho,
+              uri,
+              trackId: id,
+              queuePosition: shoutPos,
+              startPlayback: false,
+              preemptGeneration,
+            });
+          })().catch((err) =>
             console.error("[queue] dedication shout refresh:", err.message)
           );
         }

@@ -37,6 +37,7 @@ import {
 import { GENRE_BUCKETS, bucketsForArtistSync } from "./genres.js";
 import { moodLabel as eraMoodLabel } from "./moods.js";
 import { beginDjVolumeHandoff } from "./dj-volume-handoff.js";
+import { SHOUT_LEAD_BUFFER_SEC } from "./shout-lead-buffer.js";
 import {
   queueWorkGeneration,
   queueWorkWasPreempted,
@@ -2009,9 +2010,8 @@ export function announceVolumeFromMusic(volumeLevel, opts) {
   return Math.min(100, Math.max(1, musicPct + Math.max(0, boost)));
 }
 
-// If a mid-set shout would land as the next track and the current song ends
-// before TTS is ready, pause so the playhead can't skip the announce.
-const IMMINENT_ANNOUNCE_PAUSE_SEC = 45;
+// Last-song / no-buffer fallback threshold (see shout-lead-buffer.js). Prefer
+// demoting the request behind filler — that path never hard-pauses.
 
 function silenceFileName(sec) {
   return `silence-${djSilenceLabel(sec)}s.mp3`;
@@ -2070,7 +2070,11 @@ export function ensureSilenceRamp(durationSec = silenceDurationSec()) {
   };
 }
 
-/** Pause briefly when an announce would race the end of the current track. */
+/**
+ * Pause only when announce is still next-up with little time left — the
+ * last-song edge case when shout-lead-buffer found no filler to play first.
+ * After a successful buffer demote, queuePosition is past next-up and this no-ops.
+ */
 async function pauseIfAnnounceImminent(queuePosition) {
   try {
     const { getAnnouncePlaybackContext, pause } = await import("./sonos.js");
@@ -2078,14 +2082,17 @@ async function pauseIfAnnounceImminent(queuePosition) {
     if (!ctx?.playingFromQueue || !ctx.isPlaying) return false;
     const pos = Number(queuePosition) || 0;
     if (pos < 1) return false;
-    // Insert at/before the next track â†’ playhead can hit it when this song ends.
+    // Insert at/before the next track → playhead can hit it when this song ends.
     if (pos > ctx.track + 1) return false;
-    if (ctx.remainingSec == null || ctx.remainingSec > IMMINENT_ANNOUNCE_PAUSE_SEC) {
+    if (
+      ctx.remainingSec == null ||
+      ctx.remainingSec > SHOUT_LEAD_BUFFER_SEC
+    ) {
       return false;
     }
     await pause();
     console.log(
-      `[dj-voice] paused for imminent announce (queue #${pos}, ${Math.round(ctx.remainingSec)}s left on track ${ctx.track})`
+      `[dj-voice] paused for imminent announce (queue #${pos}, ${Math.round(ctx.remainingSec)}s left on track ${ctx.track}; no lead buffer)`
     );
     return true;
   } catch (err) {

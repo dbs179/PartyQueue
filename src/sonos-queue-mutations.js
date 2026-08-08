@@ -15,6 +15,12 @@ import {
   songMatchKey,
   isAnnounceQueuePad,
 } from "./sonos-queue-policy.js";
+import {
+  needsShoutLeadBuffer,
+  findShoutBufferTrackNumber,
+  requestPosAfterShoutBuffer,
+  SHOUT_LEAD_BUFFER_SEC,
+} from "./shout-lead-buffer.js";
 import { spotifyTrackId } from "./sampler.js";
 import { recordPlayed } from "./play-history.js";
 import { getDjVoiceSettings } from "./settings.js";
@@ -24,6 +30,7 @@ import {
   originSnapshot,
   isFiller,
 } from "./queue-origin.js";
+import { parseSonosTime } from "./sonos-snapshots.js";
 
 // Remove already-played songs (everything before the current track) so the queue
 // stays lean and newly added songs are never buried under a night's history.
@@ -573,6 +580,137 @@ async function removeUpcomingFillerTracksUnlocked({ beforePosition } = {}) {
 // so the move lands correctly even if the queue shifted. Sonos interprets
 // InsertBefore in the queue's current numbering, so the neighbor's live
 // position is exactly the value we need.
+/**
+ * When a mid-set shout would race the end of the current song, demote the
+ * request behind one non-request track so that song plays first (no pause).
+ * Returns the (possibly updated) absolute queue position of the request.
+ */
+export async function ensureShoutLeadBuffer(...args) {
+  return withSonosWriteLock(() => ensureShoutLeadBufferUnlocked(...args));
+}
+
+async function ensureShoutLeadBufferUnlocked(
+  requestAbsPos,
+  { thresholdSec = SHOUT_LEAD_BUFFER_SEC } = {}
+) {
+  const planned = Math.max(1, Math.floor(Number(requestAbsPos)) || 1);
+  const m = await getManager();
+  const coordinator = await resolveCoordinator(m);
+
+  let items = [];
+  let updateId = 0;
+  let currentTrack = 0;
+  let playingFromQueue = false;
+  let remainingSec = null;
+  try {
+    const [queue, pos, media] = await Promise.all([
+      coordinator.GetQueue(),
+      coordinator.AVTransportService.GetPositionInfo().catch(() => ({
+        Track: 0,
+        RelTime: "",
+        TrackDuration: "",
+      })),
+      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(
+        () => ({ CurrentURI: "" })
+      ),
+    ]);
+    items = Array.isArray(queue.Result) ? queue.Result : [];
+    updateId = Number(queue.UpdateID) || 0;
+    currentTrack = Number(pos.Track) || 0;
+    playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
+    const durationSec = parseSonosTime(pos.TrackDuration);
+    const positionSec = parseSonosTime(pos.RelTime);
+    if (
+      Number.isFinite(durationSec) &&
+      durationSec > 0 &&
+      Number.isFinite(positionSec)
+    ) {
+      remainingSec = Math.max(0, durationSec - positionSec);
+    }
+  } catch (err) {
+    console.warn("[queue] shout lead buffer read failed:", err.message);
+    return {
+      buffered: false,
+      absoluteQueuePosition: planned,
+      reason: "read-failed",
+    };
+  }
+
+  if (!playingFromQueue) {
+    return {
+      buffered: false,
+      absoluteQueuePosition: planned,
+      reason: "not-on-queue",
+    };
+  }
+
+  if (
+    !needsShoutLeadBuffer({
+      requestAbsPos: planned,
+      currentTrack,
+      remainingSec,
+      thresholdSec,
+    })
+  ) {
+    return {
+      buffered: false,
+      absoluteQueuePosition: planned,
+      reason: "not-needed",
+    };
+  }
+
+  const bufferPos = findShoutBufferTrackNumber(items, {
+    requestAbsPos: planned,
+    searchedIds: searchedIdSet(),
+  });
+  if (bufferPos == null) {
+    // Last song / only requests — keep request next-up; imminent pause applies.
+    return {
+      buffered: false,
+      absoluteQueuePosition: planned,
+      reason: "no-buffer",
+    };
+  }
+
+  const insertBefore = bufferPos + 1;
+  if (insertBefore === planned || insertBefore === planned + 1) {
+    return {
+      buffered: false,
+      absoluteQueuePosition: planned,
+      reason: "already-buffered",
+    };
+  }
+
+  try {
+    await coordinator.AVTransportService.ReorderTracksInQueue({
+      InstanceID: 0,
+      StartingIndex: planned,
+      NumberOfTracks: 1,
+      InsertBefore: insertBefore,
+      UpdateID: updateId,
+    });
+  } catch (err) {
+    console.warn("[queue] shout lead buffer reorder failed:", err.message);
+    return {
+      buffered: false,
+      absoluteQueuePosition: planned,
+      reason: "reorder-failed",
+    };
+  }
+
+  const nextPos = requestPosAfterShoutBuffer(planned, bufferPos);
+  invalidateSonosSnapshots();
+  console.log(
+    `[queue] shout lead buffer: demoted request #${planned} behind #${bufferPos} → #${nextPos} (${Math.round(remainingSec)}s left)`
+  );
+  return {
+    buffered: true,
+    absoluteQueuePosition: nextPos,
+    bufferTrack: bufferPos,
+    reason: "demoted",
+  };
+}
+
 export async function reorderQueueTrack(...args) {
   return withSonosWriteLock(() => reorderQueueTrackUnlocked(...args));
 }

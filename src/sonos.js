@@ -74,9 +74,17 @@ export {
   removeQueueTrack,
   removeUpcomingAnnouncePads,
   removeUpcomingFillerTracks,
+  ensureShoutLeadBuffer,
   reorderQueueTrack,
   clearQueue,
 } from "./sonos-queue-mutations.js";
+
+export {
+  SHOUT_LEAD_BUFFER_SEC,
+  needsShoutLeadBuffer,
+  findShoutBufferTrackNumber,
+  requestPosAfterShoutBuffer,
+} from "./shout-lead-buffer.js";
 
 export {
   listRooms,
