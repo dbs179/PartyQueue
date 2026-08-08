@@ -34,11 +34,6 @@ import {
 } from "./playlist-selection.js";
 import { showToast } from "./toast.js";
 import { wirePanelCollapse } from "./panel-collapse.js";
-import {
-  createStreamCursor,
-  resetStreamCursor,
-  advanceStreamCursor,
-} from "./stream-cursor.js";
 import { createConfirmModal } from "./confirm-modal.js";
 import { createHostPinUi } from "./host-pin-ui.js";
 import { loadMemory as loadMemoryUi } from "./memory-ui.js";
@@ -58,6 +53,7 @@ import { createSearchUi } from "./search-ui.js";
 import { createReactionsUi } from "./reactions-ui.js";
 import { createQueueUi } from "./queue-ui.js";
 import { createLyricsUi } from "./lyrics-ui.js";
+import { createLiveStreams } from "./live-streams.js";
 import {
   SUGGESTION_TEXT_MAX,
   wireSuggestionCharCount,
@@ -1661,279 +1657,25 @@ function syncHostControlsVisibility() {
   queueUi.setGuestEditLocked(locked);
 }
 
-// ---- Shared live Now Playing + queue + party streams ---------------------
-// Visible main views share demand-driven server monitors through SSE. Hidden
-// tabs and sub-pages close streams so idle phones produce no Sonos reads.
-// Party toggles ride /api/party (not Now Playing).
-const NOW_PLAYING_FALLBACK_MS = 15000;
-const NOW_PLAYING_FALLBACK_DELAY_MS = 5000;
-const QUEUE_FALLBACK_MS = 15000;
-const QUEUE_FALLBACK_DELAY_MS = 5000;
-const PARTY_FALLBACK_MS = 20000;
-const PARTY_FALLBACK_DELAY_MS = 5000;
-let nowPlayingSource = null;
-let nowPlayingStreamConnected = false;
-let nowPlayingFallbackTimer = null;
-let nowPlayingFallbackDelayTimer = null;
-let nowPlayingStreamCursor = createStreamCursor();
-let nowPlayingStreamVersion = 0;
-let queueSource = null;
-let queueStreamConnected = false;
-let queueFallbackTimer = null;
-let queueFallbackDelayTimer = null;
-let queueStreamCursor = createStreamCursor();
-let queueStreamVersion = 0;
-let queueHttpRequest = 0;
-let partySource = null;
-let partyStreamConnected = false;
-let partyFallbackTimer = null;
-let partyFallbackDelayTimer = null;
-let partyStreamCursor = createStreamCursor();
-let lastPartySettings = null;
+// Late-bound live streams (created after NP/queue apply helpers exist).
+let liveStreams = null;
 let appReady = false;
+let lastPartySettings = null;
 
-function shouldPoll() {
-  // Include Vibe (`mix`) so Discover / Never-Ending / Filter toggles keep
-  // hydrating from /api/party while the host is adjusting the mix — otherwise
-  // phones that open straight into Vibe sit on HTML defaults until a save.
-  return (
-    document.visibilityState === "visible" &&
-    (currentView === "main" ||
-      currentView === "display" ||
-      currentView === "mix")
-  );
+function refreshSonos() {
+  liveStreams?.refreshSonos();
 }
 
-function stopNowPlayingFallback() {
-  if (nowPlayingFallbackDelayTimer) {
-    clearTimeout(nowPlayingFallbackDelayTimer);
-    nowPlayingFallbackDelayTimer = null;
-  }
-  if (nowPlayingFallbackTimer) {
-    clearInterval(nowPlayingFallbackTimer);
-    nowPlayingFallbackTimer = null;
-  }
+async function loadQueue(force = false) {
+  return liveStreams?.loadQueue(force);
 }
 
-function startNowPlayingFallback() {
-  if (!shouldPoll() || nowPlayingStreamConnected || nowPlayingFallbackDelayTimer ||
-      nowPlayingFallbackTimer) {
-    return;
-  }
-  nowPlayingFallbackDelayTimer = setTimeout(() => {
-    nowPlayingFallbackDelayTimer = null;
-    if (!shouldPoll() || nowPlayingStreamConnected) return;
-    void loadNowPlaying();
-    nowPlayingFallbackTimer = setInterval(
-      loadNowPlaying,
-      NOW_PLAYING_FALLBACK_MS
-    );
-  }, NOW_PLAYING_FALLBACK_DELAY_MS);
+async function loadPartySettings() {
+  return liveStreams?.loadPartySettings();
 }
 
-function applyNowPlayingStreamSnapshot(snapshot) {
-  const next = advanceStreamCursor(nowPlayingStreamCursor, snapshot);
-  if (!next.accept) return;
-  nowPlayingStreamCursor = next.cursor;
-  nowPlayingStreamVersion += 1;
-  renderNowPlaying(snapshot);
-}
-
-function setNowPlayingConnectionStatus(status, message = "") {
-  const disconnected = status === "disconnected";
-  if (disconnected) lyricsUi.freezePlayhead();
-  npCard?.classList.toggle("is-stale", disconnected);
-  if (npConnectionStatus) {
-    npConnectionStatus.hidden = !disconnected;
-    if (disconnected) {
-      npConnectionStatus.textContent =
-        message || "Sonos reconnecting — showing the last update.";
-    }
-  }
-  if (displayConnectionStatus) {
-    displayConnectionStatus.hidden = !disconnected;
-    if (disconnected) {
-      displayConnectionStatus.textContent =
-        message || "Sonos reconnecting — showing the last update.";
-    }
-  }
-}
-
-function openNowPlayingStream() {
-  if (nowPlayingSource || !shouldPoll()) return;
-  void loadNowPlaying();
-  if (typeof EventSource !== "function") {
-    startNowPlayingFallback();
-    return;
-  }
-  // A new connection's initial event is also a clock resynchronization. Accept
-  // it even when its track-change sequence matches the prior connection.
-  nowPlayingStreamCursor = resetStreamCursor();
-  const source = new EventSource("/api/nowplaying/stream");
-  nowPlayingSource = source;
-  source.onopen = () => {
-    if (nowPlayingSource !== source) return;
-    nowPlayingStreamConnected = true;
-    stopNowPlayingFallback();
-  };
-  source.addEventListener("sonos-status", (event) => {
-    if (nowPlayingSource !== source) return;
-    try {
-      const health = JSON.parse(event.data);
-      setNowPlayingConnectionStatus(health?.status);
-    } catch {
-      /* ignore malformed status events */
-    }
-  });
-  source.onmessage = (event) => {
-    if (nowPlayingSource !== source) return;
-    try {
-      applyNowPlayingStreamSnapshot(JSON.parse(event.data));
-    } catch {
-      /* ignore malformed stream events and await the next snapshot */
-    }
-  };
-  source.onerror = () => {
-    if (nowPlayingSource !== source) return;
-    nowPlayingStreamConnected = false;
-    // Transport reconnects are normal when an SSE response ends. Keep the local
-    // playhead moving — only server sonos-status "disconnected" means Sonos
-    // itself is unreachable and should freeze the clock.
-    startNowPlayingFallback();
-  };
-}
-
-function closeNowPlayingStream() {
-  nowPlayingStreamConnected = false;
-  stopNowPlayingFallback();
-  if (nowPlayingSource) {
-    nowPlayingSource.close();
-    nowPlayingSource = null;
-  }
-}
-
-function stopQueueFallback() {
-  if (queueFallbackDelayTimer) {
-    clearTimeout(queueFallbackDelayTimer);
-    queueFallbackDelayTimer = null;
-  }
-  if (queueFallbackTimer) {
-    clearInterval(queueFallbackTimer);
-    queueFallbackTimer = null;
-  }
-}
-
-function startQueueFallback() {
-  if (
-    !shouldPoll() ||
-    queueStreamConnected ||
-    queueFallbackDelayTimer ||
-    queueFallbackTimer
-  ) {
-    return;
-  }
-  queueFallbackDelayTimer = setTimeout(() => {
-    queueFallbackDelayTimer = null;
-    if (!shouldPoll() || queueStreamConnected) return;
-    void loadQueue();
-    queueFallbackTimer = setInterval(loadQueue, QUEUE_FALLBACK_MS);
-  }, QUEUE_FALLBACK_DELAY_MS);
-}
-
-function applyQueueStreamSnapshot(snapshot) {
-  const next = advanceStreamCursor(queueStreamCursor, snapshot);
-  if (!next.accept) return;
-  queueStreamCursor = next.cursor;
-  queueStreamVersion += 1;
-  const tracks = Array.isArray(snapshot?.tracks) ? snapshot.tracks : [];
-  if (queueUi.isEditMode()) {
-    queueUi.setPendingStreamTracks(tracks);
-    return;
-  }
-  queueUi.clearPendingStreamTracks();
-  applyQueueTracks(tracks);
-}
-
-function openQueueStream() {
-  if (queueSource || !shouldPoll()) return;
-  if (typeof EventSource !== "function") {
-    void loadQueue();
-    startQueueFallback();
-    return;
-  }
-  queueStreamCursor = resetStreamCursor();
-  const source = new EventSource("/api/queue/stream");
-  queueSource = source;
-  source.onopen = () => {
-    if (queueSource !== source) return;
-    queueStreamConnected = true;
-    stopQueueFallback();
-  };
-  source.addEventListener("queue-status", (event) => {
-    if (queueSource !== source) return;
-    try {
-      const health = JSON.parse(event.data);
-      if (health?.status === "disconnected") {
-        queueStreamConnected = false;
-        startQueueFallback();
-      } else if (health?.status === "connected") {
-        queueStreamConnected = true;
-        stopQueueFallback();
-      }
-    } catch {
-      /* ignore malformed status events */
-    }
-  });
-  source.onmessage = (event) => {
-    if (queueSource !== source) return;
-    try {
-      applyQueueStreamSnapshot(JSON.parse(event.data));
-    } catch {
-      /* ignore malformed stream events and await the next snapshot */
-    }
-  };
-  source.onerror = () => {
-    if (queueSource !== source) return;
-    queueStreamConnected = false;
-    startQueueFallback();
-  };
-}
-
-function closeQueueStream() {
-  queueStreamConnected = false;
-  stopQueueFallback();
-  if (queueSource) {
-    queueSource.close();
-    queueSource = null;
-  }
-}
-
-function stopPartyFallback() {
-  if (partyFallbackDelayTimer) {
-    clearTimeout(partyFallbackDelayTimer);
-    partyFallbackDelayTimer = null;
-  }
-  if (partyFallbackTimer) {
-    clearInterval(partyFallbackTimer);
-    partyFallbackTimer = null;
-  }
-}
-
-function startPartyFallback() {
-  if (
-    !shouldPoll() ||
-    partyStreamConnected ||
-    partyFallbackDelayTimer ||
-    partyFallbackTimer
-  ) {
-    return;
-  }
-  partyFallbackDelayTimer = setTimeout(() => {
-    partyFallbackDelayTimer = null;
-    if (!shouldPoll() || partyStreamConnected) return;
-    void loadPartySettings();
-    partyFallbackTimer = setInterval(loadPartySettings, PARTY_FALLBACK_MS);
-  }, PARTY_FALLBACK_DELAY_MS);
+function syncPolling() {
+  liveStreams?.syncPolling();
 }
 
 /** Apply guest-safe party flags from /api/party (SSE or HTTP). */
@@ -1962,93 +1704,6 @@ function applyPartySettings(payload) {
     syncHostControlsVisibility();
   }
   maybeAnnounceClosingTime(payload.closingTimeAt, payload.partyRecap);
-}
-
-function applyPartyStreamSnapshot(snapshot) {
-  const next = advanceStreamCursor(partyStreamCursor, snapshot);
-  if (!next.accept) return;
-  partyStreamCursor = next.cursor;
-  applyPartySettings(snapshot);
-}
-
-async function loadPartySettings() {
-  try {
-    const res = await fetch("/api/party");
-    if (!res.ok) return;
-    applyPartySettings(await res.json());
-  } catch {
-    /* leave toggles as-is on transient errors */
-  }
-}
-
-function openPartyStream() {
-  if (partySource || !shouldPoll()) return;
-  void loadPartySettings();
-  if (typeof EventSource !== "function") {
-    startPartyFallback();
-    return;
-  }
-  partyStreamCursor = resetStreamCursor();
-  const source = new EventSource("/api/party/stream");
-  partySource = source;
-  source.onopen = () => {
-    if (partySource !== source) return;
-    partyStreamConnected = true;
-    stopPartyFallback();
-  };
-  source.addEventListener("party-status", (event) => {
-    if (partySource !== source) return;
-    try {
-      const health = JSON.parse(event.data);
-      if (health?.status === "disconnected") {
-        partyStreamConnected = false;
-        startPartyFallback();
-      } else if (health?.status === "connected") {
-        partyStreamConnected = true;
-        stopPartyFallback();
-      }
-    } catch {
-      /* ignore malformed status events */
-    }
-  });
-  source.onmessage = (event) => {
-    if (partySource !== source) return;
-    try {
-      applyPartyStreamSnapshot(JSON.parse(event.data));
-    } catch {
-      /* ignore malformed stream events */
-    }
-  };
-  source.onerror = () => {
-    if (partySource !== source) return;
-    partyStreamConnected = false;
-    startPartyFallback();
-  };
-}
-
-function closePartyStream() {
-  partyStreamConnected = false;
-  stopPartyFallback();
-  if (partySource) {
-    partySource.close();
-    partySource = null;
-  }
-}
-
-// Open/close live streams to match the active visible view. An initial HTTP
-// read paints immediately while SSE establishes and remains the fallback path.
-function syncPolling() {
-  if (shouldPoll()) {
-    void loadQueue();
-    if (currentView !== "display") void loadGroups();
-    openNowPlayingStream();
-    openQueueStream();
-    openPartyStream();
-  } else {
-    closeNowPlayingStream();
-    closeQueueStream();
-    closePartyStream();
-  }
 }
 
 function showView(name) {
@@ -2520,7 +2175,6 @@ let optimisticNp = null;
 /** confirmed | optimistic | converging | empty */
 let nowPlayingDisplayMode = "empty";
 let lastQueueTracks = [];
-let nowPlayingHttpRequest = 0;
 let lastArtPrefetchKey = "";
 
 /** Skip art prefetch on Save-Data / very slow cellular. */
@@ -2862,25 +2516,6 @@ function renderNowPlaying(transport) {
   prefetchUpcomingAlbumArt(lastQueueTracks);
 }
 
-async function loadNowPlaying() {
-  const requestId = ++nowPlayingHttpRequest;
-  const streamVersionAtStart = nowPlayingStreamVersion;
-  try {
-    const res = await fetch("/api/nowplaying");
-    if (!res.ok) return;
-    const snapshot = await res.json();
-    if (
-      requestId !== nowPlayingHttpRequest ||
-      nowPlayingStreamVersion !== streamVersionAtStart
-    ) {
-      return;
-    }
-    renderNowPlaying(snapshot);
-  } catch {
-    /* retain the last good stream or fallback snapshot */
-  }
-}
-
 function applyQueueTracks(tracks) {
   lastQueueTracks = tracks;
   searchUi.setQueuedTracks(tracks);
@@ -2889,36 +2524,25 @@ function applyQueueTracks(tracks) {
   prefetchUpcomingAlbumArt(tracks);
 }
 
-async function loadQueue(force = false) {
-  // While editing, don't let fallback HTTP rebuild the list under the user's
-  // hands (it would interrupt a drag or wipe the delete buttons). Explicit
-  // reconciliation calls pass force=true.
-  if (queueUi.isEditMode() && !force) return;
-  const requestId = ++queueHttpRequest;
-  const streamVersionAtStart = queueStreamVersion;
-  try {
-    const res = await fetch("/api/queue/list");
-    if (!res.ok) return;
-    const data = await res.json();
-    if (
-      requestId !== queueHttpRequest ||
-      queueStreamVersion !== streamVersionAtStart
-    ) {
-      return;
-    }
-    const tracks = Array.isArray(data.tracks) ? data.tracks : [];
-    applyQueueTracks(tracks);
-  } catch {
-    /* leave previous queue on transient errors */
-  }
-}
 
-function refreshSonos() {
-  // App-owned mutations nudge the shared server monitor. HTTP remains the
-  // immediate path only when the queue stream is unavailable.
-  if (!queueStreamConnected) void loadQueue();
-  if (currentView !== "display") void loadGroups();
-}
+liveStreams = createLiveStreams(
+  {
+    npCard,
+    npConnectionStatus,
+    displayConnectionStatus,
+  },
+  {
+    getCurrentView: () => currentView,
+    renderNowPlaying: (snapshot) => renderNowPlaying(snapshot),
+    applyQueueTracks: (tracks) => applyQueueTracks(tracks),
+    applyPartySettings: (payload) => applyPartySettings(payload),
+    freezePlayhead: () => lyricsUi.freezePlayhead(),
+    isQueueEditMode: () => queueUi.isEditMode(),
+    setPendingStreamTracks: (tracks) => queueUi.setPendingStreamTracks(tracks),
+    clearPendingStreamTracks: () => queueUi.clearPendingStreamTracks(),
+    loadGroups: (force) => loadGroups(force),
+  }
+);
 
 async function postControl(btn, endpoint, onOk) {
   btn.disabled = true;
