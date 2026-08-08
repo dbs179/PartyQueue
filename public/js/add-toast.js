@@ -1,16 +1,6 @@
 /** Toast copy after adding or promoting a song in the queue. */
 
-function trackIdFromUri(uri) {
-  if (!uri) return null;
-  let decoded = uri;
-  try {
-    decoded = decodeURIComponent(uri);
-  } catch {
-    /* use as-is if it isn't valid percent-encoding */
-  }
-  const m = /spotify:track:([A-Za-z0-9]+)/.exec(decoded);
-  return m ? m[1] : null;
-}
+import { trackIdFromUri } from "./search-track.js";
 
 /**
  * True when a DJ announce/silence pad sits ahead of the added song.

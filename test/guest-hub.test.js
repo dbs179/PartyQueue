@@ -6,6 +6,10 @@ import {
   guestHubStat,
   guestHubDesc,
 } from "../public/js/guest.js";
+import {
+  guestBirthdayFormValues,
+  guestNotesList,
+} from "../public/js/guest-hub-ui.js";
 
 test("formatGuestBirthday formats month day and role", () => {
   assert.equal(
@@ -38,4 +42,22 @@ test("guestHubDesc truncates long first note", () => {
   const desc = guestHubDesc({ notes: [long] });
   assert.equal(desc.length, 72);
   assert.ok(desc.endsWith("…"));
+});
+
+test("guestBirthdayFormValues parses MM-DD and defaults role", () => {
+  assert.deepEqual(
+    guestBirthdayFormValues({ birthday: "08-15", birthdayRole: "host" }),
+    { month: "8", day: "15", role: "host" }
+  );
+  assert.deepEqual(guestBirthdayFormValues({}), {
+    month: "",
+    day: "",
+    role: "star",
+  });
+});
+
+test("guestNotesList normalizes array or string notes", () => {
+  assert.deepEqual(guestNotesList({ notes: ["a", "b"] }), ["a", "b"]);
+  assert.deepEqual(guestNotesList({ notes: "solo" }), ["solo"]);
+  assert.deepEqual(guestNotesList({}), []);
 });

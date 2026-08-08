@@ -13,9 +13,8 @@ import {
   setDisplayAlias,
   guestBadgeName as guestBadgeNameFrom,
   guestIdentityPayload as guestIdentityPayloadFrom,
-  guestHubStat,
-  guestHubDesc,
 } from "./guest.js";
+import { createGuestHubUi } from "./guest-hub-ui.js";
 import {
   mediaIdentity,
   playbackIdentity,
@@ -62,7 +61,8 @@ import {
   nowPlayingOriginLabel,
   displayOriginLabel,
 } from "./now-playing-origin.js";
-import { buildAddToastMessage } from "./add-toast.js";
+import { trackIdFromUri } from "./search-track.js";
+import { createSearchUi } from "./search-ui.js";
 import {
   SUGGESTION_TEXT_MAX,
   wireSuggestionCharCount,
@@ -596,23 +596,6 @@ let endOfNightTrack = {
 let endOfNightSearchTimer = 0;
 const djShoutPercentRow = document.getElementById("dj-shout-percent-row");
 const djShoutEveryRow = document.getElementById("dj-shout-every-row");
-const guestHubGrid = document.getElementById("guest-hub-grid");
-const guestListEl = document.getElementById("guest-list");
-const guestNameInput = document.getElementById("guest-name-input");
-const guestNotesInput = document.getElementById("guest-notes-input");
-const guestSaveBtn = document.getElementById("guest-save");
-const guestBdayMonth = document.getElementById("guest-bday-month");
-const guestBdayDay = document.getElementById("guest-bday-day");
-const guestBdayRole = document.getElementById("guest-bday-role");
-const guestBdaySaveBtn = document.getElementById("guest-bday-save");
-const guestBdayForgetBtn = document.getElementById("guest-bday-forget");
-const guestRemoveBtn = document.getElementById("guest-remove");
-const guestRenameBtn = document.getElementById("guest-rename");
-const settingsUserEditTitle = document.getElementById("settings-user-edit-title");
-/** @type {Array<{name?: string, notes?: string[], birthday?: string|null, birthdayRole?: string}>} */
-let cachedGuests = [];
-/** Name of guest currently open in the edit view, or null for Add user. */
-let editingGuestName = null;
 const djVoiceTestBtn = document.getElementById("dj-voice-test");
 const djVoiceTestElevenlabsBtn = document.getElementById(
   "dj-voice-test-elevenlabs"
@@ -1595,313 +1578,30 @@ if (endOfNightResetBtn) {
   });
 }
 
-function fillGuestBirthdayForm(g) {
-  if (guestNameInput) guestNameInput.value = g?.name || "";
-  if (guestNotesInput) guestNotesInput.value = "";
-  const bday = String(g?.birthday || "");
-  const [mm, dd] = bday.split("-");
-  if (guestBdayMonth) guestBdayMonth.value = mm ? String(Number(mm)) : "";
-  if (guestBdayDay) guestBdayDay.value = dd ? String(Number(dd)) : "";
-  if (guestBdayRole) guestBdayRole.value = g?.birthdayRole || "star";
-}
-
-function setGuests(guests) {
-  cachedGuests = Array.isArray(guests) ? guests : [];
-  renderGuestHub(cachedGuests);
-  refreshGuestEditNotes();
-}
-
-function openGuestEditor(guest) {
-  editingGuestName = guest?.name || null;
-  fillGuestBirthdayForm(guest || {});
-  if (settingsUserEditTitle) {
-    settingsUserEditTitle.textContent = editingGuestName || "Add user";
+// ---- Users hub (DJ Booth → shout-out notes / birthdays) ----
+const { loadGuests } = createGuestHubUi(
+  {
+    hubGrid: document.getElementById("guest-hub-grid"),
+    listEl: document.getElementById("guest-list"),
+    nameInput: document.getElementById("guest-name-input"),
+    notesInput: document.getElementById("guest-notes-input"),
+    saveBtn: document.getElementById("guest-save"),
+    bdayMonth: document.getElementById("guest-bday-month"),
+    bdayDay: document.getElementById("guest-bday-day"),
+    bdayRole: document.getElementById("guest-bday-role"),
+    bdaySaveBtn: document.getElementById("guest-bday-save"),
+    bdayForgetBtn: document.getElementById("guest-bday-forget"),
+    removeBtn: document.getElementById("guest-remove"),
+    renameBtn: document.getElementById("guest-rename"),
+    editTitle: document.getElementById("settings-user-edit-title"),
+  },
+  {
+    hostFetch,
+    showToast,
+    confirmModal,
+    navigate,
   }
-  if (guestRemoveBtn) guestRemoveBtn.hidden = !editingGuestName;
-  if (guestRenameBtn) guestRenameBtn.hidden = !editingGuestName;
-  refreshGuestEditNotes();
-  navigate("settings-user-edit");
-  setTimeout(() => {
-    if (editingGuestName) guestNotesInput?.focus();
-    else guestNameInput?.focus();
-  }, 50);
-}
-
-function renderGuestHub(guests) {
-  if (!guestHubGrid) return;
-  guestHubGrid.innerHTML = "";
-  const list = Array.isArray(guests) ? guests : [];
-
-  for (const g of list) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "settings-hub-card";
-    btn.innerHTML = `
-      <span class="settings-hub-title"></span>
-      <span class="settings-hub-stat"></span>
-      <span class="settings-hub-desc"></span>
-    `;
-    btn.querySelector(".settings-hub-title").textContent = g.name || "Guest";
-    btn.querySelector(".settings-hub-stat").textContent = guestHubStat(g);
-    btn.querySelector(".settings-hub-desc").textContent = guestHubDesc(g);
-    btn.addEventListener("click", () => openGuestEditor(g));
-    guestHubGrid.appendChild(btn);
-  }
-
-  const addBtn = document.createElement("button");
-  addBtn.type = "button";
-  addBtn.className = "settings-hub-card settings-hub-card-full";
-  addBtn.id = "guest-add-card";
-  addBtn.innerHTML = `
-    <span class="settings-hub-title">Add user</span>
-    <span class="settings-hub-desc">New requestor notes and birthday</span>
-  `;
-  addBtn.addEventListener("click", () => openGuestEditor(null));
-  guestHubGrid.appendChild(addBtn);
-}
-
-function refreshGuestEditNotes() {
-  if (!guestListEl) return;
-  guestListEl.innerHTML = "";
-  const name = (guestNameInput?.value || editingGuestName || "").trim();
-  const g =
-    cachedGuests.find(
-      (x) => (x.name || "").toLowerCase() === name.toLowerCase()
-    ) || null;
-  const notes = Array.isArray(g?.notes) ? g.notes : g?.notes ? [g.notes] : [];
-
-  if (!name) {
-    const empty = document.createElement("p");
-    empty.className = "guest-list-empty";
-    empty.textContent = "Enter a name, then add notes.";
-    guestListEl.appendChild(empty);
-    return;
-  }
-  if (!notes.length) {
-    const empty = document.createElement("p");
-    empty.className = "guest-list-empty";
-    empty.textContent = "No notes yet — add one below.";
-    guestListEl.appendChild(empty);
-    return;
-  }
-
-  const notesUl = document.createElement("ul");
-  notesUl.className = "guest-note-list";
-  notes.forEach((note, idx) => {
-    const li = document.createElement("li");
-    li.className = "guest-note-item";
-    const text = document.createElement("span");
-    text.textContent = note;
-    const rm = document.createElement("button");
-    rm.type = "button";
-    rm.className = "pill-btn guest-note-remove";
-    rm.textContent = "×";
-    rm.title = "Remove note";
-    rm.setAttribute("aria-label", "Remove note");
-    rm.addEventListener("click", async () => {
-      try {
-        const res = await fetch(
-          `/api/guests/${encodeURIComponent(g.name || "")}/notes/${idx}`,
-          { method: "DELETE" }
-        );
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || "Could not remove note.");
-        setGuests(data.guests);
-      } catch (err) {
-        showToast(err.message, true);
-      }
-    });
-    li.appendChild(text);
-    li.appendChild(rm);
-    notesUl.appendChild(li);
-  });
-  guestListEl.appendChild(notesUl);
-}
-
-async function loadGuests() {
-  try {
-    const res = await hostFetch("/api/guests");
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not load users.");
-    setGuests(data.guests);
-  } catch {
-    /* leave list as-is on transient errors */
-  }
-}
-
-if (guestSaveBtn) {
-  guestSaveBtn.addEventListener("click", async () => {
-    const name = guestNameInput?.value?.trim() || "";
-    const note = guestNotesInput?.value?.trim() || "";
-    if (!name) {
-      showToast("Enter a name.", true);
-      return;
-    }
-    if (!note) {
-      showToast("Enter a short note.", true);
-      return;
-    }
-    guestSaveBtn.disabled = true;
-    try {
-      const res = await hostFetch("/api/guests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, note }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not save note.");
-      editingGuestName = name;
-      if (settingsUserEditTitle) settingsUserEditTitle.textContent = name;
-      if (guestRemoveBtn) guestRemoveBtn.hidden = false;
-      setGuests(data.guests);
-      if (guestNotesInput) guestNotesInput.value = "";
-      showToast("Note added");
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      guestSaveBtn.disabled = false;
-    }
-  });
-}
-
-if (guestBdaySaveBtn) {
-  guestBdaySaveBtn.addEventListener("click", async () => {
-    const name = guestNameInput?.value?.trim() || "";
-    if (!name) {
-      showToast("Enter a name.", true);
-      return;
-    }
-    const month = guestBdayMonth?.value || "";
-    const day = guestBdayDay?.value || "";
-    const birthday =
-      month && day ? `${month}/${day}` : null;
-    const birthdayRole = guestBdayRole?.value || "star";
-    guestBdaySaveBtn.disabled = true;
-    try {
-      const res = await hostFetch("/api/guests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, birthday, birthdayRole }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not save birthday.");
-      editingGuestName = name;
-      if (settingsUserEditTitle) settingsUserEditTitle.textContent = name;
-      if (guestRemoveBtn) guestRemoveBtn.hidden = false;
-      setGuests(data.guests);
-      showToast(birthday ? "Birthday saved" : "Birthday cleared");
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      guestBdaySaveBtn.disabled = false;
-    }
-  });
-}
-
-if (guestRenameBtn) {
-  guestRenameBtn.addEventListener("click", async () => {
-    const from = editingGuestName || "";
-    const to = guestNameInput?.value?.trim() || "";
-    if (!from) {
-      showToast("Open a user first.", true);
-      return;
-    }
-    if (!to) {
-      showToast("Enter the new name.", true);
-      return;
-    }
-    if (from === to) {
-      showToast("Change the name field, then tap Rename.");
-      return;
-    }
-    const ok = await confirmModal(
-      `Rename ${from} to ${to}? Notes that mention the old name will be updated.`,
-      "Rename"
-    );
-    if (!ok) return;
-    guestRenameBtn.disabled = true;
-    try {
-      const res = await hostFetch("/api/guests/rename", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from, to }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not rename user.");
-      editingGuestName = data.guest?.name || to;
-      if (guestNameInput) guestNameInput.value = editingGuestName;
-      if (settingsUserEditTitle) {
-        settingsUserEditTitle.textContent = editingGuestName;
-      }
-      setGuests(data.guests);
-      showToast(`Renamed to ${editingGuestName}`);
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      guestRenameBtn.disabled = false;
-    }
-  });
-}
-
-if (guestRemoveBtn) {
-  guestRemoveBtn.addEventListener("click", async () => {
-    const name = guestNameInput?.value?.trim() || editingGuestName || "";
-    if (!name) {
-      showToast("Enter or select a name.", true);
-      return;
-    }
-    const ok = await confirmModal(
-      `Remove ${name}? Their notes and birthday will be deleted.`,
-      "Remove user"
-    );
-    if (!ok) return;
-    guestRemoveBtn.disabled = true;
-    try {
-      const res = await hostFetch(`/api/guests/${encodeURIComponent(name)}`, {
-        method: "DELETE",
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not remove user.");
-      editingGuestName = null;
-      setGuests(data.guests);
-      showToast("Removed");
-      navigate("settings-users");
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      guestRemoveBtn.disabled = false;
-    }
-  });
-}
-
-if (guestBdayForgetBtn) {
-  guestBdayForgetBtn.addEventListener("click", async () => {
-    const name = guestNameInput?.value?.trim() || "";
-    if (!name) {
-      showToast("Enter or select a name.", true);
-      return;
-    }
-    const ok = await confirmModal(
-      `Reset tonight's birthday shout for ${name}? Their next request can get a first-request birthday wish again.`,
-      "Reset birthday shout"
-    );
-    if (!ok) return;
-    guestBdayForgetBtn.disabled = true;
-    try {
-      const res = await hostFetch(
-        `/api/guests/${encodeURIComponent(name)}/forget-birthday-shout`,
-        { method: "POST" }
-      );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not reset birthday shout.");
-      showToast(`Birthday shout reset for ${name}`);
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      guestBdayForgetBtn.disabled = false;
-    }
-  });
-}
+);
 
 // ---- Connections (Spotify app / Last.fm / HA / Sonos HTTP / account) ----
 const {
@@ -2071,7 +1771,7 @@ settingsClearReactionsBtn?.addEventListener("click", async () => {
     if (!res.ok) throw new Error(data.error || "Could not clear reactions.");
     showToast("Mood reactions cleared");
     npReactionsSyncedFor = null;
-    if (nowPlayingId) void syncMyReactions(nowPlayingId);
+    if (searchUi.getNowPlayingId()) void syncMyReactions(searchUi.getNowPlayingId());
     else paintNpReactions({ mine: null, micMine: false });
     if (currentView === "stats") loadStats();
   } catch (err) {
@@ -2094,7 +1794,7 @@ settingsClearKaraokeBtn?.addEventListener("click", async () => {
     if (!res.ok) throw new Error(data.error || "Could not clear Karaoke list.");
     showToast("Karaoke list cleared");
     npReactionsSyncedFor = null;
-    if (nowPlayingId) void syncMyReactions(nowPlayingId);
+    if (searchUi.getNowPlayingId()) void syncMyReactions(searchUi.getNowPlayingId());
     if (currentView === "stats") loadStats();
   } catch (err) {
     showToast(err.message, true);
@@ -3791,307 +3491,33 @@ if (queueEmpty) {
   queueEmpty.textContent = CONNECTING_MESSAGE;
 }
 
-let debounceTimer = null;
-let currentQuery = "";
-
-searchInput.addEventListener("input", () => {
-  const q = searchInput.value.trim();
-  searchClear.hidden = searchInput.value.length === 0;
-  clearTimeout(debounceTimer);
-  if (!q) {
-    resultsEl.innerHTML = "";
-    statusEl.textContent = "";
-    return;
+const searchUi = createSearchUi(
+  {
+    searchInput,
+    searchClear,
+    resultsEl,
+    statusEl,
+    dedicationOverlay,
+    dedicationInput,
+    dedicationError,
+    dedicationSaveBtn,
+    dedicationCancelBtn,
+  },
+  {
+    showToast,
+    confirmModal,
+    ensureDisplayName,
+    guestIdentityPayload,
+    getPartyLocks: () => ({ partyOver, requestsPaused }),
+    partyOverMessage: GUEST_BANNER_PARTY_OVER,
+    setAutofillToggle,
+    markClosingShown,
+    showPartyRecap,
+    refreshSonos,
+    getCurrentView: () => currentView,
+    loadStats,
   }
-  debounceTimer = setTimeout(() => runSearch(q), 300);
-});
-
-searchClear.addEventListener("click", () => {
-  clearTimeout(debounceTimer);
-  searchInput.value = "";
-  searchClear.hidden = true;
-  resultsEl.innerHTML = "";
-  statusEl.textContent = "";
-  searchInput.focus();
-});
-
-async function runSearch(q) {
-  currentQuery = q;
-  statusEl.textContent = "Searching...";
-  resultsEl.setAttribute("aria-busy", "true");
-  try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-    const data = await res.json();
-    // Ignore stale responses if the user kept typing.
-    if (q !== currentQuery) return;
-
-    if (!res.ok) {
-      resultsEl.innerHTML = "";
-      statusEl.textContent = data.error || "Search failed.";
-      return;
-    }
-    renderResults(data.tracks || []);
-  } catch {
-    if (q !== currentQuery) return;
-    resultsEl.innerHTML = "";
-    statusEl.textContent = "Network error. Try again.";
-  } finally {
-    if (q === currentQuery) resultsEl.removeAttribute("aria-busy");
-  }
-}
-
-// Track IDs currently in the queue + the one now playing, so search results can
-// flag songs that are already queued.
-let queuedIdSet = new Set();
-let searchedQueuedIdSet = new Set(); // queued via guest search (the priority lane)
-let queuedKeySet = new Set(); // song keys (title+artist) of everything queued
-let searchedQueuedKeySet = new Set(); // song keys queued via guest search
-let nowPlayingId = null;
-let nowPlayingKey = "";
-
-function trackIdFromUri(uri) {
-  if (!uri) return null;
-  let decoded = uri;
-  try {
-    decoded = decodeURIComponent(uri);
-  } catch {
-    /* use as-is if it isn't valid percent-encoding */
-  }
-  const m = /spotify:track:([A-Za-z0-9]+)/.exec(decoded);
-  return m ? m[1] : null;
-}
-
-// Loose "same song" key (title + primary artist), mirroring the server. Spotify
-// has many IDs for one song (album vs single vs remaster), so we also match by
-// this key to flag dupes that ID matching alone would miss.
-function songMatchKey(title, artist) {
-  const norm = (s) =>
-    String(s || "")
-      .toLowerCase()
-      .replace(/\(.*?\)|\[.*?\]/g, " ")
-      .replace(/\s[-\u2013]\s.*$/, " ")
-      .replace(/\bfeat\.?\b.*$/, " ")
-      .replace(/[^a-z0-9]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-  const t = norm(title);
-  const a = norm(String(artist || "").split(",")[0]);
-  return t && a ? `${t}|${a}` : "";
-}
-
-function isQueued(id, key) {
-  if (id && (queuedIdSet.has(id) || id === nowPlayingId)) return true;
-  return !!key && (queuedKeySet.has(key) || key === nowPlayingKey);
-}
-
-// Flag any visible search result whose song is already in the queue / playing.
-// A song waiting as filler (Random / Never-Ending / discovery) gets a distinct
-// "Random queue" badge; a guest-searched (or now-playing) song reads "In queue".
-function updateResultsQueuedState() {
-  for (const li of resultsEl.children) {
-    const id = li.dataset.id;
-    const key = li.dataset.key || "";
-    const queued = isQueued(id, key);
-    li.classList.toggle("in-queue", queued);
-    const badge = li.querySelector(".in-queue-badge");
-    if (!badge) continue;
-    badge.hidden = !queued;
-    if (queued) {
-      const isSearched =
-        (id && (searchedQueuedIdSet.has(id) || id === nowPlayingId)) ||
-        (key && (searchedQueuedKeySet.has(key) || key === nowPlayingKey));
-      const isRandom = !isSearched;
-      badge.textContent = isRandom ? "\u{1F3B2} In Random queue" : "\u2713 In queue";
-      badge.classList.toggle("random", isRandom);
-    }
-  }
-}
-
-function renderResults(tracks) {
-  resultsEl.innerHTML = "";
-  statusEl.textContent = tracks.length ? "" : "No songs found.";
-
-  for (const track of tracks) {
-    const li = document.createElement("li");
-    li.className = "track";
-    li.dataset.id = trackIdFromUri(track.uri) || "";
-    li.dataset.key = songMatchKey(track.name, track.artists);
-
-    const art = track.image
-      ? `<img src="${track.image}" alt="" loading="lazy" />`
-      : `<div class="art-fallback"></div>`;
-
-    li.innerHTML = `
-      ${art}
-      <div class="meta">
-        <div class="title">${escapeHtml(track.name)}<span class="in-queue-badge" hidden>\u2713 In queue</span></div>
-        <div class="artist">${escapeHtml(track.artists)}</div>
-      </div>
-      <button class="add-btn" type="button">Add</button>
-    `;
-
-    const btn = li.querySelector(".add-btn");
-    btn.addEventListener("click", () => addToQueue(track, btn));
-    resultsEl.appendChild(li);
-  }
-
-  updateResultsQueuedState();
-}
-
-async function addToQueue(track, btn) {
-  if (partyOver) {
-    showToast(GUEST_BANNER_PARTY_OVER, true);
-    return;
-  }
-  if (requestsPaused) {
-    showToast("Requests are paused right now.", true);
-    return;
-  }
-  const displayName = await ensureDisplayName({ required: true });
-  if (!displayName) {
-    showToast("Enter your name before adding songs.", true);
-    return;
-  }
-
-  const id = trackIdFromUri(track.uri);
-  const key = songMatchKey(track.name, track.artists);
-  const exactMatch = !!id && (queuedIdSet.has(id) || id === nowPlayingId);
-  // A *different* Spotify version (same song, different track ID) is already in
-  // the queue. Let the guest decide: add this version too, or just move the one
-  // that's already waiting up to the front. (Exact-same versions skip the prompt
-  // and are simply promoted - we never want a true duplicate.)
-  const versionMatch =
-    !exactMatch && !!key && (queuedKeySet.has(key) || key === nowPlayingKey);
-
-  let force = false;
-  if (versionMatch) {
-    force = await confirmModal(
-      `A version of "${track.name}" is already in the queue. Add this version too, or move the one that's already waiting up to the front?`,
-      "Add this version",
-      "Move existing up"
-    );
-  }
-
-  btn.disabled = true;
-  btn.textContent = "Adding...";
-  try {
-    const res = await fetch("/api/queue", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        uri: track.uri,
-        name: track.name,
-        artist: track.artists,
-        force,
-        ...guestIdentityPayload(),
-      }),
-    });
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.error || "Could not add song.");
-    }
-
-    btn.textContent = data.alreadyRequested
-      ? "Already queued"
-      : data.promoted
-        ? "Moved up"
-        : "Added";
-    btn.classList.add("added");
-    if (data.closingTime) {
-      setAutofillToggle(false);
-      markClosingShown(data.closingTimeAt || Date.now()); // don't re-toast on poll
-      showPartyRecap(data.partyRecap);
-    } else {
-      const msg = data.alreadyRequested
-        ? `"${track.name}" is already in the requested queue.`
-        : await buildAddToastMessage(track, data);
-      // Optional dedicate — does not block Add. Toast action opens a short field.
-      showToast(
-        msg,
-        false,
-        5500,
-        data.alreadyRequested
-          ? {}
-          : {
-              actionLabel: "Dedicate",
-              onAction: () => openDedicationModal(track),
-            }
-      );
-    }
-    refreshSonos();
-    // Keep Stats current if that page is open.
-    if (currentView === "stats") loadStats();
-  } catch (err) {
-    btn.disabled = false;
-    btn.textContent = "Add";
-    showToast(err.message, true);
-  }
-}
-
-function openDedicationModal(track) {
-  if (!dedicationOverlay || !dedicationInput) return;
-  dedicationError.hidden = true;
-  dedicationError.textContent = "";
-  dedicationInput.value = "";
-
-  let session = null;
-  const cleanup = () => {
-    dedicationSaveBtn?.removeEventListener("click", onSave);
-    dedicationCancelBtn?.removeEventListener("click", onCancel);
-    dedicationInput.removeEventListener("keydown", onKey);
-    session?.close();
-    session = null;
-  };
-  const onCancel = () => cleanup();
-  const onKey = (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      onSave();
-    }
-  };
-  const onSave = async () => {
-    const note = sanitizeDedication(dedicationInput.value);
-    if (!note) {
-      dedicationError.textContent = "Enter a name or short note, or tap Skip.";
-      dedicationError.hidden = false;
-      return;
-    }
-    dedicationSaveBtn.disabled = true;
-    try {
-      const res = await fetch("/api/queue/dedication", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          uri: track.uri,
-          name: track.name,
-          artist: track.artists,
-          dedication: note,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not save dedication.");
-      cleanup();
-      const by = getDisplayAlias() || getDisplayName();
-      showToast(dedicationDisplayLabel(note, by) || "Dedication saved");
-      refreshSonos();
-    } catch (err) {
-      dedicationError.textContent = err.message || "Could not save.";
-      dedicationError.hidden = false;
-    } finally {
-      dedicationSaveBtn.disabled = false;
-    }
-  };
-  dedicationSaveBtn?.addEventListener("click", onSave);
-  dedicationCancelBtn?.addEventListener("click", onCancel);
-  dedicationInput.addEventListener("keydown", onKey);
-  session = attachModal(dedicationOverlay, {
-    initialFocus: dedicationInput,
-    onEscape: onCancel,
-    allowBackdrop: true,
-    onBackdrop: onCancel,
-  });
-}
+);
 
 clearBtn.addEventListener("click", async () => {
   // Double confirm — intentional; Clear Queue is open to the party but destructive.
@@ -4968,9 +4394,9 @@ function renderNowPlaying(transport) {
     npMyMic = false;
     npReactionsSyncedFor = null;
   }
-  nowPlayingId = nextNpId;
-  nowPlayingKey = hasTrack ? songMatchKey(np.title, np.artist) : "";
-  updateResultsQueuedState();
+  searchUi.setNowPlaying(hasTrack ? np : null, {
+    includeId: hasTrack && !updating,
+  });
 
   // Playing/Paused + origin pills: stacked and centered on the right.
   if (npPills) npPills.hidden = !hasTrack;
@@ -5026,7 +4452,7 @@ function renderNowPlaying(transport) {
         micMine: npMyMic,
       });
     }
-    if (!updating) void syncMyReactions(nowPlayingId);
+    if (!updating) void syncMyReactions(searchUi.getNowPlayingId());
   } else {
     npCard.classList.add("is-empty");
     npTitle.hidden = true;
@@ -5057,7 +4483,7 @@ npReactions?.addEventListener("click", async (e) => {
   e.preventDefault();
   e.stopPropagation();
   const kind = btn.getAttribute("data-react");
-  const id = nowPlayingId;
+  const id = searchUi.getNowPlayingId();
   if (!id || !NP_REACTION_KINDS.includes(kind)) return;
 
   const displayName = await ensureDisplayName({ required: true });
@@ -5179,17 +4605,9 @@ function renderPartyDisplayQueue(tracks) {
 
 function applyQueueTracks(tracks) {
   lastQueueTracks = tracks;
-  queuedIdSet = new Set(tracks.map((t) => trackIdFromUri(t.uri)).filter(Boolean));
-  searchedQueuedIdSet = new Set(
-    tracks.filter((t) => t.searched).map((t) => trackIdFromUri(t.uri)).filter(Boolean)
-  );
-  queuedKeySet = new Set(tracks.map((t) => songMatchKey(t.title, t.artist)).filter(Boolean));
-  searchedQueuedKeySet = new Set(
-    tracks.filter((t) => t.searched).map((t) => songMatchKey(t.title, t.artist)).filter(Boolean)
-  );
+  searchUi.setQueuedTracks(tracks);
   renderQueue(tracks);
   renderPartyDisplayQueue(tracks);
-  updateResultsQueuedState();
   prefetchUpcomingAlbumArt(tracks);
 }
 
