@@ -44,6 +44,7 @@ import {
   reconcilePlaylistSelection,
 } from "./playlist-selection.js";
 import { showToast } from "./toast.js";
+import { wirePanelCollapse } from "./panel-collapse.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -285,64 +286,13 @@ function saveSelection() {
   savePlaylistSelection(selectedPlaylistIds);
 }
 
-// Collapse/expand the "Up next" list (the header + count stay visible).
-// Expanded by default; remembers the last choice in localStorage.
-const QUEUE_COLLAPSE_KEY = "pq.queueCollapsed";
-function applyQueueCollapsed(collapsed) {
-  queueSection.classList.toggle("collapsed", collapsed);
-  queueToggle.setAttribute("aria-expanded", String(!collapsed));
-}
-{
-  const stored = localStorage.getItem(QUEUE_COLLAPSE_KEY);
-  applyQueueCollapsed(stored == null ? false : stored === "1");
-}
-queueToggle.addEventListener("click", (e) => {
-  // The Edit button sits inside this header; don't collapse when it's used.
-  if (e.target instanceof Element && e.target.closest("#queue-edit-toggle"))
-    return;
-  const collapsed = !queueSection.classList.contains("collapsed");
-  localStorage.setItem(QUEUE_COLLAPSE_KEY, collapsed ? "1" : "0");
-  applyQueueCollapsed(collapsed);
+// Collapse/expand Up Next + main-page panels (Controls, Suggestion Box, …).
+// Each panel remembers its own state in localStorage.
+wirePanelCollapse("queue-section", "queue-toggle", "pq.queueCollapsed", {
+  defaultCollapsed: false,
+  // Edit sits inside the queue header; don't collapse when it's used.
+  ignoreClickSelector: "#queue-edit-toggle",
 });
-queueToggle.addEventListener("keydown", (e) => {
-  if (e.target !== queueToggle) return;
-  if (e.key === "Enter" || e.key === " ") {
-    e.preventDefault();
-    queueToggle.click();
-  }
-});
-
-// Collapse/expand main-page panels (Controls, Suggestion Box, …).
-// Each panel remembers its own state; missing keys use defaultCollapsed.
-function wirePanelCollapse(
-  sectionId,
-  toggleId,
-  storageKey,
-  { onExpand = null, defaultCollapsed = true } = {}
-) {
-  const section = document.getElementById(sectionId);
-  const toggle = document.getElementById(toggleId);
-  if (!section || !toggle) return;
-  function apply(collapsed) {
-    section.classList.toggle("collapsed", collapsed);
-    toggle.setAttribute("aria-expanded", String(!collapsed));
-  }
-  const stored = localStorage.getItem(storageKey);
-  apply(stored == null ? defaultCollapsed : stored === "1");
-  toggle.addEventListener("click", () => {
-    const collapsed = !section.classList.contains("collapsed");
-    localStorage.setItem(storageKey, collapsed ? "1" : "0");
-    apply(collapsed);
-    if (!collapsed && typeof onExpand === "function") onExpand();
-  });
-  toggle.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      toggle.click();
-    }
-  });
-}
-
 wirePanelCollapse("controls-section", "controls-toggle", "pq.controlsCollapsed", {
   onExpand: () => loadGroups(true),
 });
