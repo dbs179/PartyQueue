@@ -30,16 +30,22 @@ function load() {
     cache = Array.isArray(raw)
       ? raw
           .filter((e) => e && typeof e.id === "string" && e.id)
-          .map((e) => ({
-            id: e.id,
-            name: typeof e.name === "string" ? e.name : "",
-            artist: typeof e.artist === "string" ? e.artist : "",
-            ts: Number(e.ts) || 0,
-            // Canonical User for Party Stats / recap (not the queue badge alias).
-            requestedBy: sanitizeDisplayName(e.requestedBy),
-            alias: sanitizeDisplayName(e.alias),
-            dedication: sanitizeDedication(e.dedication),
-          }))
+          .map((e) => {
+            const row = {
+              id: e.id,
+              name: typeof e.name === "string" ? e.name : "",
+              artist: typeof e.artist === "string" ? e.artist : "",
+              ts: Number(e.ts) || 0,
+              // Canonical User for Party Stats / recap (not the queue badge alias).
+              requestedBy: sanitizeDisplayName(e.requestedBy),
+              alias: sanitizeDisplayName(e.alias),
+              dedication: sanitizeDedication(e.dedication),
+            };
+            if (e.kind === "setRequest" || e.kind === "setTrack") {
+              row.kind = e.kind;
+            }
+            return row;
+          })
       : [];
   } catch {
     cache = [];
@@ -59,6 +65,7 @@ function persistNow() {
       if (e.requestedBy) row.requestedBy = e.requestedBy;
       if (e.alias) row.alias = e.alias;
       if (e.dedication) row.dedication = e.dedication;
+      if (e.kind === "setRequest" || e.kind === "setTrack") row.kind = e.kind;
       return row;
     });
     writeFileAtomic(REQUESTS_FILE, JSON.stringify(out));
@@ -105,7 +112,7 @@ function cancelPersistTimer() {
  * `ts` is injectable for tests; defaults to now.
  */
 export function recordRequest(
-  { id, name, artist, requestedBy, alias, dedication } = {},
+  { id, name, artist, requestedBy, alias, dedication, kind } = {},
   ts = Date.now()
 ) {
   if (typeof id !== "string" || !id) return;
@@ -123,10 +130,57 @@ export function recordRequest(
   // Only keep alias when it differs from the User (saves noise).
   if (aliasClean && aliasClean !== by) row.alias = aliasClean;
   if (ded) row.dedication = ded;
+  if (kind === "setRequest" || kind === "setTrack") row.kind = kind;
   list.push(row);
   while (list.length > MAX) list.shift();
   cache = list;
   persist();
+}
+
+/**
+ * Ledger one Set Request (fairness) plus optional per-track stats rows.
+ * The setRequest row is what set-request fairness counts; setTrack rows feed
+ * Party Stats without consuming song-request rolling quota.
+ */
+export function recordSetRequest(
+  {
+    artistId,
+    artist,
+    requestedBy,
+    alias,
+    tracks = [],
+  } = {},
+  ts = Date.now()
+) {
+  const id = String(artistId || "").trim();
+  if (!id) return;
+  const when = Number(ts) || Date.now();
+  recordRequest(
+    {
+      id: `set:${id}`,
+      name: "Set Request",
+      artist: typeof artist === "string" ? artist : "",
+      requestedBy,
+      alias,
+      kind: "setRequest",
+    },
+    when
+  );
+  for (const t of Array.isArray(tracks) ? tracks : []) {
+    const trackId = typeof t?.id === "string" ? t.id : "";
+    if (!trackId) continue;
+    recordRequest(
+      {
+        id: trackId,
+        name: typeof t.name === "string" ? t.name : "",
+        artist: typeof t.artist === "string" ? t.artist : artist || "",
+        requestedBy,
+        alias,
+        kind: "setTrack",
+      },
+      when
+    );
+  }
 }
 
 /** Attach / update dedication on the newest matching request for this track. */
@@ -194,7 +248,11 @@ function normArtist(name) {
 //             topArtists: [{ artist, count }] }
 export function summarizeRequests(events, sinceTs = 0, limit = 5) {
   const list = (Array.isArray(events) ? events : []).filter(
-    (e) => e && (Number(e.ts) || 0) >= sinceTs
+    (e) =>
+      e &&
+      (Number(e.ts) || 0) >= sinceTs &&
+      // Ledger-only Set Request rows are not songs.
+      e.kind !== "setRequest"
   );
 
   const songs = new Map(); // id -> { id, name, artist, count }
@@ -230,7 +288,12 @@ export function summarizeRequests(events, sinceTs = 0, limit = 5) {
  */
 export function topRequesters(events, sinceTs = 0, limit = 5) {
   const list = (Array.isArray(events) ? events : []).filter(
-    (e) => e && (Number(e.ts) || 0) >= sinceTs && e.requestedBy
+    (e) =>
+      e &&
+      (Number(e.ts) || 0) >= sinceTs &&
+      e.requestedBy &&
+      // Count the set once (not once per track) for requester leaderboards.
+      e.kind !== "setTrack"
   );
   const map = new Map(); // name -> count
   for (const e of list) {

@@ -10,6 +10,7 @@ import {
   isUserConnected,
   getPlaylists,
   searchTracks,
+  searchArtists,
   rewarmCaches,
   spotifyCooldownMs,
   getPoolWarmedAt,
@@ -26,15 +27,31 @@ export function registerSpotifyRoutes(app, ctx) {
   app.get("/api/search", searchLimit, asyncHandler(async (req, res) => {
     const query = req.query.q;
     if (!query || !String(query).trim()) {
-      return res.json({ tracks: [] });
+      return res.json({ tracks: [], artists: [] });
     }
     try {
-      let tracks = await searchTracks(String(query), 20);
+      const q = String(query);
+      const [trackHits, artistHits] = await Promise.all([
+        searchTracks(q, 20),
+        searchArtists(q, 5).catch((err) => {
+          console.warn("[search] artists:", err.message);
+          return [];
+        }),
+      ]);
+      let tracks = trackHits;
       // Hide explicit results when the host's content filter is on.
       if (getContentSettings().filterExplicit) {
         tracks = tracks.filter((t) => !t.explicit);
       }
-      res.json({ tracks });
+      // Prefer an exact (case-insensitive) name match for Set Request.
+      const needle = q.trim().toLowerCase();
+      const artists = [...artistHits].sort((a, b) => {
+        const aExact = a.name.toLowerCase() === needle ? 0 : 1;
+        const bExact = b.name.toLowerCase() === needle ? 0 : 1;
+        if (aExact !== bExact) return aExact - bExact;
+        return (b.popularity || 0) - (a.popularity || 0);
+      });
+      res.json({ tracks, artists });
     } catch (err) {
       console.error("[search]", err.message);
       res.status(502).json({ error: "Spotify search failed. Check your credentials." });

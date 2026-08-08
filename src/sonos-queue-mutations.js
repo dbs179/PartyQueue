@@ -124,6 +124,150 @@ export async function addTrackToQueue(...args) {
   return withSonosWriteLock(() => addTrackToQueueUnlocked(...args));
 }
 
+const SET_REQUEST_SIZE = 5;
+
+/**
+ * Guest Set Request: enqueue multiple searched tracks under one write lock so
+ * they stay a contiguous block at the end of the request block.
+ * @param {Array<{ uri: string, name?: string, artist?: string }>} tracks
+ * @param {{ requestedBy?: string|null, requestedByUser?: string|null }} [meta]
+ */
+export async function addSetRequestToQueue(...args) {
+  return withSonosWriteLock(() => addSetRequestToQueueUnlocked(...args));
+}
+
+async function addSetRequestToQueueUnlocked(
+  tracks,
+  { requestedBy = null, requestedByUser = null } = {}
+) {
+  const list = (Array.isArray(tracks) ? tracks : [])
+    .filter(
+      (t) =>
+        t &&
+        typeof t.uri === "string" &&
+        t.uri.startsWith("spotify:track:")
+    )
+    .slice(0, SET_REQUEST_SIZE);
+  if (!list.length) {
+    throw new Error("No tracks to add for this Set Request.");
+  }
+
+  const m = await getManager();
+  const coordinator = await resolveCoordinator(m);
+  const byOpts = {
+    requestedBy,
+    requestedByUser,
+    setRequest: true,
+  };
+
+  let items = [];
+  let currentTrack = 0;
+  let playingFromQueue = false;
+  try {
+    const [queue, pos, media] = await Promise.all([
+      coordinator.GetQueue(),
+      coordinator.AVTransportService.GetPositionInfo().catch(() => ({ Track: 0 })),
+      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
+        CurrentURI: "",
+      })),
+    ]);
+    items = Array.isArray(queue.Result) ? queue.Result : [];
+    currentTrack = Number(pos.Track) || 0;
+    playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
+  } catch (err) {
+    console.error("[queue] set-request live read failed:", err.message);
+  }
+
+  const start = playingFromQueue && currentTrack >= 1 ? currentTrack : 0;
+  const upcomingIds = new Set();
+  for (let i = start; i < items.length; i++) {
+    const itId = spotifyTrackId(items[i]?.TrackUri ?? items[i]?.uri);
+    if (itId) upcomingIds.add(itId);
+  }
+
+  const toAdd = list.filter((t) => {
+    const id = spotifyTrackId(t.uri);
+    return id && !upcomingIds.has(id);
+  });
+  if (!toAdd.length) {
+    throw new Error(
+      "Those songs are already coming up — try another artist."
+    );
+  }
+
+  // Fresh searchedIds each insert so later set tracks stay after earlier ones.
+  let insertPos = findInsertPosition(items, {
+    currentTrack,
+    playingFromQueue,
+    searchedIds: searchedIdSet(),
+  });
+  // Sonos: 0 = append. For a growing block, keep an absolute cursor.
+  let nextPos =
+    insertPos === 0 ? items.length + 1 : Math.max(1, Number(insertPos) || 1);
+  const added = [];
+
+  for (const t of toAdd) {
+    const meta = MetaDataHelper.GuessMetaDataAndTrackUri(
+      t.uri,
+      resolveRegion()
+    );
+    await enqueueMeta(m, meta, nextPos);
+    const id = spotifyTrackId(t.uri);
+    if (id) {
+      markOrigin([id], "searched", {
+        ...byOpts,
+        appendInstance: upcomingIds.has(id),
+      });
+      upcomingIds.add(id);
+      recordPlayed([
+        {
+          id,
+          artist: t.artist || "",
+          name: t.name || "",
+          source: "searched",
+          requestedBy,
+        },
+      ]);
+    }
+    added.push({
+      uri: t.uri,
+      id: id || null,
+      name: t.name || "",
+      artist: t.artist || "",
+      absoluteQueuePosition: nextPos,
+    });
+    nextPos += 1;
+  }
+
+  const queueWasEmpty = items.length === 0;
+  const dj = getDjVoiceSettings();
+  const deferStartForShout =
+    queueWasEmpty && !!dj.djVoiceEnabled && !!dj.djShoutEnabled;
+  const started = deferStartForShout
+    ? false
+    : await autoStartIfIdle(coordinator);
+  invalidateSonosSnapshots();
+
+  const offset = playingFromQueue && currentTrack >= 1 ? currentTrack : 0;
+  const firstAbs = added[0]?.absoluteQueuePosition || 1;
+  const queuePosition = Math.max(1, firstAbs - offset);
+
+  return {
+    room: coordinator.Name,
+    group: coordinator.GroupName,
+    started,
+    added: added.length,
+    tracks: added,
+    queueWasEmpty,
+    deferredStart: deferStartForShout,
+    queuePosition,
+    absoluteQueuePosition: firstAbs,
+    requestCreated: true,
+  };
+}
+
+export { SET_REQUEST_SIZE };
+
 async function addTrackToQueueUnlocked(
   trackUri,
   {

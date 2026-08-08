@@ -81,10 +81,13 @@ export function evaluateRequestFairness({
     Math.floor(Number(policy.requestFairnessUpcomingThreshold) || 1)
   );
   const totalRequestedUpcoming = upcoming.filter(
-    (track) => track?.searched
+    (track) => track?.searched && !track?.setRequest
   ).length;
   const upcomingCount = upcoming.filter(
-    (track) => track?.searched && userKey(track.requestedByUser) === key
+    (track) =>
+      track?.searched &&
+      !track?.setRequest &&
+      userKey(track.requestedByUser) === key
   ).length;
   if (
     totalRequestedUpcoming >= upcomingThreshold &&
@@ -116,6 +119,9 @@ export function evaluateRequestFairness({
   const recent = (Array.isArray(events) ? events : [])
     .filter(
       (event) =>
+        // Set Request ledger rows never consume song-request rolling quota.
+        event?.kind !== "setRequest" &&
+        event?.kind !== "setTrack" &&
         userKey(event?.requestedBy) === key &&
         Number(event?.ts) > now - windowMs &&
         Number(event?.ts) <= now

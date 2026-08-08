@@ -7,7 +7,11 @@ import {
   queueWorkGeneration,
   queueWorkWasPreempted,
 } from "../queue-preempt.js";
-import { isUserConnected } from "../spotify.js";
+import {
+  isUserConnected,
+  getArtistTopTracks,
+  getArtist,
+} from "../spotify.js";
 import {
   getAutoFillState,
   getClosingTimeAt,
@@ -36,6 +40,7 @@ import {
   getRandomnessSettings,
   getDiscoverySettings,
   getRequestFairnessSettings,
+  getSetRequestFairnessSettings,
   getContentSettings,
   getRotationSettings,
 } from "../settings.js";
@@ -61,6 +66,7 @@ import {
 import { ensureGuestProfile } from "../guest-profiles.js";
 import {
   recordRequest,
+  recordSetRequest,
   getRequests,
   setRequestDedication,
 } from "../request-log.js";
@@ -68,11 +74,14 @@ import {
   evaluateRequestFairness,
   withRequestFairnessLock,
 } from "../request-fairness.js";
+import { evaluateSetRequestFairness } from "../set-request-fairness.js";
 import { spotifyTrackId } from "../sampler.js";
 import {
   addPlaylistToQueue,
   addRandomFromPlaylists,
   addTrackToQueue,
+  addSetRequestToQueue,
+  SET_REQUEST_SIZE,
   getQueueList,
   invalidateSonosSnapshots,
   shouldClearQueueForRandomDj,
@@ -81,6 +90,7 @@ import {
   removeQueueTrack,
   removeUpcomingFillerTracks,
   reorderQueueTrack,
+  ensureShoutLeadBuffer,
 } from "../sonos.js";
 import {
   setPartyOver,
@@ -102,6 +112,7 @@ export function registerQueueRoutes(app, ctx) {
   // DJ Voice is configured.
   const sonos = {
     addTrackToQueue,
+    addSetRequestToQueue,
     addPlaylistToQueue,
     addRandomFromPlaylists,
     getQueueList,
@@ -111,6 +122,7 @@ export function registerQueueRoutes(app, ctx) {
     play,
     invalidateSonosSnapshots,
     clearQueueWithoutAutoRefill,
+    ensureShoutLeadBuffer,
     ...(ctx.sonos || {}),
   };
 
@@ -363,6 +375,211 @@ export function registerQueueRoutes(app, ctx) {
       res.status(502).json({ error: err.message || "Could not add to Sonos queue." });
     }
   }));
+
+  // Guest Set Request: enqueue up to 5 Spotify top tracks for an artist as one
+  // contiguous searched block (after existing requests). Separate fairness.
+  app.post(
+    "/api/queue/set-request",
+    queueBurstLimit,
+    queueSustainedLimit,
+    asyncHandler(async (req, res) => {
+      const preemptGeneration = queueWorkGeneration();
+      const { artistId, artist, requestedBy, requestedByUser } = req.body ?? {};
+      const id = String(artistId || "").trim();
+      if (!id) {
+        return res.status(400).json({ error: "Pick an artist for a Set Request." });
+      }
+      if (isPartyOver()) {
+        return res
+          .status(403)
+          .json({ error: PARTY_OVER_MESSAGE, code: "party_over" });
+      }
+      if (getContentSettings().requestsPaused) {
+        return res
+          .status(403)
+          .json({ error: "Requests are paused right now." });
+      }
+      const { user, badge, alias } = resolveGuestIdentity({
+        requestedBy,
+        requestedByUser,
+      });
+      if (!user) {
+        return res
+          .status(400)
+          .json({ error: "Enter your name before requesting a set." });
+      }
+
+      try {
+        const outcome = await withRequestFairnessLock(async () => {
+          const fairness = getSetRequestFairnessSettings();
+          const decision = evaluateSetRequestFairness({
+            settings: fairness,
+            user,
+            events: getRequests(),
+            hostAuthenticated: isValidHostToken(extractHostToken(req)),
+          });
+          if (!decision.allowed) return { decision };
+
+          let artistName = String(artist || "").trim();
+          if (!artistName) {
+            const resolved = await getArtist(id);
+            artistName = resolved?.name || id;
+          }
+
+          const filterExplicit = !!getContentSettings().filterExplicit;
+          let top = await getArtistTopTracks(id, { filterExplicit });
+          top = top.slice(0, SET_REQUEST_SIZE);
+          if (!top.length) {
+            return {
+              error: {
+                status: 404,
+                error: `No playable tracks found for ${artistName}.`,
+              },
+            };
+          }
+
+          const added = await sonos.addSetRequestToQueue(top, {
+            requestedBy: badge,
+            requestedByUser: user,
+          });
+
+          if (added.requestCreated !== false) {
+            recordSetRequest({
+              artistId: id,
+              artist: artistName,
+              requestedBy: user,
+              alias: alias && alias !== user ? alias : null,
+              tracks: (added.tracks || []).map((t) => ({
+                id: t.id,
+                name: t.name,
+                artist: t.artist,
+              })),
+            });
+          }
+
+          return { result: added, artistName };
+        });
+
+        if (outcome.decision) {
+          const denied = outcome.decision;
+          if (denied.retryAfterSec) {
+            res.set("Retry-After", String(denied.retryAfterSec));
+          }
+          return res.status(denied.status || 429).json({
+            error: denied.error,
+            code: denied.code,
+            rollingCount: denied.rollingCount,
+            rollingMax: denied.rollingMax,
+            windowHours: denied.windowHours,
+            retryAt: denied.retryAt,
+          });
+        }
+        if (outcome.error) {
+          return res
+            .status(outcome.error.status || 400)
+            .json({ error: outcome.error.error });
+        }
+
+        const result = outcome.result;
+        const artistName = outcome.artistName;
+        try {
+          if (ensureGuestProfile(user)) {
+            console.log(`[queue/set-request] new guest profile: ${user}`);
+          }
+        } catch (err) {
+          console.error("[queue/set-request] guest profile:", err.message);
+        }
+
+        // One shout for the set (first track), not five.
+        const first = result.tracks?.[0];
+        if (
+          result.requestCreated !== false &&
+          first &&
+          shouldShoutOnSearch({
+            force: !!result.queueWasEmpty,
+            requestedBy: user,
+          })
+        ) {
+          const pos = Number(
+            result.absoluteQueuePosition ?? result.queuePosition
+          );
+          const startPlayback = !!(result.queueWasEmpty || result.deferredStart);
+          if (Number.isFinite(pos) && pos >= 1) {
+            try {
+              let shoutPos = pos;
+              if (!startPlayback) {
+                try {
+                  const lead = await sonos.ensureShoutLeadBuffer(pos);
+                  if (Number.isFinite(lead?.absoluteQueuePosition)) {
+                    shoutPos = lead.absoluteQueuePosition;
+                  }
+                } catch (err) {
+                  console.warn(
+                    "[queue/set-request] shout lead buffer skipped:",
+                    err.message
+                  );
+                }
+              }
+              const voice = await announceRequestShout({
+                name: first.name || "Set Request",
+                artist: artistName,
+                requestedBy: user,
+                uri: first.uri,
+                trackId: first.id,
+                queuePosition: shoutPos,
+                startPlayback,
+                preemptGeneration,
+              });
+              if (
+                startPlayback &&
+                !voice?.ok &&
+                !voice?.skipped &&
+                !queueWorkWasPreempted(preemptGeneration)
+              ) {
+                await sonos.play({ trackNumber: 1 });
+              }
+            } catch (err) {
+              console.error("[queue/set-request] shout:", err.message);
+              if (
+                startPlayback &&
+                !queueWorkWasPreempted(preemptGeneration)
+              ) {
+                try {
+                  await sonos.play({ trackNumber: 1 });
+                } catch (playErr) {
+                  console.error(
+                    "[queue/set-request] shout fallback play:",
+                    playErr.message
+                  );
+                }
+              }
+            }
+          }
+        } else if (
+          result.requestCreated !== false &&
+          result.deferredStart &&
+          !result.started &&
+          !queueWorkWasPreempted(preemptGeneration)
+        ) {
+          void sonos.play({ trackNumber: 1 }).catch((err) =>
+            console.error("[queue/set-request] deferred start:", err.message)
+          );
+        }
+
+        res.json({
+          ok: true,
+          artist: artistName,
+          artistId: id,
+          ...result,
+        });
+      } catch (err) {
+        console.error("[queue/set-request]", err.message);
+        res
+          .status(502)
+          .json({ error: err.message || "Could not add Set Request." });
+      }
+    })
+  );
 
   // Optional post-Add dedication (toast chip). Guest-accessible; only updates
   // searched origins. If a mid-queue shout pad is still upcoming, supersede it

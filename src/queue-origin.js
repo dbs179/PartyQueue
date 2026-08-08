@@ -60,6 +60,7 @@ function rowMeta(e) {
     dedication: e.dedication || null,
     mood: e.mood || null,
     genreLane: e.genreLane || null,
+    setRequest: !!e.setRequest,
   };
 }
 
@@ -96,6 +97,7 @@ function load() {
             dedication: sanitizeDedication(e.dedication),
             mood: typeof e.mood === "string" && e.mood ? e.mood : null,
             genreLane: cleanGenreLane(e.genreLane),
+            setRequest: !!e.setRequest,
           }))
       : null;
   } catch {
@@ -140,6 +142,7 @@ function persistNow() {
       if (e.dedication) row.dedication = e.dedication;
       if (e.mood) row.mood = e.mood;
       if (e.genreLane) row.genreLane = e.genreLane;
+      if (e.setRequest) row.setRequest = true;
       return row;
     });
     writeFileAtomic(STORE_FILE, JSON.stringify(out));
@@ -189,7 +192,7 @@ function removeAllForId(id) {
  * Record the source for one or more track IDs.
  * @param {string[]} ids
  * @param {string} source
- * @param {{ requestedBy?: string|null, requestedByUser?: string|null, dedication?: string|null, mood?: string|null, genreLane?: string|null, appendInstance?: boolean }} [opts]
+ * @param {{ requestedBy?: string|null, requestedByUser?: string|null, dedication?: string|null, mood?: string|null, genreLane?: string|null, appendInstance?: boolean, setRequest?: boolean }} [opts]
  */
 export function markOrigin(ids, source, opts = {}) {
   if (!VALID.has(source)) return;
@@ -212,6 +215,7 @@ export function markOrigin(ids, source, opts = {}) {
       : null;
   const genreLaneOpt = cleanGenreLane(opts.genreLane);
   const appendInstance = source === "searched" && !!opts.appendInstance;
+  const setRequest = source === "searched" && !!opts.setRequest;
   load();
   for (const id of clean) {
     const prevSearched = (searchedById?.get(id) || []).slice();
@@ -256,6 +260,7 @@ export function markOrigin(ids, source, opts = {}) {
       dedication: ded,
       mood,
       genreLane,
+      setRequest,
     });
   }
   trimEntries();

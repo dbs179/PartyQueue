@@ -6,6 +6,7 @@ import {
   RANDOMNESS_DEFAULTS,
   DISCOVERY_DEFAULTS,
   REQUEST_FAIRNESS_DEFAULTS,
+  SET_REQUEST_FAIRNESS_DEFAULTS,
   CONTENT_DEFAULTS,
   BRANDING_DEFAULTS,
   ROTATION_DEFAULTS,
@@ -18,6 +19,8 @@ import {
   setDiscoverySettings,
   getRequestFairnessSettings,
   setRequestFairnessSettings,
+  getSetRequestFairnessSettings,
+  setSetRequestFairnessSettings,
   getContentSettings,
   setContentSettings,
   getBrandingSettings,
@@ -65,6 +68,7 @@ export function registerSettingsRoutes(app) {
       ...getRandomnessSettings(),
       ...getDiscoverySettings(),
       ...getRequestFairnessSettings(),
+      ...getSetRequestFairnessSettings(),
       ...getRotationSettings(),
       ...publicContentSettings(),
       ...getDjVoiceSettings(),
@@ -74,6 +78,7 @@ export function registerSettingsRoutes(app) {
         ...RANDOMNESS_DEFAULTS,
         ...DISCOVERY_DEFAULTS,
         ...REQUEST_FAIRNESS_DEFAULTS,
+        ...SET_REQUEST_FAIRNESS_DEFAULTS,
         ...ROTATION_DEFAULTS,
         ...CONTENT_DEFAULTS,
         ...DJ_VOICE_DEFAULTS,
@@ -105,6 +110,7 @@ export function registerSettingsRoutes(app) {
       setRandomnessSettings(body);
       setDiscoverySettings(body);
       setRequestFairnessSettings(body);
+      setSetRequestFairnessSettings(body);
       setRotationSettings(body);
       setContentSettings(body);
       setDjVoiceSettings(body);
@@ -116,6 +122,7 @@ export function registerSettingsRoutes(app) {
         ...getRandomnessSettings(),
         ...getDiscoverySettings(),
         ...getRequestFairnessSettings(),
+        ...getSetRequestFairnessSettings(),
         ...getRotationSettings(),
         ...publicContentSettings(),
         ...getDjVoiceSettings(),
@@ -125,6 +132,7 @@ export function registerSettingsRoutes(app) {
           ...RANDOMNESS_DEFAULTS,
           ...DISCOVERY_DEFAULTS,
           ...REQUEST_FAIRNESS_DEFAULTS,
+          ...SET_REQUEST_FAIRNESS_DEFAULTS,
           ...ROTATION_DEFAULTS,
           ...CONTENT_DEFAULTS,
           ...DJ_VOICE_DEFAULTS,

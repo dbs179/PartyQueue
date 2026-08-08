@@ -285,6 +285,19 @@ const REQUEST_FAIRNESS_BOUNDS = {
   requestFairnessWindowMinutes: { min: 1, max: 1440 },
 };
 
+// Guest Set Request fairness (main-search artist sets). On by default so a
+// party night starts with one set per hour unless the host opens it up.
+export const SET_REQUEST_FAIRNESS_DEFAULTS = {
+  setRequestFairnessEnabled: true,
+  setRequestFairnessMax: 1,
+  setRequestFairnessWindowHours: 1,
+};
+
+const SET_REQUEST_FAIRNESS_BOUNDS = {
+  setRequestFairnessMax: { min: 1, max: 10 },
+  setRequestFairnessWindowHours: { min: 1, max: 24 },
+};
+
 export function getRequestFairnessSettings() {
   const s = loadSettings();
   return {
@@ -338,6 +351,47 @@ export function setRequestFairnessSettings(partial = {}) {
   }
   saveSettings(next);
   return getRequestFairnessSettings();
+}
+
+export function getSetRequestFairnessSettings() {
+  const s = loadSettings();
+  const song = getRequestFairnessSettings();
+  return {
+    setRequestFairnessEnabled:
+      typeof s.setRequestFairnessEnabled === "boolean"
+        ? s.setRequestFairnessEnabled
+        : SET_REQUEST_FAIRNESS_DEFAULTS.setRequestFairnessEnabled,
+    setRequestFairnessMax: clampInt(
+      s.setRequestFairnessMax,
+      SET_REQUEST_FAIRNESS_DEFAULTS.setRequestFairnessMax,
+      SET_REQUEST_FAIRNESS_BOUNDS.setRequestFairnessMax
+    ),
+    setRequestFairnessWindowHours: clampInt(
+      s.setRequestFairnessWindowHours,
+      SET_REQUEST_FAIRNESS_DEFAULTS.setRequestFairnessWindowHours,
+      SET_REQUEST_FAIRNESS_BOUNDS.setRequestFairnessWindowHours
+    ),
+    // Host PIN bypass is shared with song-request fairness.
+    requestFairnessHostBypass: song.requestFairnessHostBypass,
+  };
+}
+
+export function setSetRequestFairnessSettings(partial = {}) {
+  const next = { ...loadSettings() };
+  for (const key of Object.keys(SET_REQUEST_FAIRNESS_BOUNDS)) {
+    if (partial[key] != null) {
+      next[key] = clampInt(
+        partial[key],
+        next[key] ?? SET_REQUEST_FAIRNESS_DEFAULTS[key],
+        SET_REQUEST_FAIRNESS_BOUNDS[key]
+      );
+    }
+  }
+  if (partial.setRequestFairnessEnabled != null) {
+    next.setRequestFairnessEnabled = !!partial.setRequestFairnessEnabled;
+  }
+  saveSettings(next);
+  return getSetRequestFairnessSettings();
 }
 
 // DJ voice announcements (Home Assistant TTS between sets). Off by default.

@@ -465,6 +465,7 @@ async function getQueueListRaw() {
         ? djPersona.albumArt
         : albumArtUrl(t.AlbumArtUri, coordinator.Host),
       searched: source === "searched",
+      setRequest: source === "searched" ? !!meta?.setRequest : false,
       discovered: source === "discovered",
       moodPick: source === "mood",
       // Decade the track was added under, so badges survive decade swaps.

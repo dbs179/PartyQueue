@@ -708,12 +708,24 @@
                 <span class="autofill-hint">Automatic showcase batches — tune “every N” under Queue</span>
               </span>
             </label>
-            <div class="setting-row booth-same-artist-next">
-              <label class="setting-label" for="same-artist-picker">Next artist set</label>
-              <select id="same-artist-picker" class="setting-input">
-                <option value="">Loading artists…</option>
-              </select>
-              <div class="settings-actions" style="margin-top:0.5rem;gap:0.5rem;display:flex;flex-wrap:wrap;">
+            <div class="booth-same-artist-next">
+              <label class="setting-label" for="same-artist-search">Next artist set</label>
+              <p class="setting-hint booth-same-artist-intro">
+                Search Spotify for any artist, then arm them for the next Random or Never-Ending batch.
+              </p>
+              <div class="booth-same-artist-lookup">
+                <input
+                  id="same-artist-search"
+                  class="setting-input booth-same-artist-select"
+                  type="search"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="Search Spotify artists…"
+                />
+                <ul id="same-artist-results" class="booth-same-artist-results" hidden></ul>
+                <p id="same-artist-selected" class="setting-hint booth-same-artist-selected" hidden></p>
+              </div>
+              <div class="booth-same-artist-actions">
                 <button id="same-artist-arm" type="button" class="pill-btn success">Arm next set</button>
                 <button id="same-artist-clear" type="button" class="pill-btn" hidden>Clear</button>
               </div>
@@ -735,6 +747,27 @@
                 <span class="autofill-hint">Fairness limits skip the host (needs an active PIN session)</span>
               </span>
             </label>
+            <label class="autofill" title="Limit how often each guest can add a 5-song Set Request from search">
+              <input type="checkbox" id="set-set-request-fairness-enabled" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Enable Set Request fairness</span>
+                <span class="autofill-hint">Separate from song requests — default one set per hour</span>
+              </span>
+            </label>
+            <div class="setting-row booth-set-request-hours">
+              <label class="setting-label" for="set-set-request-fairness-hours">Set Request every</label>
+              <input
+                id="set-set-request-fairness-hours"
+                class="setting-input setting-input-num"
+                type="number"
+                min="1"
+                max="24"
+                step="1"
+                value="1"
+              />
+              <span class="setting-hint">hours (per guest)</span>
+            </div>
           </div>
         </div>
         <div class="controls-divider" aria-hidden="true"></div>

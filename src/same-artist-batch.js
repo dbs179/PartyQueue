@@ -19,7 +19,13 @@ const ARM_TTL_MS = 15 * 60 * 1000;
 let setsSinceLastShowcase = 0;
 
 /**
- * @typedef {{ artistKey: string, artistName: string, armedAt: number, expiresAt: number }} SameArtistArm
+ * @typedef {{
+ *   artistKey: string,
+ *   artistName: string,
+ *   spotifyArtistId: string|null,
+ *   armedAt: number,
+ *   expiresAt: number,
+ * }} SameArtistArm
  * @type {SameArtistArm|null}
  */
 let armed = null;
@@ -123,11 +129,18 @@ export function resetSameArtistBatchCountersForTests() {
 }
 
 /**
- * @param {{ artistKey: string, artistName?: string, now?: number, ttlMs?: number }} opts
+ * @param {{
+ *   artistKey: string,
+ *   artistName?: string,
+ *   spotifyArtistId?: string|null,
+ *   now?: number,
+ *   ttlMs?: number,
+ * }} opts
  */
 export function armSameArtistBatch({
   artistKey,
   artistName = "",
+  spotifyArtistId = null,
   now = Date.now(),
   ttlMs = ARM_TTL_MS,
 } = {}) {
@@ -138,10 +151,12 @@ export function armSameArtistBatch({
     throw err;
   }
   const name = String(artistName || artistKey || key).trim() || key;
+  const spotifyId = String(spotifyArtistId || "").trim() || null;
   const ttl = Math.max(60_000, Number(ttlMs) || ARM_TTL_MS);
   armed = {
     artistKey: key,
     artistName: name,
+    spotifyArtistId: spotifyId,
     armedAt: now,
     expiresAt: now + ttl,
   };
@@ -160,6 +175,7 @@ export function peekSameArtistBatch(now = Date.now()) {
   return {
     artistKey: armed.artistKey,
     artistName: armed.artistName,
+    spotifyArtistId: armed.spotifyArtistId || null,
     armedAt: armed.armedAt,
     expiresAt: armed.expiresAt,
   };
@@ -174,6 +190,7 @@ export function consumeSameArtistBatch(now = Date.now()) {
     ? {
         artistKey: had.artistKey,
         artistName: had.artistName,
+        spotifyArtistId: had.spotifyArtistId || null,
       }
     : null;
 }
@@ -189,9 +206,50 @@ export function getSameArtistBatchState(now = Date.now()) {
     armed: !!pending,
     artist: pending?.artistName || null,
     artistKey: pending?.artistKey || null,
+    spotifyArtistId: pending?.spotifyArtistId || null,
     armedAt: pending?.armedAt ?? null,
     expiresAt: pending?.expiresAt ?? null,
   };
+}
+
+/**
+ * Merge library-filtered playlists with Spotify top tracks for a showcase.
+ * Prefers library URIs, then fills from Spotify.
+ * @param {Array<{ tracks?: object[] }>} libraryPlaylists
+ * @param {Array<{ uri?: string, name?: string, artist?: string, explicit?: boolean }>} spotifyTracks
+ * @param {{ artistName?: string, spotifyArtistId?: string|null }} [meta]
+ */
+export function mergeArtistShowcasePlaylists(
+  libraryPlaylists,
+  spotifyTracks,
+  meta = {}
+) {
+  const seen = new Set();
+  const tracks = [];
+  for (const p of Array.isArray(libraryPlaylists) ? libraryPlaylists : []) {
+    for (const t of p.tracks || []) {
+      if (!t?.uri || seen.has(t.uri)) continue;
+      seen.add(t.uri);
+      tracks.push(t);
+    }
+  }
+  for (const t of Array.isArray(spotifyTracks) ? spotifyTracks : []) {
+    if (!t?.uri || seen.has(t.uri)) continue;
+    seen.add(t.uri);
+    tracks.push(t);
+  }
+  if (!tracks.length) return [];
+  const id =
+    meta.spotifyArtistId
+      ? `spotify-artist:${meta.spotifyArtistId}`
+      : `same-artist:${primaryArtist(meta.artistName) || "set"}`;
+  return [
+    {
+      id,
+      name: String(meta.artistName || "Same artist").trim() || "Same artist",
+      tracks,
+    },
+  ];
 }
 
 /**

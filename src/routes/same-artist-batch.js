@@ -1,15 +1,14 @@
-// Same-artist showcase: list pool artists, arm/clear next-set, read state.
+// Same-artist showcase: Spotify artist lookup, arm/clear next-set, read state.
 
 import { asyncHandler } from "../http/async-handler.js";
 import { requireHost } from "../host-auth.js";
-import { loadSettings } from "../settings.js";
 import {
   armSameArtistBatch,
   artistKeyFromName,
-  buildSameArtistPool,
   clearSameArtistBatch,
   getSameArtistBatchState,
 } from "../same-artist-batch.js";
+import { getArtist, searchArtists } from "../spotify.js";
 
 /** @param {import('express').Express} app */
 export function registerSameArtistBatchRoutes(app) {
@@ -21,18 +20,22 @@ export function registerSameArtistBatchRoutes(app) {
     }
   );
 
+  // Spotify artist typeahead for Booth “Next artist set”.
   app.get(
     "/api/same-artist-batch/artists",
     requireHost,
-    asyncHandler(async (_req, res) => {
+    asyncHandler(async (req, res) => {
+      const q = String(req.query.q || "").trim();
+      if (!q) {
+        return res.json({ ok: true, artists: [] });
+      }
       try {
-        const filterExplicit = !!loadSettings().filterExplicit;
-        const { artists, pool } = await buildSameArtistPool({ filterExplicit });
-        res.json({ ok: true, artists, pool });
+        const artists = await searchArtists(q, 10);
+        res.json({ ok: true, artists });
       } catch (err) {
         console.error("[same-artist-batch/artists]", err.message);
         res.status(502).json({
-          error: err.message || "Could not list artists.",
+          error: err.message || "Spotify artist search failed.",
           ...getSameArtistBatchState(),
         });
       }
@@ -44,30 +47,50 @@ export function registerSameArtistBatchRoutes(app) {
     requireHost,
     asyncHandler(async (req, res) => {
       try {
-        const raw = String(req.body?.artist || "").trim();
-        if (!raw) {
+        const artistId = String(req.body?.artistId || "").trim();
+        const raw = String(
+          req.body?.artist || req.body?.name || ""
+        ).trim();
+        if (!artistId && !raw) {
           return res.status(400).json({
-            error: "Pick an artist for the next same-artist set.",
+            error: "Search Spotify and pick an artist for the next set.",
             ...getSameArtistBatchState(),
           });
         }
-        const key = artistKeyFromName(raw);
-        const filterExplicit = !!loadSettings().filterExplicit;
-        const { artists } = await buildSameArtistPool({ filterExplicit });
-        const match =
-          artists.find((a) => a.key === key) ||
-          artists.find(
+
+        let name = raw;
+        let spotifyArtistId = artistId || null;
+
+        // Prefer a resolved Spotify match (id from typeahead, or best search hit).
+        if (!spotifyArtistId) {
+          const hits = await searchArtists(raw, 5);
+          const exact = hits.find(
             (a) => a.name.toLowerCase() === raw.toLowerCase()
           );
-        if (!match) {
-          return res.status(400).json({
-            error: `"${raw}" is not in the current Mood/Genre pool.`,
-            ...getSameArtistBatchState(),
-          });
+          const match = exact || hits[0];
+          if (!match) {
+            return res.status(400).json({
+              error: `No Spotify artist found for “${raw}”.`,
+              ...getSameArtistBatchState(),
+            });
+          }
+          spotifyArtistId = match.id;
+          name = match.name;
+        } else if (!name) {
+          const resolved = await getArtist(spotifyArtistId);
+          if (!resolved) {
+            return res.status(400).json({
+              error: "Unknown Spotify artist.",
+              ...getSameArtistBatchState(),
+            });
+          }
+          name = resolved.name;
         }
+
         const state = armSameArtistBatch({
-          artistKey: match.key,
-          artistName: match.name,
+          artistKey: artistKeyFromName(name),
+          artistName: name,
+          spotifyArtistId,
         });
         res.json({ ok: true, ...state });
       } catch (err) {

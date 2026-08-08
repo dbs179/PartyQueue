@@ -361,10 +361,15 @@ const artistWindowInput = document.getElementById("set-artist-window");
 const artistCapInput = document.getElementById("set-artist-cap");
 const sameArtistBatchInput = document.getElementById("set-same-artist-batch");
 const sameArtistEveryInput = document.getElementById("set-same-artist-every");
-const sameArtistPicker = document.getElementById("same-artist-picker");
+const sameArtistSearch = document.getElementById("same-artist-search");
+const sameArtistResults = document.getElementById("same-artist-results");
+const sameArtistSelectedEl = document.getElementById("same-artist-selected");
 const sameArtistArmBtn = document.getElementById("same-artist-arm");
 const sameArtistClearBtn = document.getElementById("same-artist-clear");
 const sameArtistArmedHint = document.getElementById("same-artist-armed-hint");
+/** @type {{ id: string, name: string }|null} */
+let sameArtistPick = null;
+let sameArtistSearchTimer = null;
 const strictFillInput = document.getElementById("set-strict-fill");
 const settingsSaveBtn = document.getElementById("settings-save");
 const settingsResetBtn = document.getElementById("settings-reset");
@@ -396,6 +401,12 @@ const requestFairnessWindowInput = document.getElementById(
 );
 const requestFairnessHostBypassInput = document.getElementById(
   "set-request-fairness-host-bypass"
+);
+const setRequestFairnessEnabledInput = document.getElementById(
+  "set-set-request-fairness-enabled"
+);
+const setRequestFairnessHoursInput = document.getElementById(
+  "set-set-request-fairness-hours"
 );
 const randomMoodEveryInput = document.getElementById("set-random-mood-every");
 const randomDecadeEveryInput = document.getElementById(
@@ -640,6 +651,18 @@ function fillSettings(s) {
   if (s.requestFairnessHostBypass != null && requestFairnessHostBypassInput) {
     requestFairnessHostBypassInput.checked = !!s.requestFairnessHostBypass;
   }
+  if (
+    s.setRequestFairnessEnabled != null &&
+    setRequestFairnessEnabledInput
+  ) {
+    setRequestFairnessEnabledInput.checked = !!s.setRequestFairnessEnabled;
+  }
+  if (
+    s.setRequestFairnessWindowHours != null &&
+    setRequestFairnessHoursInput
+  ) {
+    setRequestFairnessHoursInput.value = s.setRequestFairnessWindowHours;
+  }
   if (s.endlessQueueCount != null && endlessCountInput) {
     endlessCountInput.value = s.endlessQueueCount;
     if (autofillHint) {
@@ -684,6 +707,8 @@ async function loadSettings() {
     const res = await hostFetch("/api/settings");
     if (!res.ok) return;
     fillSettings(await res.json());
+    // Artist picker needs a host session — refresh after unlock/hydrate.
+    void loadSameArtistPicker();
   } catch {
     /* leave inputs blank on transient errors */
   }
@@ -730,6 +755,10 @@ function currentSettingsPayload() {
     requestFairnessRollingMax: Number(requestFairnessRollingMaxInput?.value),
     requestFairnessWindowMinutes: Number(requestFairnessWindowInput?.value),
     requestFairnessHostBypass: !!requestFairnessHostBypassInput?.checked,
+    setRequestFairnessEnabled: !!setRequestFairnessEnabledInput?.checked,
+    setRequestFairnessWindowHours: Number(
+      setRequestFairnessHoursInput?.value
+    ),
     randomMoodEverySets: Number(randomMoodEveryInput?.value),
     randomDecadeEverySets: Number(randomDecadeEveryInput?.value),
   };
@@ -833,6 +862,17 @@ sameArtistBatchInput?.addEventListener("change", () => {
   saveSettings({ sameArtistBatchEnabled: !!sameArtistBatchInput.checked });
 });
 
+function paintSameArtistSelected() {
+  if (!sameArtistSelectedEl) return;
+  if (sameArtistPick?.name) {
+    sameArtistSelectedEl.hidden = false;
+    sameArtistSelectedEl.textContent = `Selected: ${sameArtistPick.name}`;
+  } else {
+    sameArtistSelectedEl.hidden = true;
+    sameArtistSelectedEl.textContent = "";
+  }
+}
+
 function paintSameArtistArmed(state) {
   if (!sameArtistArmedHint || !sameArtistClearBtn) return;
   if (state?.armed && state.artist) {
@@ -846,47 +886,124 @@ function paintSameArtistArmed(state) {
   }
 }
 
-async function loadSameArtistPicker() {
-  if (!sameArtistPicker) return;
+function clearSameArtistResults() {
+  if (!sameArtistResults) return;
+  sameArtistResults.innerHTML = "";
+  sameArtistResults.hidden = true;
+}
+
+function paintSameArtistResults(artists) {
+  if (!sameArtistResults) return;
+  const esc = (v) =>
+    String(v ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/"/g, "&quot;");
+  const list = Array.isArray(artists) ? artists : [];
+  if (!list.length) {
+    sameArtistResults.innerHTML =
+      `<li><button type="button" disabled>No artists found</button></li>`;
+    sameArtistResults.hidden = false;
+    return;
+  }
+  sameArtistResults.innerHTML = list
+    .map((a) => {
+      const img = a.image
+        ? `<img src="${esc(a.image)}" alt="" width="32" height="32" loading="lazy" />`
+        : `<span class="booth-same-artist-avatar" aria-hidden="true"></span>`;
+      return `<li><button type="button" data-artist-id="${esc(a.id)}" data-artist-name="${esc(a.name)}">${img}<span>${esc(a.name)}</span></button></li>`;
+    })
+    .join("");
+  sameArtistResults.hidden = false;
+}
+
+async function searchSameArtistLookup(query) {
+  const q = String(query || "").trim();
+  if (!q) {
+    clearSameArtistResults();
+    return;
+  }
   try {
-    const [artistsRes, stateRes] = await Promise.all([
-      hostFetch("/api/same-artist-batch/artists"),
-      hostFetch("/api/same-artist-batch"),
-    ]);
-    const artistsData = await artistsRes.json().catch(() => ({}));
-    const stateData = await stateRes.json().catch(() => ({}));
-    if (!artistsRes.ok) {
-      sameArtistPicker.innerHTML =
-        `<option value="">${artistsData.error || "Could not load artists"}</option>`;
-      return;
+    const res = await hostFetch(
+      `/api/same-artist-batch/artists?q=${encodeURIComponent(q)}`
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 401) {
+        showToast("Unlock the DJ Booth with your Host PIN to search artists.", true);
+        clearSameArtistResults();
+        return;
+      }
+      throw new Error(data.error || "Artist search failed.");
     }
-    const artists = Array.isArray(artistsData.artists) ? artistsData.artists : [];
-    const armedKey = stateData.artistKey || "";
-    const esc = (v) =>
-      String(v ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/"/g, "&quot;");
-    sameArtistPicker.innerHTML =
-      `<option value="">Select an artist…</option>` +
-      artists
-        .map(
-          (a) =>
-            `<option value="${esc(a.key)}"${
-              a.key === armedKey ? " selected" : ""
-            }>${esc(a.name)} (${Number(a.trackCount) || 0})</option>`
-        )
-        .join("");
-    paintSameArtistArmed(stateData);
+    paintSameArtistResults(data.artists || []);
   } catch (err) {
-    sameArtistPicker.innerHTML = `<option value="">${err.message}</option>`;
+    showToast(err.message, true);
+    clearSameArtistResults();
   }
 }
 
+async function loadSameArtistPicker() {
+  try {
+    const res = await hostFetch("/api/same-artist-batch");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 401) {
+        paintSameArtistArmed({ armed: false });
+        return;
+      }
+      throw new Error(data.error || "Could not load next artist set.");
+    }
+    paintSameArtistArmed(data);
+  } catch (err) {
+    console.warn("[same-artist]", err.message);
+  }
+}
+
+sameArtistSearch?.addEventListener("input", () => {
+  const q = sameArtistSearch.value.trim();
+  clearTimeout(sameArtistSearchTimer);
+  if (!q) {
+    clearSameArtistResults();
+    return;
+  }
+  sameArtistSearchTimer = setTimeout(() => {
+    void searchSameArtistLookup(q);
+  }, 300);
+});
+
+sameArtistResults?.addEventListener("click", (ev) => {
+  const btn = ev.target?.closest?.("button[data-artist-id]");
+  if (!btn) return;
+  sameArtistPick = {
+    id: btn.getAttribute("data-artist-id") || "",
+    name: btn.getAttribute("data-artist-name") || "",
+  };
+  if (sameArtistSearch) sameArtistSearch.value = sameArtistPick.name;
+  paintSameArtistSelected();
+  clearSameArtistResults();
+});
+
 sameArtistArmBtn?.addEventListener("click", async () => {
-  const artist = sameArtistPicker?.value;
-  if (!artist) {
-    showToast("Pick an artist first.", true);
+  if (!sameArtistPick?.id) {
+    const typed = sameArtistSearch?.value?.trim() || "";
+    if (typed) {
+      // Soft resolve: search then take best match if they typed but didn't click.
+      await searchSameArtistLookup(typed);
+      const first = sameArtistResults?.querySelector?.("button[data-artist-id]");
+      if (first) {
+        sameArtistPick = {
+          id: first.getAttribute("data-artist-id") || "",
+          name: first.getAttribute("data-artist-name") || typed,
+        };
+        paintSameArtistSelected();
+        clearSameArtistResults();
+      }
+    }
+  }
+  if (!sameArtistPick?.id) {
+    showToast("Search Spotify and pick an artist, then Arm next set.", true);
+    sameArtistSearch?.focus();
     return;
   }
   sameArtistArmBtn.disabled = true;
@@ -894,7 +1011,10 @@ sameArtistArmBtn?.addEventListener("click", async () => {
     const res = await hostFetch("/api/same-artist-batch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ artist }),
+      body: JSON.stringify({
+        artistId: sameArtistPick.id,
+        artist: sameArtistPick.name,
+      }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Could not arm set.");
@@ -912,18 +1032,16 @@ sameArtistClearBtn?.addEventListener("click", async () => {
     const res = await hostFetch("/api/same-artist-batch", { method: "DELETE" });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Could not clear.");
+    sameArtistPick = null;
+    paintSameArtistSelected();
+    if (sameArtistSearch) sameArtistSearch.value = "";
+    clearSameArtistResults();
     paintSameArtistArmed(data);
     showToast("Cleared next artist set");
   } catch (err) {
     showToast(err.message, true);
   }
 });
-
-// Refresh the picker when opening Booth (pool follows Mood/Genre).
-toolbarBoothBtn?.addEventListener("click", () => {
-  void loadSameArtistPicker();
-});
-void loadSameArtistPicker();
 
 // Host bypass lives on the Booth page now, away from the Queue panel's Save
 // button, so it saves on flip like the other Booth switches.
@@ -942,6 +1060,25 @@ requestFairnessEnabledInput?.addEventListener("change", () => {
         : "Request fairness disabled",
     }
   );
+});
+
+setRequestFairnessEnabledInput?.addEventListener("change", () => {
+  saveSettings(
+    {
+      setRequestFairnessEnabled: !!setRequestFairnessEnabledInput.checked,
+    },
+    {
+      toastMessage: setRequestFairnessEnabledInput.checked
+        ? "Set Request fairness enabled"
+        : "Set Request fairness disabled",
+    }
+  );
+});
+
+setRequestFairnessHoursInput?.addEventListener("change", () => {
+  saveSettings({
+    setRequestFairnessWindowHours: Number(setRequestFairnessHoursInput.value),
+  });
 });
 
 // The explicit filter is an independent switch (like Never-Ending Queue): it
@@ -1711,7 +1848,10 @@ function showView(name) {
   }
   lyricsUi.onViewChange({ target, previous: previousView });
   if (!hostLocked) {
-    if (target === "booth") updateBoothHubSummaries();
+    if (target === "booth") {
+      updateBoothHubSummaries();
+      void loadSameArtistPicker();
+    }
     if (target === "settings-dj") updateDjHubSummaries();
     if (target === "settings-dj-advanced") void loadDjEffectivePrompt();
     // Booth holds most host toggles; hydrate them the same way Settings does

@@ -148,7 +148,7 @@ export function createSearchUi(els, deps) {
         if (statusEl) statusEl.textContent = data.error || "Search failed.";
         return;
       }
-      renderResults(data.tracks || []);
+      renderResults(data.tracks || [], data.artists || [], q);
     } catch {
       if (q !== currentQuery) return;
       if (resultsEl) resultsEl.innerHTML = "";
@@ -158,10 +158,52 @@ export function createSearchUi(els, deps) {
     }
   }
 
-  function renderResults(tracks) {
+  function pickSetRequestArtist(artists, query) {
+    const list = Array.isArray(artists) ? artists : [];
+    if (!list.length) return null;
+    const needle = String(query || "").trim().toLowerCase();
+    const exact = list.find((a) => a?.name?.toLowerCase() === needle);
+    if (exact?.id) return exact;
+    // Strong enough: top hit when the query looks like a name (not a song title
+    // with " - " / " by "), and popularity is decent or name shares the query.
+    const top = list[0];
+    if (!top?.id || !top?.name) return null;
+    if (/[-–—]| by /i.test(query)) return null;
+    const name = top.name.toLowerCase();
+    if (needle.length >= 2 && (name === needle || name.includes(needle) || needle.includes(name))) {
+      return top;
+    }
+    return null;
+  }
+
+  function renderResults(tracks, artists, query) {
     if (!resultsEl) return;
     resultsEl.innerHTML = "";
-    if (statusEl) statusEl.textContent = tracks.length ? "" : "No songs found.";
+    const setArtist = pickSetRequestArtist(artists, query);
+    if (statusEl) {
+      statusEl.textContent =
+        tracks.length || setArtist ? "" : "No songs found.";
+    }
+
+    if (setArtist) {
+      const li = document.createElement("li");
+      li.className = "track set-request-row";
+      li.dataset.artistId = setArtist.id;
+      const art = setArtist.image
+        ? `<img src="${escapeHtml(setArtist.image)}" alt="" loading="lazy" />`
+        : `<div class="art-fallback"></div>`;
+      li.innerHTML = `
+      ${art}
+      <div class="meta">
+        <div class="title"><span class="set-request-kicker">Artist</span>${escapeHtml(setArtist.name)}</div>
+        <div class="artist">Add 5 songs as a Set Request</div>
+      </div>
+      <button class="add-btn set-request-btn" type="button">Set Request</button>
+    `;
+      const btn = li.querySelector(".set-request-btn");
+      btn.addEventListener("click", () => addSetRequest(setArtist, btn));
+      resultsEl.appendChild(li);
+    }
 
     for (const track of tracks) {
       const li = document.createElement("li");
@@ -188,6 +230,64 @@ export function createSearchUi(els, deps) {
     }
 
     updateResultsQueuedState();
+  }
+
+  async function addSetRequest(artist, btn) {
+    const locks = getPartyLocks() || {};
+    if (locks.partyOver) {
+      showToast(partyOverMessage, true);
+      return;
+    }
+    if (locks.requestsPaused) {
+      showToast("Requests are paused right now.", true);
+      return;
+    }
+    const displayName = await ensureDisplayName({ required: true });
+    if (!displayName) {
+      showToast("Enter your name before requesting a set.", true);
+      return;
+    }
+    const ok = await confirmModal(
+      `Add a Set Request of 5 songs by ${artist.name}?`,
+      "Set Request",
+      "Cancel"
+    );
+    if (!ok) return;
+
+    btn.disabled = true;
+    const prev = btn.textContent;
+    btn.textContent = "Adding…";
+    try {
+      const res = await fetchFn("/api/queue/set-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          artistId: artist.id,
+          artist: artist.name,
+          ...guestIdentityPayload(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not add Set Request.");
+      const n = Number(data.added) || 0;
+      showToast(
+        n
+          ? `Set Request: ${n} song${n === 1 ? "" : "s"} by ${data.artist || artist.name}`
+          : `Set Request added for ${data.artist || artist.name}`
+      );
+      btn.textContent = "Added";
+      refreshSonos();
+      if (getCurrentView() === "stats") loadStats();
+    } catch (err) {
+      showToast(err.message, true);
+      btn.textContent = prev;
+      btn.disabled = false;
+      return;
+    }
+    setTimeout(() => {
+      btn.textContent = prev;
+      btn.disabled = false;
+    }, 2000);
   }
 
   async function addToQueue(track, btn) {

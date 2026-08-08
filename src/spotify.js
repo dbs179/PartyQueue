@@ -725,6 +725,113 @@ export async function searchTracks(query, limit = 20) {
   return tracks;
 }
 
+// Artist lookup for Booth “next artist set” — any Spotify artist, not just
+// names that appear in the host’s playlist pool.
+const ARTIST_SEARCH_CACHE_TTL_MS = 60_000;
+const ARTIST_SEARCH_CACHE_MAX = 100;
+const artistSearchCache = new Map(); // key -> { at, artists }
+
+export async function searchArtists(query, limit = 10) {
+  if (!query || !query.trim()) return [];
+
+  const market = getSpotifyAppCredentials().market;
+  const capped = Math.max(1, Math.min(20, Math.floor(Number(limit) || 10)));
+  const key = `${market}|${capped}|${query.trim().toLowerCase()}`;
+
+  const hit = artistSearchCache.get(key);
+  if (hit && Date.now() - hit.at < ARTIST_SEARCH_CACHE_TTL_MS) {
+    artistSearchCache.delete(key);
+    artistSearchCache.set(key, hit);
+    return hit.artists;
+  }
+
+  const token = await getAccessToken();
+  const params = new URLSearchParams({
+    q: query,
+    type: "artist",
+    limit: String(capped),
+    market,
+  });
+  const res = await spotifyApiFetch(`${SEARCH_URL}?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw spotifyHttpError("artist search", res.status);
+  }
+  const data = await res.json();
+  const artists = (data.artists?.items ?? [])
+    .filter((a) => a?.id && a?.name)
+    .map((a) => ({
+      id: String(a.id),
+      name: String(a.name),
+      image: pickImage(a.images),
+      popularity: Number(a.popularity) || 0,
+    }));
+
+  artistSearchCache.set(key, { at: Date.now(), artists });
+  if (artistSearchCache.size > ARTIST_SEARCH_CACHE_MAX) {
+    artistSearchCache.delete(artistSearchCache.keys().next().value);
+  }
+  return artists;
+}
+
+/** Resolve a Spotify artist id to a display name (client-credentials). */
+export async function getArtist(artistId) {
+  const id = String(artistId || "").trim();
+  if (!id) return null;
+  const token = await getAccessToken();
+  const res = await spotifyApiFetch(
+    `${API_BASE}/artists/${encodeURIComponent(id)}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) {
+    throw spotifyHttpError("artist", res.status);
+  }
+  const a = await res.json();
+  if (!a?.id || !a?.name) return null;
+  return {
+    id: String(a.id),
+    name: String(a.name),
+    image: pickImage(a.images),
+    popularity: Number(a.popularity) || 0,
+  };
+}
+
+/** Top tracks for a Spotify artist (client-credentials; market-scoped). */
+export async function getArtistTopTracks(artistId, { filterExplicit = false } = {}) {
+  const id = String(artistId || "").trim();
+  if (!id) return [];
+
+  const market = getSpotifyAppCredentials().market;
+  const token = await getAccessToken();
+  const res = await spotifyApiFetch(
+    `${API_BASE}/artists/${encodeURIComponent(id)}/top-tracks?market=${encodeURIComponent(market)}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) {
+    throw spotifyHttpError("artist top tracks", res.status);
+  }
+  const data = await res.json();
+  let tracks = (data.tracks ?? [])
+    .filter(
+      (t) =>
+        t &&
+        typeof t.uri === "string" &&
+        t.uri.startsWith("spotify:track:")
+    )
+    .map((t) => ({
+      uri: t.uri,
+      name: t.name ?? "",
+      artist: t.artists?.map((a) => a.name).join(", ") ?? "",
+      explicit: !!t.explicit,
+      year: releaseYear(t.album?.release_date),
+    }));
+  if (filterExplicit) {
+    tracks = tracks.filter((t) => !t.explicit);
+  }
+  return tracks;
+}
+
 // One raw search page for era Moods fallback sourcing. Unlike searchTracks
 // this exposes offset paging, track ids, and release year, and skips the
 // guest-search cache (mood candidates are cached at a higher level). Filter

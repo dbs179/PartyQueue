@@ -70,6 +70,8 @@ export {
   pauseQueueTrim,
   trimPlayedTracks,
   addTrackToQueue,
+  addSetRequestToQueue,
+  SET_REQUEST_SIZE,
   addPlaylistToQueue,
   enqueueHttpAudio,
   removeQueueTrack,

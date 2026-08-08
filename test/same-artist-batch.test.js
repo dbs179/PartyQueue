@@ -12,6 +12,7 @@ import {
   getSetsSinceLastSameArtistBatch,
   resetSameArtistBatchCountersForTests,
   getSameArtistBatchState,
+  mergeArtistShowcasePlaylists,
 } from "../src/same-artist-batch.js";
 import { allowSameArtistBatch } from "../src/sampler.js";
 
@@ -70,14 +71,37 @@ test("pickShowcaseArtistFromPlaylists prefers artists with enough tracks", () =>
 
 test("host arm wins peek and consume clears it", () => {
   resetSameArtistBatchCountersForTests();
-  armSameArtistBatch({ artistKey: "prince", artistName: "Prince" });
+  armSameArtistBatch({
+    artistKey: "prince",
+    artistName: "Prince",
+    spotifyArtistId: "spotify-prince",
+  });
   const peek = peekSameArtistBatch();
   assert.equal(peek.artistKey, "prince");
+  assert.equal(peek.spotifyArtistId, "spotify-prince");
   assert.equal(getSameArtistBatchState().armed, true);
   const used = consumeSameArtistBatch();
   assert.equal(used.artistName, "Prince");
+  assert.equal(used.spotifyArtistId, "spotify-prince");
   assert.equal(peekSameArtistBatch(), null);
   clearSameArtistBatch();
+});
+
+test("mergeArtistShowcasePlaylists prefers library then Spotify", () => {
+  const merged = mergeArtistShowcasePlaylists(
+    [{ tracks: [{ uri: "spotify:track:a", name: "Lib" }] }],
+    [
+      { uri: "spotify:track:a", name: "Dup" },
+      { uri: "spotify:track:b", name: "Top" },
+    ],
+    { artistName: "Prince", spotifyArtistId: "abc" }
+  );
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].id, "spotify-artist:abc");
+  assert.deepEqual(
+    merged[0].tracks.map((t) => t.uri),
+    ["spotify:track:a", "spotify:track:b"]
+  );
 });
 
 test("counter advances for normal sets and resets on showcase", () => {

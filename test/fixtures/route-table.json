@@ -85,6 +85,7 @@
   "POST /api/queue/random :: destructiveLimit > <anonymous>",
   "POST /api/queue/remove :: destructiveLimit > requireHostControls > <anonymous>",
   "POST /api/queue/reorder :: destructiveLimit > requireHostControls > <anonymous>",
+  "POST /api/queue/set-request :: queueBurstLimit > queueSustainedLimit > <anonymous>",
   "POST /api/reactions :: rateLimitMiddleware > <anonymous>",
   "POST /api/restart :: requireHostStrict > destructiveLimit > <anonymous>",
   "POST /api/same-artist-batch :: requireHost > <anonymous>",
