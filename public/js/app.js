@@ -66,6 +66,11 @@ import {
   buildDjIconGalleryItems,
   mountThumbGallery,
 } from "./asset-gallery.js";
+import {
+  nowPlayingOriginLabel,
+  displayOriginLabel,
+} from "./now-playing-origin.js";
+import { buildAddToastMessage } from "./add-toast.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -5040,42 +5045,6 @@ async function addToQueue(track, btn) {
   }
 }
 
-/** Build add/move toast; mention when a DJ pad sits ahead of the song. */
-async function buildAddToastMessage(track, data) {
-  const pos = Number(data.queuePosition);
-  let afterDj = false;
-  try {
-    const res = await fetch("/api/queue/list");
-    if (res.ok) {
-      const q = await res.json();
-      const tracks = Array.isArray(q) ? q : q?.tracks || [];
-      const id = trackIdFromUri(track.uri);
-      const idx = id
-        ? tracks.findIndex((t) => trackIdFromUri(t.uri) === id)
-        : -1;
-      if (idx > 0) {
-        afterDj = tracks.slice(0, idx).some((t) => t.djVoice);
-      } else if (idx < 0 && Number.isFinite(pos) && pos > 1) {
-        afterDj = tracks.slice(0, pos - 1).some((t) => t.djVoice);
-      }
-    }
-  } catch {
-    /* ignore — toast still works without the DJ hint */
-  }
-  const djSuffix = afterDj ? " \u00b7 after DJ" : "";
-  if (data.started) {
-    return `Added "${track.name}" \u2014 now playing`;
-  }
-  if (data.promoted) {
-    return Number.isFinite(pos) && pos > 0
-      ? `Moved "${track.name}" up \u2014 you\u2019re #${pos}${djSuffix}`
-      : `Moved "${track.name}" up \u2014 it was already queued`;
-  }
-  return Number.isFinite(pos) && pos > 0
-    ? `Added \u2014 you\u2019re #${pos}${djSuffix}`
-    : `Added "${track.name}" to the queue`;
-}
-
 function openDedicationModal(track) {
   if (!dedicationOverlay || !dedicationInput) return;
   dedicationError.hidden = true;
@@ -5844,50 +5813,6 @@ window.addEventListener("popstate", () => {
   if (npOverlayOpen) closeNpOverlay({ fromPopstate: true });
 });
 
-function nowPlayingOriginLabel(np, hasTrack) {
-  if (!hasTrack || !np || np.djVoice) return null;
-  const origin = np.origin || (np.discovered ? "discovered" : np.searched ? "searched" : null);
-  if (origin === "discovered") {
-    return {
-      text: "Discover",
-      title: "Added by Discover (similar to your music)",
-      cls: "origin-discovered",
-    };
-  }
-  if (origin === "searched") {
-    const dedication = sanitizeDedication(np.dedication || "");
-    const requester = sanitizeDisplayName(np.requestedBy || "");
-    if (dedication) {
-      const label = dedicationDisplayLabel(dedication, requester);
-      return {
-        text: label,
-        title: label,
-        cls: "origin-searched",
-      };
-    }
-    if (requester) {
-      return {
-        text: `Requested · ${requester}`,
-        title: `Requested by ${requester}`,
-        cls: "origin-searched",
-      };
-    }
-    return {
-      text: "Requested",
-      title: "A guest searched and added this song",
-      cls: "origin-searched",
-    };
-  }
-  if (origin === "filler") {
-    return {
-      text: "Random",
-      title: "Added by Random / Never-Ending",
-      cls: "origin-random",
-    };
-  }
-  return null;
-}
-
 function paintNpReactions(data) {
   npReactionCounts = Object.fromEntries(
     NP_REACTION_KINDS.map((k) => [k, Math.max(0, Number(data?.[k]) || 0)])
@@ -5990,7 +5915,9 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
     // Same "how it got here" tag as the Up Next rows; DJ clips aren't songs.
     const hide = !!np.djVoice || stateUpdating;
     displayOriginPill.hidden = hide;
-    if (!hide) displayOriginPill.textContent = displayOriginLabel(np);
+    if (!hide) {
+      displayOriginPill.textContent = displayOriginLabel(np, activeEraMoodId());
+    }
   }
 }
 
@@ -6263,24 +6190,6 @@ async function loadNowPlaying() {
   }
 }
 
-/**
- * "How it got here" label shared by the Party Display's Now Playing pill and
- * Up Next rows: dedication > requested > era hit > Discover > Random. Works
- * for both queue tracks and the Now Playing payload (same origin fields).
- */
-function displayOriginLabel(track) {
-  const requester = sanitizeDisplayName(track.requestedBy || "");
-  const dedication = sanitizeDedication(track.dedication || "");
-  if (dedication) return dedicationDisplayLabel(dedication, requester);
-  if (track.searched) return requester ? `Requested by ${requester}` : "Requested";
-  if (track.moodPick) {
-    const era = trackEraLabel(track);
-    return era ? `${era} Hit` : "Era Hit";
-  }
-  if (track.discovered) return "Discover";
-  return "Random";
-}
-
 function renderPartyDisplayQueue(tracks) {
   if (!displayQueue || !displayQueueEmpty || !displayQueueCount) return;
   // DJ announce rows stay in the list (same as the main page's Up Next) so
@@ -6314,7 +6223,7 @@ function renderPartyDisplayQueue(tracks) {
     if (!track.djVoice) {
       const source = document.createElement("span");
       source.className = "party-display-queue-source";
-      source.textContent = displayOriginLabel(track);
+      source.textContent = displayOriginLabel(track, activeEraMoodId());
       meta.appendChild(source);
     }
 
