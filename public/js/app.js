@@ -25,7 +25,6 @@ import {
   serverPlaybackPosition,
 } from "./now-playing-utils.js";
 import {
-  formatSuggestionWhen,
   escapeHtml,
 } from "./format.js";
 import {
@@ -71,6 +70,22 @@ import {
   displayOriginLabel,
 } from "./now-playing-origin.js";
 import { buildAddToastMessage } from "./add-toast.js";
+import {
+  SUGGESTION_TEXT_MAX,
+  wireSuggestionCharCount,
+  filterSuggestions,
+  suggestionsCountLabel,
+  suggestionsEmptyMessage,
+  suggestionRowHtml,
+} from "./suggestions.js";
+import {
+  paintStatsReactionList,
+  statRows,
+  statsSummaryCardsHtml,
+  dedicationsHtml,
+  karaokeRowsHtml,
+  statsEmptyMessage,
+} from "./stats-ui.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -3014,18 +3029,14 @@ const suggestionCharCount = document.getElementById("suggestion-count");
 const suggestionsList = document.getElementById("suggestions-list");
 const suggestionsEmpty = document.getElementById("suggestions-empty");
 const suggestionsCountEl = document.getElementById("suggestions-count");
-const SUGGESTION_TEXT_MAX = 280;
 let suggestionsCache = [];
 let suggestionsFilter = "open";
 
-function syncSuggestionCharCount() {
-  if (!suggestionCharCount || !suggestionText) return;
-  const n = suggestionText.value.length;
-  suggestionCharCount.textContent = `${n} / ${SUGGESTION_TEXT_MAX}`;
-}
-
-suggestionText?.addEventListener("input", syncSuggestionCharCount);
-syncSuggestionCharCount();
+const syncSuggestionCharCount = wireSuggestionCharCount(
+  suggestionText,
+  suggestionCharCount,
+  SUGGESTION_TEXT_MAX
+);
 
 suggestionSubmit?.addEventListener("click", async () => {
   const displayName = await ensureDisplayName();
@@ -3060,41 +3071,20 @@ suggestionSubmit?.addEventListener("click", async () => {
 function renderSuggestions() {
   if (!suggestionsList) return;
   const all = Array.isArray(suggestionsCache) ? suggestionsCache : [];
-  const filtered =
-    suggestionsFilter === "open"
-      ? all.filter((s) => !s.done)
-      : suggestionsFilter === "done"
-        ? all.filter((s) => s.done)
-        : all;
-  const openCount = all.filter((s) => !s.done).length;
+  const filtered = filterSuggestions(all, suggestionsFilter);
   if (suggestionsCountEl) {
-    suggestionsCountEl.textContent = all.length
-      ? `(${openCount} open · ${all.length})`
-      : "";
+    suggestionsCountEl.textContent = suggestionsCountLabel(all);
   }
   suggestionsList.innerHTML = "";
   if (suggestionsEmpty) {
     suggestionsEmpty.hidden = filtered.length > 0;
-    suggestionsEmpty.textContent =
-      suggestionsFilter === "done"
-        ? "No implemented suggestions yet."
-        : suggestionsFilter === "open"
-          ? "No open suggestions — inbox zero."
-          : "No suggestions yet.";
+    suggestionsEmpty.textContent = suggestionsEmptyMessage(suggestionsFilter);
   }
   for (const s of filtered) {
     const li = document.createElement("li");
     li.className = "track track-noart suggestion-row" + (s.done ? " done" : "");
     li.dataset.id = s.id;
-    const who = sanitizeDisplayName(s.requestedBy || "") || "Guest";
-    const when = formatSuggestionWhen(s.ts);
-    li.innerHTML = `
-      <input type="checkbox" class="suggestion-check" ${s.done ? "checked" : ""} title="Mark implemented" aria-label="Mark implemented" />
-      <div class="suggestion-meta">
-        <div class="suggestion-text">${escapeHtml(s.text || "")}</div>
-        <div class="suggestion-byline">${escapeHtml(who)}${when ? ` · ${escapeHtml(when)}` : ""}</div>
-      </div>
-    `;
+    li.innerHTML = suggestionRowHtml(s);
     const box = li.querySelector(".suggestion-check");
     box.addEventListener("change", () => toggleSuggestionDone(s.id, box.checked, box));
     suggestionsList.appendChild(li);
@@ -3180,81 +3170,6 @@ const statsWinBtns = document.querySelectorAll("#stats-box .stats-win-btn");
 let statsData = null;
 let statsWindow = "tonight";
 
-const REACTION_EMOJI = {
-  up: "\u{1F44D}",
-  down: "\u{1F44E}",
-  heart: "\u2764\uFE0F",
-  fire: "\u{1F525}",
-  laugh: "\u{1F602}",
-  vomit: "\u{1F92E}",
-  party: "\u{1F389}",
-  mic: "\u{1F3A4}",
-};
-
-function paintStatsReactionList(wrap, listEl, items, { byPrefix = "" } = {}) {
-  if (!wrap || !listEl) return;
-  const rows = Array.isArray(items) ? items : [];
-  if (!rows.length) {
-    wrap.hidden = true;
-    listEl.innerHTML = "";
-    return;
-  }
-  wrap.hidden = false;
-  listEl.innerHTML = rows
-    .map((it, i) => {
-      const main = escapeHtml(it.name || "Unknown");
-      const artist = it.artist
-        ? `<span class="stats-sub">${escapeHtml(it.artist)}</span>`
-        : "";
-      const groups = (Array.isArray(it.reactions) ? it.reactions : [])
-        .map((r) => {
-          const emoji = REACTION_EMOJI[r.kind] || r.kind;
-          const who = formatNameList(r.by);
-          return who ? `${emoji} ${escapeHtml(who)}` : "";
-        })
-        .filter(Boolean)
-        .join(" \u00b7 ");
-      const whoLine =
-        !groups && byPrefix
-          ? (() => {
-              const who = formatNameList(it.by);
-              return who
-                ? `<span class="stats-sub">${escapeHtml(byPrefix)} ${escapeHtml(who)}</span>`
-                : "";
-            })()
-          : groups
-            ? `<span class="stats-sub">${groups}</span>`
-            : "";
-      return `<li class="stats-row"><span class="stats-rank">${i + 1}</span><span class="stats-name">${main}${artist}${whoLine}</span><span class="stats-count">${it.count}\u00d7</span></li>`;
-    })
-    .join("");
-}
-
-function statRows(items, primaryKey) {
-  return (Array.isArray(items) ? items : [])
-    .map((it, i) => {
-      const main =
-        primaryKey === "song"
-          ? escapeHtml(it.name || "Unknown")
-          : primaryKey === "requester"
-            ? escapeHtml(it.name || "Guest")
-            : escapeHtml(it.artist);
-      const sub =
-        primaryKey === "song" && it.artist
-          ? `<span class="stats-sub">${escapeHtml(it.artist)}</span>`
-          : "";
-      return `<li class="stats-row"><span class="stats-rank">${i + 1}</span><span class="stats-name">${main}${sub}</span><span class="stats-count">${it.count}\u00d7</span></li>`;
-    })
-    .join("");
-}
-
-function formatNameList(names) {
-  return (Array.isArray(names) ? names : [])
-    .map((n) => sanitizeDisplayName(n) || "Guest")
-    .filter(Boolean)
-    .join(", ");
-}
-
 function renderStats() {
   if (!statsData) return;
   const s = statsData[statsWindow] || {
@@ -3280,22 +3195,11 @@ function renderStats() {
     !partyMusic.length &&
     !mostHated.length;
   statsEmpty.hidden = !empty;
-  statsEmpty.textContent =
-    statsWindow === "tonight"
-      ? "No requests yet tonight \u2014 search and add a song to get the party started."
-      : "No requests yet \u2014 search and add a song to get the party started.";
+  statsEmpty.textContent = statsEmptyMessage(statsWindow);
   statsBody.hidden = empty;
   if (empty) return;
 
-  const topSong = s.topSongs?.[0];
-  const topArtist = s.topArtists?.[0];
-  const topRequester = s.topRequesters?.[0];
-  statsCards.innerHTML = `
-    <div class="stat-card"><div class="stat-num">${s.total || 0}</div><div class="stat-cap">requests</div></div>
-    <div class="stat-card"><div class="stat-lead">${topSong ? escapeHtml(topSong.name || "Unknown") : "\u2014"}</div><div class="stat-cap">top song</div></div>
-    <div class="stat-card"><div class="stat-lead">${topArtist ? escapeHtml(topArtist.artist) : "\u2014"}</div><div class="stat-cap">top artist</div></div>
-    <div class="stat-card"><div class="stat-lead">${topRequester ? escapeHtml(topRequester.name) : "\u2014"}</div><div class="stat-cap">top requestor${topRequester ? ` \u00b7 ${topRequester.count}\u00d7` : ""}</div></div>
-  `;
+  statsCards.innerHTML = statsSummaryCardsHtml(s);
   statsSongs.innerHTML = s.total
     ? statRows(s.topSongs, "song")
     : `<li class="stats-row stats-row-empty"><span class="stats-name">No requests yet</span></li>`;
@@ -3321,17 +3225,7 @@ function renderStats() {
       statsDedications.innerHTML = "";
     } else {
       statsDedicationsWrap.hidden = false;
-      statsDedications.innerHTML = wall
-        .map((d) => {
-          const label = dedicationDisplayLabel(d.dedication, d.requestedBy);
-          const song = [d.name, d.artist].filter(Boolean).join(" — ");
-          return `<li class="stats-row"><span class="stats-name">${escapeHtml(label)}${
-            song
-              ? `<span class="stats-sub">${escapeHtml(song)}</span>`
-              : ""
-          }</span></li>`;
-        })
-        .join("");
+      statsDedications.innerHTML = dedicationsHtml(wall);
     }
   }
   paintStatsReactionList(statsTopLikedWrap, statsTopLiked, topLiked);
@@ -3344,19 +3238,7 @@ function renderStats() {
       statsKaraoke.innerHTML = "";
     } else {
       statsKaraokeWrap.hidden = false;
-      statsKaraoke.innerHTML = karaoke
-        .map((it, i) => {
-          const main = escapeHtml(it.name || "Unknown");
-          const artist = it.artist
-            ? `<span class="stats-sub">${escapeHtml(it.artist)}</span>`
-            : "";
-          const who = formatNameList(it.by);
-          const byLine = who
-            ? `<span class="stats-sub">Mic'd by ${escapeHtml(who)}</span>`
-            : "";
-          return `<li class="stats-row"><span class="stats-rank">${i + 1}</span><span class="stats-name">${main}${artist}${byLine}</span><span class="stats-count" title="Mic taps">${REACTION_EMOJI.mic} ${it.count}</span></li>`;
-        })
-        .join("");
+      statsKaraoke.innerHTML = karaokeRowsHtml(karaoke);
     }
   }
   paintStatsReactionList(statsReactedWrap, statsReacted, reacted);
