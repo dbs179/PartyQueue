@@ -49,6 +49,7 @@ import {
   advanceStreamCursor,
 } from "./stream-cursor.js";
 import { createConfirmModal } from "./confirm-modal.js";
+import { createHostPinUi } from "./host-pin-ui.js";
 import { loadMemory as loadMemoryUi } from "./memory-ui.js";
 import { createPartyRecapUi } from "./party-recap.js";
 import { createSonosGroups } from "./sonos-groups.js";
@@ -88,15 +89,7 @@ import {
   formatSelectedOfTotal,
   paintMixLabels,
 } from "./mix-labels.js";
-import {
-  formatDjIconLabel,
-  formatDjVoiceHubLine,
-  formatDjAdvancedHubLine,
-  formatDjVolumeHubLine,
-  formatDjShoutsHubLine,
-  formatDjLastCallHubLine,
-  formatEndOfNightLabel,
-} from "./dj-hub-summaries.js";
+import { createDjBoothUi } from "./dj-booth-ui.js";
 import {
   isSettingsArea,
   isMusicMixArea,
@@ -111,10 +104,6 @@ import {
   guestLockBannerView,
   paintGuestLockBanner,
 } from "./guest-lock-banner.js";
-import {
-  paintDjTtsProviderRows,
-  paintDjShoutModeRows,
-} from "./dj-form-ui.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -132,6 +121,64 @@ const confirmModal = createConfirmModal({
   confirmBtn: modalConfirm,
   cancelBtn: modalCancel,
 });
+
+// Host PIN + hostFetch — created early so other UI factories can share hostFetch.
+const {
+  hostFetch,
+  settingsGateOk,
+  settingsUnlocked,
+  openPinGate,
+  closePinGate,
+  loadPinRequired,
+  refreshHostPinStatus,
+  verifyHostSessionStillValid,
+  isPinRequired,
+  isPinGateOpen,
+  getPendingPinAction,
+  clearPendingPinAction,
+} = createHostPinUi(
+  {
+    pinOverlay: document.getElementById("pin-overlay"),
+    pinInput: document.getElementById("pin-input"),
+    pinError: document.getElementById("pin-error"),
+    pinUnlockBtn: document.getElementById("pin-unlock"),
+    pinCancelBtn: document.getElementById("pin-cancel"),
+    pinSetupOverlay: document.getElementById("pin-setup-overlay"),
+    pinSetupBootstrap: document.getElementById("pin-setup-bootstrap"),
+    pinSetupInput: document.getElementById("pin-setup-input"),
+    pinSetupConfirm: document.getElementById("pin-setup-confirm"),
+    pinSetupError: document.getElementById("pin-setup-error"),
+    pinSetupSkipBtn: document.getElementById("pin-setup-skip"),
+    pinSetupSaveBtn: document.getElementById("pin-setup-save"),
+    hostPinStatusEl: document.getElementById("host-pin-status"),
+    hostPinCurrentRow: document.getElementById("host-pin-current-row"),
+    hostPinCurrentInput: document.getElementById("host-pin-current"),
+    hostPinBootstrapRow: document.getElementById("host-pin-bootstrap-row"),
+    hostPinBootstrapInput: document.getElementById("host-pin-bootstrap"),
+    hostPinNewInput: document.getElementById("host-pin-new"),
+    hostPinConfirmInput: document.getElementById("host-pin-confirm"),
+    hostPinSaveBtn: document.getElementById("host-pin-save"),
+    hostPinClearBtn: document.getElementById("host-pin-clear"),
+    controlsHostUnlockBtn: document.getElementById("controls-host-unlock"),
+  },
+  {
+    showToast,
+    confirmModal,
+    isHostArea,
+    getCurrentView: () => currentView,
+    hideView: (name) => {
+      if (VIEWS[name]) VIEWS[name].hidden = true;
+    },
+    getLastNonSettingsView: () =>
+      VIEWS[lastNonSettingsView] ? lastNonSettingsView : "main",
+    navigate: (name) => navigate(name),
+    showView: (name) => showView(name),
+    loadSettings: () => loadSettings(),
+    loadAutoFill: () => loadAutoFill(),
+    confirmAndRestart: () => confirmAndRestart(),
+    syncHostControlsVisibility: () => syncHostControlsVisibility(),
+  }
+);
 
 const nameOverlay = document.getElementById("name-overlay");
 const nameTitle = document.getElementById("name-title");
@@ -541,73 +588,16 @@ function getReactGuestId() {
     return `g${Date.now().toString(36)}`;
   }
 }
-const djVoiceToggle = document.getElementById("dj-voice-toggle");
-const djNameInput = document.getElementById("set-dj-name");
-const djIntroPercentInput = document.getElementById("set-dj-intro-percent");
-const djMaxWordsInput = document.getElementById("set-dj-max-words");
-const djVolumeLowInput = document.getElementById("set-dj-vol-low");
-const djVolumeMidInput = document.getElementById("set-dj-vol-mid");
-const djVolumeHighInput = document.getElementById("set-dj-vol-high");
-const djSilenceInput = document.getElementById("set-dj-silence");
-const djTtsProviderInput = document.getElementById("set-dj-tts-provider");
-const djTtsVoiceInput = document.getElementById("set-dj-tts-voice");
-const djTtsVoiceElevenlabsInput = document.getElementById(
-  "set-dj-tts-voice-elevenlabs"
-);
-const djTtsVoiceOpenaiRow = document.getElementById("dj-tts-voice-openai-row");
-const djTtsVoiceElevenlabsRow = document.getElementById(
-  "dj-tts-voice-elevenlabs-row"
-);
-const djTtsSpeedInput = document.getElementById("set-dj-tts-speed");
-const djIntensityInput = document.getElementById("set-dj-intensity");
-const djCatchphraseInput = document.getElementById("set-dj-catchphrase");
-const djBanListInput = document.getElementById("set-dj-ban-list");
-const djPersonaNotesInput = document.getElementById("set-dj-persona-notes");
-const djAlwaysInstructionsInput = document.getElementById(
-  "set-dj-always-instructions"
-);
-const djNeverInstructionsInput = document.getElementById(
-  "set-dj-never-instructions"
-);
-const djPronunciationsInput = document.getElementById("set-dj-pronunciations");
-const djAdvancedSaveBtn = document.getElementById("dj-advanced-save");
-const djAdvancedResetBtn = document.getElementById("dj-advanced-reset");
-const djAdvancedPreviewRefreshBtn = document.getElementById(
-  "dj-advanced-preview-refresh"
-);
-const djEffectivePromptInput = document.getElementById("dj-effective-prompt");
-const djShoutEnabledInput = document.getElementById("set-dj-shout-enabled");
-const djShoutModeInput = document.getElementById("set-dj-shout-mode");
-const djShoutPercentInput = document.getElementById("set-dj-shout-percent");
-const djShoutEveryInput = document.getElementById("set-dj-shout-every");
-const djPartyRecapEnabledInput = document.getElementById("set-dj-party-recap-enabled");
-const endOfNightLabelEl = document.getElementById("end-of-night-label");
-const endOfNightSearchInput = document.getElementById("end-of-night-search");
-const endOfNightResultsEl = document.getElementById("end-of-night-results");
-const endOfNightResetBtn = document.getElementById("end-of-night-reset");
-const recapHintEl = document.getElementById("recap-hint");
-
-/** @type {{ uri: string|null, name: string, artist: string }} */
-let endOfNightTrack = {
-  uri: null,
-  name: "Closing Time",
-  artist: "Semisonic",
-};
-let endOfNightSearchTimer = 0;
-const djShoutPercentRow = document.getElementById("dj-shout-percent-row");
-const djShoutEveryRow = document.getElementById("dj-shout-every-row");
-const djVoiceTestBtn = document.getElementById("dj-voice-test");
-const djVoiceTestElevenlabsBtn = document.getElementById(
-  "dj-voice-test-elevenlabs"
-);
-const djVoicePreviewPlayer = document.getElementById("dj-voice-preview-player");
-const djVoiceSaveBtns = document.querySelectorAll(".dj-voice-save-btn");
-const djVoiceResetBtns = document.querySelectorAll(".dj-voice-reset-btn");
+// DJ booth UI bound after branding (selectDjIcon) is created
+let updateDjHubSummaries = () => {};
+let setActiveDjIconName = () => {};
+let applyDjFromSettings = () => {};
+let loadDjEffectivePrompt = async () => {};
+let getEndOfNightName = () => "Last call";
 const djIconUploadBtn = document.getElementById("dj-icon-upload-btn");
 const djIconFileInput = document.getElementById("dj-icon-file");
 const djIconGallery = document.getElementById("dj-icon-gallery");
-/** @type {string|null} active uploaded icon filename, or null for default */
-let activeDjIconName = null;
+const recapHintEl = document.getElementById("recap-hint");
 const eventNameInput = document.getElementById("set-event-name");
 const subtitleInput = document.getElementById("set-subtitle");
 const showVersionInput = document.getElementById("set-show-version");
@@ -689,7 +679,7 @@ const {
     saveSettings,
     getDefaultDjIconName: () => settingsDefaults?.djIcon || "dj-icon-flat.png",
     onDjIconChange: (name) => {
-      activeDjIconName = name;
+      setActiveDjIconName(name);
       updateDjHubSummaries();
     },
     onShowQueueGenreChange: (enabled) => {
@@ -697,6 +687,79 @@ const {
     },
   }
 );
+
+const djBooth = createDjBoothUi(
+  {
+    djVoiceToggle: document.getElementById("dj-voice-toggle"),
+    djNameInput: document.getElementById("set-dj-name"),
+    djIntroPercentInput: document.getElementById("set-dj-intro-percent"),
+    djMaxWordsInput: document.getElementById("set-dj-max-words"),
+    djVolumeLowInput: document.getElementById("set-dj-vol-low"),
+    djVolumeMidInput: document.getElementById("set-dj-vol-mid"),
+    djVolumeHighInput: document.getElementById("set-dj-vol-high"),
+    djSilenceInput: document.getElementById("set-dj-silence"),
+    djTtsProviderInput: document.getElementById("set-dj-tts-provider"),
+    djTtsVoiceInput: document.getElementById("set-dj-tts-voice"),
+    djTtsVoiceElevenlabsInput: document.getElementById(
+      "set-dj-tts-voice-elevenlabs"
+    ),
+    djTtsVoiceOpenaiRow: document.getElementById("dj-tts-voice-openai-row"),
+    djTtsVoiceElevenlabsRow: document.getElementById(
+      "dj-tts-voice-elevenlabs-row"
+    ),
+    djTtsSpeedInput: document.getElementById("set-dj-tts-speed"),
+    djIntensityInput: document.getElementById("set-dj-intensity"),
+    djCatchphraseInput: document.getElementById("set-dj-catchphrase"),
+    djBanListInput: document.getElementById("set-dj-ban-list"),
+    djPersonaNotesInput: document.getElementById("set-dj-persona-notes"),
+    djAlwaysInstructionsInput: document.getElementById(
+      "set-dj-always-instructions"
+    ),
+    djNeverInstructionsInput: document.getElementById(
+      "set-dj-never-instructions"
+    ),
+    djPronunciationsInput: document.getElementById("set-dj-pronunciations"),
+    djAdvancedSaveBtn: document.getElementById("dj-advanced-save"),
+    djAdvancedResetBtn: document.getElementById("dj-advanced-reset"),
+    djAdvancedPreviewRefreshBtn: document.getElementById(
+      "dj-advanced-preview-refresh"
+    ),
+    djEffectivePromptInput: document.getElementById("dj-effective-prompt"),
+    djShoutEnabledInput: document.getElementById("set-dj-shout-enabled"),
+    djShoutModeInput: document.getElementById("set-dj-shout-mode"),
+    djShoutPercentInput: document.getElementById("set-dj-shout-percent"),
+    djShoutEveryInput: document.getElementById("set-dj-shout-every"),
+    djPartyRecapEnabledInput: document.getElementById(
+      "set-dj-party-recap-enabled"
+    ),
+    endOfNightLabelEl: document.getElementById("end-of-night-label"),
+    endOfNightSearchInput: document.getElementById("end-of-night-search"),
+    endOfNightResultsEl: document.getElementById("end-of-night-results"),
+    endOfNightResetBtn: document.getElementById("end-of-night-reset"),
+    djShoutPercentRow: document.getElementById("dj-shout-percent-row"),
+    djShoutEveryRow: document.getElementById("dj-shout-every-row"),
+    djVoiceTestBtn: document.getElementById("dj-voice-test"),
+    djVoiceTestElevenlabsBtn: document.getElementById(
+      "dj-voice-test-elevenlabs"
+    ),
+    djVoicePreviewPlayer: document.getElementById("dj-voice-preview-player"),
+    djVoiceSaveBtns: document.querySelectorAll(".dj-voice-save-btn"),
+    djVoiceResetBtns: document.querySelectorAll(".dj-voice-reset-btn"),
+  },
+  {
+    hostFetch,
+    showToast,
+    saveSettings,
+    selectDjIcon,
+    getSettingsDefaults: () => settingsDefaults,
+    refreshBoothMediaUrl,
+  }
+);
+updateDjHubSummaries = djBooth.updateDjHubSummaries;
+setActiveDjIconName = djBooth.setActiveDjIconName;
+applyDjFromSettings = djBooth.applyFromSettings;
+loadDjEffectivePrompt = djBooth.loadDjEffectivePrompt;
+getEndOfNightName = djBooth.getEndOfNightName;
 
 function fillSettings(s) {
   if (s.songMemory != null) songMemoryInput.value = s.songMemory;
@@ -772,101 +835,7 @@ function fillSettings(s) {
       refreshPoolSizeHint();
     }
   }
-  if (s.djVoiceEnabled != null && djVoiceToggle) {
-    djVoiceToggle.checked = !!s.djVoiceEnabled;
-  }
-  if (s.djName != null && djNameInput) djNameInput.value = s.djName;
-  if (s.djNameIntroPercent != null && djIntroPercentInput) {
-    djIntroPercentInput.value = s.djNameIntroPercent;
-  }
-  if (s.djAnnounceMaxWords != null && djMaxWordsInput) {
-    djMaxWordsInput.value = s.djAnnounceMaxWords;
-  }
-  if (s.djVolumeBumpLowPct != null && djVolumeLowInput) {
-    djVolumeLowInput.value = s.djVolumeBumpLowPct;
-  }
-  if (s.djVolumeBumpMidPct != null && djVolumeMidInput) {
-    djVolumeMidInput.value = s.djVolumeBumpMidPct;
-  }
-  if (s.djVolumeBumpHighPct != null && djVolumeHighInput) {
-    djVolumeHighInput.value = s.djVolumeBumpHighPct;
-  }
-  if (s.djHandoffSilenceSec != null && djSilenceInput) {
-    djSilenceInput.value = String(s.djHandoffSilenceSec);
-  }
-  if (s.djTtsProvider != null && djTtsProviderInput) {
-    djTtsProviderInput.value = String(s.djTtsProvider);
-  }
-  if (s.djTtsVoiceOpenAi != null && djTtsVoiceInput) {
-    djTtsVoiceInput.value = String(s.djTtsVoiceOpenAi);
-  } else if (s.djTtsVoice != null && djTtsVoiceInput && s.djTtsProvider === "openai_ha") {
-    djTtsVoiceInput.value = String(s.djTtsVoice);
-  }
-  if (s.djTtsVoiceElevenlabs != null && djTtsVoiceElevenlabsInput) {
-    djTtsVoiceElevenlabsInput.value = String(s.djTtsVoiceElevenlabs);
-  } else if (
-    s.djTtsVoice != null &&
-    djTtsVoiceElevenlabsInput &&
-    s.djTtsProvider === "elevenlabs_ha"
-  ) {
-    djTtsVoiceElevenlabsInput.value = String(s.djTtsVoice);
-  }
-  syncDjTtsProviderUi();
-  if (s.djTtsSpeed != null && djTtsSpeedInput) {
-    djTtsSpeedInput.value = String(s.djTtsSpeed);
-  }
-  if (s.djCharacterIntensity != null && djIntensityInput) {
-    djIntensityInput.value = String(s.djCharacterIntensity);
-  }
-  if (s.djCatchphrase != null && djCatchphraseInput) {
-    djCatchphraseInput.value = String(s.djCatchphrase);
-  }
-  if (s.djBanList != null && djBanListInput) {
-    djBanListInput.value = String(s.djBanList);
-  }
-  if (s.djPersonaNotes != null && djPersonaNotesInput) {
-    djPersonaNotesInput.value = String(s.djPersonaNotes);
-  }
-  if (s.djAlwaysInstructions != null && djAlwaysInstructionsInput) {
-    djAlwaysInstructionsInput.value = String(s.djAlwaysInstructions);
-  }
-  if (s.djNeverInstructions != null && djNeverInstructionsInput) {
-    djNeverInstructionsInput.value = String(s.djNeverInstructions);
-  }
-  if (s.djPronunciations != null && djPronunciationsInput) {
-    djPronunciationsInput.value = String(s.djPronunciations);
-  }
-  if (s.djShoutEnabled != null && djShoutEnabledInput) {
-    djShoutEnabledInput.checked = !!s.djShoutEnabled;
-  }
-  if (s.djShoutMode != null && djShoutModeInput) {
-    djShoutModeInput.value = String(s.djShoutMode);
-  }
-  if (s.djShoutPercent != null && djShoutPercentInput) {
-    djShoutPercentInput.value = s.djShoutPercent;
-  }
-  if (s.djShoutEveryN != null && djShoutEveryInput) {
-    djShoutEveryInput.value = s.djShoutEveryN;
-  }
-  syncDjShoutModeUi();
-  if (s.djPartyRecapEnabled != null && djPartyRecapEnabledInput) {
-    djPartyRecapEnabledInput.checked = !!s.djPartyRecapEnabled;
-  }
-  if (
-    s.endOfNightTrackUri !== undefined ||
-    s.endOfNightTrackName !== undefined ||
-    s.endOfNightTrackArtist !== undefined
-  ) {
-    endOfNightTrack = {
-      uri: s.endOfNightTrackUri || null,
-      name: s.endOfNightTrackName || "Closing Time",
-      artist: s.endOfNightTrackArtist || (s.endOfNightTrackUri ? "" : "Semisonic"),
-    };
-    if (!endOfNightTrack.uri) {
-      endOfNightTrack = { uri: null, name: "Closing Time", artist: "Semisonic" };
-    }
-    paintEndOfNightLabel();
-  }
+  applyDjFromSettings(s);
   if (s.eventName != null) eventNameInput.value = s.eventName;
   if (s.subtitle != null) subtitleInput.value = s.subtitle;
   if (s.showVersion != null) {
@@ -880,74 +849,6 @@ function fillSettings(s) {
   if (s.heroBanner !== undefined) applyHero(s.heroBanner);
   applyBranding(s.eventName, s.subtitle);
   if (s.defaults) settingsDefaults = s.defaults;
-  if (Object.prototype.hasOwnProperty.call(s, "djIcon")) {
-    activeDjIconName = s.djIcon || null;
-  }
-  updateDjHubSummaries();
-}
-
-function updateDjHubSummaries() {
-  // The Sonos media URL card lives on this hub now.
-  void refreshBoothMediaUrl();
-  const bannerEl = document.getElementById("dj-stat-banner");
-  const nameEl = document.getElementById("dj-stat-name");
-  const voiceEl = document.getElementById("dj-stat-voice");
-  const advancedEl = document.getElementById("dj-stat-advanced");
-  const volumeEl = document.getElementById("dj-stat-volume");
-  const shoutsEl = document.getElementById("dj-stat-shouts");
-
-  if (bannerEl) bannerEl.textContent = formatDjIconLabel(activeDjIconName);
-
-  if (nameEl) {
-    const name = (djNameInput?.value || "").trim() || "Party DJ";
-    nameEl.textContent = name;
-  }
-
-  if (voiceEl) {
-    voiceEl.textContent = formatDjVoiceHubLine({
-      intensity: djIntensityInput?.value,
-      provider: djTtsProviderInput?.value,
-      speed: djTtsSpeedInput?.value ?? 1,
-    });
-  }
-
-  if (advancedEl) {
-    advancedEl.textContent = formatDjAdvancedHubLine({
-      personaNotes: djPersonaNotesInput?.value,
-      alwaysInstructions: djAlwaysInstructionsInput?.value,
-      neverInstructions: djNeverInstructionsInput?.value,
-      pronunciations: djPronunciationsInput?.value,
-    });
-  }
-
-  if (volumeEl) {
-    volumeEl.textContent = formatDjVolumeHubLine({
-      low: djVolumeLowInput?.value ?? "—",
-      mid: djVolumeMidInput?.value ?? "—",
-      high: djVolumeHighInput?.value ?? "—",
-      silence: djSilenceInput?.value ?? "—",
-    });
-  }
-
-  if (shoutsEl) {
-    shoutsEl.textContent = formatDjShoutsHubLine({
-      mode: djShoutModeInput?.value,
-      everyN: djShoutEveryInput?.value || "5",
-      percent: djShoutPercentInput?.value ?? "25",
-    });
-  }
-
-  const lastCallEl = document.getElementById("dj-stat-lastcall");
-  if (lastCallEl) {
-    lastCallEl.textContent = formatDjLastCallHubLine(endOfNightTrack.name);
-  }
-}
-
-function paintEndOfNightLabel() {
-  if (endOfNightLabelEl) {
-    endOfNightLabelEl.textContent = formatEndOfNightLabel(endOfNightTrack);
-  }
-  updateDjHubSummaries();
 }
 
 async function loadSettings() {
@@ -1146,7 +1047,7 @@ partyOverInput?.addEventListener("change", () => {
 
 hostControlsInput?.addEventListener("change", () => {
   const on = !!hostControlsInput.checked;
-  if (on && !settingsPinRequired) {
+  if (on && !isPinRequired()) {
     hostControlsInput.checked = false;
     showToast("Set a host PIN before enabling host-only controls.", true);
     return;
@@ -1195,387 +1096,6 @@ function setPartyOverUi(on) {
   if (partyOverInput) partyOverInput.checked = partyOver;
   if (displayPartyOverPill) displayPartyOverPill.hidden = !partyOver;
   updateGuestLockBanner();
-}
-
-// DJ Voice: announce each new set via Home Assistant (needs HA credentials).
-if (djVoiceToggle) {
-  djVoiceToggle.addEventListener("change", () => {
-    saveSettings({ djVoiceEnabled: djVoiceToggle.checked });
-  });
-}
-
-function syncDjTtsProviderUi() {
-  paintDjTtsProviderRows(
-    {
-      openaiRow: djTtsVoiceOpenaiRow,
-      elevenlabsRow: djTtsVoiceElevenlabsRow,
-    },
-    djTtsProviderInput?.value
-  );
-}
-
-function syncDjShoutModeUi() {
-  paintDjShoutModeRows(
-    {
-      percentRow: djShoutPercentRow,
-      everyRow: djShoutEveryRow,
-    },
-    djShoutModeInput?.value
-  );
-}
-
-function currentDjVoicePayload() {
-  const provider = djTtsProviderInput?.value || "elevenlabs_ha";
-  return {
-    djName: djNameInput?.value ?? "",
-    djNameIntroPercent: Number(djIntroPercentInput?.value),
-    djAnnounceMaxWords: Number(djMaxWordsInput?.value),
-    djVolumeBumpLowPct: Number(djVolumeLowInput?.value),
-    djVolumeBumpMidPct: Number(djVolumeMidInput?.value),
-    djVolumeBumpHighPct: Number(djVolumeHighInput?.value),
-    djHandoffSilenceSec: Number(djSilenceInput?.value),
-    djTtsProvider: provider,
-    djTtsVoiceOpenAi: djTtsVoiceInput?.value ?? "onyx",
-    djTtsVoiceElevenlabs: djTtsVoiceElevenlabsInput?.value?.trim() || "",
-    djTtsVoice:
-      provider === "openai_ha"
-        ? djTtsVoiceInput?.value ?? "onyx"
-        : djTtsVoiceElevenlabsInput?.value?.trim() || "",
-    djTtsSpeed: Number(djTtsSpeedInput?.value ?? 1),
-    djCharacterIntensity: djIntensityInput?.value ?? "classic",
-    djCatchphrase: djCatchphraseInput?.value ?? "",
-    djBanList: djBanListInput?.value ?? "",
-    djPersonaNotes: djPersonaNotesInput?.value ?? "",
-    djAlwaysInstructions: djAlwaysInstructionsInput?.value ?? "",
-    djNeverInstructions: djNeverInstructionsInput?.value ?? "",
-    djPronunciations: djPronunciationsInput?.value ?? "",
-    djShoutEnabled: !!djShoutEnabledInput?.checked,
-    djShoutMode: djShoutModeInput?.value || "every",
-    djShoutPercent: Number(djShoutPercentInput?.value),
-    djShoutEveryN: Number(djShoutEveryInput?.value),
-  };
-}
-
-async function runDjVoicePreview(btn) {
-  const provider = djTtsProviderInput?.value || "elevenlabs_ha";
-  const voice =
-    provider === "openai_ha"
-      ? djTtsVoiceInput?.value || "onyx"
-      : djTtsVoiceElevenlabsInput?.value?.trim() || "";
-  const speed = Number(djTtsSpeedInput?.value || 1);
-  if (btn) btn.disabled = true;
-  const prevLabel = btn?.textContent;
-  if (btn) btn.textContent = "…";
-  showToast("Generating sample…", false, 8000);
-  try {
-    const res = await hostFetch("/api/dj-voice/preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ voice, speed, provider }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "Could not preview voice.");
-    if (!data.url) throw new Error("Preview returned no audio URL.");
-
-    if (djVoicePreviewPlayer) {
-      djVoicePreviewPlayer.hidden = false;
-      djVoicePreviewPlayer.src = data.url;
-      djVoicePreviewPlayer.load();
-      try {
-        await djVoicePreviewPlayer.play();
-        showToast(
-          `Playing ${data.provider || provider} · ${data.voice || voice} @ ${data.speed ?? speed}×`
-        );
-      } catch {
-        showToast("Sample ready — press play on the player below.", false, 5000);
-      }
-    } else {
-      const audio = new Audio(data.url);
-      await audio.play();
-      showToast(`Playing ${data.voice || voice} @ ${data.speed ?? speed}×`);
-    }
-  } catch (err) {
-    showToast(err.message || "Voice test failed.", true);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = prevLabel;
-    }
-  }
-}
-
-if (djTtsProviderInput) {
-  djTtsProviderInput.addEventListener("change", syncDjTtsProviderUi);
-}
-
-djVoiceSaveBtns.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    saveSettings(currentDjVoicePayload(), { toastMessage: "Saved" });
-  });
-});
-
-async function loadDjEffectivePrompt() {
-  if (!djEffectivePromptInput) return;
-  const btn = djAdvancedPreviewRefreshBtn;
-  if (btn) btn.disabled = true;
-  djEffectivePromptInput.value = "Loading effective prompt…";
-  try {
-    const res = await hostFetch("/api/dj-voice/prompt-preview", {
-      cache: "no-store",
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "Could not load prompt preview.");
-    djEffectivePromptInput.value = data.prompt || "(No prompt returned.)";
-  } catch (err) {
-    djEffectivePromptInput.value = "";
-    showToast(err.message || "Could not load prompt preview.", true);
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-if (djAdvancedSaveBtn) {
-  djAdvancedSaveBtn.addEventListener("click", async () => {
-    djAdvancedSaveBtn.disabled = true;
-    try {
-      const saved = await saveSettings(currentDjVoicePayload(), {
-        toastMessage: "Advanced DJ saved",
-      });
-      if (saved) await loadDjEffectivePrompt();
-    } finally {
-      djAdvancedSaveBtn.disabled = false;
-    }
-  });
-}
-
-djAdvancedPreviewRefreshBtn?.addEventListener("click", () => {
-  void loadDjEffectivePrompt();
-});
-
-djAdvancedResetBtn?.addEventListener("click", async () => {
-  const d = settingsDefaults || {};
-  const values = {
-    djPersonaNotes: d.djPersonaNotes ?? "",
-    djAlwaysInstructions: d.djAlwaysInstructions ?? "",
-    djNeverInstructions: d.djNeverInstructions ?? "",
-    djPronunciations: d.djPronunciations ?? "",
-  };
-  fillSettings(values);
-  const saved = await saveSettings(values, {
-    toastMessage: "Advanced DJ set to defaults",
-  });
-  if (saved) await loadDjEffectivePrompt();
-});
-
-if (djVoiceTestBtn) {
-  djVoiceTestBtn.addEventListener("click", () => runDjVoicePreview(djVoiceTestBtn));
-}
-if (djVoiceTestElevenlabsBtn) {
-  djVoiceTestElevenlabsBtn.addEventListener("click", () =>
-    runDjVoicePreview(djVoiceTestElevenlabsBtn)
-  );
-}
-
-async function resetDjVoiceDefaults() {
-  const d = settingsDefaults || {};
-  fillSettings({
-    djName: d.djName ?? "Party DJ",
-    djNameIntroPercent: d.djNameIntroPercent ?? 25,
-    djAnnounceMaxWords: d.djAnnounceMaxWords ?? 55,
-    djVolumeBumpLowPct: d.djVolumeBumpLowPct ?? 20,
-    djVolumeBumpMidPct: d.djVolumeBumpMidPct ?? 8,
-    djVolumeBumpHighPct: d.djVolumeBumpHighPct ?? 4,
-    djHandoffSilenceSec: d.djHandoffSilenceSec ?? 3,
-    djTtsProvider: d.djTtsProvider ?? "elevenlabs_ha",
-    djTtsVoiceOpenAi: d.djTtsVoiceOpenAi ?? "onyx",
-    djTtsVoiceElevenlabs: d.djTtsVoiceElevenlabs ?? "",
-    djTtsSpeed: d.djTtsSpeed ?? 1,
-    djCharacterIntensity: d.djCharacterIntensity ?? "extra",
-    djCatchphrase: d.djCatchphrase ?? "",
-    djBanList: d.djBanList ?? "",
-    djPersonaNotes: d.djPersonaNotes ?? "",
-    djAlwaysInstructions: d.djAlwaysInstructions ?? "",
-    djNeverInstructions: d.djNeverInstructions ?? "",
-    djPronunciations: d.djPronunciations ?? "",
-    djShoutEnabled: d.djShoutEnabled ?? true,
-    djShoutMode: d.djShoutMode ?? "every",
-    djShoutPercent: d.djShoutPercent ?? 25,
-    djShoutEveryN: d.djShoutEveryN ?? 5,
-    djPartyRecapEnabled: d.djPartyRecapEnabled ?? true,
-    endOfNightTrackUri: null,
-    endOfNightTrackName: null,
-    endOfNightTrackArtist: null,
-  });
-  endOfNightTrack = { uri: null, name: "Closing Time", artist: "Semisonic" };
-  paintEndOfNightLabel();
-  if (djPartyRecapEnabledInput) {
-    djPartyRecapEnabledInput.checked = d.djPartyRecapEnabled ?? true;
-  }
-  try {
-    await selectDjIcon(null);
-  } catch {
-    /* icon select is best-effort; text defaults still save */
-  }
-  saveSettings(
-    {
-      djName: d.djName ?? "Party DJ",
-      djNameIntroPercent: d.djNameIntroPercent ?? 25,
-      djAnnounceMaxWords: d.djAnnounceMaxWords ?? 55,
-      djVolumeBumpLowPct: d.djVolumeBumpLowPct ?? 20,
-      djVolumeBumpMidPct: d.djVolumeBumpMidPct ?? 8,
-      djVolumeBumpHighPct: d.djVolumeBumpHighPct ?? 4,
-      djHandoffSilenceSec: d.djHandoffSilenceSec ?? 3,
-      djTtsProvider: d.djTtsProvider ?? "elevenlabs_ha",
-      djTtsVoiceOpenAi: d.djTtsVoiceOpenAi ?? "onyx",
-      djTtsVoiceElevenlabs: d.djTtsVoiceElevenlabs ?? "",
-      djTtsSpeed: d.djTtsSpeed ?? 1,
-      djCharacterIntensity: d.djCharacterIntensity ?? "extra",
-      djCatchphrase: d.djCatchphrase ?? "",
-      djBanList: d.djBanList ?? "",
-      djPersonaNotes: d.djPersonaNotes ?? "",
-      djAlwaysInstructions: d.djAlwaysInstructions ?? "",
-      djNeverInstructions: d.djNeverInstructions ?? "",
-      djPronunciations: d.djPronunciations ?? "",
-      djShoutEnabled: d.djShoutEnabled ?? true,
-      djShoutMode: d.djShoutMode ?? "every",
-      djShoutPercent: d.djShoutPercent ?? 25,
-      djShoutEveryN: d.djShoutEveryN ?? 5,
-      djPartyRecapEnabled: d.djPartyRecapEnabled ?? true,
-      endOfNightTrackUri: null,
-      endOfNightTrackName: null,
-      endOfNightTrackArtist: null,
-      djIcon: null,
-    },
-    { toastMessage: "Set to Default" }
-  );
-}
-
-djVoiceResetBtns.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    void resetDjVoiceDefaults();
-  });
-});
-
-if (djShoutModeInput) {
-  djShoutModeInput.addEventListener("change", syncDjShoutModeUi);
-}
-if (djShoutEnabledInput) {
-  djShoutEnabledInput.addEventListener("change", () => {
-    saveSettings({ djShoutEnabled: !!djShoutEnabledInput.checked });
-  });
-}
-
-if (djPartyRecapEnabledInput) {
-  djPartyRecapEnabledInput.addEventListener("change", () => {
-    saveSettings({ djPartyRecapEnabled: !!djPartyRecapEnabledInput.checked });
-  });
-}
-
-async function searchEndOfNightTracks(q) {
-  if (!endOfNightResultsEl) return;
-  const query = String(q || "").trim();
-  if (query.length < 2) {
-    endOfNightResultsEl.hidden = true;
-    endOfNightResultsEl.innerHTML = "";
-    return;
-  }
-  try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "Search failed.");
-    const tracks = Array.isArray(data.tracks) ? data.tracks.slice(0, 8) : [];
-    if (!tracks.length) {
-      endOfNightResultsEl.hidden = false;
-      endOfNightResultsEl.innerHTML =
-        '<p class="setting-hint">No tracks found.</p>';
-      return;
-    }
-    endOfNightResultsEl.hidden = false;
-    endOfNightResultsEl.innerHTML = "";
-    for (const t of tracks) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "end-of-night-result";
-      btn.innerHTML = `<span class="end-of-night-result-meta"><span class="end-of-night-result-title"></span><span class="end-of-night-result-artist"></span></span><span>Use</span>`;
-      btn.querySelector(".end-of-night-result-title").textContent = t.name || "Track";
-      btn.querySelector(".end-of-night-result-artist").textContent = t.artist || "";
-      btn.addEventListener("click", () => {
-        void pickEndOfNightTrack(t);
-      });
-      endOfNightResultsEl.appendChild(btn);
-    }
-  } catch (err) {
-    endOfNightResultsEl.hidden = false;
-    endOfNightResultsEl.innerHTML = `<p class="setting-hint">${escapeHtml(err.message || "Search failed.")}</p>`;
-  }
-}
-
-async function pickEndOfNightTrack(t) {
-  const uri = t?.uri || null;
-  if (!uri) {
-    showToast("That track has no Spotify URI.", true);
-    return;
-  }
-  try {
-    await saveSettings(
-      {
-        endOfNightTrackUri: uri,
-        endOfNightTrackName: t.name || "",
-        endOfNightTrackArtist: t.artist || "",
-      },
-      { toastMessage: "End of night song saved" }
-    );
-    endOfNightTrack = {
-      uri,
-      name: t.name || "Last call song",
-      artist: t.artist || "",
-    };
-    paintEndOfNightLabel();
-    if (endOfNightSearchInput) endOfNightSearchInput.value = "";
-    if (endOfNightResultsEl) {
-      endOfNightResultsEl.hidden = true;
-      endOfNightResultsEl.innerHTML = "";
-    }
-  } catch (err) {
-    showToast(err.message || "Could not save song.", true);
-  }
-}
-
-if (endOfNightSearchInput) {
-  endOfNightSearchInput.addEventListener("input", () => {
-    clearTimeout(endOfNightSearchTimer);
-    endOfNightSearchTimer = setTimeout(() => {
-      void searchEndOfNightTracks(endOfNightSearchInput.value);
-    }, 280);
-  });
-}
-
-if (endOfNightResetBtn) {
-  endOfNightResetBtn.addEventListener("click", async () => {
-    try {
-      await saveSettings(
-        {
-          endOfNightTrackUri: null,
-          endOfNightTrackName: null,
-          endOfNightTrackArtist: null,
-        },
-        { toastMessage: "Reset to Closing Time" }
-      );
-      endOfNightTrack = {
-        uri: null,
-        name: "Closing Time",
-        artist: "Semisonic",
-      };
-      paintEndOfNightLabel();
-      if (endOfNightSearchInput) endOfNightSearchInput.value = "";
-      if (endOfNightResultsEl) {
-        endOfNightResultsEl.hidden = true;
-        endOfNightResultsEl.innerHTML = "";
-      }
-    } catch (err) {
-      showToast(err.message || "Could not reset.", true);
-    }
-  });
 }
 
 // ---- Users hub (DJ Booth → shout-out notes / birthdays) ----
@@ -2188,7 +1708,7 @@ const {
   },
   {
     showToast,
-    getEndOfNightName: () => endOfNightTrack.name,
+    getEndOfNightName,
   }
 );
 const VIEWS = {
@@ -2228,7 +1748,7 @@ function syncHostControlsVisibility() {
   const protectedControls = document.getElementById("controls-host-protected");
   const lock = document.getElementById("controls-host-lock");
   const locked =
-    hostControlsOnly && settingsPinRequired && !settingsUnlocked();
+    hostControlsOnly && isPinRequired() && !settingsUnlocked();
   if (body) body.hidden = false;
   if (protectedControls) protectedControls.hidden = locked;
   if (lock) lock.hidden = !locked;
@@ -2243,494 +1763,6 @@ function syncHostControlsVisibility() {
     syncSortable();
     void loadQueue(true);
   }
-}
-
-document.getElementById("controls-host-unlock")?.addEventListener("click", () => {
-  openPinGate({ title: "Unlock party controls", action: "reveal-controls" });
-});
-
-// ---- Host PIN gate -----------------------------------------------------
-// Optional gate for the DJ Booth and everything behind it (all settings
-// pages, Users, Connections, Memory, Suggestions, Reset, Restart). PIN is
-// verified by the server (never shipped to the browser). Vibe, Stats, Sonos
-// groups, Join Code, Party Display, and the rest of the party UI stay open
-// without a PIN.
-const pinOverlay = document.getElementById("pin-overlay");
-const pinInput = document.getElementById("pin-input");
-const pinError = document.getElementById("pin-error");
-const pinUnlockBtn = document.getElementById("pin-unlock");
-const pinCancelBtn = document.getElementById("pin-cancel");
-const PIN_UNLOCK_KEY = "pq.settingsUnlocked";
-let settingsPinRequired = false;
-/** @type {null | "reveal-settings" | "reveal-controls" | "restart"} */
-let pendingPinAction = null;
-
-function settingsUnlocked() {
-  try {
-    return sessionStorage.getItem(PIN_UNLOCK_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function setSettingsUnlocked(on) {
-  try {
-    if (on) {
-      sessionStorage.setItem(PIN_UNLOCK_KEY, "1");
-    } else {
-      sessionStorage.removeItem(PIN_UNLOCK_KEY);
-    }
-  } catch {
-    /* ignore storage errors */
-  }
-}
-
-function settingsGateOk() {
-  return !settingsPinRequired || settingsUnlocked();
-}
-
-// The unlocked flag lives in sessionStorage, so a long-lived tab can keep it
-// after the server-side host session expired (TTL or a restart). On host-area
-// entry we confirm the session with the server and re-lock when it's gone.
-let hostSessionCheckedAt = 0;
-async function verifyHostSessionStillValid() {
-  if (!settingsPinRequired || !settingsUnlocked()) return;
-  const now = Date.now();
-  if (now - hostSessionCheckedAt < 15000) return; // debounce booth browsing
-  hostSessionCheckedAt = now;
-  try {
-    const res = await fetch("/api/settings/pin-session", {
-      credentials: "same-origin",
-    });
-    if (!res.ok) return;
-    const data = await res.json();
-    if (data && data.ok === false) {
-      setSettingsUnlocked(false);
-      syncHostControlsVisibility();
-      if (isHostArea(currentView)) {
-        if (VIEWS[currentView]) VIEWS[currentView].hidden = true;
-        openPinGate({ title: "DJ Booth is locked", action: "reveal-host" });
-      }
-    }
-  } catch {
-    /* offline / transient — host APIs still re-lock on 401 */
-  }
-}
-
-/** fetch() for host-only APIs — uses the HttpOnly session cookie; re-locks on 401. */
-async function hostFetch(url, options = {}) {
-  const headers = new Headers(options.headers || {});
-  const res = await fetch(url, {
-    ...options,
-    headers,
-    credentials: "same-origin",
-  });
-  if (res.status === 401 && settingsPinRequired) {
-    try {
-      const data = await res.clone().json();
-      if (data && data.pinRequired) {
-        setSettingsUnlocked(false);
-        syncHostControlsVisibility();
-        openPinGate({
-          title: "Host PIN required",
-          action: pendingPinAction || "reveal-host",
-        });
-      }
-    } catch {
-      /* ignore parse errors */
-    }
-  }
-  return res;
-}
-
-const PIN_SETUP_SEEN_KEY = "pq.pinSetupSeen";
-const pinSetupOverlay = document.getElementById("pin-setup-overlay");
-const pinSetupBootstrap = document.getElementById("pin-setup-bootstrap");
-const pinSetupInput = document.getElementById("pin-setup-input");
-const pinSetupConfirm = document.getElementById("pin-setup-confirm");
-const pinSetupError = document.getElementById("pin-setup-error");
-const pinSetupSkipBtn = document.getElementById("pin-setup-skip");
-const pinSetupSaveBtn = document.getElementById("pin-setup-save");
-const hostPinStatusEl = document.getElementById("host-pin-status");
-const hostPinCurrentRow = document.getElementById("host-pin-current-row");
-const hostPinCurrentInput = document.getElementById("host-pin-current");
-const hostPinBootstrapRow = document.getElementById("host-pin-bootstrap-row");
-const hostPinBootstrapInput = document.getElementById("host-pin-bootstrap");
-const hostPinNewInput = document.getElementById("host-pin-new");
-const hostPinConfirmInput = document.getElementById("host-pin-confirm");
-const hostPinSaveBtn = document.getElementById("host-pin-save");
-const hostPinClearBtn = document.getElementById("host-pin-clear");
-/** @type {{ required?: boolean, source?: string|null, removable?: boolean, bootstrapRequired?: boolean }|null} */
-let hostPinInfo = null;
-
-function pinSetupSeen() {
-  try {
-    return localStorage.getItem(PIN_SETUP_SEEN_KEY) === "1";
-  } catch {
-    return true;
-  }
-}
-
-function markPinSetupSeen() {
-  try {
-    localStorage.setItem(PIN_SETUP_SEEN_KEY, "1");
-  } catch {
-    /* ignore */
-  }
-}
-
-function showPinSetupError(msg) {
-  if (!pinSetupError) return;
-  pinSetupError.textContent = msg || "";
-  pinSetupError.hidden = !msg;
-}
-
-/** @type {{ close: () => void }|null} */
-let pinSetupModalSession = null;
-
-function openPinSetupPrompt() {
-  if (!pinSetupOverlay || pinSetupSeen()) return;
-  showPinSetupError("");
-  if (pinSetupBootstrap) pinSetupBootstrap.value = "";
-  if (pinSetupInput) pinSetupInput.value = "";
-  if (pinSetupConfirm) pinSetupConfirm.value = "";
-  pinSetupModalSession?.close();
-  pinSetupModalSession = attachModal(pinSetupOverlay, {
-    initialFocus: pinSetupBootstrap || pinSetupInput,
-    onEscape: () => closePinSetupPrompt(),
-    allowBackdrop: true,
-    onBackdrop: () => closePinSetupPrompt(),
-  });
-}
-
-function closePinSetupPrompt() {
-  markPinSetupSeen();
-  if (pinSetupModalSession) {
-    const session = pinSetupModalSession;
-    pinSetupModalSession = null;
-    session.close();
-    return;
-  }
-  if (pinSetupOverlay) pinSetupOverlay.hidden = true;
-}
-
-/** Soft first-run nudge when Spotify app credentials are still missing. */
-async function maybeNudgeSpotifySetup() {
-  try {
-    const res = await fetch("/api/health");
-    if (!res.ok) return;
-    const data = await res.json();
-    if (data?.spotifyConfigured) return;
-    showToast(
-      "Next: add Spotify credentials under DJ Booth → Connections",
-      false,
-      10000,
-      {
-        actionLabel: "Open",
-        onAction: () => navigate("settings-connections"),
-      }
-    );
-  } catch {
-    /* ignore */
-  }
-}
-
-function paintHostPinSettings() {
-  if (!hostPinStatusEl) return;
-  const required = !!hostPinInfo?.required;
-  const source = hostPinInfo?.source || null;
-  if (!required) {
-    hostPinStatusEl.textContent =
-      "No host PIN set. Enter the six-digit setup code from data/host-bootstrap-code.json to claim the DJ Booth.";
-  } else if (source === "file") {
-    hostPinStatusEl.textContent = "Host PIN is set (saved on this server).";
-  } else if (source === "env") {
-    hostPinStatusEl.textContent =
-      "Host PIN is set via SETTINGS_PIN in .env. Saving a new PIN here moves it into a hashed server file and clears .env.";
-  } else {
-    hostPinStatusEl.textContent = "Host PIN is set.";
-  }
-  if (hostPinCurrentRow) hostPinCurrentRow.hidden = !required;
-  if (hostPinBootstrapRow) {
-    hostPinBootstrapRow.hidden = required || !hostPinInfo?.bootstrapRequired;
-  }
-  if (hostPinClearBtn) {
-    hostPinClearBtn.hidden = !hostPinInfo?.removable;
-  }
-}
-
-async function refreshHostPinStatus() {
-  try {
-    const res = await fetch("/api/settings/pin-required");
-    if (!res.ok) throw new Error("status failed");
-    hostPinInfo = await res.json();
-    settingsPinRequired = !!hostPinInfo.required;
-  } catch {
-    hostPinInfo = { required: true };
-    settingsPinRequired = true;
-  }
-  paintHostPinSettings();
-  syncHostControlsVisibility();
-}
-
-async function loadPinRequired() {
-  await refreshHostPinStatus();
-  // If we already landed on a Booth page before this resolved, enforce the gate.
-  if (isHostArea(currentView) && !settingsGateOk()) {
-    if (VIEWS[currentView]) VIEWS[currentView].hidden = true;
-    openPinGate({
-      title: "DJ Booth is locked",
-      action: "reveal-host",
-    });
-  } else if (!settingsPinRequired && !pinSetupSeen()) {
-    openPinSetupPrompt();
-  }
-}
-
-async function saveHostPin({
-  pin,
-  currentPin = "",
-  bootstrapCode = "",
-  fromSetup = false,
-} = {}) {
-  const res = await fetch("/api/settings/pin", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "same-origin",
-    body: JSON.stringify({
-      pin,
-      currentPin: currentPin || undefined,
-      bootstrapCode: bootstrapCode || undefined,
-    }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.ok) {
-    throw new Error(data.error || "Could not save PIN.");
-  }
-  setSettingsUnlocked(true);
-  hostPinInfo = {
-    required: !!data.required,
-    source: data.source ?? null,
-    removable: !!data.removable,
-    bootstrapRequired: !!data.bootstrapRequired,
-  };
-  settingsPinRequired = !!hostPinInfo.required;
-  paintHostPinSettings();
-  syncHostControlsVisibility();
-  if (fromSetup) {
-    closePinSetupPrompt();
-    showToast("Host PIN saved");
-    maybeNudgeSpotifySetup();
-    return data;
-  }
-  showToast("Host PIN saved");
-  return data;
-}
-
-hostPinSaveBtn?.addEventListener("click", async () => {
-  const pin = (hostPinNewInput?.value || "").trim();
-  const confirm = (hostPinConfirmInput?.value || "").trim();
-  const currentPin = (hostPinCurrentInput?.value || "").trim();
-  const bootstrapCode = (hostPinBootstrapInput?.value || "").trim();
-  if (!pin || pin.length < 4) {
-    showToast("PIN must be at least 4 characters.", true);
-    return;
-  }
-  if (pin !== confirm) {
-    showToast("PIN confirmation does not match.", true);
-    return;
-  }
-  hostPinSaveBtn.disabled = true;
-  try {
-    await saveHostPin({
-      pin,
-      currentPin: settingsPinRequired ? currentPin : "",
-      bootstrapCode: settingsPinRequired ? "" : bootstrapCode,
-    });
-    if (hostPinNewInput) hostPinNewInput.value = "";
-    if (hostPinConfirmInput) hostPinConfirmInput.value = "";
-    if (hostPinCurrentInput) hostPinCurrentInput.value = "";
-    if (hostPinBootstrapInput) hostPinBootstrapInput.value = "";
-  } catch (err) {
-    showToast(err.message || "Could not save PIN.", true);
-  } finally {
-    hostPinSaveBtn.disabled = false;
-  }
-});
-
-hostPinClearBtn?.addEventListener("click", async () => {
-  const ok = await confirmModal(
-    "Remove host PIN? DJ Booth and host APIs will be open to anyone on the LAN.",
-    "Remove PIN"
-  );
-  if (!ok) return;
-  hostPinClearBtn.disabled = true;
-  try {
-    const res = await hostFetch("/api/settings/pin", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        currentPin: (hostPinCurrentInput?.value || "").trim() || undefined,
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.ok) {
-      throw new Error(data.error || "Could not remove PIN.");
-    }
-    setSettingsUnlocked(false);
-    hostPinInfo = data;
-    settingsPinRequired = !!data.required;
-    paintHostPinSettings();
-    syncHostControlsVisibility();
-    if (hostPinCurrentInput) hostPinCurrentInput.value = "";
-    showToast(data.required ? "File PIN removed (env PIN may still apply)" : "Host PIN removed");
-  } catch (err) {
-    showToast(err.message || "Could not remove PIN.", true);
-  } finally {
-    hostPinClearBtn.disabled = false;
-  }
-});
-
-pinSetupSkipBtn?.addEventListener("click", () => {
-  closePinSetupPrompt();
-  maybeNudgeSpotifySetup();
-});
-
-pinSetupSaveBtn?.addEventListener("click", async () => {
-  const bootstrapCode = (pinSetupBootstrap?.value || "").trim();
-  const pin = (pinSetupInput?.value || "").trim();
-  const confirm = (pinSetupConfirm?.value || "").trim();
-  if (!/^\d{6}$/.test(bootstrapCode)) {
-    showPinSetupError("Enter the six-digit setup code from data/host-bootstrap-code.json.");
-    return;
-  }
-  if (!pin || pin.length < 4) {
-    showPinSetupError("PIN must be at least 4 characters.");
-    return;
-  }
-  if (pin !== confirm) {
-    showPinSetupError("PIN confirmation does not match.");
-    return;
-  }
-  pinSetupSaveBtn.disabled = true;
-  try {
-    await saveHostPin({ pin, bootstrapCode, fromSetup: true });
-  } catch (err) {
-    showPinSetupError(err.message || "Could not save PIN.");
-  } finally {
-    pinSetupSaveBtn.disabled = false;
-  }
-});
-
-[pinSetupBootstrap, pinSetupInput, pinSetupConfirm].forEach((el) => {
-  el?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") pinSetupSaveBtn?.click();
-  });
-});
-
-function showPinError(msg) {
-  if (!pinError) return;
-  pinError.textContent = msg;
-  pinError.hidden = false;
-}
-
-/** @type {{ close: () => void }|null} */
-let pinModalSession = null;
-
-function dismissPinGate() {
-  pendingPinAction = null;
-  closePinGate();
-  const backTo = VIEWS[lastNonSettingsView] ? lastNonSettingsView : "main";
-  navigate(backTo);
-}
-
-function openPinGate({ title = "Locked", action = "reveal-settings" } = {}) {
-  if (!pinOverlay) return;
-  pendingPinAction = action;
-  if (pinError) {
-    pinError.hidden = true;
-    pinError.textContent = "";
-  }
-  if (pinInput) pinInput.value = "";
-  const pinTitle = document.getElementById("pin-title");
-  if (pinTitle) pinTitle.textContent = title;
-  pinModalSession?.close();
-  pinModalSession = attachModal(pinOverlay, {
-    initialFocus: pinInput,
-    onEscape: dismissPinGate,
-    allowBackdrop: false,
-  });
-}
-
-function closePinGate() {
-  if (pinModalSession) {
-    const session = pinModalSession;
-    pinModalSession = null;
-    session.close();
-    return;
-  }
-  if (pinOverlay) pinOverlay.hidden = true;
-}
-
-async function submitPin() {
-  const pin = (pinInput?.value || "").trim();
-  if (!pin) {
-    showPinError("Enter your PIN.");
-    return;
-  }
-  if (pinUnlockBtn) pinUnlockBtn.disabled = true;
-  try {
-    const res = await fetch("/api/settings/verify-pin", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pin }),
-      credentials: "same-origin",
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data.ok) {
-      setSettingsUnlocked(true);
-      closePinGate();
-      syncHostControlsVisibility();
-      // Host session is live — pull full settings immediately so Booth/Vibe
-      // toggles aren't stuck on HTML defaults until the next save.
-      void loadSettings();
-      void loadAutoFill();
-      const action = pendingPinAction;
-      pendingPinAction = null;
-      if (action === "restart") {
-        void confirmAndRestart();
-      } else if (isHostArea(currentView)) {
-        // Re-run the view now that the gate passes: reveals it and fires the
-        // data loads showView skipped while locked.
-        showView(currentView);
-      }
-      return;
-    }
-    if (res.status === 429) {
-      const secs = Math.ceil((data.retryMs || 30000) / 1000);
-      showPinError(`Too many attempts. Try again in ${secs}s.`);
-    } else {
-      showPinError("Incorrect PIN.");
-    }
-    if (pinInput) {
-      pinInput.value = "";
-      pinInput.focus();
-    }
-  } catch {
-    showPinError("Could not verify PIN. Try again.");
-  } finally {
-    if (pinUnlockBtn) pinUnlockBtn.disabled = false;
-  }
-}
-
-if (pinUnlockBtn) pinUnlockBtn.addEventListener("click", submitPin);
-if (pinInput) {
-  pinInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") submitPin();
-  });
-}
-if (pinCancelBtn) {
-  pinCancelBtn.addEventListener("click", dismissPinGate);
 }
 
 // ---- Shared live Now Playing + queue + party streams ---------------------
@@ -3145,8 +2177,8 @@ function showView(name) {
       title: "DJ Booth is locked",
       action: "reveal-host",
     });
-  } else if (pinOverlay && !pinOverlay.hidden && pendingPinAction !== "restart") {
-    pendingPinAction = null;
+  } else if (isPinGateOpen() && getPendingPinAction() !== "restart") {
+    clearPendingPinAction();
     closePinGate(); // leaving the Booth (e.g. phone Back) dismisses the gate
   }
   if (target === "stats") loadStats();
