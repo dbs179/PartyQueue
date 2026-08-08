@@ -43,12 +43,12 @@ import {
   savePlaylistSelection,
   reconcilePlaylistSelection,
 } from "./playlist-selection.js";
+import { showToast } from "./toast.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
 const resultsEl = document.getElementById("results");
 const statusEl = document.getElementById("status");
-const toastEl = document.getElementById("toast");
 const clearBtn = document.getElementById("clearQueue");
 const modalOverlay = document.getElementById("modal-overlay");
 const modalMessage = document.getElementById("modal-message");
@@ -8001,45 +8001,5 @@ async function loadVersion() {
   } catch {
     /* leave whatever the boot script painted */
   }
-}
-
-let toastTimer = null;
-/**
- * @param {string} message
- * @param {boolean} [isError]
- * @param {number} [durationMs]
- * @param {{ actionLabel?: string, onAction?: () => void }} [opts]
- */
-function showToast(message, isError = false, durationMs = 2600, opts = {}) {
-  clearTimeout(toastTimer);
-  toastEl.replaceChildren();
-  toastEl.classList.toggle("error", isError);
-  const actionLabel = opts?.actionLabel;
-  const onAction = opts?.onAction;
-  if (actionLabel && typeof onAction === "function" && !isError) {
-    toastEl.classList.add("has-action");
-    const msg = document.createElement("span");
-    msg.className = "toast-msg";
-    msg.textContent = message;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "toast-action";
-    btn.textContent = actionLabel;
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      clearTimeout(toastTimer);
-      toastEl.classList.remove("show", "has-action");
-      onAction();
-    });
-    toastEl.append(msg, btn);
-  } else {
-    toastEl.classList.remove("has-action");
-    toastEl.textContent = message;
-  }
-  toastEl.classList.add("show");
-  const ms = Math.max(1000, Number(durationMs) || 2600);
-  toastTimer = setTimeout(() => {
-    toastEl.classList.remove("show", "has-action");
-  }, ms);
 }
 
