@@ -45,6 +45,7 @@ import {
 } from "./playlist-selection.js";
 import { showToast } from "./toast.js";
 import { wirePanelCollapse } from "./panel-collapse.js";
+import { speakersFromGroups } from "./speakers.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -396,29 +397,6 @@ async function loadGroups(force = false) {
   } finally {
     groupsLoading = false;
   }
-}
-
-/** Build speaker chips from group membership when the API omits speakers[]. */
-function speakersFromGroups(groups) {
-  const target = groups.find((g) => g.isTarget) || groups[0] || null;
-  const targetMembers = new Set(
-    (target?.members || []).map((n) => String(n).toLowerCase())
-  );
-  const coord = String(target?.coordinator || "").toLowerCase();
-  const names = new Set();
-  for (const g of groups) {
-    for (const n of g.members || []) if (n) names.add(n);
-  }
-  return [...names]
-    .sort((a, b) => a.localeCompare(b))
-    .map((name) => {
-      const key = name.toLowerCase();
-      return {
-        name,
-        inTargetGroup: targetMembers.has(key),
-        isTargetCoordinator: key === coord,
-      };
-    });
 }
 
 function setGroupEditMode(on) {
