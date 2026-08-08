@@ -21,6 +21,7 @@ import {
   setRequestFairnessSettings,
   getSetRequestFairnessSettings,
   setSetRequestFairnessSettings,
+  resetFairnessQuotas,
   getContentSettings,
   setContentSettings,
   getBrandingSettings,
@@ -166,6 +167,17 @@ export function registerSettingsRoutes(app) {
     } catch (err) {
       console.error("[settings/clear-stats]", err.message);
       res.status(500).json({ error: err.message || "Could not clear stats." });
+    }
+  });
+
+  // Clear rolling song-request + Set Request fairness windows without wiping Stats.
+  app.post("/api/settings/clear-fairness", requireHostStrict, (_req, res) => {
+    try {
+      const fairnessResetAt = resetFairnessQuotas();
+      res.json({ ok: true, fairnessResetAt });
+    } catch (err) {
+      console.error("[settings/clear-fairness]", err.message);
+      res.status(500).json({ error: err.message || "Could not reset fairness." });
     }
   });
 

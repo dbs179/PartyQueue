@@ -40,6 +40,7 @@ export function evaluateRequestFairness({
   target = {},
   force = false,
   hostAuthenticated = false,
+  fairnessResetAt = 0,
   now = Date.now(),
 } = {}) {
   const policy = settings || {};
@@ -59,6 +60,7 @@ export function evaluateRequestFairness({
       error: "Enter your name before adding a song.",
     };
   }
+  const resetAt = Math.max(0, Math.floor(Number(fairnessResetAt) || 0));
 
   const upcoming = Array.isArray(queue) ? queue : [];
   const existing = upcoming.find((track) =>
@@ -123,6 +125,7 @@ export function evaluateRequestFairness({
         event?.kind !== "setRequest" &&
         event?.kind !== "setTrack" &&
         userKey(event?.requestedBy) === key &&
+        Number(event?.ts) > resetAt &&
         Number(event?.ts) > now - windowMs &&
         Number(event?.ts) <= now
     )

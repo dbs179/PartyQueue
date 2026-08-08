@@ -19,6 +19,7 @@ const userKey = (value) =>
  *   user?: string,
  *   events?: Array<{ kind?: string, requestedBy?: string, ts?: number }>,
  *   hostAuthenticated?: boolean,
+ *   fairnessResetAt?: number,
  *   now?: number,
  * }} [opts]
  */
@@ -27,6 +28,7 @@ export function evaluateSetRequestFairness({
   user,
   events = [],
   hostAuthenticated = false,
+  fairnessResetAt = 0,
   now = Date.now(),
 } = {}) {
   const policy = settings || {};
@@ -46,6 +48,7 @@ export function evaluateSetRequestFairness({
       error: "Enter your name before requesting a set.",
     };
   }
+  const resetAt = Math.max(0, Math.floor(Number(fairnessResetAt) || 0));
 
   const rollingMax = Math.max(
     1,
@@ -61,6 +64,7 @@ export function evaluateSetRequestFairness({
       (event) =>
         event?.kind === "setRequest" &&
         userKey(event?.requestedBy) === key &&
+        Number(event?.ts) > resetAt &&
         Number(event?.ts) > now - windowMs &&
         Number(event?.ts) <= now
     )

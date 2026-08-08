@@ -134,12 +134,32 @@ test("runs pre-silence → DJ → post-silence → music and restores exactly", 
     ([name, value]) => name === "read-volume" && value === 10
   );
   assert.ok(baselineRead >= 0 && baselineRead < firstWrite);
-  const firstPause = run.calls.findIndex(([name]) => name === "pause");
-  const firstAdvance = run.calls.findIndex(([name]) => name === "resume");
-  assert.ok(firstPause >= 0 && firstPause < firstWrite);
-  assert.ok(firstAdvance > run.calls.findIndex(
-    ([name, value]) => name === "set-volume" && value === 30
-  ));
+  // Pre/post silence must not be paused for volume settle — pause/resume on
+  // those pads restarts the following HTTP TTS clip (skip-into-DJ double).
+  const pauseWhileSettling = run.calls.findIndex(([name]) => name === "pause");
+  assert.equal(pauseWhileSettling, -1);
+  assert.ok(
+    run.calls.some(([name]) => name === "next" || name === "play-at"),
+    "should advance from post-silence to music"
+  );
+});
+
+test("does not pause pre-silence when Skip lands on the ramp pad early", async () => {
+  // Mimics seekNearEnd → natural land on ramp while handoff is waiting.
+  const run = fakeHandoff({
+    timeline: [PRE, PRE, DJ, POST, MUSIC],
+    states: ["PLAYING", "PLAYING", "PLAYING", "PLAYING", "PLAYING"],
+  });
+
+  await run.handoff.start();
+
+  assert.equal(
+    run.calls.filter(([name]) => name === "pause").length,
+    0,
+    "silence pads must keep playing while volume ramps"
+  );
+  assert.equal(run.getVolume(), 10);
+  assert.equal(run.phases.includes("announcing"), true);
 });
 
 test("missed post-silence pauses music, restores baseline, then resumes", async () => {
@@ -253,7 +273,8 @@ test("retries a failed post-silence advance without wrapping to the DJ", async (
   await run.handoff.start();
 
   assert.equal(run.calls.filter(([name]) => name === "next").length, 2);
-  assert.equal(run.calls.filter(([name]) => name === "resume").length, 2);
+  // First Next throws before resume; only the successful retry resumes.
+  assert.equal(run.calls.filter(([name]) => name === "resume").length, 1);
   assert.equal(run.getVolume(), 10);
 });
 

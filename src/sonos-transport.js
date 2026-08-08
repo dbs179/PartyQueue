@@ -15,6 +15,7 @@ import {
 } from "./dj-volume-handoff.js";
 import { isAnnounceQueuePad } from "./sonos-queue-policy.js";
 import {
+  SEEK_END_LEAD_SEC,
   decideSkipAnnounceAction,
   findNextMusicTrackNumber,
   formatSonosRelTime,
@@ -260,6 +261,10 @@ async function nextUnlocked(opts = {}) {
       }
       rememberSkippedTrack(skipped);
       invalidateSonosSnapshots();
+      console.info(
+        `[next] seek-near-end into announce (lead=${SEEK_END_LEAD_SEC}s` +
+          `${decision.alreadyNearEnd ? ", already-near-end" : ""})`
+      );
       return {
         room: coordinator.Name,
         skipped: !!skipped,

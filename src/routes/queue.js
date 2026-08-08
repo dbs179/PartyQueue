@@ -41,6 +41,7 @@ import {
   getDiscoverySettings,
   getRequestFairnessSettings,
   getSetRequestFairnessSettings,
+  getFairnessResetAt,
   getContentSettings,
   getRotationSettings,
 } from "../settings.js";
@@ -163,6 +164,7 @@ export function registerQueueRoutes(app, ctx) {
           target: { uri, name, artist },
           force: !!force,
           hostAuthenticated: isValidHostToken(extractHostToken(req)),
+          fairnessResetAt: getFairnessResetAt(),
         });
         if (!decision.allowed) return { decision };
 
@@ -417,6 +419,7 @@ export function registerQueueRoutes(app, ctx) {
             user,
             events: getRequests(),
             hostAuthenticated: isValidHostToken(extractHostToken(req)),
+            fairnessResetAt: getFairnessResetAt(),
           });
           if (!decision.allowed) return { decision };
 

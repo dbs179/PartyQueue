@@ -157,3 +157,38 @@ test("set request fairness disabled allows unlimited sets", () => {
   });
   assert.equal(result.allowed, true);
 });
+
+test("fairnessResetAt ignores older Set Request ledger rows", () => {
+  const now = Date.now();
+  const blocked = evaluateSetRequestFairness({
+    settings: setEnabled,
+    user: "Alex",
+    events: [
+      {
+        kind: "setRequest",
+        id: "set:x",
+        requestedBy: "Alex",
+        ts: now - 60_000,
+      },
+    ],
+    fairnessResetAt: 0,
+    now,
+  });
+  assert.equal(blocked.allowed, false);
+
+  const cleared = evaluateSetRequestFairness({
+    settings: setEnabled,
+    user: "Alex",
+    events: [
+      {
+        kind: "setRequest",
+        id: "set:x",
+        requestedBy: "Alex",
+        ts: now - 60_000,
+      },
+    ],
+    fairnessResetAt: now - 30_000,
+    now,
+  });
+  assert.equal(cleared.allowed, true);
+});

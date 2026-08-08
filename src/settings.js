@@ -399,6 +399,19 @@ export function setSetRequestFairnessSettings(partial = {}) {
   return getSetRequestFairnessSettings();
 }
 
+/** Epoch ms; request-log events at or before this are ignored by fairness. */
+export function getFairnessResetAt() {
+  const n = Number(loadSettings().fairnessResetAt);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+/** Host Reset Fairness — clears rolling song + Set Request quotas, keeps Stats. */
+export function resetFairnessQuotas(now = Date.now()) {
+  const at = Math.max(0, Math.floor(Number(now) || Date.now()));
+  saveSettings({ ...loadSettings(), fairnessResetAt: at });
+  return getFairnessResetAt();
+}
+
 // DJ voice announcements (Home Assistant TTS between sets). Off by default.
 // Persona fields (name / icon / intro % / max words) live here too; the
 // enable toggle stays a Controls switch and is saved independently.

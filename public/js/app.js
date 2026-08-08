@@ -370,6 +370,7 @@ const settingsClearDjMemoryBtn = document.getElementById("settings-clear-dj-memo
 const settingsClearSuggestionsBtn = document.getElementById("settings-clear-suggestions");
 const settingsClearReactionsBtn = document.getElementById("settings-clear-reactions");
 const settingsClearKaraokeBtn = document.getElementById("settings-clear-karaoke");
+const settingsClearFairnessBtn = document.getElementById("settings-clear-fairness");
 const discoverEnabledInput = document.getElementById("set-discover-enabled");
 const randomMoodToggle = document.getElementById("random-mood-toggle");
 const randomDecadeToggle = document.getElementById("random-decade-toggle");
@@ -1141,6 +1142,27 @@ settingsClearDjMemoryBtn?.addEventListener("click", async () => {
 });
 
 settingsClearSuggestionsBtn?.addEventListener("click", () => clearAllSuggestions(settingsClearSuggestionsBtn));
+
+settingsClearFairnessBtn?.addEventListener("click", async () => {
+  const ok = await confirmModal(
+    "Reset fairness? Clears rolling song-request and Set Request limits so guests can request again. Queued songs and Stats stay.",
+    "Reset fairness"
+  );
+  if (!ok) return;
+  settingsClearFairnessBtn.disabled = true;
+  try {
+    const res = await hostFetch("/api/settings/clear-fairness", {
+      method: "POST",
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not reset fairness.");
+    showToast("Fairness limits cleared");
+  } catch (err) {
+    showToast(err.message, true);
+  } finally {
+    settingsClearFairnessBtn.disabled = false;
+  }
+});
 
 async function clearAllSuggestions(btn = null) {
   const ok = await confirmModal(

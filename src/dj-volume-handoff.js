@@ -233,39 +233,13 @@ export function createDjVolumeHandoff({
     }
   };
 
-  const holdPad = async (state, label) => {
-    const io = await getAdapter();
-    if (state === "PLAYING" || state === "TRANSITIONING") {
-      try {
-        await io.pause();
-        logger.info(`held ${label} while volume settles`);
-      } catch (error) {
-        logger.warn(`could not hold ${label}: ${error.message}`);
-      }
-    }
-  };
-
-  const resumeHeldPad = async (label) => {
-    try {
-      const io = await getAdapter();
-      await io.resume();
-      logger.info(`resumed ${label} after volume settled`);
-    } catch (error) {
-      logger.warn(`could not resume ${label}: ${error.message}`);
-    }
-  };
-
-  const advanceAfterHeldPad = async (
+  const advanceAfterSilencePad = async (
     position,
     label,
-    heldAt,
-    { naturalTransition = false, nextTransition = false } = {}
+    startedAt,
+    { nextTransition = false } = {}
   ) => {
-    if (naturalTransition) {
-      await resumeHeldPad(label);
-      return;
-    }
-    const elapsed = Math.max(0, now() - heldAt);
+    const elapsed = Math.max(0, now() - startedAt);
     const remaining = Math.max(0, Math.round(silenceSec * 1000) - elapsed);
     if (remaining) await sleep(remaining);
     const io = await getAdapter();
@@ -282,7 +256,12 @@ export function createDjVolumeHandoff({
       logger.info(`advanced from ${label} after ${silenceSec}s`);
       return;
     }
-    await resumeHeldPad(label);
+    try {
+      await io.resume();
+      logger.info(`resumed ${label} after volume settled`);
+    } catch (error) {
+      logger.warn(`could not resume ${label}: ${error.message}`);
+    }
   };
 
   const run = async () => {
@@ -301,19 +280,16 @@ export function createDjVolumeHandoff({
 
         if (onRamp && baselineVolume == null) {
           handledPad = true;
-          const heldAt = now();
-          await holdPad(state, "pre-silence");
+          // Never pause pre-silence. Pause/resume on the ramp pad races Sonos
+          // into the following HTTP TTS clip and restarts it from 0 — classic
+          // "double announce" when Skip seekNearEnd lands on this block.
+          // Silence is silent: ramp volume while the pad keeps playing.
           await captureBaseline();
           setPhase("ramping-up");
           if (await ramp(baselineVolume, announceVolume)) {
             setPhase("announcing");
           }
-          await advanceAfterHeldPad(
-            ttsPosition,
-            "pre-silence",
-            heldAt,
-            { naturalTransition: true }
-          );
+          logger.info("volume ready on pre-silence; letting pad advance");
         } else if (onDj) {
           if (baselineVolume == null) {
             handledPad = true;
@@ -358,7 +334,8 @@ export function createDjVolumeHandoff({
           handledPad = true;
           if (phase !== "restored") {
             restoreHeldAt = now();
-            await holdPad(state, "post-silence");
+            // Same rule as pre-silence: don't pause the restore pad. Ramp
+            // volume down while it plays, then advance to music.
             setPhase("ramping-down");
             // A previous restore pass may have partially lowered the group.
             // Always continue from the live level; restarting from the stored
@@ -376,7 +353,7 @@ export function createDjVolumeHandoff({
             }
           }
           if (!advancedFromRestore) {
-            await advanceAfterHeldPad(
+            await advanceAfterSilencePad(
               musicPosition,
               "post-silence",
               restoreHeldAt ?? now(),
