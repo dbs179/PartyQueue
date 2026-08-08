@@ -38,6 +38,11 @@ import {
   loadEraMood,
   saveEraMood as persistEraMood,
 } from "./genre-presets.js";
+import {
+  loadPlaylistSelection,
+  savePlaylistSelection,
+  reconcilePlaylistSelection,
+} from "./playlist-selection.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -273,23 +278,11 @@ const spotifyStatus = document.getElementById("spotify-status");
 
 // Which playlists are included in the "random" picker. Persisted in the browser.
 // `null` means "not chosen yet" -> defaults to all playlists on first render.
-const SELECTION_KEY = "pq.randomPlaylists";
 let currentPlaylists = [];
-let selectedPlaylistIds = loadSelection();
+let selectedPlaylistIds = loadPlaylistSelection();
 
-// Playlists that should NOT be auto-included in random / never-ending. Matched
-// by name (case-insensitive). These start UNCHECKED on any new/cleared browser,
-// and the rule is also applied once to browsers that already have a saved
-// selection (see SELECTION_VERSION below). Hosts can still check them by hand;
-// that choice is remembered. Bump SELECTION_VERSION whenever this list changes
-// so the new exclusions take effect for existing browsers.
-const DEFAULT_UNCHECKED = [];
-const SELECTION_VERSION_KEY = "pq.selectionVersion";
-const SELECTION_VERSION = "3";
-
-function isDefaultUnchecked(name) {
-  const n = (name || "").trim().toLowerCase();
-  return DEFAULT_UNCHECKED.some((x) => x.trim().toLowerCase() === n);
+function saveSelection() {
+  savePlaylistSelection(selectedPlaylistIds);
 }
 
 // Collapse/expand the "Up next" list (the header + count stay visible).
@@ -5162,23 +5155,6 @@ if (joinCopyBtn) {
   });
 }
 
-function loadSelection() {
-  try {
-    const raw = localStorage.getItem(SELECTION_KEY);
-    return raw == null ? null : new Set(JSON.parse(raw));
-  } catch {
-    return null;
-  }
-}
-
-function saveSelection() {
-  try {
-    localStorage.setItem(SELECTION_KEY, JSON.stringify([...selectedPlaylistIds]));
-  } catch {
-    /* ignore storage errors (private mode, etc.) */
-  }
-}
-
 const EMPTY_MESSAGE =
   "Nothing is playing, add some music to the queue to start the party";
 const CONNECTING_MESSAGE = "Connecting\u2026";
@@ -7099,25 +7075,10 @@ function renderPlaylists(playlists) {
     (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" })
   );
   currentPlaylists = playlists;
-
-  const excludedIds = new Set(
-    playlists.filter((p) => isDefaultUnchecked(p.name)).map((p) => p.id)
+  selectedPlaylistIds = reconcilePlaylistSelection(
+    playlists,
+    selectedPlaylistIds
   );
-
-  if (selectedPlaylistIds === null) {
-    // First time (no saved selection): include everything except the
-    // default-unchecked playlists.
-    selectedPlaylistIds = new Set(
-      playlists.map((p) => p.id).filter((id) => !excludedIds.has(id))
-    );
-    saveSelection();
-  } else if (localStorage.getItem(SELECTION_VERSION_KEY) !== SELECTION_VERSION) {
-    // The default-unchecked rules changed since this browser last saved: keep
-    // the host's existing picks but drop any newly-excluded playlists.
-    for (const id of excludedIds) selectedPlaylistIds.delete(id);
-    saveSelection();
-  }
-  localStorage.setItem(SELECTION_VERSION_KEY, SELECTION_VERSION);
 
   playlistsList.innerHTML = "";
   playlistsEmpty.hidden = playlists.length > 0;
