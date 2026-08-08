@@ -34,7 +34,6 @@ import {
   presetIdsFor as presetIdsForBuckets,
   presetNameForIds as presetNameForIdList,
   moodLabelForIds,
-  labelForDecade,
   trackEraDisplayLabel,
   loadEraMood,
   saveEraMood as persistEraMood,
