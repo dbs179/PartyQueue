@@ -42,6 +42,21 @@ import {
   queueWorkWasPreempted,
 } from "./queue-preempt.js";
 import {
+  clearRefillAnnounceGuard,
+  installRefillAnnounceGuard,
+  isRefillAnnounceSuppressed,
+} from "./refill-announce-guard.js";
+
+export {
+  shouldSuppressRefillAnnounce,
+  refillAnnounceGuardTtlMs,
+  buildRefillAnnounceGuard,
+  clearRefillAnnounceGuard,
+  getRefillAnnounceGuard,
+  setRefillAnnounceGuardForTests,
+  isRefillAnnounceSuppressed,
+} from "./refill-announce-guard.js";
+import {
   DJ_BOOTH_ASIDES,
   DJ_SHARED_OUTROS,
   filterIntrosByContext,
@@ -2784,6 +2799,15 @@ export async function scheduleRefillAnnounce(
     return null;
   }
 
+  // Keep gapless top-ups, but do not spend OpenAI/TTS on a second intro while
+  // the previously announced Never-Ending set is still in the queue.
+  if (await isRefillAnnounceSuppressed()) {
+    console.log(
+      "[dj-voice] skipping refill announce; prior set still queued"
+    );
+    return null;
+  }
+
   // Freeze played-track trimming for the whole write-script-and-enqueue flow.
   // A trim mid-flow removes tracks in front of the playhead, shifting every
   // queue position down, which used to land the announce AFTER the first song
@@ -2869,7 +2893,10 @@ export async function scheduleRefillAnnounce(
     if (!result?.ok) {
       console.error("[dj-voice] refill enqueue failed:", result?.error);
       pending = null;
+      // Failed TTS must not block later intros.
+      return null;
     }
+    installRefillAnnounceGuard(summary);
     return pending;
   } catch (err) {
     console.error("[dj-voice] refill enqueue failed:", err.message);
@@ -2919,11 +2946,13 @@ export async function announceFreshSet(
     `[dj-voice] fresh set announce (${summary.added} songs) â†’ queue insert`
   );
   console.log(`[dj-voice] script: ${message}`);
-  return announceOnSonos(message, {
+  const result = await announceOnSonos(message, {
     startPlayback: true,
     queuePosition: 1,
     preemptGeneration,
   });
+  if (result?.ok) clearRefillAnnounceGuard();
+  return result;
 }
 
 // Mid-queue / leftover-batch announce (Random while music is already playing).
@@ -2999,11 +3028,13 @@ export async function announceSetBatch(
     `[dj-voice] set batch announce (${summary.added} songs) â†’ queue #${insertAt}`
   );
   console.log(`[dj-voice] script: ${message}`);
-  return announceOnSonos(message, {
+  const result = await announceOnSonos(message, {
     startPlayback: !!startPlayback,
     queuePosition: insertAt,
     preemptGeneration,
   });
+  if (result?.ok) clearRefillAnnounceGuard();
+  return result;
 }
 
 export function isDjVoiceReady() {

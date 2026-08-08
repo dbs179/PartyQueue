@@ -29,6 +29,7 @@ import {
   checkPendingAnnounce,
   clearPendingAnnounce,
 } from "./dj-voice.js";
+import { clearRefillAnnounceGuard } from "./refill-announce-guard.js";
 import { cancelActiveDjVolumeHandoff } from "./dj-volume-handoff.js";
 import {
   preemptQueueWork,
@@ -389,6 +390,7 @@ export async function clearQueueWithoutAutoRefill(options = {}) {
   clearTimer();
   try {
     clearPendingAnnounce();
+    clearRefillAnnounceGuard();
     const cancelDj = options.cancelDj || cancelActiveDjVolumeHandoff;
     await cancelDj("queue cleared by host");
     clearTimer();
