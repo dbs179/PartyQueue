@@ -11,9 +11,10 @@ import {
   moodGenreGuide,
 } from "../src/genre-presets.js";
 
-// The client keeps its own copy of GENRE_PRESETS (public/js/app.js); the
+// The client keeps its own copy of GENRE_PRESETS (public/js/genre-presets.js);
 // mirrors here pin the intended id sets so a rename on either side (or on the
-// server GENRE_BUCKETS list) doesn't silently break them.
+// server GENRE_BUCKETS list) doesn't silently break them. See also
+// test/client-genre-presets.test.js for an exact client↔server deepEqual.
 const ALL = [
   "rock",
   "metal",

@@ -1,5 +1,5 @@
 // Mood presets: named genre-bucket bundles ("party", "chill", ...) mirroring
-// the Vibe chips in the UI (GENRE_PRESETS in public/js/app.js). Kept as a
+// the Vibe chips in the UI (GENRE_PRESETS in public/js/genre-presets.js). Kept as a
 // leaf data module (no imports) so anything server-side — DJ scripts, the
 // Never-Ending rotation engine — can resolve a preset without pulling in
 // browser code or risking import cycles.

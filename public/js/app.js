@@ -28,6 +28,17 @@ import {
   formatSuggestionWhen,
   escapeHtml,
 } from "./format.js";
+import {
+  DECADE_LABELS,
+  sameIdSet,
+  presetIdsFor as presetIdsForBuckets,
+  presetNameForIds as presetNameForIdList,
+  moodLabelForIds,
+  labelForDecade,
+  trackEraDisplayLabel,
+  loadEraMood,
+  saveEraMood as persistEraMood,
+} from "./genre-presets.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -7279,26 +7290,6 @@ let genreDataEnabled = true;
 let genreSelection = loadGenreSelection();
 let poolSizeTimer = null;
 
-// One-tap mood mixes. Ids must match GENRE_BUCKETS on the server.
-// `all` is filled at apply time = every bucket.
-const GENRE_PRESETS = {
-  party: [
-    "rock",
-    "metal",
-    "country",
-    "hiphop",
-    "electronic",
-    "pop",
-    "punk",
-  ],
-  chill: ["folk", "soul", "jazz", "blues", "pop", "electronic", "oldies", "other"],
-  country: ["country", "folk"],
-  heavy: ["rock", "metal"],
-  rap: ["hiphop"],
-  kids: ["kids", "soundtrack"],
-  all: null,
-};
-
 // Mix-label state (declared before the decade block below runs its initial
 // sync, which paints the label). Server-broadcast mix wins; undefined = not
 // seen yet, so local state fills in until the first Now Playing payload.
@@ -7316,33 +7307,10 @@ npGenreLabel?.addEventListener("click", () => navigateMixPanel("genres"));
 // shortfalls fill with era hits from outside the library. Persists locally +
 // on the server so Random and Never-Ending share it across phones.
 const decadeChips = document.getElementById("decade-chips");
-const MOOD_KEY = "pq.mood";
-const DECADE_LABELS = {
-  "60s": "60's",
-  "70s": "70's",
-  "80s": "80's",
-  "90s": "90's",
-  "2000s": "2000's",
-  "2010s": "2010's",
-  "2020s": "2020's",
-};
 let eraMood = loadEraMood();
 
-function loadEraMood() {
-  try {
-    const raw = localStorage.getItem(MOOD_KEY);
-    return raw && DECADE_LABELS[raw] ? raw : null;
-  } catch {
-    return null;
-  }
-}
 function saveEraMood() {
-  try {
-    if (eraMood) localStorage.setItem(MOOD_KEY, eraMood);
-    else localStorage.removeItem(MOOD_KEY);
-  } catch {
-    /* ignore storage errors */
-  }
+  persistEraMood(eraMood);
 }
 function currentMoodId() {
   return eraMood;
@@ -7370,10 +7338,9 @@ if (decadeChips) {
 }
 
 // ---- Mix label ("MOOD: PARTY - 80'S") over Now Playing + on Party Display ----
-/** Active decade label ("80's") preferring the server-broadcast mix. */
-function activeEraLabel() {
-  const mood = serverMix.mood !== undefined ? serverMix.mood : eraMood;
-  return mood ? DECADE_LABELS[mood] || null : null;
+/** Active decade mood id preferring the server-broadcast mix. */
+function activeEraMoodId() {
+  return serverMix.mood !== undefined ? serverMix.mood : eraMood;
 }
 
 /**
@@ -7382,25 +7349,14 @@ function activeEraLabel() {
  * active decade only for rows queued before per-track stamping existed.
  */
 function trackEraLabel(track) {
-  if (track?.mood && DECADE_LABELS[track.mood]) return DECADE_LABELS[track.mood];
-  return activeEraLabel();
+  return trackEraDisplayLabel(track, activeEraMoodId());
 }
 
 function presetNameForIds(ids) {
-  if (!Array.isArray(ids) || !ids.length) return "All";
-  const order = ["party", "chill", "country", "heavy", "rap", "kids"];
-  for (const name of order) {
-    // Bucket-filtered when the bucket list is loaded, raw preset otherwise.
-    const preset = presetIdsFor(name);
-    const target = preset.length ? preset : GENRE_PRESETS[name] || [];
-    if (target.length && sameIdSet(ids, target)) {
-      return name.charAt(0).toUpperCase() + name.slice(1);
-    }
-  }
-  if (genreBuckets.length && sameIdSet(ids, genreBuckets.map((b) => b.id))) {
-    return "All";
-  }
-  return "Custom";
+  return presetNameForIdList(
+    ids,
+    genreBuckets.map((b) => b.id)
+  );
 }
 
 function updateMixLabels() {
@@ -7617,16 +7573,10 @@ function renderGenres() {
 }
 
 function presetIdsFor(name) {
-  const all = genreBuckets.map((b) => b.id);
-  if (!all.length) return [];
-  if (name === "all") return all;
-  return (GENRE_PRESETS[name] || []).filter((id) => all.includes(id));
-}
-
-function sameIdSet(a, b) {
-  if (a.length !== b.length) return false;
-  const set = new Set(a);
-  return b.every((id) => set.has(id));
+  return presetIdsForBuckets(
+    name,
+    genreBuckets.map((b) => b.id)
+  );
 }
 
 function syncGenrePresetHighlight() {
@@ -7644,16 +7594,10 @@ function syncGenrePresetHighlight() {
 
 /** Active mood preset label, or "Custom" when genres don't match a preset. */
 function currentMoodLabel() {
-  if (!genreBuckets.length) return null;
-  const current = currentGenreIds();
-  const order = ["party", "chill", "country", "heavy", "rap", "kids", "all"];
-  for (const name of order) {
-    const ids = presetIdsFor(name);
-    if (ids.length && sameIdSet(current, ids)) {
-      return name.charAt(0).toUpperCase() + name.slice(1);
-    }
-  }
-  return "Custom";
+  return moodLabelForIds(
+    currentGenreIds(),
+    genreBuckets.map((b) => b.id)
+  );
 }
 
 function updateMusicMixHubSummaries() {
