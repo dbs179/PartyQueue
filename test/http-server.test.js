@@ -108,7 +108,7 @@ describe("HTTP server harness", { concurrency: false }, () => {
     assert.equal(res.status, 200);
     assert.match(res.headers.get("cache-control") || "", /no-cache/i);
     const body = await res.text();
-    assert.match(body, /import\s+[\"']\.\/app\.js[\"']/);
+    assert.match(body, /import\s+["']\.\/app\.js["']/);
   });
 
   test("branded index loads the bundled client with a version query", async () => {

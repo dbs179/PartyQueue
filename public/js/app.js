@@ -44,27 +44,20 @@ import {
 } from "./playlist-selection.js";
 import { showToast } from "./toast.js";
 import { wirePanelCollapse } from "./panel-collapse.js";
-import { speakersFromGroups } from "./speakers.js";
-import { memorySourceBadge } from "./memory-badges.js";
-import {
-  applySpotifyAppStatus as paintSpotifyAppStatus,
-  applyLastfmStatus as paintLastfmStatus,
-  applyHaStatus as paintHaStatus,
-  applySonosConnStatus as paintSonosConnStatus,
-  applySpotifyAccountStatus as paintSpotifyAccountStatus,
-  paintConnStatusUnavailable,
-  paintSpotifyAccountUnavailable,
-} from "./connection-status.js";
 import {
   createStreamCursor,
   resetStreamCursor,
   advanceStreamCursor,
 } from "./stream-cursor.js";
+import { createConfirmModal } from "./confirm-modal.js";
+import { loadMemory as loadMemoryUi } from "./memory-ui.js";
+import { createPartyRecapUi } from "./party-recap.js";
+import { createSonosGroups } from "./sonos-groups.js";
+import { createConnectionsUi } from "./connections-ui.js";
 import {
-  buildBannerGalleryItems,
-  buildDjIconGalleryItems,
-  mountThumbGallery,
-} from "./asset-gallery.js";
+  createBrandingUi,
+  persistBrandingCache,
+} from "./branding-ui.js";
 import {
   nowPlayingOriginLabel,
   displayOriginLabel,
@@ -132,6 +125,13 @@ const modalOverlay = document.getElementById("modal-overlay");
 const modalMessage = document.getElementById("modal-message");
 const modalCancel = document.getElementById("modal-cancel");
 const modalConfirm = document.getElementById("modal-confirm");
+
+const confirmModal = createConfirmModal({
+  overlay: modalOverlay,
+  messageEl: modalMessage,
+  confirmBtn: modalConfirm,
+  cancelBtn: modalCancel,
+});
 
 const nameOverlay = document.getElementById("name-overlay");
 const nameTitle = document.getElementById("name-title");
@@ -370,6 +370,9 @@ wirePanelCollapse("queue-section", "queue-toggle", "pq.queueCollapsed", {
   // Edit sits inside the queue header; don't collapse when it's used.
   ignoreClickSelector: "#queue-edit-toggle",
 });
+// loadGroups bound after createSonosGroups (below)
+let loadGroups = async () => {};
+let invalidateGroups = () => {};
 wirePanelCollapse("controls-section", "controls-toggle", "pq.controlsCollapsed", {
   onExpand: () => loadGroups(true),
 });
@@ -425,236 +428,31 @@ if (toolbarDisplayBtn) {
 syncToolbarMoodVisibility();
 
 // ---- Sonos group picker + Edit groups ----
-// Normal mode: pick which group's queue PartyQueue controls.
-// Edit mode: join / leave speakers against the current target coordinator.
-const groupChips = document.getElementById("group-chips");
-const groupEmpty = document.getElementById("group-empty");
-const groupIntro = document.getElementById("group-intro");
-const groupPicker = document.getElementById("group-picker");
-const groupEdit = document.getElementById("group-edit");
-const groupEditAnchor = document.getElementById("group-edit-anchor");
-const groupMembers = document.getElementById("group-members");
-const groupAvailable = document.getElementById("group-available");
-const groupEditEmpty = document.getElementById("group-edit-empty");
-const groupEditToggle = document.getElementById("group-edit-toggle");
-const groupUngroupAllBtn = document.getElementById("group-ungroup-all");
-let groupsCache = [];
-let speakersCache = [];
-let groupsTargetLabel = null;
-let groupsLoading = false;
-let lastGroupsAt = 0;
-let groupEditMode = false;
-const GROUPS_MS = 5000;
-
-async function loadGroups(force = false) {
-  if (groupsLoading) return;
-  if (!force && Date.now() - lastGroupsAt < GROUPS_MS) return;
-  groupsLoading = true;
-  try {
-    const res = await fetch("/api/groups");
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not load groups.");
-    groupsCache = data.groups || [];
-    speakersCache = data.speakers?.length
-      ? data.speakers
-      : speakersFromGroups(groupsCache);
-    groupsTargetLabel =
-      data.targetLabel ||
-      groupsCache.find((g) => g.isTarget)?.label ||
-      groupsCache[0]?.label ||
-      null;
-    lastGroupsAt = Date.now();
-    renderGroups();
-  } catch (err) {
-    // Keep previous chips, but tell the host something went wrong.
-    if (force || !groupsCache.length) {
-      showToast(err.message || "Could not load Sonos groups.", true);
-    }
-  } finally {
-    groupsLoading = false;
+const {
+  loadGroups: loadGroupsImpl,
+  invalidate: invalidateGroupsImpl,
+} = createSonosGroups(
+  {
+    groupChips: document.getElementById("group-chips"),
+    groupEmpty: document.getElementById("group-empty"),
+    groupIntro: document.getElementById("group-intro"),
+    groupPicker: document.getElementById("group-picker"),
+    groupEdit: document.getElementById("group-edit"),
+    groupEditAnchor: document.getElementById("group-edit-anchor"),
+    groupMembers: document.getElementById("group-members"),
+    groupAvailable: document.getElementById("group-available"),
+    groupEditEmpty: document.getElementById("group-edit-empty"),
+    groupEditToggle: document.getElementById("group-edit-toggle"),
+    groupUngroupAllBtn: document.getElementById("group-ungroup-all"),
+  },
+  {
+    hostFetch,
+    showToast,
+    refreshSonos,
   }
-}
-
-function setGroupEditMode(on) {
-  groupEditMode = !!on;
-  if (groupPicker) groupPicker.hidden = groupEditMode;
-  if (groupEdit) groupEdit.hidden = !groupEditMode;
-  if (groupUngroupAllBtn) groupUngroupAllBtn.hidden = !groupEditMode;
-  if (groupEditToggle) {
-    groupEditToggle.setAttribute("aria-pressed", String(groupEditMode));
-    groupEditToggle.textContent = groupEditMode ? "Done" : "Edit groups";
-  }
-  if (groupIntro) {
-    groupIntro.textContent = groupEditMode
-      ? "Edit mode: tap a speaker under Available to join, or tap one under In this group to leave."
-      : "Songs go to this group's queue. Pick a group below, or Edit groups to join / leave speakers.";
-  }
-  renderGroups();
-}
-
-function renderGroups() {
-  if (groupEditMode) {
-    renderGroupEdit();
-    return;
-  }
-  if (!groupChips) return;
-  groupChips.innerHTML = "";
-  if (groupEmpty) groupEmpty.hidden = groupsCache.length > 0;
-
-  for (const g of groupsCache) {
-    const on = g.isTarget;
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "genre-chip group-chip" + (on ? " on" : "");
-    chip.setAttribute("role", "radio");
-    chip.setAttribute("aria-checked", on ? "true" : "false");
-    chip.title =
-      g.members?.length > 1 ? g.members.join(", ") : g.label;
-    const count =
-      g.memberCount > 1 ? `<span class="genre-cnt">${g.memberCount}</span>` : "";
-    const playing = g.isPlaying ? '<span class="group-playing" aria-hidden="true">&#9654;</span>' : "";
-    chip.innerHTML = `${playing}<span class="genre-name">${escapeHtml(g.label)}</span>${count}`;
-    if (!on) chip.addEventListener("click", () => pickGroup(g.coordinator));
-    groupChips.appendChild(chip);
-  }
-}
-
-function renderGroupEdit() {
-  if (!groupMembers || !groupAvailable) return;
-  groupMembers.innerHTML = "";
-  groupAvailable.innerHTML = "";
-
-  const members = speakersCache.filter((s) => s.inTargetGroup);
-  const available = speakersCache.filter((s) => !s.inTargetGroup);
-
-  if (groupEditAnchor) {
-    groupEditAnchor.textContent = groupsTargetLabel
-      ? `Target group: ${groupsTargetLabel}`
-      : "Target group: (none selected)";
-  }
-
-  for (const s of members) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className =
-      "genre-chip group-chip on" + (s.isTargetCoordinator ? " group-chip-coord" : "");
-    chip.title = s.isTargetCoordinator
-      ? `${s.name} (coordinator) — tap to leave group`
-      : `Remove ${s.name} from this group`;
-    chip.innerHTML = `<span class="genre-name">${escapeHtml(s.name)}</span>${
-      s.isTargetCoordinator ? '<span class="genre-cnt">lead</span>' : ""
-    }`;
-    chip.addEventListener("click", () => leaveSpeaker(s.name));
-    groupMembers.appendChild(chip);
-  }
-
-  for (const s of available) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "genre-chip group-chip";
-    chip.title = `Join ${s.name} to the target group`;
-    chip.innerHTML = `<span class="genre-name">${escapeHtml(s.name)}</span><span class="genre-cnt">+</span>`;
-    chip.addEventListener("click", () => joinSpeaker(s.name));
-    groupAvailable.appendChild(chip);
-  }
-
-  if (groupEditEmpty) {
-    const empty = speakersCache.length === 0;
-    groupEditEmpty.hidden = !empty;
-    if (empty) {
-      groupEditEmpty.textContent =
-        groupsCache.length === 0
-          ? "No Sonos speakers found. Check that speakers are online, then tap Done and try again."
-          : "Couldn't load speakers. Tap Done, hard-refresh the page, then try Edit groups again.";
-    }
-  }
-}
-
-async function pickGroup(room) {
-  try {
-    const res = await hostFetch("/api/groups/select", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ room }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not select group.");
-    lastGroupsAt = 0;
-    await loadGroups(true);
-    refreshSonos();
-    showToast(`Targeting ${data.label}`);
-  } catch (err) {
-    showToast(err.message, true);
-  }
-}
-
-async function joinSpeaker(room) {
-  try {
-    const res = await hostFetch("/api/groups/join", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ room }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not join speaker.");
-    lastGroupsAt = 0;
-    await loadGroups(true);
-    refreshSonos();
-    if (data.alreadyInGroup) showToast(`${room} is already in the group`);
-    else showToast(`Joined ${room}`);
-  } catch (err) {
-    showToast(err.message, true);
-  }
-}
-
-async function leaveSpeaker(room) {
-  try {
-    const res = await hostFetch("/api/groups/leave", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ room }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not ungroup speaker.");
-    lastGroupsAt = 0;
-    await loadGroups(true);
-    refreshSonos();
-    if (data.alreadyStandalone) showToast(`${room} is already alone`);
-    else showToast(`Ungrouped ${room}`);
-  } catch (err) {
-    showToast(err.message, true);
-  }
-}
-
-if (groupEditToggle) {
-  groupEditToggle.addEventListener("click", () => {
-    setGroupEditMode(!groupEditMode);
-    if (groupEditMode) loadGroups(true);
-  });
-}
-
-if (groupUngroupAllBtn) {
-  groupUngroupAllBtn.addEventListener("click", async () => {
-    groupUngroupAllBtn.disabled = true;
-    try {
-      const res = await hostFetch("/api/groups/ungroup-all", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not ungroup speakers.");
-      lastGroupsAt = 0;
-      await loadGroups(true);
-      refreshSonos();
-      showToast(
-        data.ungrouped
-          ? `Ungrouped ${data.ungrouped} speaker${data.ungrouped === 1 ? "" : "s"}`
-          : "All speakers were already alone"
-      );
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      groupUngroupAllBtn.disabled = false;
-    }
-  });
-}
+);
+loadGroups = loadGroupsImpl;
+invalidateGroups = invalidateGroupsImpl;
 
 // Randomness settings (song memory + per-artist budget), persisted server-side.
 const songMemoryInput = document.getElementById("set-song-memory");
@@ -835,7 +633,10 @@ const headerEventName = document.getElementById("event-name");
 const headerSubtitle = document.getElementById("subtitle");
 const headerVersion = document.getElementById("app-version");
 const heroImg = document.getElementById("hero");
-const MAX_DJ_ICON_BYTES = 2 * 1024 * 1024;
+const lookTextSaveBtn = document.getElementById("look-text-save");
+const bannerUploadBtn = document.getElementById("banner-upload-btn");
+const bannerFileInput = document.getElementById("banner-file");
+const bannerGallery = document.getElementById("banner-gallery");
 let settingsDefaults = {
   songMemory: 500,
   artistWindow: 30,
@@ -861,41 +662,6 @@ try {
 }
 if (showQueueGenreInput) showQueueGenreInput.checked = showQueueGenre;
 
-const BRANDING_STORAGE_KEY = "pq.branding";
-
-function persistBrandingCache(partial = {}) {
-  try {
-    let prev = {};
-    try {
-      prev = JSON.parse(localStorage.getItem(BRANDING_STORAGE_KEY) || "{}") || {};
-    } catch {
-      prev = {};
-    }
-    const next = {
-      eventName:
-        partial.eventName != null ? partial.eventName : prev.eventName || "",
-      subtitle:
-        partial.subtitle != null ? partial.subtitle : prev.subtitle || "",
-      heroBanner:
-        partial.heroBanner !== undefined
-          ? partial.heroBanner || null
-          : prev.heroBanner || null,
-      version: partial.version != null ? partial.version : prev.version || "",
-      showVersion:
-        partial.showVersion != null
-          ? !!partial.showVersion
-          : !!prev.showVersion,
-      showQueueGenre:
-        partial.showQueueGenre != null
-          ? !!partial.showQueueGenre
-          : !!prev.showQueueGenre,
-    };
-    localStorage.setItem(BRANDING_STORAGE_KEY, JSON.stringify(next));
-  } catch {
-    /* ignore quota / private mode */
-  }
-}
-
 function syncShowQueueGenre(enabled, { rerender = true } = {}) {
   if (typeof enabled !== "boolean") return;
   if (showQueueGenre === enabled) {
@@ -910,49 +676,44 @@ function syncShowQueueGenre(enabled, { rerender = true } = {}) {
   }
 }
 
-// Point the header image at the active banner (null = built-in default).
-// Inline boot script already set /banner from saved branding — skip reassign
-// on the initial settings load so the image isn't fetched twice.
-function applyHero(name, { force = false } = {}) {
-  if (!heroImg) return;
-  const key = name || "default";
-  persistBrandingCache({ heroBanner: name || null });
-  if (!force && heroImg.dataset.bannerKey === key) {
-    heroImg.setAttribute("data-ready", "1");
-    return;
+const {
+  applyHero,
+  applyBranding,
+  loadBanners,
+  loadDjIcons,
+  selectDjIcon,
+} = createBrandingUi(
+  {
+    heroImg,
+    headerEventName,
+    headerSubtitle,
+    headerVersion,
+    eventNameInput,
+    subtitleInput,
+    showVersionInput,
+    showQueueGenreInput,
+    lookTextSaveBtn,
+    bannerUploadBtn,
+    bannerFileInput,
+    bannerGallery,
+    djIconUploadBtn,
+    djIconFileInput,
+    djIconGallery,
+  },
+  {
+    hostFetch,
+    showToast,
+    saveSettings,
+    getDefaultDjIconName: () => settingsDefaults?.djIcon || "dj-icon-flat.png",
+    onDjIconChange: (name) => {
+      activeDjIconName = name;
+      updateDjHubSummaries();
+    },
+    onShowQueueGenreChange: (enabled) => {
+      syncShowQueueGenre(enabled, { rerender: true });
+    },
   }
-  heroImg.dataset.bannerKey = key;
-  heroImg.src = `/banner?b=${encodeURIComponent(key)}`;
-  heroImg.setAttribute("data-ready", "1");
-}
-
-// Apply the event name/tagline to the page header (and the browser tab title).
-function applyBranding(eventName, subtitle) {
-  if (eventName != null && headerEventName) {
-    if (headerEventName.textContent !== eventName) {
-      headerEventName.textContent = eventName;
-    }
-    const displayName = document.getElementById("display-event-name");
-    if (displayName && displayName.textContent !== eventName) {
-      displayName.textContent = eventName;
-    }
-    if (document.title !== eventName) document.title = eventName;
-  }
-  if (subtitle != null && headerSubtitle) {
-    if (headerSubtitle.textContent !== subtitle) {
-      headerSubtitle.textContent = subtitle;
-    }
-    headerSubtitle.hidden = subtitle.trim() === "";
-    headerSubtitle.setAttribute("data-ready", "1");
-  }
-  document.getElementById("header-title")?.setAttribute("data-ready", "1");
-  if (eventName != null || subtitle != null) {
-    persistBrandingCache({
-      eventName: eventName != null ? eventName : undefined,
-      subtitle: subtitle != null ? subtitle : undefined,
-    });
-  }
-}
+);
 
 function fillSettings(s) {
   if (s.songMemory != null) songMemoryInput.value = s.songMemory;
@@ -2142,656 +1903,62 @@ if (guestBdayForgetBtn) {
   });
 }
 
-// ---- DJ icon picker (Settings page; same pattern as banners) ------------
-function renderDjIcons(data) {
-  if (!djIconGallery) return;
-  const { active, items } = buildDjIconGalleryItems(data, {
-    defaultIconName: settingsDefaults?.djIcon || "dj-icon-flat.png",
-  });
-  activeDjIconName = active;
-  updateDjHubSummaries();
-  mountThumbGallery(djIconGallery, items, {
-    deleteAriaLabel: "Delete DJ icon",
-    onSelect: selectDjIcon,
-    onDelete: deleteDjIcon,
-  });
-}
-
-async function loadDjIcons() {
-  try {
-    const res = await fetch("/api/dj-icon");
-    if (!res.ok) return;
-    renderDjIcons(await res.json());
-  } catch {
-    /* leave gallery as-is on transient errors */
-  }
-}
-
-async function selectDjIcon(name) {
-  try {
-    const res = await hostFetch("/api/dj-icon/select", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not switch DJ icon.");
-    renderDjIcons(data);
-  } catch (err) {
-    showToast(err.message, true);
-  }
-}
-
-async function deleteDjIcon(name) {
-  try {
-    const res = await hostFetch(`/api/dj-icon/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not delete DJ icon.");
-    renderDjIcons(data);
-  } catch (err) {
-    showToast(err.message, true);
-  }
-}
-
-if (djIconUploadBtn && djIconFileInput) {
-  djIconUploadBtn.addEventListener("click", () => djIconFileInput.click());
-  djIconFileInput.addEventListener("change", () => {
-    const file = djIconFileInput.files && djIconFileInput.files[0];
-    if (!file) return;
-    if (file.size > MAX_DJ_ICON_BYTES) {
-      showToast("Image is too large (2 MB max).", true);
-      djIconFileInput.value = "";
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = async () => {
-      djIconUploadBtn.disabled = true;
-      try {
-        const res = await hostFetch("/api/dj-icon", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: reader.result }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Upload failed.");
-        renderDjIcons(data);
-        showToast("DJ Icon updated");
-      } catch (err) {
-        showToast(err.message, true);
-      } finally {
-        djIconUploadBtn.disabled = false;
-        djIconFileInput.value = "";
-      }
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-// Look → Text: explicit Save (independent of Queue Song Selection Save).
-const lookTextSaveBtn = document.getElementById("look-text-save");
-function saveLookText() {
-  saveSettings(
-    {
-      eventName: eventNameInput.value,
-      subtitle: subtitleInput.value,
+// ---- Connections (Spotify app / Last.fm / HA / Sonos HTTP / account) ----
+const {
+  loadSpotifyAppStatus,
+  loadLastfmStatus,
+  loadHaStatus,
+  loadSonosConnStatus,
+  loadSpotifyStatus,
+} = createConnectionsUi(
+  {
+    spotifyApp: {
+      statusEl: document.getElementById("spotify-app-status"),
+      clientIdInput: document.getElementById("set-spotify-client-id"),
+      clientSecretInput: document.getElementById("set-spotify-client-secret"),
+      redirectInput: document.getElementById("set-spotify-redirect"),
+      marketInput: document.getElementById("set-spotify-market"),
+      secretHint: document.getElementById("spotify-secret-hint"),
+      saveBtn: document.getElementById("spotify-app-save"),
+      testBtn: document.getElementById("spotify-app-test"),
+      clearBtn: document.getElementById("spotify-app-clear"),
     },
-    { toastMessage: "Saved" }
-  );
-}
-lookTextSaveBtn?.addEventListener("click", saveLookText);
-for (const input of [eventNameInput, subtitleInput]) {
-  input?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      saveLookText();
-    }
-  });
-}
-showVersionInput.addEventListener("change", () => {
-  saveSettings({ showVersion: showVersionInput.checked });
-  if (headerVersion) headerVersion.hidden = !showVersionInput.checked;
-  persistBrandingCache({ showVersion: showVersionInput.checked });
-});
-if (showQueueGenreInput) {
-  showQueueGenreInput.addEventListener("change", () => {
-    syncShowQueueGenre(showQueueGenreInput.checked, { rerender: true });
-    saveSettings({ showQueueGenre: showQueueGenreInput.checked });
-  });
-}
-
-// ---- Hero banner picker (Settings page) --------------------------------
-const bannerUploadBtn = document.getElementById("banner-upload-btn");
-const bannerFileInput = document.getElementById("banner-file");
-const bannerGallery = document.getElementById("banner-gallery");
-const MAX_BANNER_BYTES = 8 * 1024 * 1024;
-
-function renderBanners(data) {
-  if (!bannerGallery) return;
-  mountThumbGallery(bannerGallery, buildBannerGalleryItems(data), {
-    deleteAriaLabel: "Delete banner",
-    onSelect: selectBanner,
-    onDelete: deleteBanner,
-  });
-}
-
-async function loadBanners() {
-  try {
-    const res = await fetch("/api/banners");
-    if (!res.ok) return;
-    renderBanners(await res.json());
-  } catch {
-    /* leave gallery as-is on transient errors */
+    lastfm: {
+      statusEl: document.getElementById("lastfm-status"),
+      keyInput: document.getElementById("set-lastfm-key"),
+      keyHint: document.getElementById("lastfm-key-hint"),
+      saveBtn: document.getElementById("lastfm-save"),
+      testBtn: document.getElementById("lastfm-test"),
+      clearBtn: document.getElementById("lastfm-clear"),
+    },
+    ha: {
+      statusEl: document.getElementById("ha-status"),
+      urlInput: document.getElementById("set-ha-url"),
+      tokenInput: document.getElementById("set-ha-token"),
+      tokenHint: document.getElementById("ha-token-hint"),
+      saveBtn: document.getElementById("ha-save"),
+      testBtn: document.getElementById("ha-test"),
+      clearBtn: document.getElementById("ha-clear"),
+    },
+    sonos: {
+      statusEl: document.getElementById("sonos-conn-status"),
+      hostInput: document.getElementById("set-sonos-host"),
+      roomInput: document.getElementById("set-sonos-room"),
+      saveBtn: document.getElementById("sonos-conn-save"),
+      testBtn: document.getElementById("sonos-conn-test"),
+      clearBtn: document.getElementById("sonos-conn-clear"),
+    },
+    spotifyAccount: {
+      statusEl: spotifyStatus,
+      cacheWarmed,
+    },
+  },
+  {
+    hostFetch,
+    showToast,
+    loadGenres,
   }
-}
-
-// Spotify Developer app credentials (DJ Booth → Connections).
-// Client secret is write-only — status never returns the secret.
-const spotifyAppStatusEl = document.getElementById("spotify-app-status");
-const spotifyClientIdInput = document.getElementById("set-spotify-client-id");
-const spotifyClientSecretInput = document.getElementById("set-spotify-client-secret");
-const spotifyRedirectInput = document.getElementById("set-spotify-redirect");
-const spotifyMarketInput = document.getElementById("set-spotify-market");
-const spotifySecretHint = document.getElementById("spotify-secret-hint");
-const spotifyAppSaveBtn = document.getElementById("spotify-app-save");
-const spotifyAppTestBtn = document.getElementById("spotify-app-test");
-const spotifyAppClearBtn = document.getElementById("spotify-app-clear");
-const spotifyAppEls = {
-  statusEl: spotifyAppStatusEl,
-  clientIdInput: spotifyClientIdInput,
-  clientSecretInput: spotifyClientSecretInput,
-  redirectInput: spotifyRedirectInput,
-  marketInput: spotifyMarketInput,
-  secretHint: spotifySecretHint,
-  saveBtn: spotifyAppSaveBtn,
-  clearBtn: spotifyAppClearBtn,
-};
-
-function applySpotifyAppStatus(data) {
-  paintSpotifyAppStatus(spotifyAppEls, data);
-}
-
-async function loadSpotifyAppStatus() {
-  if (!spotifyAppStatusEl) return;
-  try {
-    const res = await hostFetch("/api/spotify/app/status");
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not load Spotify app status.");
-    applySpotifyAppStatus(data);
-  } catch {
-    paintConnStatusUnavailable(spotifyAppStatusEl);
-  }
-}
-
-// Clear the asterisk mask when focusing so a new secret can be typed/pasted.
-if (spotifyClientSecretInput) {
-  spotifyClientSecretInput.addEventListener("focus", () => {
-    if (/^\*+$/.test(spotifyClientSecretInput.value)) {
-      spotifyClientSecretInput.value = "";
-    }
-  });
-}
-
-if (spotifyAppSaveBtn) {
-  spotifyAppSaveBtn.addEventListener("click", async () => {
-    spotifyAppSaveBtn.disabled = true;
-    try {
-      const body = {
-        clientId: spotifyClientIdInput?.value ?? "",
-        redirectUri: spotifyRedirectInput?.value ?? "",
-        market: spotifyMarketInput?.value ?? "",
-      };
-      const secret = (spotifyClientSecretInput?.value ?? "").trim();
-      // Ignore the display mask (all *) and blanks — keep the saved secret.
-      if (secret && !/^\*+$/.test(secret)) body.clientSecret = secret;
-      const res = await hostFetch("/api/spotify/app", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not save Spotify app settings.");
-      applySpotifyAppStatus(data);
-      showToast("Spotify app settings saved");
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      if (spotifyClientIdInput && !spotifyClientIdInput.readOnly) {
-        spotifyAppSaveBtn.disabled = false;
-      }
-    }
-  });
-}
-
-if (spotifyAppTestBtn) {
-  spotifyAppTestBtn.addEventListener("click", async () => {
-    spotifyAppTestBtn.disabled = true;
-    try {
-      const res = await hostFetch("/api/spotify/app/test", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Connection failed.");
-      showToast(data.message || "Spotify app credentials work");
-      loadSpotifyAppStatus();
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      spotifyAppTestBtn.disabled = false;
-    }
-  });
-}
-
-if (spotifyAppClearBtn) {
-  spotifyAppClearBtn.addEventListener("click", async () => {
-    if (!confirm("Clear saved Spotify Client ID, Secret, Redirect URI, and Market?")) return;
-    spotifyAppClearBtn.disabled = true;
-    try {
-      const res = await hostFetch("/api/spotify/app/clear", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not clear Spotify app settings.");
-      applySpotifyAppStatus(data);
-      showToast("Spotify app settings cleared");
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      if (spotifyClientIdInput && !spotifyClientIdInput.readOnly) {
-        spotifyAppClearBtn.disabled = false;
-      }
-    }
-  });
-}
-
-// Last.fm API key (Settings → Last.fm). Key is write-only from the browser.
-const lastfmStatusEl = document.getElementById("lastfm-status");
-const lastfmKeyInput = document.getElementById("set-lastfm-key");
-const lastfmKeyHint = document.getElementById("lastfm-key-hint");
-const lastfmSaveBtn = document.getElementById("lastfm-save");
-const lastfmTestBtn = document.getElementById("lastfm-test");
-const lastfmClearBtn = document.getElementById("lastfm-clear");
-const lastfmEls = {
-  statusEl: lastfmStatusEl,
-  keyInput: lastfmKeyInput,
-  keyHint: lastfmKeyHint,
-  saveBtn: lastfmSaveBtn,
-  clearBtn: lastfmClearBtn,
-};
-
-function applyLastfmStatus(data) {
-  paintLastfmStatus(lastfmEls, data);
-}
-
-async function loadLastfmStatus() {
-  if (!lastfmStatusEl) return;
-  try {
-    const res = await hostFetch("/api/lastfm/status");
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not load Last.fm status.");
-    applyLastfmStatus(data);
-  } catch {
-    paintConnStatusUnavailable(lastfmStatusEl);
-  }
-}
-
-if (lastfmKeyInput) {
-  lastfmKeyInput.addEventListener("focus", () => {
-    if (/^\*+$/.test(lastfmKeyInput.value)) {
-      lastfmKeyInput.value = "";
-    }
-  });
-}
-
-if (lastfmSaveBtn) {
-  lastfmSaveBtn.addEventListener("click", async () => {
-    lastfmSaveBtn.disabled = true;
-    try {
-      const body = {};
-      const key = (lastfmKeyInput?.value ?? "").trim();
-      // Ignore the display mask (all *) and blanks — keep the saved key.
-      if (key && !/^\*+$/.test(key)) body.apiKey = key;
-      const res = await hostFetch("/api/lastfm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not save Last.fm settings.");
-      applyLastfmStatus(data);
-      showToast("Saved");
-      loadGenres();
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      lastfmSaveBtn.disabled = false;
-    }
-  });
-}
-
-if (lastfmTestBtn) {
-  lastfmTestBtn.addEventListener("click", async () => {
-    lastfmTestBtn.disabled = true;
-    try {
-      const res = await hostFetch("/api/lastfm/test", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Connection failed.");
-      showToast(data.message || "Last.fm API key works");
-      loadLastfmStatus();
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      lastfmTestBtn.disabled = false;
-    }
-  });
-}
-
-if (lastfmClearBtn) {
-  lastfmClearBtn.addEventListener("click", async () => {
-    if (!confirm("Clear saved Last.fm API key?")) return;
-    lastfmClearBtn.disabled = true;
-    try {
-      const res = await hostFetch("/api/lastfm/clear", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not clear Last.fm settings.");
-      applyLastfmStatus(data);
-      showToast("Last.fm settings cleared");
-      loadGenres();
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      if (lastfmKeyInput && !lastfmKeyInput.readOnly) lastfmClearBtn.disabled = false;
-    }
-  });
-}
-
-// Home Assistant credentials (Settings → Home Assistant). Token is write-only
-// from the browser's perspective — status never returns the secret value.
-const haStatusEl = document.getElementById("ha-status");
-const haUrlInput = document.getElementById("set-ha-url");
-const haTokenInput = document.getElementById("set-ha-token");
-const haTokenHint = document.getElementById("ha-token-hint");
-const haSaveBtn = document.getElementById("ha-save");
-const haTestBtn = document.getElementById("ha-test");
-const haClearBtn = document.getElementById("ha-clear");
-const haEls = {
-  statusEl: haStatusEl,
-  urlInput: haUrlInput,
-  tokenInput: haTokenInput,
-  tokenHint: haTokenHint,
-  saveBtn: haSaveBtn,
-  clearBtn: haClearBtn,
-};
-
-function applyHaStatus(data) {
-  paintHaStatus(haEls, data);
-}
-
-async function loadHaStatus() {
-  if (!haStatusEl) return;
-  try {
-    const res = await hostFetch("/api/homeassistant/status");
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not load Home Assistant status.");
-    applyHaStatus(data);
-  } catch {
-    paintConnStatusUnavailable(haStatusEl);
-  }
-}
-
-if (haTokenInput) {
-  haTokenInput.addEventListener("focus", () => {
-    if (/^\*+$/.test(haTokenInput.value)) {
-      haTokenInput.value = "";
-    }
-  });
-}
-
-if (haSaveBtn) {
-  haSaveBtn.addEventListener("click", async () => {
-    haSaveBtn.disabled = true;
-    try {
-      const body = { url: haUrlInput?.value ?? "" };
-      const token = (haTokenInput?.value ?? "").trim();
-      // Ignore the display mask (all *) and blanks — keep the saved token.
-      if (token && !/^\*+$/.test(token)) body.token = token;
-      const res = await hostFetch("/api/homeassistant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not save Home Assistant settings.");
-      applyHaStatus(data);
-      showToast("Saved");
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      haSaveBtn.disabled = false;
-    }
-  });
-}
-
-if (haTestBtn) {
-  haTestBtn.addEventListener("click", async () => {
-    haTestBtn.disabled = true;
-    try {
-      const res = await hostFetch("/api/homeassistant/test", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Connection failed.");
-      showToast(data.message || "Home Assistant connected");
-      loadHaStatus();
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      haTestBtn.disabled = false;
-    }
-  });
-}
-
-if (haClearBtn) {
-  haClearBtn.addEventListener("click", async () => {
-    if (!confirm("Clear saved Home Assistant URL and token?")) return;
-    haClearBtn.disabled = true;
-    try {
-      const res = await hostFetch("/api/homeassistant/clear", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not clear Home Assistant settings.");
-      applyHaStatus(data);
-      showToast("Home Assistant settings cleared");
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      haClearBtn.disabled = false;
-    }
-  });
-}
-
-// Sonos speaker IP + room (Connections). Not secrets — shown in the fields.
-const sonosConnStatusEl = document.getElementById("sonos-conn-status");
-const sonosHostInput = document.getElementById("set-sonos-host");
-const sonosRoomInput = document.getElementById("set-sonos-room");
-const sonosConnSaveBtn = document.getElementById("sonos-conn-save");
-const sonosConnTestBtn = document.getElementById("sonos-conn-test");
-const sonosConnClearBtn = document.getElementById("sonos-conn-clear");
-const sonosConnEls = {
-  statusEl: sonosConnStatusEl,
-  hostInput: sonosHostInput,
-  roomInput: sonosRoomInput,
-  saveBtn: sonosConnSaveBtn,
-  clearBtn: sonosConnClearBtn,
-};
-
-function applySonosConnStatus(data) {
-  paintSonosConnStatus(sonosConnEls, data);
-}
-
-async function loadSonosConnStatus() {
-  if (!sonosConnStatusEl) return;
-  try {
-    const res = await hostFetch("/api/sonos/connection");
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not load Sonos settings.");
-    applySonosConnStatus(data);
-  } catch {
-    paintConnStatusUnavailable(sonosConnStatusEl);
-  }
-}
-
-if (sonosConnSaveBtn) {
-  sonosConnSaveBtn.addEventListener("click", async () => {
-    sonosConnSaveBtn.disabled = true;
-    try {
-      const res = await hostFetch("/api/sonos/connection", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          host: sonosHostInput?.value ?? "",
-          room: sonosRoomInput?.value ?? "",
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not save Sonos settings.");
-      applySonosConnStatus(data);
-      showToast("Sonos settings saved");
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      sonosConnSaveBtn.disabled = false;
-    }
-  });
-}
-
-if (sonosConnTestBtn) {
-  sonosConnTestBtn.addEventListener("click", async () => {
-    sonosConnTestBtn.disabled = true;
-    showToast("Looking for Sonos…", false, 8000);
-    try {
-      // Save current fields first so Test uses what you typed.
-      const saveRes = await hostFetch("/api/sonos/connection", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          host: sonosHostInput?.value ?? "",
-          room: sonosRoomInput?.value ?? "",
-        }),
-      });
-      const saveData = await saveRes.json().catch(() => ({}));
-      if (!saveRes.ok) {
-        throw new Error(saveData.error || "Could not save Sonos settings.");
-      }
-      applySonosConnStatus(saveData);
-      const res = await hostFetch("/api/sonos/connection/test", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Connection failed.");
-      showToast(data.message || "Sonos connected", false, 5000);
-      loadSonosConnStatus();
-    } catch (err) {
-      showToast(err.message, true, 5000);
-    } finally {
-      sonosConnTestBtn.disabled = false;
-    }
-  });
-}
-
-if (sonosConnClearBtn) {
-  sonosConnClearBtn.addEventListener("click", async () => {
-    if (!confirm("Clear saved Sonos speaker IP and room name?")) return;
-    sonosConnClearBtn.disabled = true;
-    try {
-      const res = await hostFetch("/api/sonos/connection/clear", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not clear Sonos settings.");
-      applySonosConnStatus(data);
-      showToast("Sonos settings cleared");
-    } catch (err) {
-      showToast(err.message, true);
-    } finally {
-      sonosConnClearBtn.disabled = false;
-    }
-  });
-}
-
-// Update the Settings "Spotify" indicator: connected (green), rate-limited
-// (amber, with how long is left), or not connected (red). Reads local server
-// state only - never triggers a Spotify call.
-const spotifyAccountEls = {
-  statusEl: spotifyStatus,
-  cacheWarmed,
-};
-
-async function loadSpotifyStatus() {
-  if (!spotifyStatus) return;
-  try {
-    const res = await fetch("/api/spotify/status");
-    const data = await res.json();
-    paintSpotifyAccountStatus(spotifyAccountEls, data);
-  } catch {
-    paintSpotifyAccountUnavailable(spotifyAccountEls);
-  }
-}
-
-async function selectBanner(name) {
-  try {
-    const res = await hostFetch("/api/banners/select", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not switch banner.");
-    applyHero(data.active);
-    renderBanners(data);
-  } catch (err) {
-    showToast(err.message, true);
-  }
-}
-
-async function deleteBanner(name) {
-  if (!name) return;
-  try {
-    const res = await hostFetch(`/api/banners/${encodeURIComponent(name)}`, { method: "DELETE" });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Could not delete banner.");
-    applyHero(data.active);
-    renderBanners(data);
-    showToast("Banner deleted");
-  } catch (err) {
-    showToast(err.message, true);
-  }
-}
-
-if (bannerUploadBtn && bannerFileInput) {
-  bannerUploadBtn.addEventListener("click", () => bannerFileInput.click());
-  bannerFileInput.addEventListener("change", () => {
-    const file = bannerFileInput.files && bannerFileInput.files[0];
-    if (!file) return;
-    if (file.size > MAX_BANNER_BYTES) {
-      showToast("Image is too large (8 MB max).", true);
-      bannerFileInput.value = "";
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = async () => {
-      bannerUploadBtn.disabled = true;
-      try {
-        const res = await hostFetch("/api/banners", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: reader.result }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Upload failed.");
-        applyHero(data.active);
-        renderBanners(data);
-        showToast("Banner updated");
-      } catch (err) {
-        showToast(err.message, true);
-      } finally {
-        bannerUploadBtn.disabled = false;
-        bannerFileInput.value = "";
-      }
-    };
-    reader.readAsDataURL(file);
-  });
-}
+);
 
 settingsResetBtn?.addEventListener("click", () => {
   // Leave Vibe / DJ persona / branding alone; each has its own control
@@ -2958,55 +2125,15 @@ async function clearAllSuggestions(btn = null) {
 
 // Memory view: the recently-played "memory" the picker avoids. Lazy-loaded on
 // first expand so a normal page load triggers no extra Spotify lookups.
-const memoryCount = document.getElementById("memory-count");
-const memoryIntro = document.getElementById("memory-intro");
-const memoryList = document.getElementById("memory-list");
-const memoryEmpty = document.getElementById("memory-empty");
-
-function renderMemory(tracks) {
-  memoryList.innerHTML = "";
-  memoryEmpty.hidden = tracks.length > 0;
-  memoryIntro.hidden = tracks.length === 0;
-  memoryCount.textContent = tracks.length ? `(${tracks.length})` : "";
-
-  tracks.forEach((track, i) => {
-    const li = document.createElement("li");
-    li.className = "track";
-    const art = track.image
-      ? `<img src="${track.image}" alt="" loading="lazy" />`
-      : `<div class="art-fallback"></div>`;
-    const badge = memorySourceBadge(
-      track.source,
-      track.skipped,
-      track.requestedBy,
-      track.mood
-    );
-    li.innerHTML = `
-      <span class="queue-index">${i + 1}</span>
-      ${art}
-      <div class="meta">
-        <div class="title">${escapeHtml(track.title || "Unknown")}${badge}</div>
-        <div class="artist">${escapeHtml(track.artist || "")}</div>
-      </div>
-    `;
-    memoryList.appendChild(li);
-  });
-}
+const memoryEls = {
+  countEl: document.getElementById("memory-count"),
+  introEl: document.getElementById("memory-intro"),
+  listEl: document.getElementById("memory-list"),
+  emptyEl: document.getElementById("memory-empty"),
+};
 
 async function loadMemory() {
-  memoryEmpty.hidden = true;
-  memoryIntro.hidden = true;
-  memoryCount.textContent = "...";
-  try {
-    const res = await hostFetch("/api/history");
-    if (!res.ok) throw new Error("Could not load memory.");
-    const data = await res.json();
-    renderMemory(data.tracks || []);
-  } catch {
-    memoryCount.textContent = "";
-    memoryEmpty.hidden = false;
-    memoryEmpty.textContent = "Could not load memory.";
-  }
+  return loadMemoryUi(memoryEls, { hostFetch });
 }
 
 // ---- Suggestion Box (guest submit + host inbox) ----------------------------
@@ -3348,6 +2475,22 @@ const displayJoinError = document.getElementById("display-join-error");
 const recapOverlay = document.getElementById("recap-overlay");
 const recapBody = document.getElementById("recap-body");
 const recapDismissBtn = document.getElementById("recap-dismiss");
+const {
+  showPartyRecap,
+  maybeAnnounceClosingTime,
+  markClosingShown,
+} = createPartyRecapUi(
+  {
+    overlay: recapOverlay,
+    body: recapBody,
+    hintEl: recapHintEl,
+    dismissBtn: recapDismissBtn,
+  },
+  {
+    showToast,
+    getEndOfNightName: () => endOfNightTrack.name,
+  }
+);
 const VIEWS = {
   main: viewMain,
   "settings-look": viewSettingsLook,
@@ -4857,7 +4000,7 @@ async function addToQueue(track, btn) {
     btn.classList.add("added");
     if (data.closingTime) {
       setAutofillToggle(false);
-      lastClosingShown = data.closingTimeAt || Date.now(); // don't re-toast on poll
+      markClosingShown(data.closingTimeAt || Date.now()); // don't re-toast on poll
       showPartyRecap(data.partyRecap);
     } else {
       const msg = data.alreadyRequested
@@ -4947,35 +4090,6 @@ function openDedicationModal(track) {
     onEscape: onCancel,
     allowBackdrop: true,
     onBackdrop: onCancel,
-  });
-}
-
-// Promise-based confirm modal. Resolves true if the user confirms.
-function confirmModal(message, confirmLabel = "Yes", cancelLabel = "Cancel") {
-  return new Promise((resolve) => {
-    modalMessage.textContent = message;
-    modalConfirm.textContent = confirmLabel;
-    modalCancel.textContent = cancelLabel;
-
-    let session = null;
-    const cleanup = (result) => {
-      modalConfirm.removeEventListener("click", onConfirm);
-      modalCancel.removeEventListener("click", onCancel);
-      session?.close();
-      session = null;
-      resolve(result);
-    };
-    const onConfirm = () => cleanup(true);
-    const onCancel = () => cleanup(false);
-
-    modalConfirm.addEventListener("click", onConfirm);
-    modalCancel.addEventListener("click", onCancel);
-    session = attachModal(modalOverlay, {
-      initialFocus: modalConfirm,
-      onEscape: onCancel,
-      allowBackdrop: true,
-      onBackdrop: onCancel,
-    });
   });
 }
 
@@ -6336,7 +5450,7 @@ volUp10Btn.addEventListener("click", () => {
 
 groupAllBtn.addEventListener("click", () => {
   postControl(groupAllBtn, "/api/group-all", (d) => {
-    lastGroupsAt = 0;
+    invalidateGroups();
     loadGroups(true);
     showToast(`Grouped ${d.players} speakers · Volume ${d.volume}`);
   });
@@ -7038,86 +6152,6 @@ genreToggleAll?.addEventListener("click", () => {
 // The list of playlist IDs the random/never-ending picker should draw from.
 function currentSelectionIds() {
   return selectedPlaylistIds ? [...selectedPlaylistIds] : [];
-}
-
-// Most recent "Closing Time" event this client has already announced, so the
-// last-call toast / recap shows once per event (not on every 5s poll).
-let lastClosingShown = 0;
-let lastPartyRecapPayload = null;
-
-/** @type {{ close: () => void }|null} */
-let recapModalSession = null;
-
-function showPartyRecap(recap) {
-  lastPartyRecapPayload = recap && typeof recap === "object" ? recap : null;
-  const songName =
-    (lastPartyRecapPayload?.endOfNightName || endOfNightTrack.name || "Last call").trim();
-  if (recapHintEl) {
-    recapHintEl.textContent = `Last call — ${songName} is next`;
-  }
-  if (!recapOverlay || !recapBody || !lastPartyRecapPayload) {
-    showToast(`\u{1F37A} Last call \u2014 ${songName}!`);
-    return;
-  }
-  const lines = [];
-  const total = Number(lastPartyRecapPayload.total) || 0;
-  lines.push(
-    `<p><span class="recap-stat">${total}</span> request${total === 1 ? "" : "s"} tonight</p>`
-  );
-  const songs = Array.isArray(lastPartyRecapPayload.topSongs)
-    ? lastPartyRecapPayload.topSongs
-    : [];
-  if (songs.length) {
-    lines.push("<p class=\"recap-stat\">Top songs</p><ul>");
-    for (const s of songs.slice(0, 3)) {
-      const label = s.artist ? `${s.name} — ${s.artist}` : s.name;
-      lines.push(`<li>${escapeHtml(label)} (${s.count})</li>`);
-    }
-    lines.push("</ul>");
-  }
-  const people = Array.isArray(lastPartyRecapPayload.topRequesters)
-    ? lastPartyRecapPayload.topRequesters
-    : [];
-  if (people.length) {
-    lines.push("<p class=\"recap-stat\">Top requestors</p><ul>");
-    for (const p of people.slice(0, 3)) {
-      lines.push(`<li>${escapeHtml(p.name)} (${p.count})</li>`);
-    }
-    lines.push("</ul>");
-  }
-  recapBody.innerHTML = lines.join("");
-  recapModalSession?.close();
-  recapModalSession = attachModal(recapOverlay, {
-    initialFocus: recapDismissBtn,
-    onEscape: hidePartyRecap,
-    allowBackdrop: true,
-    onBackdrop: hidePartyRecap,
-  });
-}
-
-function hidePartyRecap() {
-  if (recapModalSession) {
-    const session = recapModalSession;
-    recapModalSession = null;
-    session.close();
-    return;
-  }
-  if (recapOverlay) recapOverlay.hidden = true;
-}
-
-if (recapDismissBtn) {
-  recapDismissBtn.addEventListener("click", hidePartyRecap);
-}
-
-// Announce "Closing Time" (last call) to whoever is looking. Driven by the
-// server timestamp broadcast in the Now Playing poll, so every guest sees it,
-// not just the person who added the song. Stale events (e.g. a page opened long
-// after) are marked seen but not toasted.
-function maybeAnnounceClosingTime(ts, partyRecap) {
-  if (!ts || ts <= lastClosingShown) return;
-  lastClosingShown = ts;
-  if (Date.now() - ts > 60000) return;
-  showPartyRecap(partyRecap);
 }
 
 // Set the toggle's checked state and remember when, so an in-flight Now Playing

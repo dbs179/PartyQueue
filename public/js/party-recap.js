@@ -1,0 +1,127 @@
+/** Closing Time / party recap overlay helpers. */
+
+import { escapeHtml } from "./format.js";
+import { attachModal } from "./modal.js";
+
+/**
+ * @param {object|null|undefined} recap
+ * @returns {string}
+ */
+export function buildPartyRecapHtml(recap) {
+  const payload = recap && typeof recap === "object" ? recap : null;
+  if (!payload) return "";
+  const lines = [];
+  const total = Number(payload.total) || 0;
+  lines.push(
+    `<p><span class="recap-stat">${total}</span> request${total === 1 ? "" : "s"} tonight</p>`
+  );
+  const songs = Array.isArray(payload.topSongs) ? payload.topSongs : [];
+  if (songs.length) {
+    lines.push('<p class="recap-stat">Top songs</p><ul>');
+    for (const s of songs.slice(0, 3)) {
+      const label = s.artist ? `${s.name} — ${s.artist}` : s.name;
+      lines.push(`<li>${escapeHtml(label)} (${s.count})</li>`);
+    }
+    lines.push("</ul>");
+  }
+  const people = Array.isArray(payload.topRequesters) ? payload.topRequesters : [];
+  if (people.length) {
+    lines.push('<p class="recap-stat">Top requestors</p><ul>');
+    for (const p of people.slice(0, 3)) {
+      lines.push(`<li>${escapeHtml(p.name)} (${p.count})</li>`);
+    }
+    lines.push("</ul>");
+  }
+  return lines.join("");
+}
+
+/**
+ * @param {number|null|undefined} ts
+ * @param {number} lastShown
+ * @param {number} [now]
+ */
+export function shouldAnnounceClosingTime(ts, lastShown, now = Date.now()) {
+  const t = Number(ts) || 0;
+  if (!t || t <= (Number(lastShown) || 0)) {
+    return { announce: false, nextLastShown: Number(lastShown) || 0 };
+  }
+  const next = t;
+  if (now - t > 60_000) return { announce: false, nextLastShown: next };
+  return { announce: true, nextLastShown: next };
+}
+
+/**
+ * @param {{
+ *   overlay?: HTMLElement|null,
+ *   body?: HTMLElement|null,
+ *   hintEl?: HTMLElement|null,
+ *   dismissBtn?: HTMLElement|null,
+ * }} els
+ * @param {{
+ *   showToast: (msg: string, isError?: boolean) => void,
+ *   getEndOfNightName?: () => string,
+ * }} deps
+ */
+export function createPartyRecapUi(els, deps) {
+  const { overlay, body, hintEl, dismissBtn } = els || {};
+  const showToast = deps?.showToast || (() => {});
+  const getEndOfNightName = deps?.getEndOfNightName || (() => "Last call");
+
+  let lastClosingShown = 0;
+  let lastPartyRecapPayload = null;
+  /** @type {{ close: () => void }|null} */
+  let recapModalSession = null;
+
+  function hidePartyRecap() {
+    if (recapModalSession) {
+      const session = recapModalSession;
+      recapModalSession = null;
+      session.close();
+      return;
+    }
+    if (overlay) overlay.hidden = true;
+  }
+
+  function showPartyRecap(recap) {
+    lastPartyRecapPayload = recap && typeof recap === "object" ? recap : null;
+    const songName = (
+      lastPartyRecapPayload?.endOfNightName ||
+      getEndOfNightName() ||
+      "Last call"
+    ).trim();
+    if (hintEl) hintEl.textContent = `Last call — ${songName} is next`;
+    if (!overlay || !body || !lastPartyRecapPayload) {
+      showToast(`\u{1F37A} Last call \u2014 ${songName}!`);
+      return;
+    }
+    body.innerHTML = buildPartyRecapHtml(lastPartyRecapPayload);
+    recapModalSession?.close();
+    recapModalSession = attachModal(overlay, {
+      initialFocus: dismissBtn,
+      onEscape: hidePartyRecap,
+      allowBackdrop: true,
+      onBackdrop: hidePartyRecap,
+    });
+  }
+
+  function maybeAnnounceClosingTime(ts, partyRecap) {
+    const gate = shouldAnnounceClosingTime(ts, lastClosingShown);
+    lastClosingShown = gate.nextLastShown;
+    if (!gate.announce) return;
+    showPartyRecap(partyRecap);
+  }
+
+  function markClosingShown(ts) {
+    const t = Number(ts) || 0;
+    if (t > lastClosingShown) lastClosingShown = t;
+  }
+
+  dismissBtn?.addEventListener("click", hidePartyRecap);
+
+  return {
+    showPartyRecap,
+    hidePartyRecap,
+    maybeAnnounceClosingTime,
+    markClosingShown,
+  };
+}
