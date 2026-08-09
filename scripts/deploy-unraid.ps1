@@ -63,6 +63,9 @@ try {
   Write-Host "Uploading PartyQueue v$expectedVersion to $RemoteShare ..."
   Invoke-Robocopy (Join-Path $staging "src") (Join-Path $RemoteShare "src")
   Invoke-Robocopy (Join-Path $staging "public") (Join-Path $RemoteShare "public")
+  # Dockerfile client-build stage needs scripts/build-client.mjs (and keeps
+  # future script deps in sync without listing each file).
+  Invoke-Robocopy (Join-Path $staging "scripts") (Join-Path $RemoteShare "scripts")
   foreach ($file in @(
       ".dockerignore",
       "Dockerfile",
