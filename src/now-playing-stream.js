@@ -1,6 +1,27 @@
 const DEFAULT_INTERVAL_MS = 1500;
+const DEFAULT_PAUSED_INTERVAL_MS = 5000;
 const DEFAULT_ERROR_INTERVAL_MS = 3000;
 const DEFAULT_CLOCK_SYNC_MS = 10_000;
+
+/**
+ * Sonos poll cadence for the NP monitor. Stay quick while playing / transitioning;
+ * slow down when paused or idle so overnight SSE subscribers are cheaper.
+ * Transport nudges still force an immediate poll.
+ */
+export function nowPlayingPollIntervalMs(
+  snapshot,
+  {
+    playingMs = DEFAULT_INTERVAL_MS,
+    pausedMs = DEFAULT_PAUSED_INTERVAL_MS,
+  } = {}
+) {
+  const state = String(snapshot?.state || "");
+  const playing =
+    snapshot?.isPlaying === true ||
+    state === "PLAYING" ||
+    state === "TRANSITIONING";
+  return playing ? playingMs : pausedMs;
+}
 
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -97,6 +118,8 @@ export function createSnapshotMonitor({
   monitorName = "Snapshot",
   intervalMs = DEFAULT_INTERVAL_MS,
   errorIntervalMs = DEFAULT_ERROR_INTERVAL_MS,
+  /** @type {null|((snapshot: object|null) => number)} */
+  intervalFor = null,
   now = Date.now,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
@@ -246,6 +269,17 @@ export function createSnapshotMonitor({
           lastSuccessAt: now(),
         });
         if (!stopped && subscribers.size) publish(snapshot, { force: recovered });
+        if (typeof intervalFor === "function") {
+          try {
+            const custom = Number(intervalFor(snapshot));
+            if (Number.isFinite(custom) && custom >= 0) nextDelay = custom;
+          } catch (err) {
+            logger.warn?.(
+              `[${monitorName}-stream] intervalFor failed:`,
+              err.message
+            );
+          }
+        }
         return snapshot;
       })
       .catch((err) => {
@@ -345,6 +379,7 @@ export function createNowPlayingMonitor(options = {}) {
     monitorName: "now-playing",
     maxSilenceMs: DEFAULT_CLOCK_SYNC_MS,
     forcePublishFor: nowPlayingClockDiscontinuous,
+    intervalFor: nowPlayingPollIntervalMs,
     ...options,
   });
 }

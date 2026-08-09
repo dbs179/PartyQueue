@@ -7,11 +7,23 @@ import {
 } from "./stream-cursor.js";
 
 export const NOW_PLAYING_FALLBACK_MS = 15000;
+/** HTTP fallback only (SSE down): slower while paused/idle. */
+export const NOW_PLAYING_FALLBACK_PAUSED_MS = 45000;
 export const NOW_PLAYING_FALLBACK_DELAY_MS = 5000;
 export const QUEUE_FALLBACK_MS = 15000;
 export const QUEUE_FALLBACK_DELAY_MS = 5000;
 export const PARTY_FALLBACK_MS = 20000;
 export const PARTY_FALLBACK_DELAY_MS = 5000;
+
+/** @param {object|null|undefined} snapshot */
+export function nowPlayingLooksActive(snapshot) {
+  const state = String(snapshot?.state || "");
+  return (
+    snapshot?.isPlaying === true ||
+    state === "PLAYING" ||
+    state === "TRANSITIONING"
+  );
+}
 
 /**
  * @param {string} visibilityState
@@ -70,9 +82,12 @@ export function createLiveStreams(els, deps) {
   let nowPlayingStreamConnected = false;
   let nowPlayingFallbackTimer = null;
   let nowPlayingFallbackDelayTimer = null;
+  let nowPlayingFallbackGen = 0;
   let nowPlayingStreamCursor = createStreamCursor();
   let nowPlayingStreamVersion = 0;
   let nowPlayingHttpRequest = 0;
+  /** Last known transport activity — drives HTTP fallback cadence. */
+  let nowPlayingActive = true;
 
   let queueSource = null;
   let queueStreamConnected = false;
@@ -93,14 +108,46 @@ export function createLiveStreams(els, deps) {
   }
 
   function stopNowPlayingFallback() {
+    nowPlayingFallbackGen += 1;
     if (nowPlayingFallbackDelayTimer) {
       clearTimeout(nowPlayingFallbackDelayTimer);
       nowPlayingFallbackDelayTimer = null;
     }
     if (nowPlayingFallbackTimer) {
-      clearInterval(nowPlayingFallbackTimer);
+      clearTimeout(nowPlayingFallbackTimer);
       nowPlayingFallbackTimer = null;
     }
+  }
+
+  function nowPlayingFallbackIntervalMs() {
+    return nowPlayingActive
+      ? NOW_PLAYING_FALLBACK_MS
+      : NOW_PLAYING_FALLBACK_PAUSED_MS;
+  }
+
+  function armNowPlayingFallbackTick(gen) {
+    if (
+      gen !== nowPlayingFallbackGen ||
+      !shouldPoll() ||
+      nowPlayingStreamConnected ||
+      nowPlayingFallbackTimer
+    ) {
+      return;
+    }
+    nowPlayingFallbackTimer = setTimeout(() => {
+      nowPlayingFallbackTimer = null;
+      if (
+        gen !== nowPlayingFallbackGen ||
+        !shouldPoll() ||
+        nowPlayingStreamConnected
+      ) {
+        return;
+      }
+      void loadNowPlaying().finally(() => {
+        if (gen !== nowPlayingFallbackGen) return;
+        armNowPlayingFallbackTick(gen);
+      });
+    }, nowPlayingFallbackIntervalMs());
   }
 
   function startNowPlayingFallback() {
@@ -112,15 +159,25 @@ export function createLiveStreams(els, deps) {
     ) {
       return;
     }
+    const gen = nowPlayingFallbackGen;
     nowPlayingFallbackDelayTimer = setTimeout(() => {
       nowPlayingFallbackDelayTimer = null;
-      if (!shouldPoll() || nowPlayingStreamConnected) return;
-      void loadNowPlaying();
-      nowPlayingFallbackTimer = setInterval(
-        loadNowPlaying,
-        NOW_PLAYING_FALLBACK_MS
-      );
+      if (
+        gen !== nowPlayingFallbackGen ||
+        !shouldPoll() ||
+        nowPlayingStreamConnected
+      ) {
+        return;
+      }
+      void loadNowPlaying().finally(() => {
+        if (gen !== nowPlayingFallbackGen) return;
+        armNowPlayingFallbackTick(gen);
+      });
     }, NOW_PLAYING_FALLBACK_DELAY_MS);
+  }
+
+  function noteNowPlayingActivity(snapshot) {
+    nowPlayingActive = nowPlayingLooksActive(snapshot);
   }
 
   function applyNowPlayingStreamSnapshot(snapshot) {
@@ -128,6 +185,7 @@ export function createLiveStreams(els, deps) {
     if (!next.accept) return;
     nowPlayingStreamCursor = next.cursor;
     nowPlayingStreamVersion += 1;
+    noteNowPlayingActivity(snapshot);
     renderNowPlaying(snapshot);
   }
 
@@ -171,6 +229,7 @@ export function createLiveStreams(els, deps) {
       if (!next.accept) return;
       nowPlayingStreamCursor = next.cursor;
       nowPlayingStreamVersion += 1;
+      noteNowPlayingActivity(snapshot);
       renderNowPlaying(snapshot);
     } catch {
       /* retain the last good stream or fallback snapshot */

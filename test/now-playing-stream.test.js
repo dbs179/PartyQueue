@@ -4,6 +4,7 @@ import {
   createSnapshotMonitor,
   createNowPlayingMonitor,
   nowPlayingClockDiscontinuous,
+  nowPlayingPollIntervalMs,
   nowPlayingSignature,
 } from "../src/now-playing-stream.js";
 import {
@@ -18,6 +19,56 @@ function makeMonitor(readSnapshot) {
     logger: { warn() {} },
   });
 }
+
+test("nowPlayingPollIntervalMs slows down when paused or idle", () => {
+  assert.equal(
+    nowPlayingPollIntervalMs({ isPlaying: true, state: "PLAYING" }),
+    1500
+  );
+  assert.equal(
+    nowPlayingPollIntervalMs({ isPlaying: false, state: "TRANSITIONING" }),
+    1500
+  );
+  assert.equal(
+    nowPlayingPollIntervalMs({ isPlaying: false, state: "PAUSED_PLAYBACK" }),
+    5000
+  );
+  assert.equal(nowPlayingPollIntervalMs({ isPlaying: false, state: "STOPPED" }), 5000);
+  assert.equal(nowPlayingPollIntervalMs(null), 5000);
+});
+
+test("NP monitor schedules a longer delay after a paused snapshot", async () => {
+  const delays = [];
+  let n = 0;
+  const monitor = createNowPlayingMonitor({
+    autoSchedule: true,
+    logger: { warn() {} },
+    setTimer: (fn, ms) => {
+      delays.push(ms);
+      return setTimeout(fn, 0);
+    },
+    clearTimer: clearTimeout,
+    readSnapshot: async () => {
+      n += 1;
+      if (n === 1) {
+        return { uri: "spotify:track:1", isPlaying: true, state: "PLAYING" };
+      }
+      return {
+        uri: "spotify:track:1",
+        isPlaying: false,
+        state: "PAUSED_PLAYBACK",
+      };
+    },
+  });
+  monitor.subscribe(() => {});
+  await new Promise((r) => setTimeout(r, 20));
+  await monitor.pollNow();
+  await monitor.pollNow();
+  // First subscribe schedules 0; after playing poll → 1500; after paused → 5000.
+  assert.ok(delays.includes(1500));
+  assert.ok(delays.includes(5000));
+  await monitor.stop();
+});
 
 test("one Now Playing read serves every subscriber", async () => {
   let reads = 0;
