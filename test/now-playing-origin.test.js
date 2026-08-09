@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   nowPlayingOriginLabel,
   displayOriginLabel,
+  displayOriginTone,
 } from "../public/js/now-playing-origin.js";
 
 test("nowPlayingOriginLabel returns null without a track or for DJ clips", () => {
@@ -66,4 +67,21 @@ test("displayOriginLabel precedence: dedication > requested > era > discover > r
   );
   assert.equal(displayOriginLabel({ discovered: true }), "Discover");
   assert.equal(displayOriginLabel({}), "Random");
+});
+
+test("displayOriginTone matches Requested / Discover / Random / Mood", () => {
+  assert.equal(
+    displayOriginTone({ searched: true, requestedBy: "Dave" }),
+    "origin-searched"
+  );
+  assert.equal(
+    displayOriginTone({ discovered: true }),
+    "origin-discovered"
+  );
+  assert.equal(displayOriginTone({ origin: "filler" }), "origin-random");
+  assert.equal(
+    displayOriginTone({ moodPick: true, mood: "80s" }),
+    "origin-mood"
+  );
+  assert.equal(displayOriginTone({}), "origin-random");
 });

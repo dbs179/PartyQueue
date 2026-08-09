@@ -3133,6 +3133,81 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   color: var(--muted);
 }
 
+/* Origin / Mood / Genre pills: keep grey pill chrome; color the text only
+   (main NP uses filled gradients — Display stays quieter on a TV). */
+.party-display-origin.origin-searched {
+  color: #3ddc84;
+}
+
+.party-display-origin.origin-discovered {
+  color: #c4b5fd;
+}
+
+.party-display-origin.origin-random {
+  color: #7dd3fc;
+}
+
+.party-display-origin.origin-mood {
+  color: #fbbf24;
+}
+
+.party-display-mix {
+  color: #60a5fa;
+}
+
+.party-display-genre {
+  color: var(--muted);
+}
+
+.party-display-genre.genre-tone-rock {
+  color: #f87171;
+}
+.party-display-genre.genre-tone-metal {
+  color: #a78bfa;
+}
+.party-display-genre.genre-tone-country {
+  color: #fbbf24;
+}
+.party-display-genre.genre-tone-hiphop {
+  color: #fb7185;
+}
+.party-display-genre.genre-tone-electronic {
+  color: #22d3ee;
+}
+.party-display-genre.genre-tone-pop {
+  color: #f472b6;
+}
+.party-display-genre.genre-tone-folk {
+  color: #a3e635;
+}
+.party-display-genre.genre-tone-punk {
+  color: #fb923c;
+}
+.party-display-genre.genre-tone-soul {
+  color: #e879f9;
+}
+.party-display-genre.genre-tone-jazz {
+  color: #38bdf8;
+}
+.party-display-genre.genre-tone-blues {
+  color: #818cf8;
+}
+.party-display-genre.genre-tone-classical {
+  color: #d4d4d8;
+}
+.party-display-genre.genre-tone-soundtrack {
+  color: #2dd4bf;
+}
+.party-display-genre.genre-tone-oldies {
+  color: #fcd34d;
+}
+.party-display-genre.genre-tone-kids {
+  color: #86efac;
+}
+.party-display-genre.genre-tone-other {
+  color: #94a3b8;
+}
+
 /* "Party's Over" lockdown pill — reads as final, not informational. */
 .party-display-over {
   color: #fda4af;

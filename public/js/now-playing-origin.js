@@ -81,3 +81,37 @@ export function displayOriginLabel(track, activeEraMood = null) {
   if (track.discovered) return "Discover";
   return "Random";
 }
+
+const ORIGIN_TONE_CLASSES = [
+  "origin-searched",
+  "origin-discovered",
+  "origin-random",
+  "origin-mood",
+];
+
+/**
+ * CSS tone class for Party Display origin pill text (background stays grey).
+ * @param {object|null|undefined} track
+ */
+export function displayOriginTone(track) {
+  if (!track) return "origin-random";
+  const origin =
+    track.origin ||
+    (track.discovered ? "discovered" : track.searched ? "searched" : null);
+  if (origin === "searched" || track.searched) return "origin-searched";
+  if (origin === "discovered" || track.discovered) return "origin-discovered";
+  if (origin === "mood" || track.moodPick) return "origin-mood";
+  return "origin-random";
+}
+
+/**
+ * @param {HTMLElement|null|undefined} el
+ * @param {string|null|undefined} toneClass
+ */
+export function paintOriginToneClass(el, toneClass) {
+  if (!el) return;
+  el.classList.remove(...ORIGIN_TONE_CLASSES);
+  if (toneClass && ORIGIN_TONE_CLASSES.includes(toneClass)) {
+    el.classList.add(toneClass);
+  }
+}

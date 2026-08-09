@@ -22,6 +22,8 @@ import {
 import {
   nowPlayingOriginLabel,
   displayOriginLabel,
+  displayOriginTone,
+  paintOriginToneClass,
 } from "./now-playing-origin.js";
 import { trackIdFromUri } from "./search-track.js";
 import { createSearchUi } from "./search-ui.js";
@@ -2407,6 +2409,9 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
     displayOriginPill.hidden = hide;
     if (!hide) {
       displayOriginPill.textContent = displayOriginLabel(np, activeEraMoodId());
+      paintOriginToneClass(displayOriginPill, displayOriginTone(np));
+    } else {
+      paintOriginToneClass(displayOriginPill, null);
     }
   }
 }

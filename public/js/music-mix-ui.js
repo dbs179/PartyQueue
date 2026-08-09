@@ -100,7 +100,12 @@ export function createMusicMixUi(els, deps) {
   // Mix-label state (declared before the decade block below runs its initial
   // sync, which paints the label). Server-broadcast mix wins; undefined = not
   // seen yet, so local state fills in until the first Now Playing payload.
-  let serverMix = { genres: undefined, mood: undefined, genreLabel: undefined };
+  let serverMix = {
+    genres: undefined,
+    mood: undefined,
+    genreLabel: undefined,
+    genreLane: undefined,
+  };
 
   npMoodLabel?.addEventListener("click", () => navigateMixPanel("mood-presets"));
   npGenreLabel?.addEventListener("click", () => navigateMixPanel("genres"));
@@ -171,6 +176,10 @@ export function createMusicMixUi(els, deps) {
     const label = resolveMixGenreLabelFromNowPlaying(np);
     if (label === undefined) return;
     serverMix.genreLabel = label;
+    serverMix.genreLane =
+      typeof np?.mixGenreLane === "string" && np.mixGenreLane
+        ? np.mixGenreLane
+        : null;
     updateMixLabels();
   }
 

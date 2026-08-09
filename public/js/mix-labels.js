@@ -58,10 +58,50 @@ export function buildMixLabelTexts(serverMix, locals = {}) {
     Array.isArray(genres) ? genres : [],
     allBucketIds
   );
+  const genreLane =
+    typeof serverMix?.genreLane === "string" && serverMix.genreLane
+      ? serverMix.genreLane
+      : null;
   return {
     moodText: formatMoodMixText(preset, era),
     genreText: formatGenreHeaderText(serverMix?.genreLabel),
+    genreLane,
   };
+}
+
+const GENRE_TONE_PREFIX = "genre-tone-";
+const GENRE_TONE_LANES = [
+  "rock",
+  "metal",
+  "country",
+  "hiphop",
+  "electronic",
+  "pop",
+  "folk",
+  "punk",
+  "soul",
+  "jazz",
+  "blues",
+  "classical",
+  "soundtrack",
+  "oldies",
+  "kids",
+  "other",
+];
+
+/**
+ * @param {HTMLElement|null|undefined} el
+ * @param {string|null|undefined} lane
+ */
+export function paintGenreToneClass(el, lane) {
+  if (!el?.classList) return;
+  for (const id of GENRE_TONE_LANES) {
+    el.classList.remove(`${GENRE_TONE_PREFIX}${id}`);
+  }
+  const next = typeof lane === "string" ? lane : "";
+  if (next && GENRE_TONE_LANES.includes(next)) {
+    el.classList.add(`${GENRE_TONE_PREFIX}${next}`);
+  }
 }
 
 /**
@@ -121,13 +161,19 @@ export function formatSelectedOfTotal(selected, total) {
  *   displayMixPill?: HTMLElement|null,
  *   displayGenrePill?: HTMLElement|null,
  * }} els
- * @param {{ moodText: string, genreText: string }} texts
+ * @param {{ moodText: string, genreText: string, genreLane?: string|null }} texts
  */
 export function paintMixLabels(els, texts) {
   const { npMoodLabel, npGenreLabel, displayMixPill, displayGenrePill } =
     els || {};
   const moodText = texts?.moodText || "Mood: All";
   const genreText = texts?.genreText || "Genre:";
+  const genreLane = texts?.genreLane || null;
+  const hasGenreValue = !!(
+    typeof texts?.genreText === "string" &&
+    texts.genreText.startsWith("Genre:") &&
+    texts.genreText.length > "Genre:".length
+  );
 
   if (npMoodLabel) {
     npMoodLabel.textContent = moodText;
@@ -145,5 +191,6 @@ export function paintMixLabels(els, texts) {
   if (displayGenrePill) {
     displayGenrePill.textContent = genreText;
     displayGenrePill.hidden = false;
+    paintGenreToneClass(displayGenrePill, hasGenreValue ? genreLane : null);
   }
 }
