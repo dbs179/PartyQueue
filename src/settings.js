@@ -69,7 +69,7 @@ export const RANDOMNESS_DEFAULTS = {
   artistCap: 1,
   endlessQueueCount: 5,
   strictFill: true,
-  sameArtistBatchEnabled: false,
+  sameArtistBatchEnabled: true,
   sameArtistBatchEveryN: 8,
 };
 
