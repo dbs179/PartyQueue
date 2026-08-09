@@ -78,6 +78,10 @@ test("genre and playlist badges respect showQueueGenre", () => {
   };
   assert.equal(queueGenreBadgeHtml(track, { showQueueGenre: false }), "");
   assert.match(queueGenreBadgeHtml(track, { showQueueGenre: true }), /Pop/);
+  assert.doesNotMatch(
+    queueGenreBadgeHtml(track, { showQueueGenre: true }),
+    /is-unknown/
+  );
   assert.equal(queuePlaylistBadgeHtml(track, { showQueueGenre: false }), "");
   assert.match(
     queuePlaylistBadgeHtml(track, { showQueueGenre: true }),
@@ -87,6 +91,13 @@ test("genre and playlist badges respect showQueueGenre", () => {
     queueGenreBadgeHtml({ ...track, djVoice: true }, { showQueueGenre: true }),
     ""
   );
+});
+
+test("missing genre shows muted Unknown badge when showQueueGenre is on", () => {
+  const html = queueGenreBadgeHtml({}, { showQueueGenre: true });
+  assert.match(html, /Unknown/);
+  assert.match(html, /is-unknown/);
+  assert.match(html, /Genre not matched yet/);
 });
 
 test("queueBadgeHtml concatenates origin + genre + playlist", () => {

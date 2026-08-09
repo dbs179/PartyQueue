@@ -4,6 +4,8 @@ import {
   resolveActiveEraMoodId,
   formatMoodMixText,
   formatGenreHeaderText,
+  genreHeaderHasKnownValue,
+  UNKNOWN_GENRE_DISPLAY,
   buildMixLabelTexts,
   resolveMixGenreLabelFromNowPlaying,
   mixSelectionPatchFromParty,
@@ -22,7 +24,13 @@ test("formatMoodMixText and formatGenreHeaderText", () => {
   assert.equal(formatMoodMixText("Party", "80's"), "Mood: Party - 80's");
   assert.equal(formatMoodMixText("Custom", null), "Mood: Custom");
   assert.equal(formatGenreHeaderText("Rock"), "Genre: Rock");
-  assert.equal(formatGenreHeaderText(null), "Genre:");
+  assert.equal(
+    formatGenreHeaderText(null),
+    `Genre: ${UNKNOWN_GENRE_DISPLAY}`
+  );
+  assert.equal(genreHeaderHasKnownValue("Genre: Rock"), true);
+  assert.equal(genreHeaderHasKnownValue(`Genre: ${UNKNOWN_GENRE_DISPLAY}`), false);
+  assert.equal(genreHeaderHasKnownValue("Genre:"), false);
 });
 
 test("buildMixLabelTexts uses local genres/mood when server unset", () => {
@@ -77,17 +85,52 @@ test("hub formatters and paintMixLabels", () => {
   assert.equal(formatSelectedOfTotal(3, 10), "3 of 10 selected");
   assert.equal(formatSelectedOfTotal(0, 0), "—");
 
+  const makeEl = () => {
+    const classes = new Set();
+    return {
+      textContent: "",
+      hidden: true,
+      classList: {
+        toggle(name, on) {
+          if (on) classes.add(name);
+          else classes.delete(name);
+        },
+        contains(name) {
+          return classes.has(name);
+        },
+        add(name) {
+          classes.add(name);
+        },
+        remove(name) {
+          classes.delete(name);
+        },
+      },
+    };
+  };
   const els = {
-    npMoodLabel: { textContent: "", hidden: true },
-    npGenreLabel: { textContent: "", hidden: true },
-    displayMixPill: { textContent: "", hidden: true },
-    displayGenrePill: { textContent: "", hidden: true },
+    npMoodLabel: makeEl(),
+    npGenreLabel: makeEl(),
+    displayMixPill: makeEl(),
+    displayGenrePill: makeEl(),
   };
   paintMixLabels(els, {
     moodText: "Mood: Party - 80's",
     genreText: "Genre: Rock",
+    genreLane: "rock",
   });
   assert.equal(els.npMoodLabel.textContent, "Mood: Party - 80's");
   assert.equal(els.npMoodLabel.hidden, false);
   assert.equal(els.displayGenrePill.textContent, "Genre: Rock");
+  assert.equal(els.displayGenrePill.classList.contains("is-unknown"), false);
+
+  paintMixLabels(els, {
+    moodText: "Mood: All",
+    genreText: `Genre: ${UNKNOWN_GENRE_DISPLAY}`,
+  });
+  assert.equal(
+    els.displayGenrePill.textContent,
+    `Genre: ${UNKNOWN_GENRE_DISPLAY}`
+  );
+  assert.equal(els.displayGenrePill.classList.contains("is-unknown"), true);
+  assert.equal(els.npGenreLabel.classList.contains("is-unknown"), true);
 });

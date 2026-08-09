@@ -1356,7 +1356,7 @@ button.guest-name:focus-visible {
   margin-left: 0;
 }
 
-/* Song/set genre pill (optional Up Next badge — matched lane only). */
+/* Song/set genre pill (optional Up Next badge — matched lane or Unknown). */
 .queue-genre-badge {
   display: inline-block;
   padding: 1px 7px;
@@ -1368,6 +1368,12 @@ button.guest-name:focus-visible {
   white-space: nowrap;
   color: #fff;
   background: linear-gradient(135deg, #0f9f9a, #0b7f8a);
+}
+
+.queue-genre-badge.is-unknown {
+  color: var(--muted, #94a3b8);
+  background: rgba(148, 163, 184, 0.18);
+  font-weight: 600;
 }
 
 /* Track lives in the host's Spotify playlist pool. */
@@ -3234,6 +3240,12 @@ body.party-display-active.party-display-preview .party-display-view {
   color: var(--muted);
 }
 
+.party-display-genre.is-unknown,
+#np-genre-label.is-unknown {
+  color: var(--muted);
+  opacity: 0.72;
+}
+
 .party-display-genre.genre-tone-rock {
   color: #f87171;
 }
@@ -3556,6 +3568,11 @@ body.party-display-active.party-display-preview .party-display-view {
 
 .party-display-queue-meta .party-display-queue-genre {
   color: #7ee0d8;
+}
+
+.party-display-queue-meta .party-display-queue-genre.is-unknown {
+  color: rgba(148, 163, 184, 0.85);
+  font-weight: 600;
 }
 
 .party-display-queue-meta .party-display-queue-playlist {

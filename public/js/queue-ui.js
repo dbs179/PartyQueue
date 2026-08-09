@@ -8,6 +8,7 @@ import {
 } from "./guest.js";
 import { trackEraDisplayLabel } from "./genre-presets.js";
 import { displayOriginLabel } from "./now-playing-origin.js";
+import { UNKNOWN_GENRE_DISPLAY } from "./mix-labels.js";
 
 /**
  * @param {number} n
@@ -105,9 +106,16 @@ export function queueGenreLabel(track) {
  */
 export function queueGenreBadgeHtml(track, { showQueueGenre = false } = {}) {
   if (!showQueueGenre || track.djVoice) return "";
-  const label = queueGenreLabel(track);
-  if (!label) return "";
-  return `<span class="queue-genre-badge" title="Matched song genre">${escapeHtml(label)}</span>`;
+  const matched = queueGenreLabel(track);
+  const unknown = !matched;
+  const label = matched || UNKNOWN_GENRE_DISPLAY;
+  const cls = unknown
+    ? "queue-genre-badge is-unknown"
+    : "queue-genre-badge";
+  const title = unknown
+    ? "Genre not matched yet"
+    : "Matched song genre";
+  return `<span class="${cls}" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
 }
 
 /**
@@ -486,14 +494,16 @@ export function createQueueUi(els, deps) {
 
         // Same Show song genre toggle as main Up Next (genre + From Playlists).
         if (showGenre) {
-          const genreLabel = queueGenreLabel(track);
-          if (genreLabel) {
-            const genre = document.createElement("span");
-            genre.className = "party-display-queue-genre";
-            genre.textContent = genreLabel;
-            genre.title = "Matched song genre";
-            meta.appendChild(genre);
-          }
+          const matched = queueGenreLabel(track);
+          const genre = document.createElement("span");
+          genre.className = matched
+            ? "party-display-queue-genre"
+            : "party-display-queue-genre is-unknown";
+          genre.textContent = matched || UNKNOWN_GENRE_DISPLAY;
+          genre.title = matched
+            ? "Matched song genre"
+            : "Genre not matched yet";
+          meta.appendChild(genre);
           if (track.fromPlaylist) {
             const playlist = document.createElement("span");
             playlist.className = "party-display-queue-playlist";

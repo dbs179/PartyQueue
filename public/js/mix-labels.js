@@ -27,9 +27,24 @@ export function formatMoodMixText(presetName, eraLabel) {
   return eraLabel ? `Mood: ${preset} - ${eraLabel}` : `Mood: ${preset}`;
 }
 
+/** Stable label when a track has no matched genre yet. */
+export const UNKNOWN_GENRE_DISPLAY = "Unknown";
+
 /** @param {string|null|undefined} genreLabel */
 export function formatGenreHeaderText(genreLabel) {
-  return genreLabel ? `Genre: ${genreLabel}` : "Genre:";
+  const label = String(genreLabel || "").trim();
+  return label
+    ? `Genre: ${label}`
+    : `Genre: ${UNKNOWN_GENRE_DISPLAY}`;
+}
+
+/** True when the Genre header shows a real lane/label (not empty / Unknown). */
+export function genreHeaderHasKnownValue(genreText) {
+  if (typeof genreText !== "string" || !genreText.startsWith("Genre:")) {
+    return false;
+  }
+  const rest = genreText.slice("Genre:".length).trim();
+  return !!rest && rest !== UNKNOWN_GENRE_DISPLAY;
 }
 
 /**
@@ -167,22 +182,20 @@ export function paintMixLabels(els, texts) {
   const { npMoodLabel, npGenreLabel, displayMixPill, displayGenrePill } =
     els || {};
   const moodText = texts?.moodText || "Mood: All";
-  const genreText = texts?.genreText || "Genre:";
+  const genreText =
+    texts?.genreText || `Genre: ${UNKNOWN_GENRE_DISPLAY}`;
   const genreLane = texts?.genreLane || null;
-  const hasGenreValue = !!(
-    typeof texts?.genreText === "string" &&
-    texts.genreText.startsWith("Genre:") &&
-    texts.genreText.length > "Genre:".length
-  );
+  const hasKnownGenre = genreHeaderHasKnownValue(genreText);
 
   if (npMoodLabel) {
     npMoodLabel.textContent = moodText;
     npMoodLabel.hidden = false;
   }
   if (npGenreLabel) {
-    // Keep the "Genre" affordance clickable even when idle — only clear the value.
+    // Keep the Genre affordance clickable; Unknown when nothing matched yet.
     npGenreLabel.textContent = genreText;
     npGenreLabel.hidden = false;
+    npGenreLabel.classList?.toggle?.("is-unknown", !hasKnownGenre);
   }
   if (displayMixPill) {
     displayMixPill.textContent = moodText;
@@ -191,6 +204,7 @@ export function paintMixLabels(els, texts) {
   if (displayGenrePill) {
     displayGenrePill.textContent = genreText;
     displayGenrePill.hidden = false;
-    paintGenreToneClass(displayGenrePill, hasGenreValue ? genreLane : null);
+    paintGenreToneClass(displayGenrePill, hasKnownGenre ? genreLane : null);
+    displayGenrePill.classList?.toggle?.("is-unknown", !hasKnownGenre);
   }
 }
