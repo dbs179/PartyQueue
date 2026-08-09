@@ -384,6 +384,59 @@ export function clearConsumedDedication(id) {
   persist();
 }
 
+/**
+ * Pure: advance the "last heard music track" pointer used to consume searched
+ * origins after a song leaves Now Playing.
+ *
+ * Important: do NOT clear when playback moves onto DJ announce pads. Empty-
+ * queue shouts often register the first Set Request / request as heard, then
+ * pad playback used to wipe Requested + Genre before the song resumed.
+ *
+ * @param {string|null} prevHeardId
+ * @param {{
+ *   playingFromQueue?: boolean,
+ *   uri?: string|null,
+ *   djClip?: boolean,
+ *   silenceBridge?: boolean,
+ *   trackId?: string|null,
+ * }} [ctx]
+ * @returns {{ lastHeardTrackId: string|null, clearId: string|null, heardId: string|null }}
+ */
+export function advanceHeardTrack(prevHeardId, ctx = {}) {
+  const playingFromQueue = !!ctx.playingFromQueue;
+  const uri = ctx.uri || null;
+  const djClip = !!ctx.djClip;
+  const silenceBridge = !!ctx.silenceBridge;
+  const trackId =
+    typeof ctx.trackId === "string" && ctx.trackId ? ctx.trackId : null;
+  const prev =
+    typeof prevHeardId === "string" && prevHeardId ? prevHeardId : null;
+
+  if (playingFromQueue && uri && !djClip && !silenceBridge) {
+    if (trackId && trackId !== prev) {
+      return {
+        lastHeardTrackId: trackId,
+        clearId: prev,
+        heardId: trackId,
+      };
+    }
+    return { lastHeardTrackId: prev, clearId: null, heardId: null };
+  }
+
+  // DJ ramp / TTS / restore: keep the pointer, do not consume the song under
+  // the announce (it often resumes as the same track id).
+  if (djClip || silenceBridge) {
+    return { lastHeardTrackId: prev, clearId: null, heardId: null };
+  }
+
+  // Left the queue source or went idle — consume.
+  if (prev && (!playingFromQueue || !uri)) {
+    return { lastHeardTrackId: null, clearId: prev, heardId: null };
+  }
+
+  return { lastHeardTrackId: prev, clearId: null, heardId: null };
+}
+
 // Filler = anything that should sink below real requests (random/never-ending
 // picks, discoveries, and era mood hits).
 export function isFiller(id) {

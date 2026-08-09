@@ -161,6 +161,75 @@ test("clearConsumedDedication removes the oldest instance only", () => {
   origin.clearConsumedDedication("missing");
 });
 
+test("advanceHeardTrack does not clear origin when entering DJ announce pads", () => {
+  // Empty-queue Set Request: first song registers as heard, then shout pads.
+  const afterSong = origin.advanceHeardTrack(null, {
+    playingFromQueue: true,
+    uri: "spotify:track:adventure",
+    trackId: "adventure",
+  });
+  assert.equal(afterSong.heardId, "adventure");
+  assert.equal(afterSong.lastHeardTrackId, "adventure");
+  assert.equal(afterSong.clearId, null);
+
+  const onRamp = origin.advanceHeardTrack(afterSong.lastHeardTrackId, {
+    playingFromQueue: true,
+    uri: "http://partyqueue/media/tts/silence-ramp-3s.mp3",
+    djClip: false,
+    silenceBridge: true,
+    trackId: null,
+  });
+  assert.equal(onRamp.clearId, null, "must keep Set Request origin through DJ");
+  assert.equal(onRamp.lastHeardTrackId, "adventure");
+
+  const onTts = origin.advanceHeardTrack(onRamp.lastHeardTrackId, {
+    playingFromQueue: true,
+    uri: "http://ha/tts_proxy/clip.mp3",
+    djClip: true,
+    silenceBridge: false,
+  });
+  assert.equal(onTts.clearId, null);
+  assert.equal(onTts.lastHeardTrackId, "adventure");
+
+  // Same song resumes after announce — no clear, no re-record.
+  const resume = origin.advanceHeardTrack(onTts.lastHeardTrackId, {
+    playingFromQueue: true,
+    uri: "spotify:track:adventure",
+    trackId: "adventure",
+  });
+  assert.equal(resume.clearId, null);
+  assert.equal(resume.heardId, null);
+  assert.equal(resume.lastHeardTrackId, "adventure");
+
+  // Next music track consumes the prior request.
+  const next = origin.advanceHeardTrack(resume.lastHeardTrackId, {
+    playingFromQueue: true,
+    uri: "spotify:track:magic",
+    trackId: "magic",
+  });
+  assert.equal(next.clearId, "adventure");
+  assert.equal(next.heardId, "magic");
+  assert.equal(next.lastHeardTrackId, "magic");
+});
+
+test("advanceHeardTrack clears when leaving the queue or going idle", () => {
+  assert.deepEqual(
+    origin.advanceHeardTrack("abc", {
+      playingFromQueue: false,
+      uri: "spotify:track:abc",
+      trackId: "abc",
+    }),
+    { lastHeardTrackId: null, clearId: "abc", heardId: null }
+  );
+  assert.deepEqual(
+    origin.advanceHeardTrack("abc", {
+      playingFromQueue: true,
+      uri: null,
+    }),
+    { lastHeardTrackId: null, clearId: "abc", heardId: null }
+  );
+});
+
 test("setDedication updates or clears the newest searched instance", () => {
   origin.markOrigin(["d2"], "searched", { requestedBy: "Mark" });
   const set = origin.setDedication("d2", "  Sarah  ");

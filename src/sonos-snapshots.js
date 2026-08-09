@@ -36,6 +36,7 @@ import {
   originSnapshot,
   originMetaForOccurrence,
   clearConsumedDedication,
+  advanceHeardTrack,
 } from "./queue-origin.js";
 import { warmLyrics } from "./lyrics.js";
 import {
@@ -282,29 +283,36 @@ async function getNowPlayingRaw() {
   // guest requests and Sonos-app picks enter song memory too. Only while the
   // local queue is the source — radio/SiriusXM shouldn't pollute the DJ memory.
   // Skip DJ TTS / silence-bridge clips so filenames don't enter song memory.
-  // When a song leaves Now Playing (next track, DJ pad, or idle), clear its
-  // live dedication so a later re-queue doesn't show yesterday's note. Stats
-  // keep dedications via the request log.
-  if (playingFromQueue && uri && !djClip && !silenceBridge) {
-    const id = spotifyTrackId(uri);
-    if (id && id !== lastHeardTrackId) {
-      const prevId = lastHeardTrackId;
-      lastHeardTrackId = id;
-      // Prefer the queue-origin tag when PartyQueue added it; Sonos-app / radio
-      // plays stay untagged.
-      const source = originOf(id) || null;
-      const mood = source === "mood" ? moodOf(id) : null;
+  // Consume a searched origin when music advances to a *different* song (or
+  // leaves the queue) — never when playback moves onto DJ announce pads, or
+  // empty-queue Set Request shouts wipe Requested + Genre on the first track.
+  {
+    const id =
+      playingFromQueue && uri && !djClip && !silenceBridge
+        ? spotifyTrackId(uri)
+        : null;
+    const step = advanceHeardTrack(lastHeardTrackId, {
+      playingFromQueue,
+      uri,
+      djClip,
+      silenceBridge,
+      trackId: id,
+    });
+    if (step.heardId) {
+      const source = originOf(step.heardId) || null;
+      const mood = source === "mood" ? moodOf(step.heardId) : null;
       recordPlayed([
-        { id, artist: artist || "", name: title || "", source, mood },
+        {
+          id: step.heardId,
+          artist: artist || "",
+          name: title || "",
+          source,
+          mood,
+        },
       ]);
-      if (prevId) clearConsumedDedication(prevId);
     }
-  } else if (
-    lastHeardTrackId &&
-    (djClip || silenceBridge || !uri || !playingFromQueue)
-  ) {
-    clearConsumedDedication(lastHeardTrackId);
-    if (!djClip && !silenceBridge) lastHeardTrackId = null;
+    if (step.clearId) clearConsumedDedication(step.clearId);
+    lastHeardTrackId = step.lastHeardTrackId;
   }
 
   // Sonos reports RelTime / TrackDuration as H:MM:SS (sometimes with decimals).
