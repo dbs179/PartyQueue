@@ -3375,6 +3375,35 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   font-size: calc(15 * var(--pd));
 }
 
+/* TV / Fully: larger Up Next type only (layout unchanged). */
+body.party-display-active.party-display-kiosk .party-display-queue .party-display-label {
+  font-size: calc(20 * var(--pd));
+}
+
+body.party-display-active.party-display-kiosk .party-display-queue-count {
+  font-size: calc(20 * var(--pd));
+}
+
+body.party-display-active.party-display-kiosk .party-display-queue-index {
+  font-size: calc(22 * var(--pd));
+}
+
+body.party-display-active.party-display-kiosk .party-display-queue-meta strong {
+  font-size: calc(26 * var(--pd));
+}
+
+body.party-display-active.party-display-kiosk .party-display-queue-meta > span {
+  font-size: calc(20 * var(--pd));
+}
+
+body.party-display-active.party-display-kiosk .party-display-queue-meta .party-display-queue-source {
+  font-size: calc(18 * var(--pd));
+}
+
+body.party-display-active.party-display-kiosk .party-display-queue .party-display-side-empty {
+  font-size: calc(20 * var(--pd));
+}
+
 .party-display-join {
   grid-column: 2;
   grid-row: 2;
