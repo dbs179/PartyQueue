@@ -4,6 +4,38 @@ import { escapeHtml } from "./format.js";
 import { attachModal } from "./modal.js";
 
 /**
+ * Resolve the end-of-night song label for guest-facing copy.
+ * @param {object|null|undefined} recap
+ * @param {() => string} [getEndOfNightName]
+ */
+export function closingTimeSongName(recap, getEndOfNightName) {
+  const fromRecap = String(recap?.endOfNightName || "").trim();
+  if (fromRecap) return fromRecap;
+  const fromSettings =
+    typeof getEndOfNightName === "function"
+      ? String(getEndOfNightName() || "").trim()
+      : "";
+  return fromSettings || "Closing Time";
+}
+
+/**
+ * Short toast when last call hits — clear even if the recap modal is open.
+ * @param {string} songName
+ */
+export function closingTimeToastMessage(songName) {
+  const song = String(songName || "").trim() || "Closing Time";
+  return `Last call — no more requests. ${song} is next.`;
+}
+
+/**
+ * Recap modal hint under the title.
+ * @param {string} songName
+ */
+export function closingTimeHintText(songName) {
+  return closingTimeToastMessage(songName);
+}
+
+/**
  * @param {object|null|undefined} recap
  * @returns {string}
  */
@@ -56,16 +88,17 @@ export function shouldAnnounceClosingTime(ts, lastShown, now = Date.now()) {
  *   body?: HTMLElement|null,
  *   hintEl?: HTMLElement|null,
  *   dismissBtn?: HTMLElement|null,
+ *   titleEl?: HTMLElement|null,
  * }} els
  * @param {{
- *   showToast: (msg: string, isError?: boolean) => void,
+ *   showToast: (msg: string, isError?: boolean, durationMs?: number) => void,
  *   getEndOfNightName?: () => string,
  * }} deps
  */
 export function createPartyRecapUi(els, deps) {
-  const { overlay, body, hintEl, dismissBtn } = els || {};
+  const { overlay, body, hintEl, dismissBtn, titleEl } = els || {};
   const showToast = deps?.showToast || (() => {});
-  const getEndOfNightName = deps?.getEndOfNightName || (() => "Last call");
+  const getEndOfNightName = deps?.getEndOfNightName || (() => "Closing Time");
 
   let lastClosingShown = 0;
   let lastPartyRecapPayload = null;
@@ -84,14 +117,20 @@ export function createPartyRecapUi(els, deps) {
 
   function showPartyRecap(recap) {
     lastPartyRecapPayload = recap && typeof recap === "object" ? recap : null;
-    const songName = (
-      lastPartyRecapPayload?.endOfNightName ||
-      getEndOfNightName() ||
-      "Last call"
-    ).trim();
-    if (hintEl) hintEl.textContent = `Last call — ${songName} is next`;
+    const songName = closingTimeSongName(
+      lastPartyRecapPayload,
+      getEndOfNightName
+    );
+    const toast = closingTimeToastMessage(songName);
+    const hint = closingTimeHintText(songName);
+
+    if (titleEl) titleEl.textContent = "Last call";
+    if (hintEl) hintEl.textContent = hint;
+    // Always toast so guests who dismiss the modal (or miss it) still see
+    // that requests are closed and which song is next.
+    showToast(toast, false, 5000);
+
     if (!overlay || !body || !lastPartyRecapPayload) {
-      showToast(`\u{1F37A} Last call \u2014 ${songName}!`);
       return;
     }
     body.innerHTML = buildPartyRecapHtml(lastPartyRecapPayload);

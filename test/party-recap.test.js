@@ -2,6 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildPartyRecapHtml,
+  closingTimeHintText,
+  closingTimeSongName,
+  closingTimeToastMessage,
   shouldAnnounceClosingTime,
 } from "../public/js/party-recap.js";
 
@@ -38,4 +41,18 @@ test("shouldAnnounceClosingTime skips stale and repeats", () => {
     announce: true,
     nextLastShown: now - 10_000,
   });
+});
+
+test("closing time copy names the song and drops beer emoji", () => {
+  assert.equal(
+    closingTimeSongName({ endOfNightName: "Closing Time" }, () => "Other"),
+    "Closing Time"
+  );
+  assert.equal(closingTimeSongName(null, () => "Custom Nightcap"), "Custom Nightcap");
+  assert.equal(closingTimeSongName(null, () => ""), "Closing Time");
+
+  const toast = closingTimeToastMessage("Closing Time");
+  assert.equal(toast, "Last call — no more requests. Closing Time is next.");
+  assert.doesNotMatch(toast, /🍺|🍻/);
+  assert.equal(closingTimeHintText("Custom Nightcap"), closingTimeToastMessage("Custom Nightcap"));
 });

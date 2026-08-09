@@ -1597,6 +1597,7 @@ const {
     overlay: recapOverlay,
     body: recapBody,
     hintEl: recapHintEl,
+    titleEl: document.getElementById("recap-title"),
     dismissBtn: recapDismissBtn,
   },
   {
