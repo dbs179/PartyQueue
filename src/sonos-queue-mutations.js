@@ -108,6 +108,34 @@ export async function autoStartIfIdle(coordinator) {
   }
 }
 
+/**
+ * Empty-queue shout path: park on the queue without Play so the first song
+ * can't audibly start while TTS is still generating (then get paused + restarted
+ * after the DJ pads insert).
+ */
+export async function holdIdleForDeferredShout(coordinator) {
+  try {
+    const media = await coordinator.AVTransportService.GetMediaInfo({
+      InstanceID: 0,
+    }).catch(() => null);
+    const onQueue = /^x-rincon-queue:/.test(media?.CurrentURI || "");
+    if (!onQueue) await coordinator.SwitchToQueue();
+    // Always Pause after landing on the queue. Sonos sometimes begins the first
+    // enqueued track on SwitchToQueue / AddURIToQueue; leaving it PLAYING here
+    // is exactly the empty-queue "tease → DJ → restart" glitch.
+    try {
+      await coordinator.Pause();
+    } catch {
+      /* already STOPPED is fine */
+    }
+    console.log("[queue] held idle for deferred DJ shout");
+    return true;
+  } catch (err) {
+    console.warn("[queue] hold for deferred shout failed:", err.message);
+    return false;
+  }
+}
+
 // The set of guest-searched track IDs from the origin store. Used to find where
 // a new request belongs: just after the last searched song, ahead of everything
 // else. Relying on "searched" (always tagged on add) rather than "filler" keeps
@@ -243,9 +271,12 @@ async function addSetRequestToQueueUnlocked(
   const dj = getDjVoiceSettings();
   const deferStartForShout =
     queueWasEmpty && !!dj.djVoiceEnabled && !!dj.djShoutEnabled;
-  const started = deferStartForShout
-    ? false
-    : await autoStartIfIdle(coordinator);
+  let started = false;
+  if (deferStartForShout) {
+    await holdIdleForDeferredShout(coordinator);
+  } else {
+    started = await autoStartIfIdle(coordinator);
+  }
   invalidateSonosSnapshots();
 
   const offset = playingFromQueue && currentTrack >= 1 ? currentTrack : 0;
@@ -390,9 +421,12 @@ async function addTrackToQueueUnlocked(
   const deferStartForShout =
     queueWasEmpty && !!dj.djVoiceEnabled && !!dj.djShoutEnabled;
 
-  const started = deferStartForShout
-    ? false
-    : await autoStartIfIdle(coordinator);
+  let started = false;
+  if (deferStartForShout) {
+    await holdIdleForDeferredShout(coordinator);
+  } else {
+    started = await autoStartIfIdle(coordinator);
+  }
   invalidateSonosSnapshots();
 
   // Guest-facing queue spot (#1 = next up). Absolute Sonos index minus the

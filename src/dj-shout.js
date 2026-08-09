@@ -418,7 +418,8 @@ export async function writeRequestShoutScript({
 /**
  * Insert a shout TTS immediately before the newly queued song.
  * Empty-queue adds should pass startPlayback: true so Sonos plays the shout
- * first (music may already have auto-started on the song alone).
+ * first. Callers hold/pause transport while TTS builds so the song does not
+ * audibly start before the DJ pads.
  * @returns {Promise<{ok: boolean, skipped?: boolean, error?: string}>}
  */
 export async function announceRequestShout(

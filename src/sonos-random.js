@@ -2,7 +2,11 @@ import { MetaDataHelper } from "@svrooij/sonos";
 import { withSonosWriteLock } from "./sonos-lock.js";
 import { getManager, resolveCoordinator, resolveRegion } from "./sonos-core.js";
 import { getNowPlayingFresh, invalidateSonosSnapshots } from "./sonos-snapshots.js";
-import { enqueueMeta, autoStartIfIdle } from "./sonos-queue-mutations.js";
+import {
+  enqueueMeta,
+  autoStartIfIdle,
+  holdIdleForDeferredShout,
+} from "./sonos-queue-mutations.js";
 import {
   autoStartDecision,
   isDjVoiceUri,
@@ -793,6 +797,7 @@ async function addRandomFromPlaylistsUnlocked(
         const transport = await coordinator.AVTransportService.GetTransportInfo();
         if (autoStartDecision(transport.CurrentTransportState) === "start") {
           deferredStart = true;
+          await holdIdleForDeferredShout(coordinator);
         }
       } catch {
         deferredStart = false;

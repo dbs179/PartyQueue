@@ -2641,6 +2641,17 @@ async function announceOnSonosUnlocked(
     if (!startPlayback) {
       pausedForImminent = await pauseIfAnnounceImminent(queuePosition);
     }
+    // Empty/idle shouts: pause BEFORE TTS generation. Waiting until after
+    // saveTtsClip leaves a multi-second window where Sonos can start the song,
+    // then we pause it and restart after the DJ — "started, paused, restarted".
+    if (startPlayback) {
+      try {
+        const { pause } = await import("./sonos.js");
+        await pause();
+      } catch {
+        /* best-effort */
+      }
+    }
     if (preempted()) {
       return { ok: false, skipped: true, reason: "queue-preempted" };
     }
@@ -2652,8 +2663,8 @@ async function announceOnSonosUnlocked(
     if (preempted()) {
       return { ok: false, skipped: true, reason: "queue-preempted" };
     }
-    // Pause before inserting when we're about to Play from the DJ clip.
-    // Avoids Sonos auto-starting a shifted track, then Seek+Play restarting TTS.
+    // Pause again before inserting pads — Sonos can still auto-start a shifted
+    // track between TTS save and AddURIToQueue.
     if (startPlayback) {
       try {
         const { pause } = await import("./sonos.js");
