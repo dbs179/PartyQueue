@@ -2957,8 +2957,8 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 2.15fr) minmax(calc(340 * var(--pd)), 0.85fr);
-  /* Left: Now ~3/4, lyrics ~1/4; Join pinned to screen bottom. */
-  grid-template-rows: minmax(0, 3fr) minmax(0, 1fr) auto;
+  /* Now takes all leftover height; lyrics are a fixed 5-line band; Join at bottom. */
+  grid-template-rows: minmax(0, 1fr) auto auto;
   align-items: stretch;
   column-gap: calc(36 * var(--pd));
   row-gap: calc(14 * var(--pd));
@@ -2972,7 +2972,7 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+  justify-content: stretch;
 }
 
 .party-display-side {
@@ -2986,26 +2986,29 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   align-self: stretch;
 }
 
+/* Two columns: big art (left) + compact meta centered beside it. */
 .party-display-hero {
+  container-type: size;
   flex: 1 1 auto;
   width: 100%;
   min-height: 0;
-  max-height: 100%;
+  height: 100%;
   display: grid;
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
-  align-items: end;
-  gap: calc(28 * var(--pd));
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: calc(24 * var(--pd));
 }
 
 .party-display-art-wrap {
   position: relative;
-  /* Large square art sized to the Now band (~3/4 of the layout). */
-  width: min(100%, calc(0.7 * var(--pd-vh, 100dvh)));
+  /* Largest square that fits the Now band; pinned low (end). */
+  width: min(100cqh, 64cqi);
+  height: min(100cqh, 64cqi);
   max-width: 100%;
   max-height: 100%;
   aspect-ratio: 1;
-  height: auto;
   align-self: end;
+  justify-self: start;
   border-radius: calc(22 * var(--pd));
   overflow: hidden;
   background: var(--surface);
@@ -3042,18 +3045,22 @@ body.party-display-active.party-display-kiosk .party-display-shell {
 .party-display-meta {
   min-width: 0;
   min-height: 0;
+  max-height: 100%;
   overflow: hidden;
-  align-self: end;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .party-display-state {
   display: inline-flex;
   margin-bottom: 0;
-  padding: calc(4 * var(--pd)) calc(9 * var(--pd));
+  padding: calc(3 * var(--pd)) calc(8 * var(--pd));
   color: var(--muted);
   background: var(--surface-2);
   border-radius: 999px;
-  font-size: calc(12 * var(--pd));
+  font-size: calc(11 * var(--pd));
   font-weight: 750;
 }
 
@@ -3062,8 +3069,8 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: calc(6 * var(--pd));
-  margin-bottom: calc(8 * var(--pd));
+  gap: calc(5 * var(--pd));
+  margin-bottom: calc(6 * var(--pd));
 }
 
 .party-display-pills .party-display-state {
@@ -3094,8 +3101,8 @@ body.party-display-active.party-display-kiosk .party-display-shell {
 
 .party-display-title {
   margin: 0;
-  max-width: 22ch;
-  font-size: calc(34 * var(--pd));
+  max-width: 24ch;
+  font-size: calc(28 * var(--pd));
   line-height: 1.08;
   letter-spacing: -0.03em;
   overflow-wrap: anywhere;
@@ -3107,40 +3114,40 @@ body.party-display-active.party-display-kiosk .party-display-shell {
 }
 
 .party-display-artist {
-  margin: calc(8 * var(--pd)) 0 0;
+  margin: calc(6 * var(--pd)) 0 0;
   color: var(--text);
-  font-size: calc(20 * var(--pd));
+  font-size: calc(16 * var(--pd));
   font-weight: 650;
   line-height: 1.1;
 }
 
 .party-display-album {
-  margin: calc(4 * var(--pd)) 0 0;
+  margin: calc(3 * var(--pd)) 0 0;
   color: var(--muted);
-  font-size: calc(14 * var(--pd));
-}
-
-.party-display-progress {
-  margin-top: calc(12 * var(--pd));
-}
-
-.party-display-progress .np-progress-track {
-  height: calc(5 * var(--pd));
-}
-
-.party-display-progress .np-progress-times {
-  margin-top: calc(4 * var(--pd));
   font-size: calc(12 * var(--pd));
 }
 
+.party-display-progress {
+  margin-top: calc(8 * var(--pd));
+}
+
+.party-display-progress .np-progress-track {
+  height: calc(4 * var(--pd));
+}
+
+.party-display-progress .np-progress-times {
+  margin-top: calc(3 * var(--pd));
+  font-size: calc(11 * var(--pd));
+}
+
 .party-display-reactions {
-  margin-top: calc(10 * var(--pd));
+  margin-top: calc(8 * var(--pd));
   width: 100%;
   display: flex;
   flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
-  gap: calc(3 * var(--pd));
+  gap: calc(2 * var(--pd));
 }
 
 .party-display-reactions[hidden] {
@@ -3153,11 +3160,11 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: calc(3 * var(--pd));
-  padding: calc(5 * var(--pd)) calc(3 * var(--pd));
+  gap: calc(2 * var(--pd));
+  padding: calc(4 * var(--pd)) calc(2 * var(--pd));
   background: var(--surface);
   border-radius: 999px;
-  font-size: calc(14 * var(--pd));
+  font-size: calc(12 * var(--pd));
 }
 
 .party-display-reactions strong {
@@ -3165,23 +3172,20 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   font-variant-numeric: tabular-nums;
 }
 
-/* 5-line karaoke window — lower ~1/4 of the left column. */
+/* Fixed 5-line karaoke band under Now — keeps Now tall so art can grow. */
 .party-display-lyrics {
+  --display-lyric-size: calc(22 * var(--pd));
   --display-lyric-line: 1.25;
   --display-lyric-gap: calc(4 * var(--pd));
-  /* Fit five lines inside the 1fr lyrics band (~1/4 of layout). */
-  --display-lyric-size: clamp(
-    16px,
-    calc((var(--pd-vh, 100dvh) * 0.2) / 6.5),
-    calc(28 * var(--pd))
-  );
   grid-column: 1;
   grid-row: 2;
   width: 100%;
   min-width: 0;
-  min-height: 0;
-  height: 100%;
-  align-self: stretch;
+  flex: 0 0 auto;
+  height: calc(
+    (5 * var(--display-lyric-size) * var(--display-lyric-line)) +
+      (4 * var(--display-lyric-gap))
+  );
   overflow: hidden;
   padding: 0 2px;
   text-align: left;
