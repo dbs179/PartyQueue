@@ -3312,13 +3312,19 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   min-height: 0;
   height: 100%;
   padding: calc(14 * var(--pd));
-  overflow: auto;
+  /* Fit N full rows in JS — no partial-row scroll. */
+  overflow: hidden;
   box-sizing: border-box;
+}
+
+/* Up Next type (PC + TV shared) — ~1.5× prior TV sizes; list count fits height. */
+.party-display-queue .party-display-label {
+  font-size: calc(30 * var(--pd));
 }
 
 .party-display-queue-count {
   color: var(--muted);
-  font-size: calc(14 * var(--pd));
+  font-size: calc(30 * var(--pd));
 }
 
 .party-display-queue-list {
@@ -3326,16 +3332,18 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   margin: calc(12 * var(--pd)) 0 0;
   padding: 0;
   display: grid;
-  gap: calc(2 * var(--pd));
+  gap: calc(4 * var(--pd));
+  min-height: 0;
+  overflow: hidden;
 }
 
 .party-display-queue-list li {
   min-width: 0;
   display: grid;
-  grid-template-columns: calc(28 * var(--pd)) minmax(0, 1fr);
-  gap: calc(10 * var(--pd));
+  grid-template-columns: calc(42 * var(--pd)) minmax(0, 1fr);
+  gap: calc(12 * var(--pd));
   align-items: center;
-  padding: calc(7 * var(--pd)) 0;
+  padding: calc(8 * var(--pd)) 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -3345,7 +3353,7 @@ body.party-display-active.party-display-kiosk .party-display-shell {
 
 .party-display-queue-index {
   color: var(--muted);
-  font-size: calc(15 * var(--pd));
+  font-size: calc(33 * var(--pd));
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -3365,17 +3373,20 @@ body.party-display-active.party-display-kiosk .party-display-shell {
 }
 
 .party-display-queue-meta strong {
-  font-size: calc(18 * var(--pd));
+  font-size: calc(39 * var(--pd));
+  line-height: 1.1;
 }
 
 .party-display-queue-meta > span {
   color: var(--muted);
-  font-size: calc(14 * var(--pd));
+  font-size: calc(30 * var(--pd));
+  line-height: 1.15;
 }
 
 .party-display-queue-meta .party-display-queue-source {
   color: #8ef0ae;
-  font-size: calc(13 * var(--pd));
+  font-size: calc(27 * var(--pd));
+  line-height: 1.15;
 }
 
 .party-display-side-empty {
@@ -3384,33 +3395,8 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   font-size: calc(15 * var(--pd));
 }
 
-/* TV / Fully: larger Up Next type only (layout unchanged). */
-body.party-display-active.party-display-kiosk .party-display-queue .party-display-label {
-  font-size: calc(20 * var(--pd));
-}
-
-body.party-display-active.party-display-kiosk .party-display-queue-count {
-  font-size: calc(20 * var(--pd));
-}
-
-body.party-display-active.party-display-kiosk .party-display-queue-index {
-  font-size: calc(22 * var(--pd));
-}
-
-body.party-display-active.party-display-kiosk .party-display-queue-meta strong {
-  font-size: calc(26 * var(--pd));
-}
-
-body.party-display-active.party-display-kiosk .party-display-queue-meta > span {
-  font-size: calc(20 * var(--pd));
-}
-
-body.party-display-active.party-display-kiosk .party-display-queue-meta .party-display-queue-source {
-  font-size: calc(18 * var(--pd));
-}
-
-body.party-display-active.party-display-kiosk .party-display-queue .party-display-side-empty {
-  font-size: calc(20 * var(--pd));
+.party-display-queue .party-display-side-empty {
+  font-size: calc(30 * var(--pd));
 }
 
 .party-display-join {

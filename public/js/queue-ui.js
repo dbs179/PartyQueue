@@ -164,6 +164,92 @@ export function createQueueUi(els, deps) {
   let sortable = null;
   /** @type {object[]|null} */
   let pendingStreamTracks = null;
+  /** @type {object[]} */
+  let lastDisplayTracks = [];
+  /** @type {ResizeObserver|null} */
+  let displayQueueResizeObserver = null;
+  let displayQueueFitRaf = 0;
+
+  const DISPLAY_QUEUE_MAX = 8;
+
+  function displayQueueSection() {
+    return displayQueue?.closest(".party-display-queue") || null;
+  }
+
+  /** How many Up Next rows fit in the panel at the current font size. */
+  function measureDisplayQueueFit() {
+    const section = displayQueueSection();
+    if (!displayQueue || !section) return 4;
+    const head = section.querySelector(".party-display-section-head");
+    const sectionStyle = getComputedStyle(section);
+    const padY =
+      (parseFloat(sectionStyle.paddingTop) || 0) +
+      (parseFloat(sectionStyle.paddingBottom) || 0);
+    const headH = head ? head.getBoundingClientRect().height : 0;
+    const listStyle = getComputedStyle(displayQueue);
+    const listMarginTop = parseFloat(listStyle.marginTop) || 0;
+    const available = section.clientHeight - padY - headH - listMarginTop;
+    if (!(available > 0)) return 1;
+
+    let probe = displayQueue.querySelector("li");
+    let created = false;
+    if (!probe) {
+      probe = document.createElement("li");
+      probe.setAttribute("aria-hidden", "true");
+      probe.innerHTML =
+        '<span class="party-display-queue-index">1</span>' +
+        '<div class="party-display-queue-meta">' +
+        "<strong>Sample Title</strong>" +
+        "<span>Sample Artist</span>" +
+        '<span class="party-display-queue-source">Random</span>' +
+        "</div>";
+      probe.style.visibility = "hidden";
+      probe.style.pointerEvents = "none";
+      displayQueue.appendChild(probe);
+      created = true;
+    }
+    const gap =
+      parseFloat(listStyle.rowGap || listStyle.gap || "0") || 0;
+    const rowH = probe.getBoundingClientRect().height + gap;
+    if (created) probe.remove();
+    if (!(rowH > 0)) return 4;
+    return Math.max(
+      1,
+      Math.min(DISPLAY_QUEUE_MAX, Math.floor(available / rowH))
+    );
+  }
+
+  function trimDisplayQueueOverflow() {
+    if (!displayQueue) return;
+    const section = displayQueueSection();
+    if (!section) return;
+    // Drop trailing rows until the panel no longer overflows.
+    while (
+      displayQueue.children.length > 1 &&
+      section.scrollHeight > section.clientHeight + 1
+    ) {
+      displayQueue.lastElementChild?.remove();
+    }
+  }
+
+  function ensureDisplayQueueObserver() {
+    if (
+      displayQueueResizeObserver ||
+      !displayQueue ||
+      typeof ResizeObserver === "undefined"
+    ) {
+      return;
+    }
+    const section = displayQueueSection();
+    if (!section) return;
+    displayQueueResizeObserver = new ResizeObserver(() => {
+      cancelAnimationFrame(displayQueueFitRaf);
+      displayQueueFitRaf = requestAnimationFrame(() => {
+        renderPartyDisplay(lastDisplayTracks);
+      });
+    });
+    displayQueueResizeObserver.observe(section);
+  }
 
   function badgeOpts(track) {
     const showQueueGenre = !!getShowQueueGenre();
@@ -323,10 +409,21 @@ export function createQueueUi(els, deps) {
   function renderPartyDisplay(tracks) {
     if (!displayQueue || !displayQueueEmpty || !displayQueueCount) return;
     const list = Array.isArray(tracks) ? tracks : [];
-    const visible = list.slice(0, 4);
+    lastDisplayTracks = list;
+    ensureDisplayQueueObserver();
+
     displayQueueCount.textContent = partyQueueCountLabel(list.length);
-    displayQueueEmpty.hidden = visible.length > 0;
     displayQueueEmpty.textContent = "The queue is empty.";
+
+    if (list.length === 0) {
+      displayQueue.innerHTML = "";
+      displayQueueEmpty.hidden = false;
+      return;
+    }
+    displayQueueEmpty.hidden = true;
+
+    const fit = measureDisplayQueueFit();
+    const visible = list.slice(0, fit);
     displayQueue.innerHTML = "";
 
     const eraMood = getActiveEraMoodId();
@@ -354,6 +451,7 @@ export function createQueueUi(els, deps) {
       row.append(number, meta);
       displayQueue.appendChild(row);
     });
+    trimDisplayQueueOverflow();
   }
 
   function isEditMode() {
