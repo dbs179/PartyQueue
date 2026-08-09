@@ -3443,10 +3443,9 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   font-size: calc(16 * var(--pd));
 }
 
-/* Width-only: Android TV / Fully Kiosk often misreports orientation:portrait
-   even on a landscape 4K screen, which used to collapse Party Display. */
+/* Phone/narrow only — never apply on Fully Kiosk TV (often misreports width). */
 @media (max-width: 900px) {
-  body.party-display-active {
+  body.party-display-active:not(.party-display-kiosk) {
     --pd: calc(min(var(--pd-vw, 100vw), var(--pd-vh, 100dvh)) / 900);
     overflow: auto;
     height: auto;
@@ -3454,97 +3453,98 @@ body.party-display-active.party-display-kiosk .party-display-shell {
     max-height: none;
   }
 
-  body.party-display-active > .container,
-  .party-display-view,
-  .party-display-shell {
+  body.party-display-active:not(.party-display-kiosk) > .container,
+  body.party-display-active:not(.party-display-kiosk) .party-display-view,
+  body.party-display-active:not(.party-display-kiosk) .party-display-shell {
     height: auto;
     min-height: 100dvh;
     max-height: none;
     overflow: visible;
   }
 
-  body.party-display-active.party-display-kiosk .party-display-shell {
-    padding: calc(28 * var(--pd));
-  }
-
-  .party-display-layout {
+  body.party-display-active:not(.party-display-kiosk) .party-display-layout {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto auto auto;
   }
 
-  .party-display-now,
-  .party-display-side,
-  .party-display-lyrics,
-  .party-display-join {
+  body.party-display-active:not(.party-display-kiosk) .party-display-now,
+  body.party-display-active:not(.party-display-kiosk) .party-display-side,
+  body.party-display-active:not(.party-display-kiosk) .party-display-lyrics,
+  body.party-display-active:not(.party-display-kiosk) .party-display-join {
     grid-column: 1;
   }
 
-  .party-display-now {
+  body.party-display-active:not(.party-display-kiosk) .party-display-now {
     grid-row: 1;
     overflow: visible;
     justify-content: flex-start;
   }
 
-  .party-display-side {
+  body.party-display-active:not(.party-display-kiosk) .party-display-side {
     grid-row: 2;
     flex-direction: column;
     align-items: stretch;
   }
 
-  .party-display-lyrics {
+  body.party-display-active:not(.party-display-kiosk) .party-display-lyrics {
     grid-row: 3;
   }
 
-  .party-display-join {
+  body.party-display-active:not(.party-display-kiosk) .party-display-join {
     grid-row: 4;
     width: 100%;
     justify-self: stretch;
   }
 
-  .party-display-hero {
+  body.party-display-active:not(.party-display-kiosk) .party-display-hero {
     grid-template-columns: minmax(calc(160 * var(--pd)), 40%) minmax(0, 1fr);
     align-items: start;
   }
 
-  .party-display-art-wrap {
+  body.party-display-active:not(.party-display-kiosk) .party-display-art-wrap {
     width: 100%;
     height: auto;
   }
 
-  .party-display-queue {
+  body.party-display-active:not(.party-display-kiosk) .party-display-queue {
     flex: 1 1 auto;
     min-width: 0;
     overflow: visible;
   }
 }
 
+/* Fully / TV: hide Back; keep the PC desktop composition. */
+body.party-display-active.party-display-kiosk .party-display-back {
+  display: none;
+}
+
 @media (max-width: 640px) {
-  body.party-display-active {
+  body.party-display-active:not(.party-display-kiosk) {
     --pd: calc(var(--pd-vw, 100vw) / 640);
   }
 
-  .party-display-shell {
+  body.party-display-active:not(.party-display-kiosk) .party-display-shell {
     padding: calc(16 * var(--pd));
   }
 
-  .party-display-topline {
+  body.party-display-active:not(.party-display-kiosk) .party-display-topline {
     align-items: flex-start;
   }
 
-  .party-display-hero {
+  body.party-display-active:not(.party-display-kiosk) .party-display-hero {
     grid-template-columns: 1fr;
   }
 
-  .party-display-side {
+  body.party-display-active:not(.party-display-kiosk) .party-display-side {
     flex-direction: column;
   }
 
-  .party-display-art-wrap {
+  body.party-display-active:not(.party-display-kiosk) .party-display-art-wrap {
     width: min(100%, 70dvh);
     justify-self: center;
   }
 
-  .party-display-title {
+  body.party-display-active:not(.party-display-kiosk) .party-display-title {
     max-width: none;
     -webkit-line-clamp: 4;
   }

@@ -1,17 +1,25 @@
 /**
  * Party Display viewport scale for PC + Fully Kiosk TV.
  *
- * Fully bookmark: `#/display?kiosk=1` (or `?kiosk=1#/display`)
- * Recommended Fully settings: fullscreen on, page zoom 100%, desktop mode off,
- * no forced desktop width / auto-zoom-on-input.
+ * Fully start URL:
+ *   http://10.10.1.30:8088/#/display?kiosk=1
+ *
+ * Fully settings for PC parity:
+ *   - Web Content → Enable JavaScript interface (for window.fully)
+ *   - Fullscreen / Immersive mode on; hide system UI
+ *   - Page zoom 100%
+ *   - Desktop mode OFF (or leave consistent after first good load)
+ *   - Disable auto-zoom on input / force desktop width overrides
  */
 
 const PD_VW = "--pd-vw";
 const PD_VH = "--pd-vh";
 const KIOSK_CLASS = "party-display-kiosk";
+const REMEASURE_MS = [0, 100, 350, 1000];
 
 let listening = false;
 let onResize = null;
+let remeasureTimers = [];
 
 function parseHashQuery() {
   const raw = String(location.hash || "").replace(/^#\/?/, "");
@@ -103,7 +111,6 @@ export function measurePartyDisplayViewport() {
 
 export function applyPartyDisplayViewport() {
   const { w, h } = measurePartyDisplayViewport();
-  // Set on body so descendants see measured values (not only :root).
   const body = document.body;
   body.style.setProperty(PD_VW, `${Math.round(w * 100) / 100}px`);
   body.style.setProperty(PD_VH, `${Math.round(h * 100) / 100}px`);
@@ -117,6 +124,20 @@ function clearPartyDisplayViewport() {
   body.classList.remove(KIOSK_CLASS);
 }
 
+function clearRemeasureTimers() {
+  for (const id of remeasureTimers) clearTimeout(id);
+  remeasureTimers = [];
+}
+
+/** Fully fullscreen / system UI often changes the box after first paint. */
+function scheduleKioskRemeasure() {
+  clearRemeasureTimers();
+  if (!isPartyDisplayKiosk()) return;
+  for (const ms of REMEASURE_MS) {
+    remeasureTimers.push(setTimeout(() => applyPartyDisplayViewport(), ms));
+  }
+}
+
 function bindListeners() {
   if (listening) return;
   listening = true;
@@ -124,6 +145,7 @@ function bindListeners() {
   window.addEventListener("resize", onResize);
   window.visualViewport?.addEventListener("resize", onResize);
   window.visualViewport?.addEventListener("scroll", onResize);
+  document.addEventListener("visibilitychange", onResize);
 }
 
 function unbindListeners() {
@@ -133,6 +155,7 @@ function unbindListeners() {
     window.removeEventListener("resize", onResize);
     window.visualViewport?.removeEventListener("resize", onResize);
     window.visualViewport?.removeEventListener("scroll", onResize);
+    document.removeEventListener("visibilitychange", onResize);
   }
   onResize = null;
 }
@@ -142,7 +165,9 @@ export function syncPartyDisplayViewport(active) {
   if (active) {
     applyPartyDisplayViewport();
     bindListeners();
+    scheduleKioskRemeasure();
   } else {
+    clearRemeasureTimers();
     unbindListeners();
     clearPartyDisplayViewport();
   }
