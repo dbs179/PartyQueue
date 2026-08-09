@@ -1,11 +1,54 @@
-import { test } from "node:test";
+import { test, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import {
-  partySettingsSignature,
-  readPartySettingsSnapshot,
-  registerPartySettingsRoutes,
-} from "../src/party-settings-http.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const STORE = path.join(
+  os.tmpdir(),
+  `pq-party-http-${process.pid}-${Date.now()}.json`
+);
+process.env.PARTYQUEUE_SETTINGS_FILE = STORE;
+
+let settings;
+let applyPublicVibeToggles;
+let partySettingsSignature;
+let readPartySettingsSnapshot;
+let registerPartySettingsRoutes;
+
+before(async () => {
+  settings = await import("../src/settings.js");
+  settings.bustSettingsCache();
+  await import("../src/autofill.js");
+  await import("../src/party-rituals.js");
+  ({
+    applyPublicVibeToggles,
+    partySettingsSignature,
+    readPartySettingsSnapshot,
+    registerPartySettingsRoutes,
+  } = await import("../src/party-settings-http.js"));
+});
+
+after(() => {
+  fs.rmSync(STORE, { recursive: true, force: true });
+  delete process.env.PARTYQUEUE_SETTINGS_FILE;
+  settings?.bustSettingsCache();
+});
+
+beforeEach(() => {
+  if (fs.existsSync(STORE)) fs.unlinkSync(STORE);
+  settings.bustSettingsCache();
+  settings.saveSettings({
+    discoverEnabled: false,
+    randomMoodEnabled: false,
+    randomDecadeEnabled: false,
+    filterExplicit: false,
+    kidsLock: false,
+    kidsLockSnapshot: null,
+  });
+  settings.bustSettingsCache();
+});
 
 test("party settings snapshot exposes guest-safe flags only", () => {
   const snap = readPartySettingsSnapshot();
@@ -70,6 +113,43 @@ test("party settings signature ignores stream metadata and senses flag changes",
   );
 });
 
+test("applyPublicVibeToggles updates Discover / rotation / filter without host PIN", () => {
+  const applied = applyPublicVibeToggles({
+    discoverEnabled: true,
+    randomMoodEnabled: true,
+    randomDecadeEnabled: true,
+    filterExplicit: true,
+    hostControlsOnly: true, // host-only — ignored
+    requestsPaused: true, // booth ritual — ignored
+  });
+  assert.deepEqual(applied.sort(), [
+    "discoverEnabled",
+    "filterExplicit",
+    "randomDecadeEnabled",
+    "randomMoodEnabled",
+  ]);
+  assert.equal(settings.getDiscoverySettings().discoverEnabled, true);
+  assert.equal(settings.getRotationSettings().randomMoodEnabled, true);
+  assert.equal(settings.getRotationSettings().randomDecadeEnabled, true);
+  assert.equal(settings.getContentSettings().filterExplicit, true);
+  assert.equal(settings.getContentSettings().hostControlsOnly, false);
+  assert.equal(settings.getContentSettings().requestsPaused, false);
+});
+
+test("applyPublicVibeToggles kidsLock uses the ritual path", () => {
+  const applied = applyPublicVibeToggles({ kidsLock: true });
+  assert.deepEqual(applied, ["kidsLock"]);
+  assert.equal(settings.getContentSettings().kidsLock, true);
+  assert.equal(settings.getContentSettings().filterExplicit, true);
+  applyPublicVibeToggles({ kidsLock: false });
+  assert.equal(settings.getContentSettings().kidsLock, false);
+});
+
+test("applyPublicVibeToggles returns empty for unknown keys", () => {
+  assert.deepEqual(applyPublicVibeToggles({ songMemory: 99 }), []);
+  assert.deepEqual(applyPublicVibeToggles({}), []);
+});
+
 class FakeResponse extends EventEmitter {
   constructor() {
     super();
@@ -128,18 +208,35 @@ test("party SSE route sends retained data and releases demand on close", () => {
   const routes = new Map();
   const app = {
     get(path, handler) {
-      routes.set(path, handler);
+      routes.set(`GET ${path}`, handler);
       if (path === "/api/party/stream") route = handler;
+    },
+    post(path, handler) {
+      routes.set(`POST ${path}`, handler);
     },
   };
   registerPartySettingsRoutes(app, { monitor });
 
-  assert.ok(routes.has("/api/party"));
-  assert.ok(routes.has("/api/party/stream"));
+  assert.ok(routes.has("GET /api/party"));
+  assert.ok(routes.has("POST /api/party"));
+  assert.ok(routes.has("GET /api/party/stream"));
 
   const httpRes = new FakeResponse();
-  routes.get("/api/party")({}, httpRes);
+  routes.get("GET /api/party")({}, httpRes);
   assert.equal(typeof httpRes.body.neverEnding, "boolean");
+
+  const postRes = new FakeResponse();
+  routes.get("POST /api/party")(
+    { body: { discoverEnabled: true } },
+    postRes
+  );
+  assert.equal(postRes.body?.ok, true);
+  assert.ok(postRes.body?.applied?.includes("discoverEnabled"));
+  assert.equal(postRes.body?.discoverEnabled, true);
+
+  const badRes = new FakeResponse();
+  routes.get("POST /api/party")({ body: { songMemory: 12 } }, badRes);
+  assert.equal(badRes.statusCode, 400);
 
   const req = new EventEmitter();
   const res = new FakeResponse();

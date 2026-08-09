@@ -31,6 +31,6 @@ test("isHostArea covers booth, memory, suggestions, and settings", () => {
   assert.equal(isHostArea("settings"), true);
   assert.equal(isHostArea("settings-queue"), true);
   assert.equal(isHostArea("main"), false);
-  assert.equal(isHostArea("mix"), false);
+  assert.equal(isHostArea("mix"), false); // Vibe page — open without PIN
   assert.equal(isHostArea("stats"), false);
 });

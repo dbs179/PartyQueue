@@ -1,8 +1,8 @@
 // Host PIN gate routes. Optional SETTINGS_PIN: UI gates DJ Booth; when set,
 // requireHost also protects host APIs (settings, credentials, resets, restart,
 // guest admin, uploads). Party controls (transport, volume, Random, clear
-// queue, Mix) stay open on the LAN. Leave PIN blank and requireHost is a
-// no-op. PIN is never sent to clients.
+// queue, Mix / Vibe toggles via POST /api/party) stay open on the LAN. Leave
+// PIN blank and requireHost is a no-op. PIN is never sent to clients.
 
 import { upsertEnvKeys } from "../env-file.js";
 import {

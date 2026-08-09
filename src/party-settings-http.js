@@ -15,8 +15,59 @@ import {
   getContentSettings,
   getDiscoverySettings,
   getRotationSettings,
+  setContentSettings,
+  setDiscoverySettings,
+  setRotationSettings,
 } from "./settings.js";
-import { isPartyOver } from "./party-rituals.js";
+import { isPartyOver, setKidsLock } from "./party-rituals.js";
+
+/** Vibe-page toggles — public on the LAN (no host PIN). */
+const PUBLIC_VIBE_TOGGLE_KEYS = [
+  "discoverEnabled",
+  "randomMoodEnabled",
+  "randomDecadeEnabled",
+  "filterExplicit",
+  "kidsLock",
+];
+
+/**
+ * Apply guest-safe Vibe toggles from a POST body. Unknown / host-only keys
+ * are ignored. Returns which keys were applied.
+ * @param {Record<string, unknown>} body
+ * @returns {string[]}
+ */
+export function applyPublicVibeToggles(body = {}) {
+  const src = body && typeof body === "object" ? body : {};
+  const applied = [];
+
+  if (typeof src.discoverEnabled === "boolean") {
+    setDiscoverySettings({ discoverEnabled: src.discoverEnabled });
+    applied.push("discoverEnabled");
+  }
+
+  const rotation = {};
+  if (typeof src.randomMoodEnabled === "boolean") {
+    rotation.randomMoodEnabled = src.randomMoodEnabled;
+    applied.push("randomMoodEnabled");
+  }
+  if (typeof src.randomDecadeEnabled === "boolean") {
+    rotation.randomDecadeEnabled = src.randomDecadeEnabled;
+    applied.push("randomDecadeEnabled");
+  }
+  if (Object.keys(rotation).length) setRotationSettings(rotation);
+
+  // Kids lock owns filterExplicit while armed — apply kids first so an
+  // explicit flip in the same payload isn't immediately overwritten.
+  if (typeof src.kidsLock === "boolean") {
+    setKidsLock(src.kidsLock);
+    applied.push("kidsLock");
+  } else if (typeof src.filterExplicit === "boolean") {
+    setContentSettings({ filterExplicit: src.filterExplicit });
+    applied.push("filterExplicit");
+  }
+
+  return applied;
+}
 
 /**
  * Assemble the public party snapshot (no Sonos, no host secrets).
@@ -134,6 +185,24 @@ export function registerPartySettingsRoutes(
   app.get("/api/party", (_req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.json(readPartySettingsSnapshot());
+  });
+
+  // Vibe toggles (Discover, Kids lock, Random Mood/Decade, Filter explicit).
+  // Open on the LAN like Never-Ending / Mix selection — not host-PIN gated.
+  app.post("/api/party", (req, res) => {
+    try {
+      const applied = applyPublicVibeToggles(req.body ?? {});
+      if (!applied.length) {
+        return res.status(400).json({
+          error: `Nothing to update. Allowed: ${PUBLIC_VIBE_TOGGLE_KEYS.join(", ")}.`,
+        });
+      }
+      nudgePartySettingsStream();
+      res.json({ ok: true, applied, ...readPartySettingsSnapshot() });
+    } catch (err) {
+      console.error("[party]", err.message);
+      res.status(400).json({ error: err.message || "Could not update party toggles." });
+    }
   });
 
   app.get("/api/party/stream", (req, res) => {

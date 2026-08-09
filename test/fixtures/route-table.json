@@ -71,6 +71,7 @@
   "POST /api/lastfm/test :: requireHost > <anonymous>",
   "POST /api/mute :: transportLimit > requireHostControls > blockVolumeDuringDj > <anonymous>",
   "POST /api/next :: transportLimit > requireHostControls > <anonymous>",
+  "POST /api/party :: <anonymous>",
   "POST /api/pause :: transportLimit > requireHostControls > <anonymous>",
   "POST /api/play :: transportLimit > requireHostControls > <anonymous>",
   "POST /api/pool-size :: <anonymous>",

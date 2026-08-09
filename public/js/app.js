@@ -733,6 +733,27 @@ async function saveSettings(values, { toastMessage = null } = {}) {
   }
 }
 
+/** Vibe toggles — public POST /api/party (no host PIN). */
+async function savePartyToggle(values, { toastMessage = null } = {}) {
+  try {
+    const res = await fetch("/api/party", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(values),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not save.");
+    syncDiscoverFromServer(data.discoverEnabled);
+    syncRotationFromServer(data);
+    syncContentTogglesFromServer(data);
+    if (toastMessage) showToast(toastMessage);
+    return true;
+  } catch (err) {
+    showToast(err.message, true);
+    return false;
+  }
+}
+
 function currentSettingsPayload() {
   return {
     songMemory: Number(songMemoryInput.value),
@@ -797,9 +818,11 @@ function syncContentTogglesFromServer(payload) {
 // Targeted payload: this toggle lives in Vibe, where the other settings
 // inputs may never have been filled (e.g. right after a deploy logs the host
 // out) — a full-form save would clamp those blanks into real values.
-discoverEnabledInput.addEventListener("change", () => {
+discoverEnabledInput.addEventListener("change", async () => {
   discoverTouchedAt = Date.now();
-  saveSettings({ discoverEnabled: discoverEnabledInput.checked });
+  const on = !!discoverEnabledInput.checked;
+  const ok = await savePartyToggle({ discoverEnabled: on });
+  if (!ok) discoverEnabledInput.checked = !on;
 });
 
 // Random Mood / Random Decade: rotate the mix between Never-Ending sets.
@@ -814,27 +837,31 @@ function syncRotationFromServer(payload) {
     randomDecadeToggle.checked = payload.randomDecadeEnabled;
   }
 }
-randomMoodToggle?.addEventListener("change", () => {
+randomMoodToggle?.addEventListener("change", async () => {
   rotationTouchedAt = Date.now();
-  saveSettings(
-    { randomMoodEnabled: randomMoodToggle.checked },
+  const on = !!randomMoodToggle.checked;
+  const ok = await savePartyToggle(
+    { randomMoodEnabled: on },
     {
-      toastMessage: randomMoodToggle.checked
+      toastMessage: on
         ? "Random Mood on — mood rotates between sets"
         : "Random Mood off",
     }
   );
+  if (!ok) randomMoodToggle.checked = !on;
 });
-randomDecadeToggle?.addEventListener("change", () => {
+randomDecadeToggle?.addEventListener("change", async () => {
   rotationTouchedAt = Date.now();
-  saveSettings(
-    { randomDecadeEnabled: randomDecadeToggle.checked },
+  const on = !!randomDecadeToggle.checked;
+  const ok = await savePartyToggle(
+    { randomDecadeEnabled: on },
     {
-      toastMessage: randomDecadeToggle.checked
+      toastMessage: on
         ? "Random Decade on — decade rotates between sets"
         : "Random Decade off",
     }
   );
+  if (!ok) randomDecadeToggle.checked = !on;
 });
 
 // Rotation pool chips (Booth > Queue): what Random Mood / Random Decade may
@@ -892,9 +919,11 @@ setRequestFairnessEnabledInput?.addEventListener("change", () => {
 
 // The explicit filter is an independent switch (like Never-Ending Queue): it
 // saves on its own and isn't touched by the Song Selection Save / Defaults.
-filterExplicitInput.addEventListener("change", () => {
+filterExplicitInput.addEventListener("change", async () => {
   contentToggleTouchedAt = Date.now();
-  saveSettings({ filterExplicit: filterExplicitInput.checked });
+  const on = !!filterExplicitInput.checked;
+  const ok = await savePartyToggle({ filterExplicit: on });
+  if (!ok) filterExplicitInput.checked = !on;
 });
 
 requestsPausedInput?.addEventListener("change", () => {
@@ -936,10 +965,11 @@ kidsLockInput?.addEventListener("change", async () => {
   contentToggleTouchedAt = Date.now();
   kidsLockInput.disabled = true;
   try {
-    await saveSettings(
+    const ok = await savePartyToggle(
       { kidsLock: on },
       { toastMessage: on ? "Kids lock on" : "Kids lock off" }
     );
+    if (!ok) kidsLockInput.checked = !on;
   } finally {
     kidsLockInput.disabled = false;
   }
