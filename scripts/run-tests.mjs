@@ -25,6 +25,11 @@ const result = spawnSync(
   // No --test-force-exit: tests must release their handles (a leak shows up
   // as a hang here instead of being masked).
   ["--test", "--test-concurrency=1", ...files],
-  { stdio: "inherit" }
+  {
+    stdio: "inherit",
+    // Keep local .env PUBLIC_BASE_URL from forcing Origin-required CSRF in
+    // HTTP contract tests (browsers/smoke send Origin; bare fetch helpers don't).
+    env: { ...process.env, PUBLIC_BASE_URL: "" },
+  }
 );
 process.exit(result.status ?? 1);

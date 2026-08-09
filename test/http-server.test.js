@@ -19,6 +19,8 @@ process.env.PARTYQUEUE_GUESTS_FILE = path.join(tmpRoot, "guests.json");
 process.env.PARTYQUEUE_ORIGIN_FILE = path.join(tmpRoot, "origins.json");
 process.env.PARTYQUEUE_DJ_MEMORY_FILE = path.join(tmpRoot, "dj-memory.json");
 delete process.env.SETTINGS_PIN;
+// Avoid requiring Origin on bare fetch helpers used by this harness.
+process.env.PUBLIC_BASE_URL = "";
 
 const { createApp, startServer, shutdownServer } = await import(
   "../src/server.js"

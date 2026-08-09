@@ -30,6 +30,9 @@ delete process.env.SETTINGS_PIN;
 // and it guarantees the suite never touches real speakers on the dev network.
 process.env.SONOS_HOST = "127.0.0.1";
 delete process.env.SONOS_ROOM;
+// load-env would otherwise import Unraid PUBLIC_BASE_URL from .env and require
+// Origin on every mutating request (postJson sends Origin either way).
+process.env.PUBLIC_BASE_URL = "";
 
 const { startServer, shutdownServer } = await import("../src/server.js");
 
@@ -72,7 +75,11 @@ describe("/api/queue* HTTP contracts", { concurrency: false }, () => {
   function postJson(pathname, body) {
     return fetch(`${baseUrl}${pathname}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        // Match browser same-origin POSTs; required when PUBLIC_BASE_URL is set.
+        Origin: baseUrl,
+      },
       body: JSON.stringify(body),
     });
   }

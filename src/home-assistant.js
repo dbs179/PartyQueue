@@ -6,6 +6,7 @@
 // only whether one is set, plus a safe URL.
 
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "./atomic-write.js";
@@ -29,6 +30,87 @@ function writeStore(data) {
   writeFileAtomic(STORE_FILE, JSON.stringify(data, null, 2));
 }
 
+function ipv4ToInt(ip) {
+  const parts = ip.split(".").map((p) => Number(p));
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+    return null;
+  }
+  return (((parts[0] << 24) >>> 0) + (parts[1] << 16) + (parts[2] << 8) + parts[3]) >>> 0;
+}
+
+function inCidrV4(ip, base, prefix) {
+  const n = ipv4ToInt(ip);
+  const b = ipv4ToInt(base);
+  if (n == null || b == null) return false;
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  return (n & mask) === (b & mask);
+}
+
+/** Loopback / RFC1918 only — blocks public + link-local/metadata IPs. */
+export function isPrivateOrLoopbackIp(hostname) {
+  const bare = String(hostname || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "");
+  const kind = net.isIP(bare);
+  if (kind === 4) {
+    if (inCidrV4(bare, "127.0.0.0", 8)) return true;
+    if (inCidrV4(bare, "10.0.0.0", 8)) return true;
+    if (inCidrV4(bare, "172.16.0.0", 12)) return true;
+    if (inCidrV4(bare, "192.168.0.0", 16)) return true;
+    return false;
+  }
+  if (kind === 6) {
+    if (bare === "::1") return true;
+    // Unique local addresses fc00::/7
+    const first = bare.split(":")[0];
+    const n = Number.parseInt(first, 16);
+    if (Number.isFinite(n) && (n & 0xfe00) === 0xfc00) return true;
+    return false;
+  }
+  return false;
+}
+
+function allowPublicHaHosts() {
+  return /^(1|true|yes)$/i.test(String(process.env.HA_ALLOW_PUBLIC_URL || "").trim());
+}
+
+/**
+ * Hostnames the server may call with the HA long-lived token.
+ * Private LAN / mDNS by default; Nabu Casa HTTPS; or any HTTPS when
+ * HA_ALLOW_PUBLIC_URL=1.
+ */
+export function isAllowedHaTarget(parsedUrl) {
+  if (!parsedUrl || (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:")) {
+    return false;
+  }
+  // Reject embedded credentials (token-in-URL style SSRF bait).
+  if (parsedUrl.username || parsedUrl.password) return false;
+
+  const hostname = String(parsedUrl.hostname || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "");
+  if (!hostname) return false;
+
+  if (net.isIP(hostname)) {
+    return isPrivateOrLoopbackIp(hostname);
+  }
+
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
+  if (!hostname.includes(".")) return true; // single-label LAN name
+  if (hostname.endsWith(".local")) return true; // mDNS
+
+  // Remote HA (Nabu Casa) — HTTPS only.
+  if (parsedUrl.protocol === "https:" && hostname.endsWith(".ui.nabu.casa")) {
+    return true;
+  }
+  if (parsedUrl.protocol === "https:" && allowPublicHaHosts()) {
+    return true;
+  }
+  return false;
+}
+
 export function cleanHaUrl(value) {
   if (typeof value !== "string") return null;
   const t = value.trim().replace(/\/+$/, "").slice(0, URL_MAX);
@@ -39,7 +121,7 @@ export function cleanHaUrl(value) {
   } catch {
     return null;
   }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  if (!isAllowedHaTarget(parsed)) return null;
   return t;
 }
 
@@ -88,8 +170,16 @@ export function getHaStatus() {
 // HA at an attacker host and exfiltrate the long-lived token.
 export function setHaSettings(partial = {}) {
   const current = getHaCredentials();
-  let url =
-    partial.url !== undefined ? cleanHaUrl(partial.url) : current.url;
+  let url = current.url;
+  if (partial.url !== undefined) {
+    const raw = partial.url;
+    if (typeof raw === "string" && raw.trim() && !cleanHaUrl(raw)) {
+      throw new Error(
+        "Home Assistant URL must be a private LAN address, .local name, localhost, or an allowed remote HA host (Nabu Casa / HA_ALLOW_PUBLIC_URL)."
+      );
+    }
+    url = cleanHaUrl(raw);
+  }
   let token = current.token;
   const urlChanged =
     partial.url !== undefined &&

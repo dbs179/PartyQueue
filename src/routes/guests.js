@@ -253,6 +253,14 @@ export function registerGuestRoutes(app) {
     max: 8,
     message: "Easy on the reactions — try again in a moment.",
   });
+  // Lyrics hits LRCLIB / Unison / ovh; keep shared-NAT phones usable while
+  // blunting a stuck tab or LAN prank that hammers lookups.
+  const lyricsLimit = softRateLimit({
+    windowMs: 10_000,
+    max: 12,
+    message: "Lyrics is cooling down — try again in a moment.",
+  });
+  lyricsLimit.displayName = "lyricsLimit";
 
   // Now Playing reactions (mood = one per guest; mic = karaoke, separate).
   app.get("/api/reactions", (req, res) => {
@@ -371,7 +379,7 @@ export function registerGuestRoutes(app) {
 
   // Lyrics via LRClib with a bounded Unison fallback. Cached server-side so
   // guest phones share one lookup per track.
-  app.get("/api/lyrics", asyncHandler(async (req, res) => {
+  app.get("/api/lyrics", lyricsLimit, asyncHandler(async (req, res) => {
     const title = String(req.query.title || "").trim();
     const artist = String(req.query.artist || "").trim();
     if (!title || !artist) {

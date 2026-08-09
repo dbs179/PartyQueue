@@ -106,7 +106,7 @@ test("resolveDisplayGenre during DJ uses the upcoming song's set lane", async ()
   assert.deepEqual(
     resolveDisplayGenre(
       {
-        title: "DJ Holy Roller",
+        title: "DJ Test Voice",
         artist: "Live from the Booth",
         uri: "http://ha/tts_proxy/clip.mp3",
         djVoice: true,
@@ -129,7 +129,7 @@ test("resolveDisplayGenre during DJ uses the upcoming song's set lane", async ()
   assert.deepEqual(
     resolveDisplayGenre(
       {
-        title: "DJ Holy Roller",
+        title: "DJ Test Voice",
         artist: "Live from the Booth",
         uri: "http://ha/tts_proxy/clip.mp3",
         djVoice: true,
@@ -143,7 +143,7 @@ test("resolveDisplayGenre during DJ uses the upcoming song's set lane", async ()
 test("enrichNowPlaying reuses attached upcomingForGenre and strips it", async () => {
   const { enrichNowPlaying } = await import("../src/now-playing-http.js");
   const enriched = await enrichNowPlaying({
-    title: "DJ Holy Roller",
+    title: "DJ Test Voice",
     artist: "Live from the Booth",
     uri: "http://10.10.1.30:8088/media/tts/silence-2s.mp3",
     djVoice: true,

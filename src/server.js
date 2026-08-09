@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createLogger, redactString } from "./logger.js";
 import { installConsoleBridge } from "./console-bridge.js";
 import { hostGuard } from "./http/host-guard.js";
+import { csrfOriginGuard } from "./http/csrf-origin.js";
 import { asyncHandler } from "./http/async-handler.js";
 import { softRateLimit } from "./rate-limit.js";
 import {
@@ -149,23 +150,10 @@ app.use((_req, res, next) => {
 app.use(["/api", "/auth"], hostGuard);
 
 // Block cross-site state-changing requests (CSRF / DNS-rebinding against this
-// LAN service). Same-origin app calls always match. Requests with no Origin
-// (curl, OAuth callback, non-browser clients) are left alone.
-app.use((req, res, next) => {
-  if (req.method !== "POST" && req.method !== "DELETE") return next();
-  const origin = req.get("origin");
-  if (!origin) return next();
-  let originHost;
-  try {
-    originHost = new URL(origin).host;
-  } catch {
-    return res.status(403).json({ error: "Bad origin." });
-  }
-  if (originHost !== req.headers.host) {
-    return res.status(403).json({ error: "Cross-origin request blocked." });
-  }
-  next();
-});
+// LAN service). Same-origin browser calls always match. When PUBLIC_BASE_URL
+// is set (typical Docker/Unraid deploy), Origin is also required so bare
+// curl/scripts can't mutate party state without pretending to be the app.
+app.use(csrfOriginGuard);
 
 // Default JSON parser for normal API calls. Banner / DJ-icon upload routes
 // carry a base64 image, so they opt into a larger limit in the route module.

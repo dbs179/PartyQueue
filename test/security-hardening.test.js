@@ -5,6 +5,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { isAllowedHostHeader } from "../src/http/host-guard.js";
+import {
+  evaluateMutatingOrigin,
+  shouldRequireMutatingOrigin,
+} from "../src/http/csrf-origin.js";
 import { imageMatchesMime } from "../src/image-signature.js";
 import { admitSseClient, SSE_MAX_GLOBAL, SSE_MAX_PER_IP } from "../src/http/sse-limits.js";
 
@@ -57,6 +61,39 @@ describe("host guard (DNS rebinding)", () => {
     process.env.PARTYQUEUE_ALLOWED_HOSTS = "queue.mytailnet.ts.net, other.example.com";
     assert.ok(isAllowedHostHeader("queue.mytailnet.ts.net"));
     assert.ok(isAllowedHostHeader("other.example.com:8088"));
+  });
+});
+
+describe("CSRF Origin on mutating requests", () => {
+  it("allows missing Origin when PUBLIC_BASE_URL is unset", () => {
+    assert.equal(shouldRequireMutatingOrigin({ publicBaseUrl: "" }), false);
+    assert.deepEqual(
+      evaluateMutatingOrigin("", "10.10.1.30:8088", { publicBaseUrl: "" }),
+      { ok: true }
+    );
+  });
+
+  it("requires Origin when PUBLIC_BASE_URL is set", () => {
+    assert.equal(
+      shouldRequireMutatingOrigin({ publicBaseUrl: "http://10.10.1.30:8088" }),
+      true
+    );
+    const missing = evaluateMutatingOrigin("", "10.10.1.30:8088", {
+      publicBaseUrl: "http://10.10.1.30:8088",
+    });
+    assert.equal(missing.ok, false);
+    assert.equal(missing.status, 403);
+  });
+
+  it("accepts matching Origin and rejects mismatches", () => {
+    const opts = { publicBaseUrl: "http://10.10.1.30:8088" };
+    assert.deepEqual(
+      evaluateMutatingOrigin("http://10.10.1.30:8088", "10.10.1.30:8088", opts),
+      { ok: true }
+    );
+    const bad = evaluateMutatingOrigin("http://evil.example", "10.10.1.30:8088", opts);
+    assert.equal(bad.ok, false);
+    assert.match(bad.error, /Cross-origin/i);
   });
 });
 

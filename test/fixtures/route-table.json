@@ -21,7 +21,7 @@
   "GET /api/homeassistant/status :: requireHost > <anonymous>",
   "GET /api/join :: <anonymous>",
   "GET /api/lastfm/status :: requireHost > <anonymous>",
-  "GET /api/lyrics :: <anonymous>",
+  "GET /api/lyrics :: lyricsLimit > <anonymous>",
   "GET /api/media-base :: <anonymous>",
   "GET /api/nowplaying :: <anonymous>",
   "GET /api/nowplaying/stream :: <anonymous>",

@@ -22,9 +22,19 @@ async function api(method, path, body, timeoutMs = 120000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
+    const headers = {};
+    const m = String(method || "").toUpperCase();
+    if (m === "POST" || m === "DELETE" || m === "PUT" || m === "PATCH") {
+      try {
+        headers.Origin = new URL(BASE).origin;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (body) headers["Content-Type"] = "application/json";
     const res = await fetch(`${BASE}${path}`, {
       method,
-      headers: body ? { "Content-Type": "application/json" } : undefined,
+      headers: Object.keys(headers).length ? headers : undefined,
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
     });

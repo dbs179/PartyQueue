@@ -7,11 +7,24 @@ export const BASE = process.env.PQ_BASE || "http://127.0.0.1:8088";
 let hostToken = process.env.PQ_HOST_TOKEN || "";
 let hostCookie = process.env.PQ_HOST_COOKIE || "";
 
+function requestOrigin() {
+  try {
+    return new URL(BASE).origin;
+  } catch {
+    return "";
+  }
+}
+
 export async function api(method, pathName, body, timeoutMs = 120000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const headers = {};
+    const m = String(method || "").toUpperCase();
+    if (m === "POST" || m === "DELETE" || m === "PUT" || m === "PATCH") {
+      const origin = requestOrigin();
+      if (origin) headers.Origin = origin;
+    }
     if (body) headers["Content-Type"] = "application/json";
     if (hostToken) headers["X-PartyQueue-Host"] = hostToken;
     if (hostCookie) headers.Cookie = hostCookie;
