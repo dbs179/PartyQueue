@@ -2842,7 +2842,11 @@ body.modal-open {
 }
 
 /* ---- Phase 5: read-only Party Display -------------------------------- */
+/* One 16:9 design unit so PC window and fullscreen TV keep the same
+   proportions. N in calc(N * var(--pd)) is design pixels at 1920-wide. */
 body.party-display-active {
+  --pd: calc(min(100vw, 177.778vh) / 1920);
+  height: 100dvh;
   min-height: 100dvh;
   overflow: hidden;
   padding: 0;
@@ -2855,21 +2859,27 @@ body.party-display-active > .header {
 body.party-display-active > .container {
   width: 100%;
   max-width: none;
-  min-height: 100dvh;
+  height: 100dvh;
+  min-height: 0;
   padding: 0;
 }
 
 .party-display-view {
-  min-height: 100dvh;
+  height: 100dvh;
+  min-height: 0;
   background: var(--bg);
 }
 
 .party-display-shell {
-  min-height: 100dvh;
-  padding: clamp(20px, 3vw, 48px);
+  height: 100dvh;
+  min-height: 0;
+  max-height: 100dvh;
+  box-sizing: border-box;
+  padding: calc(28 * var(--pd));
   display: flex;
   flex-direction: column;
-  gap: clamp(16px, 2vw, 28px);
+  gap: calc(16 * var(--pd));
+  overflow: hidden;
 }
 
 .party-display-topline,
@@ -2878,14 +2888,18 @@ body.party-display-active > .container {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
+  gap: calc(16 * var(--pd));
+}
+
+.party-display-topline {
+  flex: 0 0 auto;
 }
 
 .party-display-kicker,
 .party-display-label {
   margin: 0;
   color: var(--accent);
-  font-size: clamp(0.72rem, 1vw, 1rem);
+  font-size: calc(14 * var(--pd));
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -2894,7 +2908,7 @@ body.party-display-active > .container {
 .party-display-event {
   margin: 0;
   color: var(--accent);
-  font-size: clamp(2.25rem, 4vw, 4.5rem);
+  font-size: calc(52 * var(--pd));
   font-weight: 800;
   line-height: 1.05;
   letter-spacing: normal;
@@ -2903,7 +2917,7 @@ body.party-display-active > .container {
 
 .party-display-back {
   color: var(--muted);
-  font-size: clamp(0.75rem, 1vw, 1rem);
+  font-size: calc(14 * var(--pd));
   text-decoration: none;
 }
 
@@ -2914,32 +2928,34 @@ body.party-display-active > .container {
 }
 
 .party-display-status {
+  flex: 0 0 auto;
   margin: 0;
-  padding: 10px 14px;
+  padding: calc(10 * var(--pd)) calc(14 * var(--pd));
   color: #ffd88a;
   background: rgba(255, 183, 77, 0.12);
   border: 1px solid rgba(255, 183, 77, 0.3);
-  border-radius: 10px;
+  border-radius: calc(10 * var(--pd));
   text-align: center;
+  font-size: calc(15 * var(--pd));
 }
 
 .party-display-layout {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 2.15fr) minmax(300px, 0.85fr);
-  /* auto (not 1fr): keep lyrics snug under art/meta instead of bottom of the TV */
-  grid-template-rows: auto auto;
-  align-items: start;
-  align-content: start;
-  column-gap: clamp(20px, 3vw, 46px);
-  row-gap: clamp(14px, 1.8vw, 22px);
+  grid-template-columns: minmax(0, 2.15fr) minmax(calc(340 * var(--pd)), 0.85fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: stretch;
+  column-gap: calc(36 * var(--pd));
+  row-gap: calc(14 * var(--pd));
 }
 
 .party-display-now {
   grid-column: 1;
   grid-row: 1;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .party-display-side {
@@ -2948,29 +2964,27 @@ body.party-display-active > .container {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
-  gap: clamp(12px, 1.5vw, 18px);
-}
-
-.party-display-queue {
-  min-height: 0;
+  justify-content: space-between;
+  gap: calc(12 * var(--pd));
+  align-self: stretch;
 }
 
 .party-display-hero {
+  height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(220px, 0.85fr) minmax(280px, 1.15fr);
+  grid-template-columns: calc(420 * var(--pd)) minmax(0, 1fr);
   align-items: start;
-  gap: clamp(24px, 4vw, 64px);
+  gap: calc(36 * var(--pd));
 }
 
 .party-display-art-wrap {
   position: relative;
-  width: 100%;
-  max-height: min(52dvh, 560px);
+  width: calc(420 * var(--pd));
+  max-width: 100%;
   aspect-ratio: 1;
   align-self: start;
-  border-radius: clamp(16px, 2vw, 28px);
+  border-radius: calc(22 * var(--pd));
   overflow: hidden;
   background: var(--surface);
 }
@@ -2990,11 +3004,11 @@ body.party-display-active > .container {
   position: absolute;
   inset: 0;
   margin: 0;
-  padding: 28px;
+  padding: calc(24 * var(--pd));
   display: grid;
   place-items: center;
   color: var(--muted);
-  font-size: clamp(1.1rem, 2vw, 2rem);
+  font-size: calc(22 * var(--pd));
   line-height: 1.35;
   text-align: center;
 }
@@ -3005,16 +3019,18 @@ body.party-display-active > .container {
 
 .party-display-meta {
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .party-display-state {
   display: inline-flex;
-  margin-bottom: 14px;
-  padding: 6px 12px;
+  margin-bottom: 0;
+  padding: calc(6 * var(--pd)) calc(12 * var(--pd));
   color: var(--muted);
   background: var(--surface-2);
   border-radius: 999px;
-  font-size: clamp(0.8rem, 1.1vw, 1rem);
+  font-size: calc(14 * var(--pd));
   font-weight: 750;
 }
 
@@ -3023,8 +3039,8 @@ body.party-display-active > .container {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: calc(8 * var(--pd));
+  margin-bottom: calc(12 * var(--pd));
 }
 
 .party-display-pills .party-display-state {
@@ -3056,47 +3072,52 @@ body.party-display-active > .container {
 .party-display-title {
   margin: 0;
   max-width: 18ch;
-  font-size: clamp(2.5rem, 5.2vw, 6.8rem);
-  line-height: 0.97;
-  letter-spacing: -0.045em;
+  font-size: calc(54 * var(--pd));
+  line-height: 1.05;
+  letter-spacing: -0.04em;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
 }
 
 .party-display-artist {
-  margin: clamp(14px, 2vw, 26px) 0 0;
+  margin: calc(14 * var(--pd)) 0 0;
   color: var(--text);
-  font-size: clamp(1.35rem, 2.4vw, 3rem);
+  font-size: calc(28 * var(--pd));
   font-weight: 650;
   line-height: 1.1;
 }
 
 .party-display-album {
-  margin: 8px 0 0;
+  margin: calc(6 * var(--pd)) 0 0;
   color: var(--muted);
-  font-size: clamp(0.95rem, 1.3vw, 1.45rem);
+  font-size: calc(18 * var(--pd));
 }
 
 .party-display-progress {
-  margin-top: clamp(22px, 3vw, 42px);
+  margin-top: calc(22 * var(--pd));
 }
 
 .party-display-progress .np-progress-track {
-  height: 8px;
+  height: calc(8 * var(--pd));
 }
 
 .party-display-progress .np-progress-times {
-  margin-top: 10px;
-  font-size: clamp(0.82rem, 1vw, 1rem);
+  margin-top: calc(8 * var(--pd));
+  font-size: calc(14 * var(--pd));
 }
 
 .party-display-reactions {
-  margin-top: clamp(18px, 2.5vw, 34px);
+  margin-top: calc(18 * var(--pd));
   width: 100%;
   display: flex;
   flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
-  gap: 4px;
+  gap: calc(4 * var(--pd));
 }
 
 .party-display-reactions[hidden] {
@@ -3109,11 +3130,11 @@ body.party-display-active > .container {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 8px 4px;
+  gap: calc(4 * var(--pd));
+  padding: calc(8 * var(--pd)) calc(4 * var(--pd));
   background: var(--surface);
   border-radius: 999px;
-  font-size: clamp(0.95rem, 1.35vw, 1.35rem);
+  font-size: calc(18 * var(--pd));
 }
 
 .party-display-reactions strong {
@@ -3123,13 +3144,14 @@ body.party-display-active > .container {
 
 /* Fixed 3-line karaoke window — full layout width under Now + Up Next. */
 .party-display-lyrics {
-  --display-lyric-size: clamp(1.25rem, 2.2vw, 2.15rem);
+  --display-lyric-size: calc(26 * var(--pd));
   --display-lyric-line: 1.3;
-  --display-lyric-gap: 0.4rem;
+  --display-lyric-gap: calc(6 * var(--pd));
   grid-column: 1 / -1;
   grid-row: 2;
   width: 100%;
   min-width: 0;
+  flex: 0 0 auto;
   height: calc(
     (3 * var(--display-lyric-size) * var(--display-lyric-line)) +
       (2 * var(--display-lyric-gap))
@@ -3205,36 +3227,37 @@ body.party-display-active > .container {
 
 .party-display-queue,
 .party-display-join {
-  flex: 0 0 auto;
   background: var(--surface);
-  border-radius: clamp(14px, 1.5vw, 22px);
+  border-radius: calc(18 * var(--pd));
 }
 
 .party-display-queue {
-  padding: clamp(14px, 1.6vw, 20px);
-  overflow: hidden;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: calc(16 * var(--pd));
+  overflow: auto;
 }
 
 .party-display-queue-count {
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: calc(14 * var(--pd));
 }
 
 .party-display-queue-list {
   list-style: none;
-  margin: 14px 0 0;
+  margin: calc(12 * var(--pd)) 0 0;
   padding: 0;
   display: grid;
-  gap: 4px;
+  gap: calc(2 * var(--pd));
 }
 
 .party-display-queue-list li {
   min-width: 0;
   display: grid;
-  grid-template-columns: 2rem minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: calc(28 * var(--pd)) minmax(0, 1fr);
+  gap: calc(10 * var(--pd));
   align-items: center;
-  padding: clamp(6px, 0.9vh, 10px) 0;
+  padding: calc(7 * var(--pd)) 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -3244,7 +3267,7 @@ body.party-display-active > .container {
 
 .party-display-queue-index {
   color: var(--muted);
-  font-size: clamp(0.9rem, 1.1vw, 1.1rem);
+  font-size: calc(15 * var(--pd));
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -3253,7 +3276,7 @@ body.party-display-active > .container {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: calc(2 * var(--pd));
 }
 
 .party-display-queue-meta strong,
@@ -3264,37 +3287,40 @@ body.party-display-active > .container {
 }
 
 .party-display-queue-meta strong {
-  font-size: clamp(1rem, 1.35vw, 1.35rem);
+  font-size: calc(18 * var(--pd));
 }
 
 .party-display-queue-meta > span {
   color: var(--muted);
-  font-size: clamp(0.8rem, 1vw, 1rem);
+  font-size: calc(14 * var(--pd));
 }
 
 .party-display-queue-meta .party-display-queue-source {
   color: #8ef0ae;
-  font-size: clamp(0.72rem, 0.9vw, 0.9rem);
+  font-size: calc(13 * var(--pd));
 }
 
 .party-display-side-empty {
-  margin: 18px 0 0;
+  margin: calc(14 * var(--pd)) 0 0;
   color: var(--muted);
+  font-size: calc(15 * var(--pd));
 }
 
 .party-display-join {
-  padding: clamp(12px, 1.5vw, 18px);
+  flex: 0 0 auto;
+  padding: calc(14 * var(--pd));
   justify-content: flex-start;
 }
 
 .party-display-qr {
-  flex: 0 0 clamp(84px, 8vw, 128px);
-  padding: 6px;
+  flex: 0 0 calc(168 * var(--pd));
+  width: calc(168 * var(--pd));
+  padding: calc(8 * var(--pd));
   background: #fff;
-  border-radius: 10px;
+  border-radius: calc(12 * var(--pd));
 }
 
-/* Empty box is transparent/hidden — white tile only when SVG is injected. */
+/* Empty box hidden — white tile only when SVG is injected. */
 .party-display-qr:not(.is-ready) {
   display: none;
 }
@@ -3306,13 +3332,13 @@ body.party-display-active > .container {
 }
 
 #display-join-error.party-display-side-empty:not([hidden]) {
-  margin-top: 10px;
-  padding: 8px 10px;
+  margin-top: calc(8 * var(--pd));
+  padding: calc(8 * var(--pd)) calc(10 * var(--pd));
   color: #ffd88a;
   background: rgba(255, 183, 77, 0.12);
   border: 1px solid rgba(255, 183, 77, 0.3);
-  border-radius: 8px;
-  font-size: clamp(0.8rem, 1vw, 1rem);
+  border-radius: calc(8 * var(--pd));
+  font-size: calc(14 * var(--pd));
 }
 
 .party-display-join-copy {
@@ -3320,9 +3346,9 @@ body.party-display-active > .container {
 }
 
 .party-display-join-copy > p {
-  margin: 4px 0 0;
+  margin: calc(4 * var(--pd)) 0 0;
   color: var(--muted);
-  font-size: clamp(0.75rem, 0.95vw, 0.95rem);
+  font-size: calc(14 * var(--pd));
 }
 
 .party-display-join-copy > .party-display-label {
@@ -3331,149 +3357,31 @@ body.party-display-active > .container {
 }
 
 .party-display-url {
-  max-width: 28ch;
+  max-width: 32ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* Living-room / Fully Kiosk: raise ceilings with vmin so type and art keep
-   growing past desktop clamp maxes. Avoid orientation queries — Android TV
-   often misreports portrait on landscape 4K. */
-@media (min-width: 1200px) and (min-height: 700px) {
-  body.party-display-active .party-display-shell {
-    padding: clamp(28px, 3.2vmin, 56px);
-    gap: clamp(18px, 2.2vmin, 32px);
-  }
-
-  body.party-display-active .party-display-layout {
-    column-gap: clamp(28px, 3.5vmin, 56px);
-    row-gap: clamp(18px, 2.2vmin, 32px);
-  }
-
-  body.party-display-active .party-display-side {
-    justify-content: space-between;
-    min-height: 100%;
-    align-self: stretch;
-  }
-
-  body.party-display-active .party-display-event {
-    font-size: clamp(2.5rem, 5.5vmin, 7rem);
-  }
-
-  body.party-display-active .party-display-kicker,
-  body.party-display-active .party-display-label {
-    font-size: clamp(0.85rem, 1.4vmin, 1.25rem);
-  }
-
-  body.party-display-active .party-display-art-wrap {
-    max-height: min(58vmin, 72dvh);
-  }
-
-  body.party-display-active .party-display-title {
-    font-size: clamp(3rem, 7.5vmin, 9.5rem);
-    max-width: 16ch;
-  }
-
-  body.party-display-active .party-display-artist {
-    font-size: clamp(1.6rem, 3.2vmin, 3.8rem);
-  }
-
-  body.party-display-active .party-display-album {
-    font-size: clamp(1.1rem, 1.9vmin, 1.85rem);
-  }
-
-  body.party-display-active .party-display-state {
-    font-size: clamp(0.9rem, 1.5vmin, 1.25rem);
-    padding: 8px 14px;
-  }
-
-  body.party-display-active .party-display-progress .np-progress-track {
-    height: 10px;
-  }
-
-  body.party-display-active .party-display-progress .np-progress-times {
-    font-size: clamp(0.95rem, 1.5vmin, 1.25rem);
-  }
-
-  body.party-display-active .party-display-reactions > span {
-    font-size: clamp(1.1rem, 1.9vmin, 1.7rem);
-    padding: 10px 6px;
-  }
-
-  body.party-display-active .party-display-lyrics {
-    --display-lyric-size: clamp(1.5rem, 3.4vmin, 3.4rem);
-    --display-lyric-line: 1.35;
-    --display-lyric-gap: 0.55rem;
-  }
-
-  body.party-display-active .party-display-queue {
-    padding: clamp(16px, 2vmin, 28px);
-  }
-
-  body.party-display-active .party-display-queue-count {
-    font-size: clamp(0.95rem, 1.5vmin, 1.25rem);
-  }
-
-  body.party-display-active .party-display-queue-list {
-    gap: 6px;
-  }
-
-  body.party-display-active .party-display-queue-list li {
-    grid-template-columns: 2.4rem minmax(0, 1fr);
-    padding: clamp(8px, 1.1vh, 14px) 0;
-  }
-
-  body.party-display-active .party-display-queue-index {
-    font-size: clamp(1.05rem, 1.7vmin, 1.4rem);
-  }
-
-  body.party-display-active .party-display-queue-meta strong {
-    font-size: clamp(1.15rem, 2.1vmin, 1.85rem);
-  }
-
-  body.party-display-active .party-display-queue-meta > span {
-    font-size: clamp(0.95rem, 1.6vmin, 1.35rem);
-  }
-
-  body.party-display-active .party-display-queue-meta .party-display-queue-source {
-    font-size: clamp(0.85rem, 1.4vmin, 1.15rem);
-  }
-
-  body.party-display-active .party-display-join {
-    padding: clamp(14px, 1.8vmin, 24px);
-  }
-
-  body.party-display-active .party-display-qr {
-    flex-basis: min(22vmin, 280px);
-    padding: 10px;
-    border-radius: 14px;
-  }
-
-  body.party-display-active .party-display-join-copy > p {
-    font-size: clamp(0.9rem, 1.5vmin, 1.25rem);
-  }
-
-  body.party-display-active .party-display-url {
-    max-width: 36ch;
-    font-size: clamp(1rem, 1.7vmin, 1.4rem);
-    color: var(--text);
-  }
-
-  body.party-display-active #display-join-error.party-display-side-empty:not([hidden]) {
-    font-size: clamp(0.95rem, 1.6vmin, 1.3rem);
-  }
+  color: var(--text);
+  font-size: calc(16 * var(--pd));
 }
 
 /* Width-only: Android TV / Fully Kiosk often misreports orientation:portrait
    even on a landscape 4K screen, which used to collapse Party Display. */
 @media (max-width: 900px) {
   body.party-display-active {
+    --pd: calc(min(100vw, 100vh) / 900);
     overflow: auto;
+    height: auto;
+    min-height: 100dvh;
   }
 
+  body.party-display-active > .container,
+  .party-display-view,
   .party-display-shell {
+    height: auto;
     min-height: 100dvh;
+    max-height: none;
+    overflow: visible;
   }
 
   .party-display-layout {
@@ -3489,10 +3397,13 @@ body.party-display-active > .container {
 
   .party-display-now {
     grid-row: 1;
+    overflow: visible;
   }
 
   .party-display-side {
     grid-row: 2;
+    flex-direction: row;
+    align-items: stretch;
   }
 
   .party-display-lyrics {
@@ -3500,21 +3411,17 @@ body.party-display-active > .container {
   }
 
   .party-display-hero {
-    grid-template-columns: minmax(180px, 40vw) minmax(0, 1fr);
+    grid-template-columns: minmax(calc(160 * var(--pd)), 40%) minmax(0, 1fr);
   }
 
-  .party-display-title {
-    font-size: clamp(2rem, 7vw, 4rem);
-  }
-
-  .party-display-side {
-    flex-direction: row;
-    align-items: stretch;
+  .party-display-art-wrap {
+    width: 100%;
   }
 
   .party-display-queue {
     flex: 1 1 auto;
     min-width: 0;
+    overflow: visible;
   }
 
   .party-display-join {
@@ -3523,8 +3430,12 @@ body.party-display-active > .container {
 }
 
 @media (max-width: 640px) {
+  body.party-display-active {
+    --pd: calc(100vw / 640);
+  }
+
   .party-display-shell {
-    padding: 16px;
+    padding: calc(16 * var(--pd));
   }
 
   .party-display-topline {
@@ -3546,6 +3457,7 @@ body.party-display-active > .container {
 
   .party-display-title {
     max-width: none;
+    -webkit-line-clamp: 4;
   }
 }
 
