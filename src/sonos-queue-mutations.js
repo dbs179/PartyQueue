@@ -648,11 +648,31 @@ async function removeUpcomingAnnouncePadsUnlocked({ beforePosition } = {}) {
   }
 
   const before = Number(beforePosition) || 0;
+  // When inserting a new announce, only supersede pads that would play at or
+  // before that slot. Later refill/set pads (after guest requests / music)
+  // stay glued to their batch — wiping them made Set Request shouts erase a
+  // pending Random intro that should still fire after the request set.
+  let toRemove = indices;
+  if (before >= 1) {
+    const indexSet = new Set(indices);
+    toRemove = indices.filter((i) => {
+      if (i < before) return true;
+      // Contiguous pad run starting exactly at the insert position.
+      for (let j = before; j <= i; j++) {
+        if (!indexSet.has(j)) return false;
+      }
+      return true;
+    });
+  }
+  if (!toRemove.length) {
+    return { removed: 0, removedBefore: 0, protectedThrough };
+  }
+
   const removedBefore =
-    before >= 1 ? indices.filter((i) => i < before).length : 0;
+    before >= 1 ? toRemove.filter((i) => i < before).length : 0;
 
   // Highest ranges first so earlier indices stay valid after each remove.
-  const ranges = contiguousIndexRanges(indices).sort(
+  const ranges = contiguousIndexRanges(toRemove).sort(
     (a, b) => b.StartingIndex - a.StartingIndex
   );
   let updateId = Number(queue.UpdateID) || 0;

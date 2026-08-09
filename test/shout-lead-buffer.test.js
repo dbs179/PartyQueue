@@ -44,14 +44,10 @@ test("needsShoutLeadBuffer only when next-up and short remaining", () => {
   );
 });
 
-test("findShoutBufferTrackNumber skips pads and other requests", () => {
+test("findShoutBufferTrackNumber skips other requests to reach filler", () => {
   const items = [
     { TrackUri: "spotify:track:cur", Title: "Cur" },
     { TrackUri: "spotify:track:req", Title: "Req" },
-    {
-      TrackUri: RAMP,
-      Title: "PartyQueue Volume Ramp",
-    },
     { TrackUri: "spotify:track:otherReq", Title: "Req2" },
     { TrackUri: "spotify:track:filler", Title: "Filler" },
   ];
@@ -60,7 +56,28 @@ test("findShoutBufferTrackNumber skips pads and other requests", () => {
       requestAbsPos: 2,
       searchedIds: new Set(["req", "otherReq"]),
     }),
-    5
+    4
+  );
+});
+
+test("findShoutBufferTrackNumber refuses to demote past announce pads", () => {
+  // Pending Random refill announce between the request and filler — demoting
+  // would play that intro before the guest request.
+  const items = [
+    { TrackUri: "spotify:track:cur", Title: "Cur" },
+    { TrackUri: "spotify:track:req", Title: "Req" },
+    {
+      TrackUri: RAMP,
+      Title: "PartyQueue Volume Ramp",
+    },
+    { TrackUri: "spotify:track:filler", Title: "Filler" },
+  ];
+  assert.equal(
+    findShoutBufferTrackNumber(items, {
+      requestAbsPos: 2,
+      searchedIds: new Set(["req"]),
+    }),
+    null
   );
 });
 

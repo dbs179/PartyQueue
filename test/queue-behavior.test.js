@@ -348,8 +348,9 @@ test("findInsertPosition walks past DJ ramp/TTS pads to the request block", () =
   assert.equal(pos, 5);
 });
 
-test("findInsertPosition ignores leading announce pads when only filler follows", () => {
-  // [cur, ramp, DJ, filler] → insert before filler (pos 4), not before ramp.
+test("findInsertPosition inserts before announce pads glued to filler", () => {
+  // Pending Random refill: [cur, ramp, DJ, filler] → request before the
+  // announce block so the DJ does not intro Random then play the Set Request.
   const list = [
     { TrackUri: "spotify:track:cur", Title: "Cur", Artist: "A" },
     {
@@ -369,7 +370,7 @@ test("findInsertPosition ignores leading announce pads when only filler follows"
     playingFromQueue: true,
     searchedIds: new Set(),
   });
-  assert.equal(pos, 4);
+  assert.equal(pos, 2);
 });
 
 test("findInsertPosition skips announce pads between searched songs", () => {

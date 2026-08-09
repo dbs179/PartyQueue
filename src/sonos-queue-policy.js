@@ -137,15 +137,20 @@ export function isAnnounceQueuePad(uri, title = "") {
 // still ahead of filler (Random/Never-Ending/discoveries). If all upcoming
 // music is already searched we return 0 (append). `searchedIds` is a Set of
 // Spotify track IDs known to be guest requests. Exported for unit testing.
+//
+// Announce pads that sit immediately before filler stay glued to that filler
+// batch (Random refill / fresh-set intros). Inserting between those pads and
+// the songs they introduce made the DJ announce Random, then play a Set
+// Request. Pads that introduce an existing request stay ahead of that request
+// — we only pull back across pads that directly precede the filler boundary.
 export function findInsertPosition(items, { currentTrack = 0, playingFromQueue = false, searchedIds }) {
   const list = Array.isArray(items) ? items : [];
   const set = searchedIds instanceof Set ? searchedIds : new Set(searchedIds || []);
   // Upcoming starts just after the current track when the queue is the live
   // source; otherwise consider the whole queue.
   const start = playingFromQueue && currentTrack >= 1 ? currentTrack : 0;
-  // Walk upcoming music only. DJ ramp/TTS pads are neither requests nor filler
-  // — inserting before them was putting new requests "up next" and ahead of
-  // the existing request block after 5.9's pre-DJ silence pads.
+
+  let fillerIndex = -1;
   for (let i = start; i < list.length; i++) {
     const it = list[i];
     const uri = it.TrackUri ?? it.uri;
@@ -153,9 +158,25 @@ export function findInsertPosition(items, { currentTrack = 0, playingFromQueue =
     if (isAnnounceQueuePad(uri, title)) continue;
     const id = spotifyTrackId(uri);
     // First non-searched music track = end of the request block / start of filler.
-    if (!id || !set.has(id)) return i + 1;
+    if (!id || !set.has(id)) {
+      fillerIndex = i;
+      break;
+    }
   }
-  return 0; // everything upcoming (music) is already searched -> append (FIFO)
+  if (fillerIndex < 0) {
+    return 0; // everything upcoming (music) is already searched -> append (FIFO)
+  }
+
+  // Keep a trailing announce block glued to filler: insert before those pads.
+  let insertAt = fillerIndex;
+  while (insertAt > start) {
+    const prev = list[insertAt - 1];
+    const uri = prev.TrackUri ?? prev.uri;
+    const title = prev.Title ?? prev.title ?? "";
+    if (!isAnnounceQueuePad(uri, title)) break;
+    insertAt -= 1;
+  }
+  return insertAt + 1;
 }
 
 // Pure: 1-based queue indices of unplayed DJ ramp/TTS pads (after the current

@@ -493,13 +493,15 @@ export function registerQueueRoutes(app, ctx) {
           console.error("[queue/set-request] guest profile:", err.message);
         }
 
-        // One shout for the set (first track), not five.
+        // One shout for the set (first track), not five. Always shout when
+        // enabled — a Set Request is its own set moment, not a random every-N
+        // search add (and must not lose to a pending Random refill announce).
         const first = result.tracks?.[0];
         if (
           result.requestCreated !== false &&
           first &&
           shouldShoutOnSearch({
-            force: !!result.queueWasEmpty,
+            force: true,
             requestedBy: user,
           })
         ) {

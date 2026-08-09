@@ -37,8 +37,9 @@ export function needsShoutLeadBuffer({
 
 /**
  * 1-based queue index of the first non-request music track after the request.
- * Skips announce pads. Returns null when nothing is available to buffer with
- * (e.g. last song of the night, Never-Ending off).
+ * Returns null when nothing is available to buffer with (e.g. last song of the
+ * night, Never-Ending off), or when announce pads sit before that filler
+ * (demoting past a Random refill intro would reorder the night wrong).
  * @param {Array<{ TrackUri?: string, uri?: string, Title?: string, title?: string }>} items
  * @param {{ requestAbsPos: number, searchedIds?: Iterable<string>|Set<string> }} opts
  */
@@ -55,7 +56,9 @@ export function findShoutBufferTrackNumber(
   for (let i = req; i < list.length; i++) {
     const uri = list[i]?.TrackUri ?? list[i]?.uri;
     const title = list[i]?.Title ?? list[i]?.title ?? "";
-    if (isAnnounceQueuePad(uri, title)) continue;
+    // Do not demote past a pending set/refill announce — that would play the
+    // Random intro before the guest request we just prioritized.
+    if (isAnnounceQueuePad(uri, title)) return null;
     const id = spotifyTrackId(uri);
     if (!id || !set.has(id)) return i + 1;
   }
