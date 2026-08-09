@@ -3083,6 +3083,20 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   padding: 0;
 }
 
+/* Song / artist / transport — fills space between pills (top) and reactions (bottom). */
+.party-display-track {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+/* PC: vertically center track block between pills and reactions. */
+body.party-display-active:not(.party-display-kiosk) .party-display-track {
+  justify-content: center;
+}
+
 .party-display-state {
   display: inline-flex;
   margin-bottom: 0;
@@ -3175,8 +3189,8 @@ body.party-display-active.party-display-kiosk .party-display-shell {
 }
 
 .party-display-reactions {
-  /* Bottom-aligned with art + Up Next. */
-  margin-top: auto;
+  /* Bottom of meta column; track flex fills space above. */
+  margin-top: 0;
   width: 100%;
   flex: 0 0 auto;
   display: grid;
