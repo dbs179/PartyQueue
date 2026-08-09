@@ -62,6 +62,10 @@ import {
   guestLockBannerView,
   paintGuestLockBanner,
 } from "./guest-lock-banner.js";
+import {
+  partyDisplayHashView,
+  syncPartyDisplayViewport,
+} from "./party-display-viewport.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -1651,6 +1655,7 @@ function showView(name) {
   currentView = target;
   for (const key of Object.keys(VIEWS)) VIEWS[key].hidden = key !== target;
   document.body.classList.toggle("party-display-active", target === "display");
+  syncPartyDisplayViewport(target === "display");
   // The DJ Booth and everything behind it require the host PIN. While locked,
   // keep the view hidden and skip its data loads (they'd 401 anyway).
   const hostLocked = isHostArea(target) && !settingsGateOk();
@@ -1718,7 +1723,8 @@ function revealSettings() {
 }
 
 function routeFromHash() {
-  let h = (location.hash || "").replace(/^#\/?/, "");
+  // Strip hash query (`#/display?kiosk=1`) so Fully bookmarks still route.
+  let h = partyDisplayHashView();
   if (h === "options") h = "booth"; // old bookmark alias
   if (h === "settings") h = "booth"; // Settings hub folded into the Booth
   if (h === "mood") h = "mix"; // old Vibe (Music Mix) bookmark alias

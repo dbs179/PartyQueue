@@ -2842,12 +2842,17 @@ body.modal-open {
 }
 
 /* ---- Phase 5: read-only Party Display -------------------------------- */
-/* One 16:9 design unit so PC window and fullscreen TV keep the same
-   proportions. N in calc(N * var(--pd)) is design pixels at 1920-wide. */
+/* One 16:9 design unit so PC window and Fully Kiosk TV keep the same
+   proportions. --pd-vw/--pd-vh are set from visualViewport (JS); fallbacks
+   cover first paint. N in calc(N * var(--pd)) is design pixels at 1920-wide. */
 body.party-display-active {
-  --pd: calc(min(100vw, 177.778vh) / 1920);
-  height: 100dvh;
-  min-height: 100dvh;
+  /* --pd-vw / --pd-vh come from JS (visualViewport); fallbacks for first paint. */
+  --pd: calc(
+    min(var(--pd-vw, 100vw), calc(var(--pd-vh, 100dvh) * 16 / 9)) / 1920
+  );
+  height: var(--pd-vh, 100dvh);
+  min-height: var(--pd-vh, 100dvh);
+  max-height: var(--pd-vh, 100dvh);
   overflow: hidden;
   padding: 0;
 }
@@ -2859,27 +2864,35 @@ body.party-display-active > .header {
 body.party-display-active > .container {
   width: 100%;
   max-width: none;
-  height: 100dvh;
+  height: var(--pd-vh, 100dvh);
   min-height: 0;
+  max-height: var(--pd-vh, 100dvh);
   padding: 0;
 }
 
 .party-display-view {
-  height: 100dvh;
+  height: var(--pd-vh, 100dvh);
+  max-height: var(--pd-vh, 100dvh);
   min-height: 0;
   background: var(--bg);
 }
 
 .party-display-shell {
-  height: 100dvh;
+  height: var(--pd-vh, 100dvh);
   min-height: 0;
-  max-height: 100dvh;
+  max-height: var(--pd-vh, 100dvh);
   box-sizing: border-box;
   padding: calc(28 * var(--pd));
   display: flex;
   flex-direction: column;
   gap: calc(16 * var(--pd));
   overflow: hidden;
+}
+
+/* Fully / TV overscan: keep Join + QR inside the panel edge. */
+body.party-display-active.party-display-kiosk .party-display-shell {
+  padding: max(calc(28 * var(--pd)), calc(0.025 * var(--pd-vh, 100dvh)))
+    max(calc(28 * var(--pd)), calc(0.025 * var(--pd-vw, 100vw)));
 }
 
 .party-display-topline,
@@ -2962,9 +2975,10 @@ body.party-display-active > .container {
   grid-column: 2;
   grid-row: 1;
   min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: calc(12 * var(--pd));
   align-self: stretch;
 }
@@ -3308,8 +3322,10 @@ body.party-display-active > .container {
 
 .party-display-join {
   flex: 0 0 auto;
+  flex-shrink: 0;
   padding: calc(14 * var(--pd));
   justify-content: flex-start;
+  min-height: 0;
 }
 
 .party-display-qr {
@@ -3369,10 +3385,11 @@ body.party-display-active > .container {
    even on a landscape 4K screen, which used to collapse Party Display. */
 @media (max-width: 900px) {
   body.party-display-active {
-    --pd: calc(min(100vw, 100vh) / 900);
+    --pd: calc(min(var(--pd-vw, 100vw), var(--pd-vh, 100dvh)) / 900);
     overflow: auto;
     height: auto;
     min-height: 100dvh;
+    max-height: none;
   }
 
   body.party-display-active > .container,
@@ -3382,6 +3399,10 @@ body.party-display-active > .container {
     min-height: 100dvh;
     max-height: none;
     overflow: visible;
+  }
+
+  body.party-display-active.party-display-kiosk .party-display-shell {
+    padding: calc(28 * var(--pd));
   }
 
   .party-display-layout {
@@ -3431,7 +3452,7 @@ body.party-display-active > .container {
 
 @media (max-width: 640px) {
   body.party-display-active {
-    --pd: calc(100vw / 640);
+    --pd: calc(var(--pd-vw, 100vw) / 640);
   }
 
   .party-display-shell {
