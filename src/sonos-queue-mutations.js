@@ -15,6 +15,7 @@ import {
   songMatchKey,
   isAnnounceQueuePad,
 } from "./sonos-queue-policy.js";
+import { ensureOrderedPlayModeOn } from "./sonos-transport.js";
 import {
   needsShoutLeadBuffer,
   findShoutBufferTrackNumber,
@@ -183,6 +184,7 @@ async function addSetRequestToQueueUnlocked(
 
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
+  await ensureOrderedPlayModeOn(coordinator);
   const byOpts = {
     requestedBy,
     requestedByUser,
@@ -318,6 +320,7 @@ async function addTrackToQueueUnlocked(
   const m = await getManager();
   const meta = MetaDataHelper.GuessMetaDataAndTrackUri(trackUri, resolveRegion());
   const coordinator = await resolveCoordinator(m);
+  await ensureOrderedPlayModeOn(coordinator);
   const id = spotifyTrackId(trackUri);
   const wantKey = songMatchKey(name, artist);
 
@@ -556,6 +559,13 @@ async function insertAnnounceBlockUnlocked({
   const removePads = ops.removePads || removeUpcomingAnnouncePadsUnlocked;
   const enqueue = ops.enqueue || enqueueHttpAudioUnlocked;
   const pauseTrim = ops.pauseTrim || pauseQueueTrim;
+  const ensurePlayMode =
+    ops.ensurePlayMode ||
+    (async () => {
+      const m = await getManager();
+      const coordinator = await resolveCoordinator(m);
+      await ensureOrderedPlayModeOn(coordinator);
+    });
   const preempted = () =>
     preemptGeneration != null && queueWorkWasPreempted(preemptGeneration);
 
@@ -564,6 +574,12 @@ async function insertAnnounceBlockUnlocked({
   }
   if (!ramp?.url || !tts?.url || !restore?.url) {
     throw new Error("insertAnnounceBlock requires ramp, tts, and restore urls.");
+  }
+
+  try {
+    await ensurePlayMode();
+  } catch (err) {
+    console.warn("[announce-block] playmode check failed:", err?.message || err);
   }
 
   pauseTrim(25000);

@@ -242,6 +242,11 @@ export function registerQueueRoutes(app, ctx) {
         result.requestCreated !== false &&
         isEndOfNightTrack({ uri, name, artist })
       ) {
+        // Cancel any in-flight Never-Ending / Random fill before disabling the
+        // monitor — setAutoFill(false) clears the timer but does not bump the
+        // preempt generation, so a tick already past its enabled check could
+        // still append filler after last call (Clear Queue always preempts).
+        preemptQueueWork();
         if (getAutoFillState().enabled) setAutoFill(false);
         setPartyOver(true);
         // Filler removals above shift the just-added song up; removedBefore
@@ -418,34 +423,54 @@ export function registerQueueRoutes(app, ctx) {
       }
 
       try {
-        const outcome = await withRequestFairnessLock(async () => {
-          const fairness = getSetRequestFairnessSettings();
-          const decision = evaluateSetRequestFairness({
-            settings: fairness,
-            user,
-            events: getRequests(),
-            hostAuthenticated: isValidHostToken(extractHostToken(req)),
-            fairnessResetAt: getFairnessResetAt(),
+        const fairnessArgs = () => ({
+          settings: getSetRequestFairnessSettings(),
+          user,
+          events: getRequests(),
+          hostAuthenticated: isValidHostToken(extractHostToken(req)),
+          fairnessResetAt: getFairnessResetAt(),
+        });
+
+        // Short lock: check quota only. Spotify I/O must not hold the shared
+        // fairness lock — it also serializes regular guest song adds.
+        const precheck = await withRequestFairnessLock(async () => {
+          const decision = evaluateSetRequestFairness(fairnessArgs());
+          return decision.allowed ? { ok: true } : { decision };
+        });
+        if (precheck.decision) {
+          const denied = precheck.decision;
+          if (denied.retryAfterSec) {
+            res.set("Retry-After", String(denied.retryAfterSec));
+          }
+          return res.status(denied.status || 429).json({
+            error: denied.error,
+            code: denied.code,
+            rollingCount: denied.rollingCount,
+            rollingMax: denied.rollingMax,
+            windowMinutes: denied.windowMinutes,
+            retryAt: denied.retryAt,
           });
+        }
+
+        let artistName = String(artist || "").trim();
+        if (!artistName) {
+          const resolved = await getArtist(id);
+          artistName = resolved?.name || id;
+        }
+
+        const filterExplicit = !!getContentSettings().filterExplicit;
+        let top = await getArtistTopTracks(id, { filterExplicit });
+        top = top.slice(0, SET_REQUEST_SIZE);
+        if (!top.length) {
+          return res.status(404).json({
+            error: `No playable tracks found for ${artistName}.`,
+          });
+        }
+
+        // Re-check + enqueue + ledger under one short lock (no double-spend).
+        const outcome = await withRequestFairnessLock(async () => {
+          const decision = evaluateSetRequestFairness(fairnessArgs());
           if (!decision.allowed) return { decision };
-
-          let artistName = String(artist || "").trim();
-          if (!artistName) {
-            const resolved = await getArtist(id);
-            artistName = resolved?.name || id;
-          }
-
-          const filterExplicit = !!getContentSettings().filterExplicit;
-          let top = await getArtistTopTracks(id, { filterExplicit });
-          top = top.slice(0, SET_REQUEST_SIZE);
-          if (!top.length) {
-            return {
-              error: {
-                status: 404,
-                error: `No playable tracks found for ${artistName}.`,
-              },
-            };
-          }
 
           const added = await sonos.addSetRequestToQueue(top, {
             requestedBy: badge,
@@ -483,14 +508,8 @@ export function registerQueueRoutes(app, ctx) {
             retryAt: denied.retryAt,
           });
         }
-        if (outcome.error) {
-          return res
-            .status(outcome.error.status || 400)
-            .json({ error: outcome.error.error });
-        }
 
         const result = outcome.result;
-        const artistName = outcome.artistName;
         try {
           if (ensureGuestProfile(user)) {
             console.log(`[queue/set-request] new guest profile: ${user}`);

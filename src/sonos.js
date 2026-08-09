@@ -6,6 +6,8 @@ export {
   pickGroupByTarget,
   removeRangeFor,
   autoStartDecision,
+  isShufflePlayMode,
+  orderedPlayMode,
   shouldClearQueueForRandomDj,
   randomDjAnnouncePlan,
   findInsertPosition,
@@ -57,6 +59,7 @@ export {
   toggleShuffle,
   toggleMute,
   getAnnouncePlaybackContext,
+  ensureOrderedPlayModeOn,
 } from "./sonos-transport.js";
 
 export {

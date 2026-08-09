@@ -283,6 +283,13 @@ describe("queue routes with a fake speaker", { concurrency: false }, () => {
     const { setPartyOver, PARTY_OVER_MESSAGE } = await import(
       "../src/party-rituals.js"
     );
+    const {
+      resetQueuePreemptForTests,
+      queueWorkGeneration,
+      queueWorkWasPreempted,
+    } = await import("../src/queue-preempt.js");
+    resetQueuePreemptForTests();
+    const workGeneration = queueWorkGeneration();
     try {
       const res = await postJson("/api/queue", {
         uri: "spotify:track:closingtime000000000AA",
@@ -294,6 +301,9 @@ describe("queue routes with a fake speaker", { concurrency: false }, () => {
       assert.equal(res.status, 200);
       const body = await res.json();
       assert.equal(body.closingTime, true);
+      // Preempt in-flight Never-Ending / Random the same way Clear Queue does,
+      // so a mid-tick refill cannot append filler after last call.
+      assert.equal(queueWorkWasPreempted(workGeneration), true);
       // The Party's Over lockdown flips on so nothing new can be added...
       assert.equal(getContentSettings().partyOver, true);
       const denied = await postJson("/api/queue", {

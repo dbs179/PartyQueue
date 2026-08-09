@@ -36,6 +36,29 @@ export function removeRangeFor(track) {
   return { StartingIndex: 1, NumberOfTracks: t - 1 };
 }
 
+/** True when Sonos PlayMode includes shuffle (order is not queue index order). */
+export function isShufflePlayMode(mode) {
+  return /SHUFFLE/.test(String(mode || ""));
+}
+
+/**
+ * Strip shuffle from a Sonos PlayMode while preserving repeat.
+ * PartyQueue inserts / Skip / DJ pads use absolute queue indices — Shuffle
+ * breaks that contract.
+ */
+export function orderedPlayMode(mode) {
+  switch (String(mode || "NORMAL")) {
+    case "SHUFFLE":
+      return "REPEAT_ALL";
+    case "SHUFFLE_REPEAT_ONE":
+      return "REPEAT_ONE";
+    case "SHUFFLE_NOREPEAT":
+      return "NORMAL";
+    default:
+      return isShufflePlayMode(mode) ? "NORMAL" : String(mode || "NORMAL");
+  }
+}
+
 // Pure: decide whether adding a song should kick off playback.
 //   "skip"  -> leave playback alone: the queue is already playing, a real
 //              external source (radio/SiriusXM/line-in) is playing and we won't

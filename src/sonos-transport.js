@@ -13,13 +13,56 @@ import {
   cancelActiveDjVolumeHandoff,
   isDjVolumeHandoffActive,
 } from "./dj-volume-handoff.js";
-import { isAnnounceQueuePad } from "./sonos-queue-policy.js";
+import {
+  isAnnounceQueuePad,
+  isShufflePlayMode,
+  orderedPlayMode,
+} from "./sonos-queue-policy.js";
 import {
   SEEK_END_LEAD_SEC,
   decideSkipAnnounceAction,
   findNextMusicTrackNumber,
   formatSonosRelTime,
 } from "./skip-announce-policy.js";
+
+/**
+ * If the coordinator is in a Shuffle PlayMode, force ordered playback
+ * (preserving repeat). Safe to call under the write lock or transport lane.
+ * @param {{ AVTransportService: { GetTransportSettings: Function, SetPlayMode: Function } }} coordinator
+ */
+export async function ensureOrderedPlayModeOn(coordinator) {
+  if (!coordinator?.AVTransportService) {
+    return { changed: false, playMode: "NORMAL", shuffle: false };
+  }
+  let current = "NORMAL";
+  try {
+    const settings = await coordinator.AVTransportService.GetTransportSettings({
+      InstanceID: 0,
+    });
+    current = settings.PlayMode || "NORMAL";
+  } catch (err) {
+    console.warn("[playmode] read failed:", err?.message || err);
+    return { changed: false, playMode: current, shuffle: false };
+  }
+  if (!isShufflePlayMode(current)) {
+    return { changed: false, playMode: current, shuffle: false };
+  }
+  const next = orderedPlayMode(current);
+  try {
+    await coordinator.AVTransportService.SetPlayMode({
+      InstanceID: 0,
+      NewPlayMode: next,
+    });
+    invalidateSonosSnapshots();
+    console.warn(
+      `[playmode] cleared Shuffle (${current} → ${next}) — PartyQueue needs queue order`
+    );
+    return { changed: true, playMode: next, shuffle: false };
+  } catch (err) {
+    console.error("[playmode] clear Shuffle failed:", err?.message || err);
+    return { changed: false, playMode: current, shuffle: true };
+  }
+}
 
 /**
  * Live queue context for DJ volume handoff: current track index, next URI,
@@ -94,6 +137,7 @@ async function playUnlocked({ trackNumber } = {}) {
     /* best-effort — fall back to switching below */
   }
   if (!onQueue) await coordinator.SwitchToQueue();
+  await ensureOrderedPlayModeOn(coordinator);
   const n = Number(trackNumber);
   if (Number.isFinite(n) && n >= 1) {
     try {
@@ -185,6 +229,7 @@ async function nextUnlocked(opts = {}) {
   const announceAware = opts?.announceAware !== false;
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
+  await ensureOrderedPlayModeOn(coordinator);
 
   if (!announceAware) {
     await coordinator.Next();
@@ -335,30 +380,9 @@ async function previousUnlocked() {
   return { room: coordinator.Name };
 }
 
-// Map a Sonos PlayMode to its shuffle-toggled counterpart, preserving the
-// current repeat setting. Sonos PlayMode pairs shuffle/repeat into one enum.
-function toggledShuffleMode(current) {
-  switch (current) {
-    case "NORMAL":
-      return "SHUFFLE_NOREPEAT";
-    case "REPEAT_ALL":
-      return "SHUFFLE";
-    case "REPEAT_ONE":
-      return "SHUFFLE_REPEAT_ONE";
-    case "SHUFFLE_NOREPEAT":
-      return "NORMAL";
-    case "SHUFFLE":
-      return "REPEAT_ALL";
-    case "SHUFFLE_REPEAT_ONE":
-      return "REPEAT_ONE";
-    default:
-      return "SHUFFLE_NOREPEAT";
-  }
-}
-
-// Transport control: toggle shuffle play order for the group's queue. This
-// changes the order songs play in without reordering or destroying the queue,
-// so it is reversible and safe to flip during a party.
+// Transport control: turn Shuffle off when it is on. Enabling Shuffle is
+// refused — PartyQueue inserts and DJ pads use absolute queue positions, which
+// Sonos Shuffle ignores.
 export async function toggleShuffle(...args) {
   return withSonosTransportLane(() => toggleShuffleUnlocked(...args));
 }
@@ -370,14 +394,24 @@ async function toggleShuffleUnlocked() {
   const settings = await coordinator.AVTransportService.GetTransportSettings({
     InstanceID: 0,
   });
-  const next = toggledShuffleMode(settings.PlayMode || "NORMAL");
+  const current = settings.PlayMode || "NORMAL";
+  if (!isShufflePlayMode(current)) {
+    const err = new Error(
+      "Shuffle breaks guest request order and DJ announces. Leave it off while PartyQueue runs the night."
+    );
+    err.statusCode = 409;
+    err.code = "shuffle_disabled";
+    throw err;
+  }
+
+  const next = orderedPlayMode(current);
   await coordinator.AVTransportService.SetPlayMode({
     InstanceID: 0,
     NewPlayMode: next,
   });
 
   invalidateSonosSnapshots();
-  return { shuffle: /SHUFFLE/.test(next), playMode: next };
+  return { shuffle: false, playMode: next, cleared: true };
 }
 
 export async function toggleMute(...args) {

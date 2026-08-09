@@ -7,6 +7,7 @@ import {
   autoStartIfIdle,
   holdIdleForDeferredShout,
 } from "./sonos-queue-mutations.js";
+import { ensureOrderedPlayModeOn } from "./sonos-transport.js";
 import {
   autoStartDecision,
   isDjVoiceUri,
@@ -725,6 +726,7 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
 
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
+  await ensureOrderedPlayModeOn(coordinator);
 
   // 4) Enqueue in that order. `added` = total enqueued (playlist + discovery);
   // `similarAdded` is the discovery subset so the UI can badge the mix.

@@ -138,7 +138,12 @@ export function registerTransportRoutes(app, ctx) {
       res.json({ ok: true, ...(await toggleShuffle()) });
     } catch (err) {
       console.error("[shuffle]", err.message);
-      res.status(502).json({ error: err.message || "Could not toggle shuffle." });
+      res
+        .status(err.statusCode || 502)
+        .json({
+          error: err.message || "Could not toggle shuffle.",
+          code: err.code || undefined,
+        });
     }
   }));
 

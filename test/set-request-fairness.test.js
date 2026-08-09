@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { evaluateSetRequestFairness } from "../src/set-request-fairness.js";
-import { evaluateRequestFairness } from "../src/request-fairness.js";
+import {
+  evaluateRequestFairness,
+  withRequestFairnessLock,
+} from "../src/request-fairness.js";
 import { findInsertPosition } from "../src/sonos-queue-policy.js";
 
 const setEnabled = {
@@ -191,4 +194,41 @@ test("fairnessResetAt ignores older Set Request ledger rows", () => {
     now,
   });
   assert.equal(cleared.allowed, true);
+});
+
+test("Set Request Spotify work outside the fairness lock does not block song adds", async () => {
+  // Mirrors the route split: short precheck lock → slow Spotify → short commit lock.
+  const order = [];
+  let releaseSpotify;
+  const spotifyGate = new Promise((r) => (releaseSpotify = r));
+
+  const setRequest = (async () => {
+    await withRequestFairnessLock(async () => {
+      order.push("set-precheck");
+    });
+    order.push("set-spotify-start");
+    await spotifyGate;
+    order.push("set-spotify-end");
+    await withRequestFairnessLock(async () => {
+      order.push("set-commit");
+    });
+  })();
+
+  await new Promise((r) => setImmediate(r));
+  const songAdd = withRequestFairnessLock(async () => {
+    order.push("song-add");
+  });
+
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(order, ["set-precheck", "set-spotify-start", "song-add"]);
+
+  releaseSpotify();
+  await Promise.all([setRequest, songAdd]);
+  assert.deepEqual(order, [
+    "set-precheck",
+    "set-spotify-start",
+    "song-add",
+    "set-spotify-end",
+    "set-commit",
+  ]);
 });

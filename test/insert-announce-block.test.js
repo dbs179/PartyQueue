@@ -46,6 +46,7 @@ test("insertAnnounceBlock keeps strip + pads inside one write lock", async () =>
         return { url };
       },
       pauseTrim: () => {},
+      ensurePlayMode: async () => {},
     },
   });
 
@@ -99,6 +100,7 @@ test("insertAnnounceBlock aborts between pads when Clear preempts", async () => 
         return { url };
       },
       pauseTrim: () => {},
+      ensurePlayMode: async () => {},
     },
   });
 
@@ -131,6 +133,7 @@ test("insertAnnounceBlock adjusts position after supersede wipe", async () => {
         return {};
       },
       pauseTrim: () => {},
+      ensurePlayMode: async () => {},
     },
   });
 

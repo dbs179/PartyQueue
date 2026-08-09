@@ -2630,7 +2630,11 @@ npToggle.addEventListener("click", () => {
 
 shuffleBtn.addEventListener("click", () => {
   postControl(shuffleBtn, "/api/shuffle", (d) =>
-    showToast(d.shuffle ? "Shuffle on" : "Shuffle off")
+    showToast(
+      d.cleared || !d.shuffle
+        ? "Shuffle off — PartyQueue needs queue order"
+        : "Shuffle on"
+    )
   );
 });
 
