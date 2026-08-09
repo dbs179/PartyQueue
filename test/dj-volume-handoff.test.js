@@ -31,10 +31,22 @@ function fakeHandoff({
   const phases = [];
   const adapter = {
     async getNowPlaying() {
-      const uri = timeline[Math.min(index, timeline.length - 1)];
-      const state = states?.[Math.min(index, states.length - 1)] || "PLAYING";
-      index += 1;
+      const i = Math.min(index, timeline.length - 1);
+      const uri = timeline[i];
+      const state = states?.[i] || "PLAYING";
       calls.push(["now-playing", uri, state]);
+      // Natural pad progress: ramp always drains; playing DJ drains once.
+      // Restore stays sticky until next()/playAt so the post-advance guard
+      // can re-read without consuming the first music track.
+      if (isRampSilenceUri(uri) && index < timeline.length - 1) {
+        index += 1;
+      } else if (
+        isDjClipUri(uri, DJ) &&
+        (state === "PLAYING" || state === "TRANSITIONING") &&
+        index < timeline.length - 1
+      ) {
+        index += 1;
+      }
       return { uri, state };
     },
     async getVolume() {
@@ -60,10 +72,35 @@ function fakeHandoff({
     },
     async playAt(position) {
       calls.push(["play-at", position]);
+      if (index < timeline.length - 1) index += 1;
     },
     async next() {
       calls.push(["next"]);
+      // Advance only after a successful Next. From a DJ clip, jump to the
+      // restore pad (skipping duplicate STOPPED DJ retries in the timeline).
+      // From restore, skip duplicate restore entries used by retry tests.
       if (next) await next();
+      const cur = timeline[Math.min(index, timeline.length - 1)];
+      if (isDjClipUri(cur, DJ)) {
+        const restoreIdx = timeline.findIndex(
+          (uri, idx) => idx >= index && isRestoreSilenceUri(uri)
+        );
+        index =
+          restoreIdx >= 0
+            ? restoreIdx
+            : Math.min(index + 1, timeline.length - 1);
+      } else if (isRestoreSilenceUri(cur)) {
+        let nextIdx = index + 1;
+        while (
+          nextIdx < timeline.length &&
+          isRestoreSilenceUri(timeline[nextIdx])
+        ) {
+          nextIdx += 1;
+        }
+        index = Math.min(nextIdx, timeline.length - 1);
+      } else if (index < timeline.length - 1) {
+        index += 1;
+      }
     },
   };
   const logger = {
@@ -134,10 +171,14 @@ test("runs pre-silence → DJ → post-silence → music and restores exactly", 
     ([name, value]) => name === "read-volume" && value === 10
   );
   assert.ok(baselineRead >= 0 && baselineRead < firstWrite);
-  // Pre/post silence must not be paused for volume settle — pause/resume on
-  // those pads restarts the following HTTP TTS clip (skip-into-DJ double).
-  const pauseWhileSettling = run.calls.findIndex(([name]) => name === "pause");
-  assert.equal(pauseWhileSettling, -1);
+  // Pre-silence must not pause (that restarts TTS). Post-silence may hold so
+  // the first music track isn't skipped by a late Next().
+  const firstDjNp = run.calls.findIndex(
+    ([name, uri]) => name === "now-playing" && uri === DJ
+  );
+  const firstPause = run.calls.findIndex(([name]) => name === "pause");
+  assert.ok(firstDjNp >= 0);
+  assert.ok(firstPause > firstDjNp, "must not pause before the DJ clip");
   assert.ok(
     run.calls.some(([name]) => name === "next" || name === "play-at"),
     "should advance from post-silence to music"
@@ -153,13 +194,77 @@ test("does not pause pre-silence when Skip lands on the ramp pad early", async (
 
   await run.handoff.start();
 
-  assert.equal(
-    run.calls.filter(([name]) => name === "pause").length,
-    0,
-    "silence pads must keep playing while volume ramps"
+  const firstDjNp = run.calls.findIndex(
+    ([name, uri]) => name === "now-playing" && uri === DJ
+  );
+  const firstPause = run.calls.findIndex(([name]) => name === "pause");
+  assert.ok(firstDjNp >= 0);
+  assert.ok(
+    firstPause === -1 || firstPause > firstDjNp,
+    "pre-silence must keep playing while volume ramps up"
   );
   assert.equal(run.getVolume(), 10);
   assert.equal(run.phases.includes("announcing"), true);
+});
+
+test("does not Next past music if restore pad already advanced", async () => {
+  // Restore expires into MUSIC during settle; a blind Next would skip it.
+  const timeline = [PRE, DJ, POST];
+  let index = 0;
+  let volume = 10;
+  const calls = [];
+  const adapter = {
+    async getNowPlaying() {
+      // Polls: PRE → DJ → POST; later reads (advance guard) stay on MUSIC.
+      const uri = index < timeline.length ? timeline[index] : MUSIC;
+      if (index < timeline.length) index += 1;
+      calls.push(["now-playing", uri, "PLAYING"]);
+      return { uri, state: "PLAYING" };
+    },
+    async getVolume() {
+      return volume;
+    },
+    async setVolume(level) {
+      volume = level;
+      calls.push(["set-volume", level]);
+      return { locked: true };
+    },
+    async pause() {
+      calls.push(["pause"]);
+    },
+    async resume() {
+      calls.push(["resume"]);
+    },
+    async playAt(position) {
+      calls.push(["play-at", position]);
+    },
+    async next() {
+      calls.push(["next"]);
+    },
+  };
+  const handoff = createDjVolumeHandoff({
+    publicUrl: DJ,
+    approxDurationSec: 5,
+    silenceSec: 3,
+    calculateTarget: () => 30,
+    adapter,
+    sleep: async () => {},
+    now: () => 0,
+    pollMs: 0,
+    rampSteps: 6,
+    ttsPosition: 2,
+    musicPosition: 4,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  await handoff.start();
+
+  assert.equal(
+    calls.filter(([name]) => name === "next").length,
+    0,
+    "must not Next after already landing on music"
+  );
+  assert.ok(calls.some(([name]) => name === "resume"));
 });
 
 test("missed post-silence pauses music, restores baseline, then resumes", async () => {

@@ -233,6 +233,26 @@ export function createDjVolumeHandoff({
     }
   };
 
+  const holdRestorePad = async (state) => {
+    if (state !== "PLAYING" && state !== "TRANSITIONING") return;
+    try {
+      const io = await getAdapter();
+      await io.pause();
+      logger.info("held post-silence while volume settles");
+    } catch (error) {
+      logger.warn(`could not hold post-silence: ${error.message}`);
+    }
+  };
+
+  const liveIsAnnouncePad = (uri) => {
+    const value = String(uri || "");
+    return (
+      isRampSilenceUri(value) ||
+      isRestoreSilenceUri(value) ||
+      isDjClipUri(value, publicUrl)
+    );
+  };
+
   const advanceAfterSilencePad = async (
     position,
     label,
@@ -243,6 +263,24 @@ export function createDjVolumeHandoff({
     const remaining = Math.max(0, Math.round(silenceSec * 1000) - elapsed);
     if (remaining) await sleep(remaining);
     const io = await getAdapter();
+    // If the restore pad already advanced to the first music track while we
+    // were restoring volume, Next() would skip that song (e.g. the track the
+    // DJ just named). Only advance while still on an announce pad.
+    let liveUri = "";
+    try {
+      liveUri = String((await io.getNowPlaying())?.uri || "");
+    } catch {
+      /* treat as still on pad and fall through */
+    }
+    if (liveUri && !liveIsAnnouncePad(liveUri)) {
+      try {
+        await io.resume();
+      } catch (error) {
+        logger.warn(`music resume after ${label} failed: ${error.message}`);
+      }
+      logger.info(`already on music after ${label}; not advancing`);
+      return;
+    }
     // io.next must be a raw queue advance (see defaultAdapter) — never host
     // announce-aware Skip, which would cancel this handoff mid-restore.
     if (nextTransition && typeof io.next === "function") {
@@ -334,8 +372,10 @@ export function createDjVolumeHandoff({
           handledPad = true;
           if (phase !== "restored") {
             restoreHeldAt = now();
-            // Same rule as pre-silence: don't pause the restore pad. Ramp
-            // volume down while it plays, then advance to music.
+            // Hold post-silence only (never pre-silence/TTS). Without this the
+            // restore pad can finish during volume ramp-down, start the first
+            // music track, then our Next() skips the song the DJ just named.
+            await holdRestorePad(state);
             setPhase("ramping-down");
             // A previous restore pass may have partially lowered the group.
             // Always continue from the live level; restarting from the stored
