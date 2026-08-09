@@ -1,14 +1,16 @@
 # PartyQueue
 
-**Version 7.0.0**
+**Version 10.6.0**
 
 PartyQueue lets everyone at your party help choose the music. Guests open a
 web page on their phones, search Spotify, and add songs to your Sonos queue.
 There is no app to install on their phones and guests do not need to sign in to
 Spotify.
 
-PartyQueue is designed for personal use on a trusted home network. Do not make
-it directly available on the public internet.
+PartyQueue is designed for **personal use on a trusted home LAN**. Do not expose
+it directly on the public internet. Guest search, queue adds, and many party
+controls are intentionally open so phones on your Wi‑Fi can join without
+accounts.
 
 ## What you need
 
@@ -73,7 +75,8 @@ Open PartyQueue at:
 
 `http://YOUR_UNRAID_IP:8080`
 
-Replace `YOUR_UNRAID_IP` with the address of your Unraid server.
+Replace `YOUR_UNRAID_IP` with the address of your Unraid server. If you set a
+different `PORT` in `.env` (for example `8088`), use that port instead.
 
 The included Docker setup uses host networking because Sonos discovery usually
 does not work through Docker's normal bridge network. It also stores your
@@ -144,13 +147,53 @@ PartyQueue to create a new code if it expires.
 Party controls stay open to guests unless you also enable **Host-only
 controls** in DJ Booth.
 
-## Using PartyQueue at a party
+### Public URL (Docker / Unraid)
 
-1. Make sure guests are connected to the same Wi-Fi as PartyQueue and Sonos.
-2. Open the **Join** QR code in PartyQueue, or share its web address.
-3. Guests enter a name, search for a song, and select **Add**.
-4. Use the main controls to play, pause, skip, change volume, or clear the
-   queue.
+Set `PUBLIC_BASE_URL` in `.env` to the LAN address Sonos and phones use, for
+example `http://YOUR_UNRAID_IP:8080`. PartyQueue uses it for:
+
+- Silence / DJ Voice media URLs Sonos must fetch
+- The Join QR code
+- Stricter Origin checks on changing API requests (browsers already send Origin)
+
+## How a night works
+
+```text
+  Host prep                Guests join              Keep it going
+ ┌────────────┐          ┌──────────────┐         ┌─────────────────┐
+ │ Start app  │          │ Scan Join QR │         │ Random / Never- │
+ │ Unlock     │ ───────► │ Enter a name │ ───────►│ Ending feed the │
+ │ Booth      │          │ Search → Add │         │ queue           │
+ │ Set Vibe   │          └──────────────┘         └────────┬────────┘
+ └────────────┘                                            │
+                                                           ▼
+                                              Optional: DJ Voice shouts,
+                                              Set Request, fairness caps,
+                                              Party Display on a TV
+                                                           │
+                                                           ▼
+                                              Last call → Closing Time
+                                              (Never-Ending stops)
+                                                           │
+                                                           ▼
+                                              Clear / Party Over when done
+```
+
+1. **Prep** — Start PartyQueue, unlock the Booth with your Host PIN, pick Vibe
+   (mood / genres / playlists), and turn on Never-Ending if you want automatic
+   fills.
+2. **Join** — Share the Join QR or LAN URL. Guests pick a display name, search
+   Spotify, and add songs. Quotas (if enabled) show how many requests they have
+   left.
+3. **Run the room** — Use play / pause / skip / volume on the main page. Random
+   adds a fresh batch; Never-Ending tops up while music is playing from the
+   queue. Same-artist showcase batches are optional in the Booth.
+4. **Extras** — DJ Voice can announce requests and refills. Party Display
+   (`#/display`) is meant for a TV or Fully Kiosk Browser. Stats stay on the
+   main toolbar.
+5. **Last call** — When Closing Time (or your configured last song) is added,
+   Never-Ending stops so the night can wind down. Clear the queue or use Party
+   Over when you are finished.
 
 Useful music tools:
 
@@ -159,14 +202,39 @@ Useful music tools:
   will not restart an empty queue after Stop or Clear.
 - **Vibe** controls which playlists and genres Random can use.
 - **Edit queue** lets you remove or rearrange songs. It is off by default.
-- **Request fairness** can limit how many songs one person adds after the
-  shared request queue reaches a size you choose. It is off by default.
+- **Request fairness** can limit how many songs or sets one person adds. It is
+  off by default; guests see remaining quota when it is on.
 - **Last call** stops Never-Ending when the configured final song is added.
   The default final song is “Closing Time” by Semisonic.
 
 Host settings, user notes, branding, connections, reset, and restart tools are
 under **DJ Booth**. Stats, Sonos groups, and Vibe are available from the
 main toolbar.
+
+## Network and security posture
+
+PartyQueue assumes every device on your Wi‑Fi is a guest you invited.
+
+| Surface | Default |
+| --- | --- |
+| Song search, add, Now Playing, queue | Open on the LAN |
+| Vibe / Never-Ending / many party toggles | Open on the LAN |
+| DJ Booth, credentials, resets, uploads | Host PIN |
+| Transport / Clear Queue | Open unless **Host-only controls** is on |
+
+Do **not** port-forward PartyQueue or put it on a public reverse proxy. If you
+must use a private reverse proxy (for example on the same LAN or a VPN):
+
+- Keep the proxy off the public internet.
+- Guests should open the same hostname and port that appear in
+  `PUBLIC_BASE_URL`.
+- Mutating API calls require a matching browser `Origin` when
+  `PUBLIC_BASE_URL` is set.
+- API `Host` headers must look like a LAN address, `*.local`, localhost, or a
+  name listed in `PUBLIC_BASE_URL` / `PARTYQUEUE_ALLOWED_HOSTS` (DNS-rebinding
+  guard). Add MagicDNS or other dotted private names there if you use them.
+- PartyQueue is not a multi-tenant SaaS app: the `data` folder holds secrets in
+  plain files on disk. Protect the host and the share.
 
 ## Your Spotify playlists (optional)
 
@@ -201,11 +269,18 @@ ElevenLabs or OpenAI TTS.
 2. Create a Home Assistant long-lived access token from your profile.
 3. In PartyQueue, open **Connections → Home Assistant**.
 4. Enter the Home Assistant URL and token, then select **Test**.
+   The URL must be a private LAN / `.local` address, localhost, or HTTPS
+   Nabu Casa unless you explicitly allow another public HTTPS host.
 5. Open **Settings → DJ**, choose the provider and voice, and test it.
 6. Enable **DJ Voice** and any request shout-outs you want.
 
 During an announcement, PartyQueue temporarily adjusts the volume and then
 returns every speaker to its exact previous level before music continues.
+
+### Party Display
+
+Open `#/display` (or `#/display?kiosk=1` for Fully Kiosk) on a TV. Idle quiet
+time can dim the display so a kiosk screen is not bright all night.
 
 ## Where settings are stored
 
@@ -260,8 +335,8 @@ logs, diagnostics, and other private files.
 
 - Confirm the phone is on the same Wi-Fi.
 - Use the computer or Unraid server's network IP, not `localhost`.
-- Confirm the address includes the port, normally `:8080`.
-- Check whether a firewall is blocking Node.js or port `8080`.
+- Confirm the address includes the port (`PORT` in `.env`, default `:8080`).
+- Check whether a firewall is blocking Node.js or that port.
 
 ### DJ Booth is locked
 
@@ -272,6 +347,14 @@ code from `data/host-bootstrap-code.json`.
 
 Update PartyQueue and rebuild the Docker image. Current versions only refill
 while music is actively playing from the queue.
+
+### Host not allowed / Origin required
+
+- Open PartyQueue with the same host and port as `PUBLIC_BASE_URL`.
+- For a private dotted hostname (MagicDNS, etc.), add it to
+  `PARTYQUEUE_ALLOWED_HOSTS`.
+- Smoke scripts and non-browser tools need an `Origin` header when
+  `PUBLIC_BASE_URL` is set.
 
 ## Advanced configuration
 
@@ -288,12 +371,16 @@ SONOS_REGION=NorthAmerica
 SONOS_ROOM=
 SONOS_HOST=
 PUBLIC_BASE_URL=http://YOUR_SERVER_IP:8080
+PARTYQUEUE_ALLOWED_HOSTS=
 SETTINGS_PIN=
 ```
 
 - `SONOS_ROOM` chooses a room or group coordinator.
 - `SONOS_HOST` pins discovery to one speaker IP.
-- `PUBLIC_BASE_URL` is the address Sonos uses to reach PartyQueue media.
+- `PUBLIC_BASE_URL` is the address Sonos uses to reach PartyQueue media, and
+  enables Origin checks on mutating requests.
+- `PARTYQUEUE_ALLOWED_HOSTS` lists extra dotted hostnames the API may accept
+  (comma-separated).
 - `SETTINGS_PIN` is an optional setup fallback; using the Host PIN screen is
   preferred.
 

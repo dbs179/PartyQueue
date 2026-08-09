@@ -4,6 +4,9 @@
  * Fully start URL:
  *   http://10.10.1.30:8088/#/display?kiosk=1
  *
+ * Host TV preview (Booth Look):
+ *   #/display?preview=1  — letterboxed 16:9 stage on this device
+ *
  * Fully settings for PC parity:
  *   - Web Content → Enable JavaScript interface (for window.fully)
  *   - Fullscreen / Immersive mode on; hide system UI
@@ -18,6 +21,7 @@
 const PD_VW = "--pd-vw";
 const PD_VH = "--pd-vh";
 const KIOSK_CLASS = "party-display-kiosk";
+const PREVIEW_CLASS = "party-display-preview";
 const REMEASURE_MS = [0, 100, 350, 1000];
 
 let listening = false;
@@ -30,6 +34,26 @@ function parseHashQuery() {
   if (cut < 0) return new URLSearchParams();
   const q = raw.slice(cut + 1).replace(/^[?&]/, "");
   return new URLSearchParams(q);
+}
+
+function truthyParam(value) {
+  return value === "1" || value === "true";
+}
+
+function hashOrSearchHasFlag(names) {
+  const hashQ = parseHashQuery();
+  for (const name of names) {
+    if (truthyParam(hashQ.get(name))) return true;
+  }
+  try {
+    const sp = new URLSearchParams(location.search || "");
+    for (const name of names) {
+      if (truthyParam(sp.get(name))) return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
 }
 
 /** View name from a hash string, stripping `?kiosk=1` style query. */
@@ -52,15 +76,49 @@ export function isPartyDisplayKiosk() {
     /* ignore */
   }
   if (/Fully/i.test(navigator.userAgent || "")) return true;
-  const hashQ = parseHashQuery();
-  if (hashQ.get("kiosk") === "1" || hashQ.get("kiosk") === "true") return true;
+  return hashOrSearchHasFlag(["kiosk"]);
+}
+
+/** Host Booth “Preview as TV” — not a real Fully kiosk session. */
+export function isPartyDisplayPreview() {
+  return hashOrSearchHasFlag(["preview", "tv"]);
+}
+
+/**
+ * Largest 16:9 stage that fits inside a CSS-px box.
+ * @param {number} boxW
+ * @param {number} boxH
+ * @returns {{ w: number, h: number }}
+ */
+export function fit16x9Stage(boxW, boxH) {
+  const w = Number(boxW) || 0;
+  const h = Number(boxH) || 0;
+  if (!(w > 0 && h > 0)) return { w: 1920, h: 1080 };
+  if (w / h >= 16 / 9) {
+    const stageH = h;
+    return { w: stageH * (16 / 9), h: stageH };
+  }
+  const stageW = w;
+  return { w: stageW, h: stageW * (9 / 16) };
+}
+
+/**
+ * Fully Kiosk start URL from a Join / public base URL.
+ * @param {string} [baseUrl]
+ */
+export function partyDisplayFullyStartUrl(baseUrl) {
+  const raw = String(baseUrl || "").trim();
+  let origin = "";
   try {
-    const sp = new URLSearchParams(location.search || "");
-    if (sp.get("kiosk") === "1" || sp.get("kiosk") === "true") return true;
+    if (raw) origin = new URL(raw).origin;
   } catch {
     /* ignore */
   }
-  return false;
+  if (!origin && typeof location !== "undefined" && location?.origin) {
+    origin = location.origin;
+  }
+  if (!origin) return "#/display?kiosk=1";
+  return `${origin.replace(/\/$/, "")}/#/display?kiosk=1`;
 }
 
 function measureFromFullyCssPx() {
@@ -113,11 +171,14 @@ export function measurePartyDisplayViewport() {
 }
 
 export function applyPartyDisplayViewport() {
-  const { w, h } = measurePartyDisplayViewport();
+  const preview = isPartyDisplayPreview();
+  const live = measurePartyDisplayViewport();
+  const stage = preview ? fit16x9Stage(live.w, live.h) : live;
   const body = document.body;
-  body.style.setProperty(PD_VW, `${Math.round(w * 100) / 100}px`);
-  body.style.setProperty(PD_VH, `${Math.round(h * 100) / 100}px`);
+  body.style.setProperty(PD_VW, `${Math.round(stage.w * 100) / 100}px`);
+  body.style.setProperty(PD_VH, `${Math.round(stage.h * 100) / 100}px`);
   body.classList.toggle(KIOSK_CLASS, isPartyDisplayKiosk());
+  body.classList.toggle(PREVIEW_CLASS, preview);
 }
 
 function clearPartyDisplayViewport() {
@@ -125,6 +186,7 @@ function clearPartyDisplayViewport() {
   body.style.removeProperty(PD_VW);
   body.style.removeProperty(PD_VH);
   body.classList.remove(KIOSK_CLASS);
+  body.classList.remove(PREVIEW_CLASS);
 }
 
 function clearRemeasureTimers() {
@@ -135,7 +197,7 @@ function clearRemeasureTimers() {
 /** Fully fullscreen / system UI often changes the box after first paint. */
 function scheduleKioskRemeasure() {
   clearRemeasureTimers();
-  if (!isPartyDisplayKiosk()) return;
+  if (!isPartyDisplayKiosk() && !isPartyDisplayPreview()) return;
   for (const ms of REMEASURE_MS) {
     remeasureTimers.push(setTimeout(() => applyPartyDisplayViewport(), ms));
   }

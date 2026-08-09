@@ -67,6 +67,8 @@ import {
 } from "./guest-lock-banner.js";
 import {
   isPartyDisplayKiosk,
+  isPartyDisplayPreview,
+  partyDisplayFullyStartUrl,
   partyDisplayHashView,
   syncPartyDisplayViewport,
 } from "./party-display-viewport.js";
@@ -1705,8 +1707,24 @@ const partyDisplayIdle = createPartyDisplayIdle();
 function syncPartyDisplayIdleState() {
   partyDisplayIdle.setDisplayState({
     active: currentView === "display",
-    kiosk: isPartyDisplayKiosk(),
+    // Phone/laptop TV preview uses kiosk padding styles but must not idle.
+    kiosk: isPartyDisplayKiosk() && !isPartyDisplayPreview(),
   });
+}
+
+function syncPartyDisplayBackLabel() {
+  const back = document.getElementById("display-back");
+  if (!back) return;
+  back.textContent =
+    currentView === "display" && isPartyDisplayPreview()
+      ? "Exit TV preview"
+      : "Back";
+}
+
+function refreshBoothTvFullyUrl() {
+  const input = document.getElementById("booth-tv-fully-url");
+  if (!input) return;
+  input.value = partyDisplayFullyStartUrl(joinUrlCache || location.origin);
 }
 
 function showView(name) {
@@ -1718,6 +1736,7 @@ function showView(name) {
   document.body.classList.toggle("party-display-active", target === "display");
   syncPartyDisplayViewport(target === "display");
   syncPartyDisplayIdleState();
+  syncPartyDisplayBackLabel();
   // The DJ Booth and everything behind it require the host PIN. While locked,
   // keep the view hidden and skip its data loads (they'd 401 anyway).
   const hostLocked = isHostArea(target) && !settingsGateOk();
@@ -1741,6 +1760,8 @@ function showView(name) {
   if (!hostLocked) {
     if (target === "booth") {
       updateBoothHubSummaries();
+      refreshBoothTvFullyUrl();
+      if (!joinUrlCache) void loadJoinCode();
     }
     if (target === "settings-dj") updateDjHubSummaries();
     if (target === "settings-dj-advanced") void loadDjEffectivePrompt();
@@ -2082,6 +2103,7 @@ async function loadJoinCode() {
     joinUrlCache = data.url || "";
     if (joinUrlEl) joinUrlEl.textContent = joinUrlCache;
     if (displayJoinUrl) displayJoinUrl.textContent = joinUrlCache;
+    refreshBoothTvFullyUrl();
     // Prefer PNG <img> — Fully/Android WebView often blanks stroke-based QR SVG.
     const paintQr = (qrEl) => {
       if (!qrEl) return;
@@ -2106,6 +2128,7 @@ async function loadJoinCode() {
   } catch (err) {
     joinUrlCache = "";
     if (joinUrlEl) joinUrlEl.textContent = "";
+    refreshBoothTvFullyUrl();
     if (displayJoinUrl) displayJoinUrl.textContent = "";
     for (const errorEl of [joinErrorEl, displayJoinError]) {
       if (!errorEl) continue;
@@ -2132,6 +2155,34 @@ if (joinCopyBtn) {
     }
   });
 }
+
+const boothTvPreviewBtn = document.getElementById("booth-tv-preview");
+const boothTvKioskBtn = document.getElementById("booth-tv-kiosk");
+const boothTvFullyCopyBtn = document.getElementById("booth-tv-fully-copy");
+
+boothTvPreviewBtn?.addEventListener("click", () => {
+  const hash = "#/display?preview=1";
+  if (location.hash === hash) routeFromHash();
+  else location.hash = hash;
+});
+
+boothTvKioskBtn?.addEventListener("click", () => {
+  const hash = "#/display?kiosk=1";
+  if (location.hash === hash) routeFromHash();
+  else location.hash = hash;
+});
+
+boothTvFullyCopyBtn?.addEventListener("click", async () => {
+  const url = partyDisplayFullyStartUrl(joinUrlCache || location.origin);
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast("Fully URL copied");
+  } catch {
+    showToast(url, false, 6000);
+  }
+});
+
+refreshBoothTvFullyUrl();
 
 const EMPTY_MESSAGE =
   "Nothing is playing, add some music to the queue to start the party";

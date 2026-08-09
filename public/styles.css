@@ -1188,6 +1188,37 @@ button.guest-name:focus-visible {
   margin: 2px 0 0;
 }
 
+.booth-tv-preview-hint {
+  margin: 0 0 10px;
+  line-height: 1.35;
+}
+
+.booth-tv-preview-hint code {
+  font-size: 0.9em;
+}
+
+.booth-tv-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.booth-tv-fully-row {
+  align-items: start;
+}
+
+.booth-tv-fully-copy {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  min-width: 0;
+}
+
+.booth-tv-fully-copy .setting-input {
+  min-width: 0;
+}
+
 /* Light captions that group related controls inside the Song Selection box. */
 .setting-group-label {
   margin: 0 0 6px;
@@ -2905,9 +2936,39 @@ body.party-display-active > .container {
 }
 
 /* Fully / TV overscan: keep Join + QR inside the panel edge. */
-body.party-display-active.party-display-kiosk .party-display-shell {
+body.party-display-active.party-display-kiosk .party-display-shell,
+body.party-display-active.party-display-preview .party-display-shell {
   padding: max(calc(28 * var(--pd)), calc(0.025 * var(--pd-vh, 100dvh)))
     max(calc(28 * var(--pd)), calc(0.025 * var(--pd-vw, 100vw)));
+}
+
+/* Booth “Preview as TV”: letterbox a 16:9 stage inside the phone/laptop window. */
+body.party-display-active.party-display-preview {
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+body.party-display-active.party-display-preview > .header {
+  display: none;
+}
+
+body.party-display-active.party-display-preview > .container {
+  width: var(--pd-vw, 100vw);
+  max-width: var(--pd-vw, 100vw);
+  height: var(--pd-vh, 100dvh);
+  min-height: 0;
+  max-height: var(--pd-vh, 100dvh);
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+}
+
+body.party-display-active.party-display-preview .party-display-view {
+  width: 100%;
+  height: var(--pd-vh, 100dvh);
+  max-height: var(--pd-vh, 100dvh);
 }
 
 .party-display-topline,

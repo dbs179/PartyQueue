@@ -323,7 +323,7 @@
               </h2>
               <span id="display-version" class="party-display-version" hidden></span>
             </div>
-            <a href="#/" class="party-display-back">Back</a>
+            <a href="#/" id="display-back" class="party-display-back">Back</a>
           </div>
 
           <p
@@ -705,6 +705,38 @@
                 <span class="autofill-hint">Adds matched genre + From Playlists next to Requested / Discover / Random in Up Next (main + Party Display)</span>
               </span>
             </label>
+            <div class="controls-divider" aria-hidden="true"></div>
+            <p class="section-label settings-banner-label booth-toggle-group">Party Display TV</p>
+            <p class="setting-hint booth-tv-preview-hint">
+              Preview 16:9 TV scale on this device before Fully Kiosk. Fully needs
+              JavaScript interface enabled and start URL
+              <code>#/display?kiosk=1</code>.
+            </p>
+            <div class="booth-tv-preview-actions">
+              <button id="booth-tv-preview" type="button" class="pill-btn">
+                Preview as TV
+              </button>
+              <button id="booth-tv-kiosk" type="button" class="pill-btn">
+                Open kiosk
+              </button>
+            </div>
+            <div class="setting-row-text booth-tv-fully-row">
+              <label class="setting-label" for="booth-tv-fully-url">Fully start URL</label>
+              <div class="booth-tv-fully-copy">
+                <input
+                  type="text"
+                  id="booth-tv-fully-url"
+                  class="setting-input"
+                  readonly
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder="Loading…"
+                />
+                <button id="booth-tv-fully-copy" type="button" class="pill-btn">
+                  Copy
+                </button>
+              </div>
+            </div>
             <div class="controls-divider" aria-hidden="true"></div>
             <p class="section-label settings-banner-label booth-toggle-group">Queue</p>
             <label class="autofill" title="Prefer a short batch over re-adding songs already in memory">
