@@ -5,6 +5,7 @@ import {
   partyQueueCountLabel,
   queueTrackSig,
   queueOriginBadgeHtml,
+  queueGenreLabel,
   queueGenreBadgeHtml,
   queuePlaylistBadgeHtml,
   queueBadgeHtml,
@@ -48,6 +49,14 @@ test("queueOriginBadgeHtml covers dedication, request, discover, era, random", (
   );
   assert.equal(queueOriginBadgeHtml({ djVoice: true }), "");
   assert.match(queueOriginBadgeHtml({}), /Random/);
+});
+
+test("queueGenreLabel prefers genreLabels then genreLabel then lane", () => {
+  assert.equal(queueGenreLabel({ genreLabels: ["Pop"], genreLabel: "Rock" }), "Pop");
+  assert.equal(queueGenreLabel({ genreLabel: "Rock", genreLane: "metal" }), "Rock");
+  assert.equal(queueGenreLabel({ genreLane: "metal" }), "metal");
+  assert.equal(queueGenreLabel({ djVoice: true, genreLabel: "Rock" }), "");
+  assert.equal(queueGenreLabel({}), "");
 });
 
 test("genre and playlist badges respect showQueueGenre", () => {

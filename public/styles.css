@@ -3464,6 +3464,22 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   line-height: 1.15;
 }
 
+.party-display-queue-meta .party-display-queue-genre,
+.party-display-queue-meta .party-display-queue-playlist {
+  font-size: calc(24 * var(--pd));
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.party-display-queue-meta .party-display-queue-genre {
+  color: #7ee0d8;
+}
+
+.party-display-queue-meta .party-display-queue-playlist {
+  color: #b6d47a;
+}
+
 .party-display-side-empty {
   margin: calc(14 * var(--pd)) 0 0;
   color: var(--muted);

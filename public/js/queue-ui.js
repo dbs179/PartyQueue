@@ -80,19 +80,30 @@ export function queueOriginBadgeHtml(track, { eraLabel = "" } = {}) {
 }
 
 /**
+ * Matched genre text for an Up Next row (lane / label), or "".
+ * @param {object} track
+ */
+export function queueGenreLabel(track) {
+  if (!track || track.djVoice) return "";
+  if (Array.isArray(track.genreLabels) && track.genreLabels[0]) {
+    return String(track.genreLabels[0]);
+  }
+  if (typeof track.genreLabel === "string" && track.genreLabel) {
+    return track.genreLabel;
+  }
+  if (typeof track.genreLane === "string" && track.genreLane) {
+    return track.genreLane;
+  }
+  return "";
+}
+
+/**
  * @param {object} track
  * @param {{ showQueueGenre?: boolean }} [opts]
  */
 export function queueGenreBadgeHtml(track, { showQueueGenre = false } = {}) {
   if (!showQueueGenre || track.djVoice) return "";
-  const label =
-    Array.isArray(track.genreLabels) && track.genreLabels[0]
-      ? track.genreLabels[0]
-      : typeof track.genreLabel === "string" && track.genreLabel
-        ? track.genreLabel
-        : typeof track.genreLane === "string" && track.genreLane
-          ? track.genreLane
-          : "";
+  const label = queueGenreLabel(track);
   if (!label) return "";
   return `<span class="queue-genre-badge" title="Matched song genre">${escapeHtml(label)}</span>`;
 }
@@ -194,6 +205,7 @@ export function createQueueUi(els, deps) {
     let probe = displayQueue.querySelector("li");
     let created = false;
     if (!probe) {
+      const showGenre = !!getShowQueueGenre();
       probe = document.createElement("li");
       probe.setAttribute("aria-hidden", "true");
       probe.innerHTML =
@@ -202,6 +214,10 @@ export function createQueueUi(els, deps) {
         "<strong>Sample Title</strong>" +
         "<span>Sample Artist</span>" +
         '<span class="party-display-queue-source">Random</span>' +
+        (showGenre
+          ? '<span class="party-display-queue-genre">Rock</span>' +
+            '<span class="party-display-queue-playlist">From Playlists</span>'
+          : "") +
         "</div>";
       probe.style.visibility = "hidden";
       probe.style.pointerEvents = "none";
@@ -446,6 +462,25 @@ export function createQueueUi(els, deps) {
         source.className = "party-display-queue-source";
         source.textContent = displayOriginLabel(track, eraMood);
         meta.appendChild(source);
+
+        // Same Show song genre toggle as main Up Next (genre + From Playlists).
+        if (getShowQueueGenre()) {
+          const genreLabel = queueGenreLabel(track);
+          if (genreLabel) {
+            const genre = document.createElement("span");
+            genre.className = "party-display-queue-genre";
+            genre.textContent = genreLabel;
+            genre.title = "Matched song genre";
+            meta.appendChild(genre);
+          }
+          if (track.fromPlaylist) {
+            const playlist = document.createElement("span");
+            playlist.className = "party-display-queue-playlist";
+            playlist.textContent = "From Playlists";
+            playlist.title = "This song is in your Spotify playlists";
+            meta.appendChild(playlist);
+          }
+        }
       }
 
       row.append(number, meta);
