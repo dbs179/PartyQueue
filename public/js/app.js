@@ -11,6 +11,7 @@ import { wirePanelCollapse } from "./panel-collapse.js";
 import { createConfirmModal } from "./confirm-modal.js";
 import { createHostPinUi } from "./host-pin-ui.js";
 import { createGuestNameUi } from "./guest-name-ui.js";
+import { createGuestFairnessUi } from "./guest-fairness-ui.js";
 import { loadMemory as loadMemoryUi } from "./memory-ui.js";
 import { createPartyRecapUi } from "./party-recap.js";
 import { createSonosGroups } from "./sonos-groups.js";
@@ -144,6 +145,9 @@ const {
   }
 );
 
+/** Filled after fairness UI is created — name modal calls this on save. */
+let refreshGuestFairness = () => {};
+
 const {
   ensureDisplayName,
   guestBadgeName,
@@ -158,7 +162,18 @@ const {
   nameSaveBtn: document.getElementById("name-save"),
   nameCancelBtn: document.getElementById("name-cancel"),
   guestNameBtn: document.getElementById("guest-name"),
+  onNameChange: () => {
+    refreshGuestFairness();
+  },
 });
+
+const guestFairnessUi = createGuestFairnessUi({
+  el: document.getElementById("guest-fairness"),
+  getUser: () => guestIdentityPayload()?.requestedByUser || "",
+});
+refreshGuestFairness = () => {
+  guestFairnessUi.refresh();
+};
 
 const dedicationOverlay = document.getElementById("dedication-overlay");
 const dedicationInput = document.getElementById("dedication-input");
@@ -2145,8 +2160,14 @@ const searchUi = createSearchUi(
     refreshSonos,
     getCurrentView: () => currentView,
     loadStats,
+    onFairnessRefresh: () => refreshGuestFairness(),
   }
 );
+
+refreshGuestFairness();
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refreshGuestFairness();
+});
 
 
 const reactionsUi = createReactionsUi(

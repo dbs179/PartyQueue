@@ -30,6 +30,7 @@ import {
   DJ_ICON_DEFAULT_URL,
 } from "./settings.js";
 import { taglineForClip } from "./dj-taglines.js";
+import { scriptForClip } from "./dj-night-memory.js";
 import {
   originOf,
   moodOf,
@@ -258,6 +259,10 @@ async function getNowPlayingRaw() {
           companionUri,
         })
       : null;
+  const announceScript =
+    djClip || silenceBridge
+      ? scriptForClip(silenceBridge ? companionUri || uri : uri)
+      : null;
 
   let title;
   let artist;
@@ -350,6 +355,7 @@ async function getNowPlayingRaw() {
     durationSec,
     djVoice: djClip || silenceBridge,
     djSilence: silenceBridge,
+    ...(announceScript ? { announceScript } : {}),
     // Internal hint for enrichNowPlaying during silence (stripped before wire).
     ...(upcomingForGenre ? { upcomingForGenre } : {}),
     room: coordinator.Name,

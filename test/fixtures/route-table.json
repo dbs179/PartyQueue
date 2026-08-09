@@ -13,6 +13,7 @@
   "GET /api/dj-icon :: requireHost > <anonymous>",
   "GET /api/dj-voice/next-set :: requireHost > <anonymous>",
   "GET /api/dj-voice/prompt-preview :: requireHost > <anonymous>",
+  "GET /api/fairness :: <anonymous>",
   "GET /api/genres :: <anonymous>",
   "GET /api/groups :: <anonymous>",
   "GET /api/guests :: requireHost > <anonymous>",

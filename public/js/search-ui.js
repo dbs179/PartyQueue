@@ -42,6 +42,7 @@ import {
  *   refreshSonos: () => void,
  *   getCurrentView: () => string,
  *   loadStats: () => void,
+ *   onFairnessRefresh?: () => void,
  * }} deps
  */
 export function createSearchUi(els, deps) {
@@ -69,6 +70,7 @@ export function createSearchUi(els, deps) {
   const refreshSonos = deps.refreshSonos || (() => {});
   const getCurrentView = deps.getCurrentView || (() => "main");
   const loadStats = deps.loadStats || (() => {});
+  const onFairnessRefresh = deps.onFairnessRefresh || (() => {});
 
   let debounceTimer = null;
   let currentQuery = "";
@@ -277,9 +279,11 @@ export function createSearchUi(els, deps) {
       );
       btn.textContent = "Added";
       refreshSonos();
+      onFairnessRefresh();
       if (getCurrentView() === "stats") loadStats();
     } catch (err) {
       showToast(err.message, true);
+      onFairnessRefresh();
       btn.textContent = prev;
       btn.disabled = false;
       return;
@@ -372,11 +376,13 @@ export function createSearchUi(els, deps) {
         );
       }
       refreshSonos();
+      onFairnessRefresh();
       if (getCurrentView() === "stats") loadStats();
     } catch (err) {
       btn.disabled = false;
       btn.textContent = "Add";
       showToast(err.message, true);
+      onFairnessRefresh();
     }
   }
 

@@ -74,6 +74,7 @@ import {
 import {
   getRecentDjAnnounceScripts,
   rememberDjAnnounceScript,
+  rememberDjClipScript,
   reserveDjPhrase,
 } from "./dj-night-memory.js";
 
@@ -2775,6 +2776,15 @@ async function announceOnSonosUnlocked(
       console.log(
         `[dj-voice] using prebuilt TTS clip ${clip.fileName || clip.publicUrl}`
       );
+    }
+    // Bind spoken copy to clip URL(s) so lyrics / Party Display can show it
+    // while this pad (or its silence companion) is now playing.
+    try {
+      rememberDjClipScript(clip.publicUrl, message, {
+        alsoUris: [clip.localUrl, clip.fileName].filter(Boolean),
+      });
+    } catch (err) {
+      console.warn("[dj-voice] clip script memory failed:", err.message);
     }
     if (preempted()) {
       return { ok: false, skipped: true, reason: "queue-preempted" };

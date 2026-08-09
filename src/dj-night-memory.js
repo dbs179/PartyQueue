@@ -25,6 +25,7 @@ const MAX_USED_NOTES = 40;
 const MAX_GLOBAL_PHRASE_USES = 600;
 const MAX_GLOBAL_ANNOUNCE_SCRIPTS = 20;
 const MAX_TAGLINE_CLIPS = 120;
+const MAX_CLIP_SCRIPTS = 120;
 
 let cache = null;
 
@@ -43,6 +44,7 @@ function emptyStore() {
       phraseUses: [],
       recentAnnounceScripts: [],
       taglineClips: [],
+      clipScripts: [],
     },
   };
 }
@@ -139,7 +141,24 @@ function normalizeGlobal(global) {
         }))
         .slice(-MAX_TAGLINE_CLIPS)
     : [];
-  return { phraseUses, recentAnnounceScripts, taglineClips };
+  const clipScripts = Array.isArray(global?.clipScripts)
+    ? global.clipScripts
+        .filter(
+          (item) =>
+            item &&
+            typeof item.uri === "string" &&
+            item.uri.trim() &&
+            typeof item.text === "string" &&
+            item.text.trim()
+        )
+        .map((item) => ({
+          uri: String(item.uri).trim(),
+          text: String(item.text).trim(),
+          ts: Number(item.ts) || 0,
+        }))
+        .slice(-MAX_CLIP_SCRIPTS)
+    : [];
+  return { phraseUses, recentAnnounceScripts, taglineClips, clipScripts };
 }
 
 function persist() {
@@ -194,9 +213,87 @@ function pruneStore(now = Date.now()) {
     taglineClips: (store.global?.taglineClips || [])
       .filter((item) => item.ts >= since)
       .slice(-MAX_TAGLINE_CLIPS),
+    clipScripts: (store.global?.clipScripts || [])
+      .filter((item) => item.ts >= since)
+      .slice(-MAX_CLIP_SCRIPTS),
   };
   cache = next;
   return cache;
+}
+
+/** URI keys used to match Sonos TrackURI against a remembered clip. */
+function clipUriLookupKeys(uri) {
+  const raw = String(uri || "").trim();
+  if (!raw) return [];
+  const keys = [raw];
+  try {
+    const parsed = new URL(raw);
+    if (parsed.pathname) keys.push(parsed.pathname);
+    const base = parsed.pathname.split("/").filter(Boolean).pop();
+    if (base) keys.push(base);
+  } catch {
+    const base = raw.split(/[\\/]/).filter(Boolean).pop();
+    if (base) keys.push(base);
+  }
+  return [...new Set(keys.filter(Boolean))];
+}
+
+/**
+ * Remember the spoken script for a TTS clip URL so Now Playing / lyrics can
+ * show it while that pad plays. Store both public + local media URLs when they
+ * differ (Sonos may report either).
+ * @param {string|null|undefined} uri
+ * @param {string|null|undefined} script
+ * @param {{ alsoUris?: Array<string|null|undefined>, now?: number }} [opts]
+ */
+export function rememberDjClipScript(uri, script, { alsoUris = [], now = Date.now() } = {}) {
+  const text = String(script || "").trim();
+  if (!text) return;
+  const uris = [uri, ...(Array.isArray(alsoUris) ? alsoUris : [])]
+    .map((u) => String(u || "").trim())
+    .filter(Boolean);
+  if (!uris.length) return;
+
+  const ts = Number(now) || Date.now();
+  const store = pruneStore(ts);
+  const clips = store.global.clipScripts || [];
+  for (const uriKey of uris) {
+    const existing = clips.find((item) => item.uri === uriKey);
+    if (existing) {
+      existing.text = text;
+      existing.ts = ts;
+    } else {
+      clips.push({ uri: uriKey, text, ts });
+    }
+  }
+  while (clips.length > MAX_CLIP_SCRIPTS) clips.shift();
+  store.global.clipScripts = clips;
+  persist();
+}
+
+/**
+ * @param {string|null|undefined} uri
+ * @returns {string|null}
+ */
+export function scriptForClip(uri) {
+  const keys = clipUriLookupKeys(uri);
+  if (!keys.length) return null;
+  const store = pruneStore();
+  const clips = store.global.clipScripts || [];
+  if (!clips.length) return null;
+
+  for (const key of keys) {
+    const hit = clips.find((item) => item.uri === key);
+    if (hit?.text) return hit.text;
+  }
+  // Basename fallback when Sonos rewrites host/port but keeps the file name.
+  const keySet = new Set(keys);
+  for (const item of clips) {
+    for (const itemKey of clipUriLookupKeys(item.uri)) {
+      if (keySet.has(itemKey) && item.text) return item.text;
+    }
+  }
+  return null;
 }
 
 function guestKey(name) {

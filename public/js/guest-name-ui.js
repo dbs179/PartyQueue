@@ -22,6 +22,7 @@ import {
  *   nameSaveBtn?: HTMLElement|null,
  *   nameCancelBtn?: HTMLElement|null,
  *   guestNameBtn?: HTMLElement|null,
+ *   onNameChange?: (user: string) => void,
  * }} els
  */
 export function createGuestNameUi(els) {
@@ -35,6 +36,7 @@ export function createGuestNameUi(els) {
     nameSaveBtn,
     nameCancelBtn,
     guestNameBtn,
+    onNameChange,
   } = els || {};
 
   /** @type {string} */
@@ -133,6 +135,11 @@ export function createGuestNameUi(els) {
         sessionDisplayName = cleaned;
         sessionDisplayAlias = alias;
         syncGuestNameLabel();
+        try {
+          onNameChange?.(cleaned);
+        } catch {
+          /* ignore UI refresh errors */
+        }
         finish(cleaned);
       };
       const onCancel = () => {

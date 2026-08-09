@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   LYRICS_LEAD_SEC,
   activeSyncedLineIndex,
+  formatDjAnnounceScript,
   lyricsMissMessage,
 } from "../public/js/lyrics-ui.js";
 
@@ -30,5 +31,13 @@ test("lyricsMissMessage covers degraded providers", () => {
   assert.equal(
     lyricsMissMessage({ degraded: true }),
     "No lyrics found — providers are having trouble"
+  );
+});
+
+test("formatDjAnnounceScript soft-breaks sentences for TV/overlay", () => {
+  assert.equal(formatDjAnnounceScript(""), "");
+  assert.equal(
+    formatDjAnnounceScript("Hello party. Here comes the set! Enjoy."),
+    "Hello party.\n\nHere comes the set!\n\nEnjoy."
   );
 });

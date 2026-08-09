@@ -35,6 +35,13 @@ export function lyricsMissMessage(data) {
   return "No lyrics found";
 }
 
+/** Soft line breaks so DJ announce copy reads well on TV / overlay. */
+export function formatDjAnnounceScript(script) {
+  const text = String(script || "").trim();
+  if (!text) return "";
+  return text.replace(/([.!?])\s+/g, "$1\n\n");
+}
+
 export function playbackClockNow() {
   return globalThis.performance?.now?.() ?? Date.now();
 }
@@ -435,10 +442,19 @@ export function createLyricsUi(els, deps) {
   async function loadOverlayLyrics(np, { retryCount = 0 } = {}) {
     clearLyricsRetry();
     const fetchId = ++lyricsFetchId;
-    if (!np || np.djVoice || !(np.title && np.artist)) {
+    if (np?.djVoice) {
+      const script = formatDjAnnounceScript(np.announceScript);
+      if (script) {
+        renderPlainLyrics(script);
+        return;
+      }
       setNpFsLyricsStatus(
-        np?.djVoice ? "DJ Voice — no lyrics" : "No lyrics for this track"
+        np.djSilence ? "DJ coming up…" : "DJ Voice — waiting for script"
       );
+      return;
+    }
+    if (!np || !(np.title && np.artist)) {
+      setNpFsLyricsStatus("No lyrics for this track");
       return;
     }
     const hasPaintedLyrics = lyricsContainers().some((el) =>
@@ -522,6 +538,16 @@ export function createLyricsUi(els, deps) {
       lyricsKey = key;
       clearLyricsRetry();
       stopLyricTicker();
+      loadOverlayLyrics(np);
+      return;
+    }
+    // announceScript can land a tick after the pad starts (or after silence
+    // resolves its companion TTS URI) — promote status → plain text.
+    if (
+      np?.djVoice &&
+      String(np.announceScript || "").trim() &&
+      !lyricsContainers().some((el) => el.querySelector(".np-fs-lyrics-plain"))
+    ) {
       loadOverlayLyrics(np);
       return;
     }

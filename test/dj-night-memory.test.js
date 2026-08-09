@@ -165,6 +165,22 @@ test("global announce memory is bounded and pruned after twelve hours", () => {
   assert.deepEqual(mem.getRecentDjAnnounceScripts(5, expired), []);
 });
 
+test("clip scripts bind spoken copy to TTS URLs for lyrics display", () => {
+  const publicUrl = "http://10.10.1.30:8088/media/tts/abcd1234.mp3";
+  const localUrl = "http://127.0.0.1:8088/media/tts/abcd1234.mp3";
+  const script = "This next set is all fire. Enjoy.";
+  mem.rememberDjClipScript(publicUrl, script, {
+    alsoUris: [localUrl, "abcd1234.mp3"],
+  });
+  assert.equal(mem.scriptForClip(publicUrl), script);
+  assert.equal(mem.scriptForClip(localUrl), script);
+  assert.equal(
+    mem.scriptForClip("http://homeassistant.local:8123/api/tts_proxy/abcd1234.mp3"),
+    script
+  );
+  assert.equal(mem.scriptForClip("http://other/missing.mp3"), null);
+});
+
 test("old DJ memory files load without global announce history", () => {
   mem.clearDjNightMemory();
   fs.writeFileSync(

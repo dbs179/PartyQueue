@@ -868,6 +868,20 @@ button.guest-name:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+.guest-fairness {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+
+.guest-fairness[hidden] {
+  display: none;
+}
+
 .requests-paused-banner {
   margin: 0;
   padding: 0.65rem 0.8rem;
@@ -3326,10 +3340,17 @@ body.party-display-active.party-display-kiosk .party-display-shell {
 .party-display-lyrics .np-fs-lyrics-plain {
   margin: 0;
   height: 100%;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  white-space: pre-wrap;
   font-size: var(--display-lyric-size);
   line-height: var(--display-lyric-line);
   max-width: none;
+  scrollbar-width: none;
+}
+
+.party-display-lyrics .np-fs-lyrics-plain::-webkit-scrollbar {
+  display: none;
 }
 
 .party-display-lyrics-window {

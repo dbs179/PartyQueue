@@ -65,6 +65,7 @@ import {
 import {
   resolveGuestIdentity,
   sanitizeDedication,
+  sanitizeDisplayName,
 } from "../display-name.js";
 import { ensureGuestProfile } from "../guest-profiles.js";
 import {
@@ -78,6 +79,7 @@ import {
   withRequestFairnessLock,
 } from "../request-fairness.js";
 import { evaluateSetRequestFairness } from "../set-request-fairness.js";
+import { buildGuestFairnessStatus } from "../guest-fairness-status.js";
 import { spotifyTrackId } from "../sampler.js";
 import {
   addPlaylistToQueue,
@@ -996,6 +998,39 @@ export function registerQueueRoutes(app, ctx) {
     } catch (err) {
       res.status(502).json({ error: err.message });
     }
+  }));
+
+  // Guest quota snapshot for the search-bar remaining line. Open on the LAN
+  // like POST /api/queue — keyed by User name, not a secret.
+  app.get("/api/fairness", asyncHandler(async (req, res) => {
+    const user = sanitizeDisplayName(
+      typeof req.query?.user === "string"
+        ? req.query.user
+        : typeof req.query?.requestedByUser === "string"
+          ? req.query.requestedByUser
+          : ""
+    );
+    const songSettings = getRequestFairnessSettings();
+    const setSettings = getSetRequestFairnessSettings();
+    let queue = [];
+    if (songSettings.requestFairnessEnabled) {
+      try {
+        const snapshot = await sonos.getQueueList();
+        queue = Array.isArray(snapshot) ? snapshot : snapshot?.tracks || [];
+      } catch {
+        queue = [];
+      }
+    }
+    res.json(
+      buildGuestFairnessStatus({
+        user,
+        songSettings,
+        setSettings,
+        queue,
+        events: getRequests(),
+        fairnessResetAt: getFairnessResetAt(),
+      })
+    );
   }));
 
   app.post("/api/queue/remove", destructiveLimit, requireHostControls, asyncHandler(async (req, res) => {
