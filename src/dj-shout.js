@@ -477,5 +477,9 @@ export async function announceRequestShout(
     startPlayback: !!startPlayback,
     queuePosition: pos,
     preemptGeneration,
+    // Re-demote under the announce insert lock after TTS so pads stay glued
+    // to the request even if the queue shifted during script generation.
+    applyLeadBuffer: !startPlayback,
+    requestUri: uri || null,
   });
 }

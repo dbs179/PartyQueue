@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   shouldPollView,
+  createLiveStreams,
   NOW_PLAYING_FALLBACK_MS,
   QUEUE_FALLBACK_MS,
   PARTY_FALLBACK_MS,
@@ -20,4 +21,62 @@ test("fallback intervals stay in the expected band", () => {
   assert.equal(NOW_PLAYING_FALLBACK_MS, 15000);
   assert.equal(QUEUE_FALLBACK_MS, 15000);
   assert.ok(PARTY_FALLBACK_MS >= QUEUE_FALLBACK_MS);
+});
+
+test("HTTP now-playing fallback does not overwrite an active SSE paint", async () => {
+  const paints = [];
+  let resolveFetch;
+  const fetchPromise = new Promise((resolve) => {
+    resolveFetch = resolve;
+  });
+  const live = createLiveStreams(
+    {},
+    {
+      fetch: async () => {
+        await fetchPromise;
+        return {
+          ok: true,
+          async json() {
+            return { title: "stale-http", artist: "X" };
+          },
+        };
+      },
+      EventSource: class {
+        constructor() {
+          queueMicrotask(() => {
+            this.onopen?.();
+            this.onmessage?.({
+              data: JSON.stringify({
+                title: "fresh-sse",
+                artist: "Y",
+                streamSession: "s1",
+                streamSequence: 2,
+              }),
+            });
+          });
+        }
+        addEventListener() {}
+        close() {}
+      },
+      getVisibilityState: () => "visible",
+      getCurrentView: () => "main",
+      renderNowPlaying: (snap) => paints.push(snap.title),
+      applyQueueTracks: () => {},
+      applyPartySettings: () => {},
+      freezePlayhead: () => {},
+      isQueueEditMode: () => false,
+      setPendingStreamTracks: () => {},
+      clearPendingStreamTracks: () => {},
+      loadGroups: () => {},
+    }
+  );
+
+  live.openNowPlayingStream();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(paints, ["fresh-sse"]);
+  resolveFetch();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(paints, ["fresh-sse"]);
+  live.closeNowPlayingStream?.();
+  live.stopAll?.();
 });

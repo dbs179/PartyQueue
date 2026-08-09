@@ -161,6 +161,29 @@ test("clearConsumedDedication removes the oldest instance only", () => {
   origin.clearConsumedDedication("missing");
 });
 
+test("clearSearchedOccurrence removes a middle host-deleted copy", () => {
+  origin.markOrigin(["nine"], "searched", {
+    requestedBy: "A",
+    dedication: "Maria",
+  });
+  origin.markOrigin(["nine"], "searched", {
+    requestedBy: "B",
+    dedication: "Dave",
+    appendInstance: true,
+  });
+  origin.markOrigin(["nine"], "searched", {
+    requestedBy: "C",
+    dedication: "Owen",
+    appendInstance: true,
+  });
+  origin.clearSearchedOccurrence("nine", 1);
+  assert.deepEqual(
+    origin.searchedInstancesOf("nine").map((x) => x.dedication),
+    ["Maria", "Owen"]
+  );
+  assert.equal(origin.originMetaForOccurrence("nine", 1).dedication, "Owen");
+});
+
 test("advanceHeardTrack does not clear origin when entering DJ announce pads", () => {
   // Empty-queue Set Request: first song registers as heard, then shout pads.
   const afterSong = origin.advanceHeardTrack(null, {

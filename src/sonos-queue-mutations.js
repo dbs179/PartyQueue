@@ -30,6 +30,7 @@ import {
   originOf,
   originSnapshot,
   isFiller,
+  clearSearchedOccurrence,
 } from "./queue-origin.js";
 import { parseSonosTime } from "./sonos-snapshots.js";
 import { queueWorkWasPreempted } from "./queue-preempt.js";
@@ -383,6 +384,7 @@ async function addTrackToQueueUnlocked(
     // copy into the searched block and re-tag it — no duplicate.
     let insertBefore = insertPos || items.length + 1;
     insertBefore = Math.max(1, Math.min(insertBefore, items.length + 1));
+    let reorderOk = true;
     if (insertBefore !== existing.pos && insertBefore !== existing.pos + 1) {
       try {
         await coordinator.AVTransportService.ReorderTracksInQueue({
@@ -394,10 +396,20 @@ async function addTrackToQueueUnlocked(
         });
       } catch (err) {
         console.error("[queue] promote reorder failed:", err.message);
+        reorderOk = false;
       }
     }
-    promoted = true;
-    if (existing.id) markOrigin([existing.id], "searched", byOpts);
+    if (reorderOk) {
+      promoted = true;
+      if (existing.id) markOrigin([existing.id], "searched", byOpts);
+    } else {
+      // Reorder failed — leave the filler where it is and enqueue a real request
+      // copy. Never mark searched unless we actually placed a request row.
+      await enqueueMeta(m, meta, insertPos);
+      if (id) markOrigin([id], "searched", byOpts);
+      duplicated = true;
+      existing = null;
+    }
   } else if (existing && existingWasRequested) {
     // Already a guest request — allow another copy so Maria / Dave / Owen can
     // each dedicate the same song with its own live note + stats row.
@@ -534,6 +546,8 @@ async function enqueueHttpAudioUnlocked(
  * @param {{
  *   queuePosition?: number,
  *   preemptGeneration?: number,
+ *   applyLeadBuffer?: boolean,
+ *   requestUri?: string|null,
  *   ramp: { url: string, title?: string, artist?: string, durationSec?: number },
  *   tts: { url: string, title?: string, artist?: string, durationSec?: number },
  *   restore: { url: string, title?: string, artist?: string, durationSec?: number },
@@ -541,6 +555,7 @@ async function enqueueHttpAudioUnlocked(
  *     removePads?: Function,
  *     enqueue?: Function,
  *     pauseTrim?: Function,
+ *     ensureLeadBuffer?: Function,
  *   }
  * }} opts
  */
@@ -554,11 +569,15 @@ async function insertAnnounceBlockUnlocked({
   ramp,
   tts,
   restore,
+  applyLeadBuffer = false,
+  requestUri = null,
   ops = {},
 } = {}) {
   const removePads = ops.removePads || removeUpcomingAnnouncePadsUnlocked;
   const enqueue = ops.enqueue || enqueueHttpAudioUnlocked;
   const pauseTrim = ops.pauseTrim || pauseQueueTrim;
+  const ensureLeadBuffer =
+    ops.ensureLeadBuffer || ensureShoutLeadBufferUnlocked;
   const ensurePlayMode =
     ops.ensurePlayMode ||
     (async () => {
@@ -584,6 +603,42 @@ async function insertAnnounceBlockUnlocked({
 
   pauseTrim(25000);
   let rampPos = Number(queuePosition) || 1;
+
+  // Mid-set guest shouts: re-resolve + demote under this same write lock so the
+  // pads cannot land after another mutation shifted the request back to next-up
+  // during script/TTS (route demote alone leaves that gap).
+  if (applyLeadBuffer) {
+    try {
+      if (requestUri) {
+        const m = await getManager();
+        const coordinator = await resolveCoordinator(m);
+        const queue = await coordinator.GetQueue().catch(() => ({ Result: [] }));
+        const items = Array.isArray(queue.Result) ? queue.Result : [];
+        const live = resolveQueuePosition(items, requestUri, rampPos);
+        if (live) rampPos = live;
+      }
+      const lead = await ensureLeadBuffer(rampPos);
+      if (Number.isFinite(lead?.absoluteQueuePosition)) {
+        if (lead.absoluteQueuePosition !== rampPos) {
+          console.log(
+            `[announce-block] lead buffer under insert lock: #${rampPos} → #${lead.absoluteQueuePosition}` +
+              (lead.reason ? ` (${lead.reason})` : "")
+          );
+        }
+        rampPos = lead.absoluteQueuePosition;
+      }
+    } catch (err) {
+      console.warn(
+        "[announce-block] lead buffer under insert lock failed:",
+        err?.message || err
+      );
+    }
+  }
+
+  if (preempted()) {
+    return { ok: false, skipped: true, reason: "queue-preempted" };
+  }
+
   let wiped = { removed: 0, removedBefore: 0, protectedThrough: 0 };
   try {
     wiped = await removePads({ beforePosition: rampPos });
@@ -692,11 +747,38 @@ export async function removeQueueTrack(...args) {
 async function removeQueueTrackUnlocked({ uri, position }) {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
-  const queue = await coordinator.GetQueue();
+  const [queue, posInfo, media] = await Promise.all([
+    coordinator.GetQueue(),
+    coordinator.AVTransportService.GetPositionInfo().catch(() => ({
+      Track: 0,
+    })),
+    coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(
+      () => ({ CurrentURI: "" })
+    ),
+  ]);
   const items = Array.isArray(queue.Result) ? queue.Result : [];
 
   const pos = resolveQueuePosition(items, uri, position);
   if (!pos) throw new Error("That song is no longer in the queue.");
+
+  const trackId = spotifyTrackId(uri || items[pos - 1]?.TrackUri || null);
+  const currentTrack = Number(posInfo.Track) || 0;
+  const playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
+  // Only clear live instances for unplayed / now-playing copies. Tracks behind
+  // the playhead were already consumed when they left Now Playing.
+  if (
+    trackId &&
+    originOf(trackId) === "searched" &&
+    !(playingFromQueue && currentTrack >= 1 && pos < currentTrack)
+  ) {
+    const occ = searchedOccurrenceIndexForPosition(items, {
+      trackId,
+      absolutePos: pos,
+      currentTrack,
+      playingFromQueue,
+    });
+    if (occ != null) clearSearchedOccurrence(trackId, occ);
+  }
 
   await coordinator.AVTransportService.RemoveTrackRangeFromQueue({
     InstanceID: 0,
@@ -706,6 +788,64 @@ async function removeQueueTrackUnlocked({ uri, position }) {
   });
   invalidateSonosSnapshots();
   return { removed: true };
+}
+
+/**
+ * Prefer Sonos NewUpdateID after a queue mutation; fall back to a live
+ * GetQueue read so chained removes never send UpdateID 0.
+ * @param {{ NewUpdateID?: number|string }|null|undefined} removeResult
+ * @param {number} previous
+ * @param {{ GetQueue?: Function }|null} [coordinator]
+ */
+export async function refreshQueueUpdateId(
+  removeResult,
+  previous,
+  coordinator = null
+) {
+  const fromResult = Number(removeResult?.NewUpdateID);
+  if (Number.isFinite(fromResult)) return fromResult;
+  if (typeof coordinator?.GetQueue === "function") {
+    try {
+      const queue = await coordinator.GetQueue();
+      const live = Number(queue?.UpdateID);
+      if (Number.isFinite(live)) return live;
+    } catch {
+      /* keep previous */
+    }
+  }
+  const prev = Number(previous);
+  return Number.isFinite(prev) ? prev : 0;
+}
+
+/**
+ * Occurrence index (0 = now playing / next-up) for a Spotify id at an absolute
+ * 1-based queue position — matches queue-list badge mapping.
+ */
+export function searchedOccurrenceIndexForPosition(
+  items,
+  {
+    trackId,
+    absolutePos,
+    currentTrack = 0,
+    playingFromQueue = false,
+  } = {}
+) {
+  if (!trackId) return null;
+  const pos = Math.floor(Number(absolutePos) || 0);
+  if (pos < 1) return null;
+  const list = Array.isArray(items) ? items : [];
+  const startIdx =
+    playingFromQueue && Number(currentTrack) >= 1
+      ? Math.floor(Number(currentTrack)) - 1
+      : 0;
+  let occ = 0;
+  for (let i = startIdx; i < list.length; i++) {
+    const id = spotifyTrackId(list[i]?.TrackUri ?? list[i]?.uri ?? null);
+    if (id !== trackId) continue;
+    if (i + 1 === pos) return occ;
+    occ += 1;
+  }
+  return null;
 }
 
 // Contiguous 1-based ranges from a sorted list of indices (for batch removes).
@@ -823,14 +963,19 @@ async function removeUpcomingAnnouncePadsUnlocked({ beforePosition } = {}) {
   let removed = 0;
   for (const range of ranges) {
     try {
-      await coordinator.AVTransportService.RemoveTrackRangeFromQueue({
-        InstanceID: 0,
-        UpdateID: updateId,
-        StartingIndex: range.StartingIndex,
-        NumberOfTracks: range.NumberOfTracks,
-      });
+      const removeResult =
+        await coordinator.AVTransportService.RemoveTrackRangeFromQueue({
+          InstanceID: 0,
+          UpdateID: updateId,
+          StartingIndex: range.StartingIndex,
+          NumberOfTracks: range.NumberOfTracks,
+        });
       removed += range.NumberOfTracks;
-      updateId = 0;
+      updateId = await refreshQueueUpdateId(
+        removeResult,
+        updateId,
+        coordinator
+      );
     } catch (err) {
       console.error(
         `[dj-voice] remove announce pads #${range.StartingIndex}+${range.NumberOfTracks} failed:`,
@@ -894,14 +1039,19 @@ async function removeUpcomingFillerTracksUnlocked({ beforePosition } = {}) {
   let removed = 0;
   for (const range of ranges) {
     try {
-      await coordinator.AVTransportService.RemoveTrackRangeFromQueue({
-        InstanceID: 0,
-        UpdateID: updateId,
-        StartingIndex: range.StartingIndex,
-        NumberOfTracks: range.NumberOfTracks,
-      });
+      const removeResult =
+        await coordinator.AVTransportService.RemoveTrackRangeFromQueue({
+          InstanceID: 0,
+          UpdateID: updateId,
+          StartingIndex: range.StartingIndex,
+          NumberOfTracks: range.NumberOfTracks,
+        });
       removed += range.NumberOfTracks;
-      updateId = 0;
+      updateId = await refreshQueueUpdateId(
+        removeResult,
+        updateId,
+        coordinator
+      );
     } catch (err) {
       console.error(
         `[closing-time] remove filler #${range.StartingIndex}+${range.NumberOfTracks} failed:`,

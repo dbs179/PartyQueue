@@ -373,12 +373,25 @@ export function setDedication(id, dedication) {
  */
 export function clearConsumedDedication(id) {
   if (!id || typeof id !== "string") return;
+  clearSearchedOccurrence(id, 0);
+}
+
+/**
+ * Drop the Nth live searched instance (0 = next-up / now playing). Used when
+ * the host deletes a specific queue copy so later badges keep the right guest.
+ */
+export function clearSearchedOccurrence(id, occurrenceIndex = 0) {
+  if (!id || typeof id !== "string") return;
   load();
-  const at = entries.findIndex(
-    (e) => e.id === id && e.source === "searched"
-  );
+  const want = Math.max(0, Math.floor(Number(occurrenceIndex) || 0));
+  let seen = 0;
+  const at = entries.findIndex((e) => {
+    if (e.id !== id || e.source !== "searched") return false;
+    if (seen === want) return true;
+    seen += 1;
+    return false;
+  });
   if (at === -1) return;
-  // Consume the whole instance so the next copy keeps its own dedication.
   entries.splice(at, 1);
   buildIndex();
   persist();

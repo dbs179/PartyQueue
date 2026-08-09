@@ -28,9 +28,11 @@ export function partyQueueCountLabel(n) {
  * @param {{ showQueueGenre?: boolean }} [opts]
  */
 export function queueTrackSig(track, { showQueueGenre = false } = {}) {
+  // Omit absolute Sonos position: trimPlayedTracks shifts every upcoming
+  // index while the visible row is unchanged. Including position forced a
+  // full row rebuild (badge/pill flash) every maintenance pass.
   return [
     track.uri || "",
-    track.position || "",
     track.searched ? 1 : 0,
     track.discovered ? 1 : 0,
     track.moodPick ? 1 : 0,
@@ -177,6 +179,7 @@ export function createQueueUi(els, deps) {
   let pendingStreamTracks = null;
   /** @type {object[]} */
   let lastDisplayTracks = [];
+  let lastDisplayQueueSig = "";
   /** @type {ResizeObserver|null} */
   let displayQueueResizeObserver = null;
   let displayQueueFitRaf = 0;
@@ -434,15 +437,33 @@ export function createQueueUi(els, deps) {
     if (list.length === 0) {
       displayQueue.innerHTML = "";
       displayQueueEmpty.hidden = false;
+      lastDisplayQueueSig = "";
       return;
     }
     displayQueueEmpty.hidden = true;
 
     const fit = measureDisplayQueueFit();
     const visible = list.slice(0, fit);
+    const eraMood = getActiveEraMoodId();
+    const showGenre = getShowQueueGenre();
+    const nextSig = visible
+      .map(
+        (track) =>
+          queueTrackSig(track, { showQueueGenre: showGenre }) +
+          "\0" +
+          displayOriginLabel(track, eraMood)
+      )
+      .join("\n");
+    // Skip DOM wipe when trim only shifted absolute positions.
+    if (
+      nextSig === lastDisplayQueueSig &&
+      displayQueue.children.length === visible.length
+    ) {
+      return;
+    }
+    lastDisplayQueueSig = nextSig;
     displayQueue.innerHTML = "";
 
-    const eraMood = getActiveEraMoodId();
     visible.forEach((track, index) => {
       const row = document.createElement("li");
       const number = document.createElement("span");
@@ -464,7 +485,7 @@ export function createQueueUi(els, deps) {
         meta.appendChild(source);
 
         // Same Show song genre toggle as main Up Next (genre + From Playlists).
-        if (getShowQueueGenre()) {
+        if (showGenre) {
           const genreLabel = queueGenreLabel(track);
           if (genreLabel) {
             const genre = document.createElement("span");

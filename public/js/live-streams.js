@@ -164,6 +164,13 @@ export function createLiveStreams(els, deps) {
       ) {
         return;
       }
+      // SSE owns the paint while connected — a late HTTP response must not
+      // overwrite a fresher stream snapshot after reconnect races.
+      if (nowPlayingStreamConnected) return;
+      const next = advanceStreamCursor(nowPlayingStreamCursor, snapshot);
+      if (!next.accept) return;
+      nowPlayingStreamCursor = next.cursor;
+      nowPlayingStreamVersion += 1;
       renderNowPlaying(snapshot);
     } catch {
       /* retain the last good stream or fallback snapshot */
@@ -274,6 +281,11 @@ export function createLiveStreams(els, deps) {
       ) {
         return;
       }
+      if (queueStreamConnected) return;
+      const next = advanceStreamCursor(queueStreamCursor, data);
+      if (!next.accept) return;
+      queueStreamCursor = next.cursor;
+      queueStreamVersion += 1;
       const tracks = Array.isArray(data.tracks) ? data.tracks : [];
       applyQueueTracks(tracks);
     } catch {

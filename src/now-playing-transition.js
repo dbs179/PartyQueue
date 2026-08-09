@@ -28,7 +28,9 @@ export function trackMediaFields(snapshot) {
  * Pure-ish transition tracker.
  * - `nudge(from)` records an expected skip/previous without marking pending.
  * - `resolve(previous, snapshot)` sets metadataPending only when the queue index
- *   advanced while media fields are still the previous track (true Sonos lag).
+ *   *increases* while media fields are still the previous track (true Sonos lag).
+ * - A *decrease* with the same song (trimPlayedTracks) clears quietly — never
+ *   the grey "Updating" hold.
  * - Pending / expected transitions hard-clear after timeoutMs.
  */
 export function createNowPlayingTransitionTracker({
@@ -83,12 +85,15 @@ export function createNowPlayingTransitionTracker({
     }
 
     const prev = previousPublished || null;
-    const queueChanged =
+    // Only an *increase* with identical DIDL is Sonos metadata lag (Next/skip).
+    // A decrease with the same song is queue maintenance (trim played tracks /
+    // pad cleanup behind the playhead) — never enter the "Updating" hold.
+    const queueAdvanced =
       Number(prev?.queueTrack) > 0 &&
       Number(snapshot?.queueTrack) > 0 &&
-      Number(prev.queueTrack) !== Number(snapshot.queueTrack);
+      Number(snapshot.queueTrack) > Number(prev.queueTrack);
 
-    if (queueChanged && sameTrackMetadata(prev, snapshot)) {
+    if (queueAdvanced && sameTrackMetadata(prev, snapshot)) {
       pendingStale = {
         ...trackMediaFields(snapshot),
         startedAt: expectedFrom?.startedAt || at,
@@ -105,6 +110,14 @@ export function createNowPlayingTransitionTracker({
         ...trackMediaFields(snapshot),
         startedAt: expectedFrom.startedAt,
       };
+    } else if (
+      Number(prev?.queueTrack) > 0 &&
+      Number(snapshot?.queueTrack) > 0 &&
+      Number(snapshot.queueTrack) < Number(prev.queueTrack) &&
+      sameTrackMetadata(prev, snapshot)
+    ) {
+      // Trim/reorder behind the playhead — refresh the confirmed index quietly.
+      clearAll("queue-compacted");
     }
 
     const metadataPending =

@@ -142,3 +142,47 @@ test("insertAnnounceBlock adjusts position after supersede wipe", async () => {
   assert.deepEqual(positions, [3, 4, 5]);
   resetQueuePreemptForTests();
 });
+
+test("insertAnnounceBlock re-demotes under the write lock before pads", async () => {
+  resetQueuePreemptForTests();
+  const steps = [];
+  const positions = [];
+
+  const result = await insertAnnounceBlock({
+    queuePosition: 2,
+    applyLeadBuffer: true,
+    preemptGeneration: queueWorkGeneration(),
+    ramp: media("http://x/ramp.mp3"),
+    tts: media("http://x/tts.mp3"),
+    restore: media("http://x/restore.mp3"),
+    ops: {
+      ensureLeadBuffer: async (pos) => {
+        steps.push(`lead:${pos}`);
+        return { buffered: true, absoluteQueuePosition: 3, reason: "demoted" };
+      },
+      removePads: async () => {
+        steps.push("strip");
+        return { removed: 0, removedBefore: 0, protectedThrough: 0 };
+      },
+      enqueue: async (_url, opts) => {
+        steps.push("enqueue");
+        positions.push(opts.position);
+        return {};
+      },
+      pauseTrim: () => {},
+      ensurePlayMode: async () => {},
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.rampPos, 3);
+  assert.deepEqual(positions, [3, 4, 5]);
+  assert.deepEqual(steps, [
+    "lead:2",
+    "strip",
+    "enqueue",
+    "enqueue",
+    "enqueue",
+  ]);
+  resetQueuePreemptForTests();
+});

@@ -18,6 +18,18 @@ test("count labels", () => {
   assert.equal(partyQueueCountLabel(2), "2 queued");
 });
 
+test("queueTrackSig ignores absolute Sonos position shifts", () => {
+  const a = {
+    uri: "spotify:track:1",
+    position: 5,
+    title: "A",
+    artist: "B",
+    searched: true,
+  };
+  const b = { ...a, position: 2 };
+  assert.equal(queueTrackSig(a), queueTrackSig(b));
+});
+
 test("queueTrackSig changes with genre flag and badges inputs", () => {
   const track = {
     uri: "spotify:track:1",

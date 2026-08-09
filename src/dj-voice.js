@@ -2698,6 +2698,8 @@ export async function announceOnSonos(
     queuePosition = 1,
     preemptGeneration = queueWorkGeneration(),
     clip = null,
+    applyLeadBuffer = false,
+    requestUri = null,
   } = {}
 ) {
   return withAnnounceLock(() =>
@@ -2707,6 +2709,8 @@ export async function announceOnSonos(
       queuePosition,
       preemptGeneration,
       clip,
+      applyLeadBuffer,
+      requestUri,
     })
   );
 }
@@ -2719,6 +2723,8 @@ async function announceOnSonosUnlocked(
     queuePosition = 1,
     preemptGeneration = queueWorkGeneration(),
     clip: prebuiltClip = null,
+    applyLeadBuffer = false,
+    requestUri = null,
   } = {}
 ) {
   const preempted = () => queueWorkWasPreempted(preemptGeneration);
@@ -2799,6 +2805,8 @@ async function announceOnSonosUnlocked(
     const block = await insertAnnounceBlock({
       queuePosition,
       preemptGeneration,
+      applyLeadBuffer: !!applyLeadBuffer && !startPlayback,
+      requestUri: requestUri || null,
       ramp: {
         url: ramp.publicUrl,
         title: "PartyQueue Volume Ramp",

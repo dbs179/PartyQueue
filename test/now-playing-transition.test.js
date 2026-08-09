@@ -49,6 +49,18 @@ test("pending only when queue index advanced with stale metadata", () => {
   assert.equal(resolved.title, "Song A");
 });
 
+test("queue compaction (trim) does not mark metadataPending", () => {
+  let now = 1_000;
+  const tracker = createNowPlayingTransitionTracker({ now: () => now });
+  const previous = track({ queueTrack: 5, positionSec: 90 });
+  // trimPlayedTracks dropped earlier songs; same track, lower absolute index.
+  const compacted = track({ queueTrack: 2, positionSec: 91 });
+  const resolved = tracker.resolve(previous, compacted);
+  assert.equal(resolved.metadataPending, false);
+  assert.equal(resolved.queueTrack, 2);
+  assert.equal(tracker.diagnostics().lastClearReason, "queue-compacted");
+});
+
 test("host nudge then index advance with stale meta marks pending", () => {
   let now = 1_000;
   const tracker = createNowPlayingTransitionTracker({ now: () => now });
