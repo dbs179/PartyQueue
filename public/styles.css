@@ -3010,11 +3010,11 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
+  justify-content: stretch;
   align-self: stretch;
 }
 
-/* Two columns: big art (left) + bold meta filling the space to Up Next. */
+/* Art | meta | (queue in side): shared top/bottom of the Now row. */
 .party-display-hero {
   container-type: size;
   flex: 1 1 auto;
@@ -3023,19 +3023,19 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   height: 100%;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
+  align-items: stretch;
   gap: calc(28 * var(--pd));
 }
 
 .party-display-art-wrap {
   position: relative;
-  /* Near-full Now band height — largest square, bottom-aligned above lyrics. */
+  /* Square fills Now-row height — top/bottom align with queue + meta. */
+  height: 100%;
   width: min(100cqh, 86cqi);
-  height: min(100cqh, 86cqi);
   max-width: 100%;
   max-height: 100%;
   aspect-ratio: 1;
-  align-self: end;
+  align-self: stretch;
   justify-self: start;
   border-radius: calc(22 * var(--pd));
   overflow: hidden;
@@ -3078,8 +3078,8 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   align-self: stretch;
   display: flex;
   flex-direction: column;
-  justify-content: space-evenly;
-  padding: calc(8 * var(--pd)) 0;
+  justify-content: flex-start;
+  padding: 0;
 }
 
 .party-display-state {
@@ -3093,13 +3093,14 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   font-weight: 750;
 }
 
-/* Pill row: playback state + active Vibe side by side. */
+/* Pill row: top-aligned with art + Up Next. */
 .party-display-pills {
+  flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: calc(8 * var(--pd));
-  margin-bottom: 0;
+  margin: 0 0 calc(12 * var(--pd));
 }
 
 .party-display-pills .party-display-state {
@@ -3173,8 +3174,10 @@ body.party-display-active.party-display-kiosk .party-display-shell {
 }
 
 .party-display-reactions {
-  margin-top: 0;
+  /* Bottom-aligned with art + Up Next. */
+  margin-top: auto;
   width: 100%;
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-template-rows: auto auto;
@@ -3202,27 +3205,24 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   font-variant-numeric: tabular-nums;
 }
 
-/* 5-line karaoke band — bottom of the screen, beside Join. */
+/* 5-line karaoke — stretch to Join/QR card height (shared bottom row). */
 .party-display-lyrics {
   --display-lyric-size: calc(24 * var(--pd));
-  --display-lyric-line: 1.25;
-  --display-lyric-gap: calc(5 * var(--pd));
+  --display-lyric-line: 1.2;
+  --display-lyric-gap: calc(4 * var(--pd));
   grid-column: 1;
   grid-row: 2;
-  align-self: end;
+  align-self: stretch;
   width: 100%;
   min-width: 0;
-  flex: 0 0 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  height: calc(
-    (5 * var(--display-lyric-size) * var(--display-lyric-line)) +
-      (4 * var(--display-lyric-gap))
-  );
+  justify-content: stretch;
   overflow: hidden;
   padding: 0 2px;
   text-align: left;
+  box-sizing: border-box;
 }
 
 .party-display-lyrics .np-fs-lyrics-status {
@@ -3251,6 +3251,8 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   list-style: none;
   margin: 0;
   padding: 0;
+  flex: 1 1 auto;
+  min-height: 0;
   height: 100%;
   display: grid;
   grid-template-rows: repeat(5, 1fr);
@@ -3298,8 +3300,10 @@ body.party-display-active.party-display-kiosk .party-display-shell {
 .party-display-queue {
   flex: 1 1 auto;
   min-height: 0;
+  height: 100%;
   padding: calc(14 * var(--pd));
   overflow: auto;
+  box-sizing: border-box;
 }
 
 .party-display-queue-count {
@@ -3373,7 +3377,8 @@ body.party-display-active.party-display-kiosk .party-display-shell {
 .party-display-join {
   grid-column: 2;
   grid-row: 2;
-  align-self: end;
+  /* Intrinsic height from QR sets the bottom-row size; lyrics stretch to match. */
+  align-self: start;
   width: 100%;
   box-sizing: border-box;
   flex: 0 0 auto;
