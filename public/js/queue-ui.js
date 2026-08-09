@@ -323,7 +323,7 @@ export function createQueueUi(els, deps) {
   function renderPartyDisplay(tracks) {
     if (!displayQueue || !displayQueueEmpty || !displayQueueCount) return;
     const list = Array.isArray(tracks) ? tracks : [];
-    const visible = list.slice(0, 5);
+    const visible = list.slice(0, 4);
     displayQueueCount.textContent = partyQueueCountLabel(list.length);
     displayQueueEmpty.hidden = visible.length > 0;
     displayQueueEmpty.textContent = "The queue is empty.";
