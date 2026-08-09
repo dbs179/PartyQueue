@@ -2957,8 +2957,8 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 2.15fr) minmax(calc(340 * var(--pd)), 0.85fr);
-  /* Now+lyrics left; Up Next fills to Join; Join pinned to screen bottom. */
-  grid-template-rows: minmax(0, 1fr) auto auto;
+  /* Left: Now ~3/4, lyrics ~1/4; Join pinned to screen bottom. */
+  grid-template-rows: minmax(0, 3fr) minmax(0, 1fr) auto;
   align-items: stretch;
   column-gap: calc(36 * var(--pd));
   row-gap: calc(14 * var(--pd));
@@ -2987,21 +2987,25 @@ body.party-display-active.party-display-kiosk .party-display-shell {
 }
 
 .party-display-hero {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   width: 100%;
   min-height: 0;
+  max-height: 100%;
   display: grid;
-  grid-template-columns: calc(420 * var(--pd)) minmax(0, 1fr);
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
   align-items: end;
-  gap: calc(36 * var(--pd));
+  gap: calc(28 * var(--pd));
 }
 
 .party-display-art-wrap {
   position: relative;
-  width: calc(420 * var(--pd));
+  /* Large square art sized to the Now band (~3/4 of the layout). */
+  width: min(100%, calc(0.7 * var(--pd-vh, 100dvh)));
   max-width: 100%;
+  max-height: 100%;
   aspect-ratio: 1;
-  align-self: start;
+  height: auto;
+  align-self: end;
   border-radius: calc(22 * var(--pd));
   overflow: hidden;
   background: var(--surface);
@@ -3039,16 +3043,17 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  align-self: end;
 }
 
 .party-display-state {
   display: inline-flex;
   margin-bottom: 0;
-  padding: calc(6 * var(--pd)) calc(12 * var(--pd));
+  padding: calc(4 * var(--pd)) calc(9 * var(--pd));
   color: var(--muted);
   background: var(--surface-2);
   border-radius: 999px;
-  font-size: calc(14 * var(--pd));
+  font-size: calc(12 * var(--pd));
   font-weight: 750;
 }
 
@@ -3057,8 +3062,8 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: calc(8 * var(--pd));
-  margin-bottom: calc(12 * var(--pd));
+  gap: calc(6 * var(--pd));
+  margin-bottom: calc(8 * var(--pd));
 }
 
 .party-display-pills .party-display-state {
@@ -3089,53 +3094,53 @@ body.party-display-active.party-display-kiosk .party-display-shell {
 
 .party-display-title {
   margin: 0;
-  max-width: 18ch;
-  font-size: calc(54 * var(--pd));
-  line-height: 1.05;
-  letter-spacing: -0.04em;
+  max-width: 22ch;
+  font-size: calc(34 * var(--pd));
+  line-height: 1.08;
+  letter-spacing: -0.03em;
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
 }
 
 .party-display-artist {
-  margin: calc(14 * var(--pd)) 0 0;
+  margin: calc(8 * var(--pd)) 0 0;
   color: var(--text);
-  font-size: calc(28 * var(--pd));
+  font-size: calc(20 * var(--pd));
   font-weight: 650;
   line-height: 1.1;
 }
 
 .party-display-album {
-  margin: calc(6 * var(--pd)) 0 0;
+  margin: calc(4 * var(--pd)) 0 0;
   color: var(--muted);
-  font-size: calc(18 * var(--pd));
-}
-
-.party-display-progress {
-  margin-top: calc(22 * var(--pd));
-}
-
-.party-display-progress .np-progress-track {
-  height: calc(8 * var(--pd));
-}
-
-.party-display-progress .np-progress-times {
-  margin-top: calc(8 * var(--pd));
   font-size: calc(14 * var(--pd));
 }
 
+.party-display-progress {
+  margin-top: calc(12 * var(--pd));
+}
+
+.party-display-progress .np-progress-track {
+  height: calc(5 * var(--pd));
+}
+
+.party-display-progress .np-progress-times {
+  margin-top: calc(4 * var(--pd));
+  font-size: calc(12 * var(--pd));
+}
+
 .party-display-reactions {
-  margin-top: calc(18 * var(--pd));
+  margin-top: calc(10 * var(--pd));
   width: 100%;
   display: flex;
   flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
-  gap: calc(4 * var(--pd));
+  gap: calc(3 * var(--pd));
 }
 
 .party-display-reactions[hidden] {
@@ -3148,11 +3153,11 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: calc(4 * var(--pd));
-  padding: calc(8 * var(--pd)) calc(4 * var(--pd));
+  gap: calc(3 * var(--pd));
+  padding: calc(5 * var(--pd)) calc(3 * var(--pd));
   background: var(--surface);
   border-radius: 999px;
-  font-size: calc(18 * var(--pd));
+  font-size: calc(14 * var(--pd));
 }
 
 .party-display-reactions strong {
@@ -3160,20 +3165,23 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   font-variant-numeric: tabular-nums;
 }
 
-/* Fixed 5-line karaoke window under Now Playing (left column). */
+/* 5-line karaoke window — lower ~1/4 of the left column. */
 .party-display-lyrics {
-  --display-lyric-size: calc(26 * var(--pd));
-  --display-lyric-line: 1.3;
-  --display-lyric-gap: calc(6 * var(--pd));
+  --display-lyric-line: 1.25;
+  --display-lyric-gap: calc(4 * var(--pd));
+  /* Fit five lines inside the 1fr lyrics band (~1/4 of layout). */
+  --display-lyric-size: clamp(
+    16px,
+    calc((var(--pd-vh, 100dvh) * 0.2) / 6.5),
+    calc(28 * var(--pd))
+  );
   grid-column: 1;
   grid-row: 2;
   width: 100%;
   min-width: 0;
-  flex: 0 0 auto;
-  height: calc(
-    (5 * var(--display-lyric-size) * var(--display-lyric-line)) +
-      (4 * var(--display-lyric-gap))
-  );
+  min-height: 0;
+  height: 100%;
+  align-self: stretch;
   overflow: hidden;
   padding: 0 2px;
   text-align: left;
