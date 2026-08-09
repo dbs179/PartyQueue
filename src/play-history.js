@@ -6,8 +6,10 @@
 //   2) songMemory (Settings) — how many of the *newest* entries Random treats
 //      as "too recent to replay". Passed as recentTrackIds(songMemory).
 //
-// Fed by Random / Never-Ending / Discover adds, guest search-adds, actual
-// now-playing transitions, and skips (which also cool down that artist briefly).
+// Fed by Random / Never-Ending / Discover adds (at enqueue — those rows are
+// committed filler), actual now-playing transitions (guest requests + anything
+// Sonos starts), and skips (which also cool down that artist briefly). Guest
+// search / Set Request adds do NOT record until heard or skipped.
 //
 // Stores an ordered list of { id, artist, name } entries (oldest first) backed
 // by a JSON file in data/. The tail also powers the per-artist budget window.

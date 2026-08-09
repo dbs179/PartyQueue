@@ -279,9 +279,9 @@ async function getNowPlayingRaw() {
     albumArt = hasTrack ? albumArtUrl(meta.AlbumArtUri, coordinator.Host) : null;
   }
 
-  // Record what actually started playing (not only what Random auto-added), so
-  // guest requests and Sonos-app picks enter song memory too. Only while the
-  // local queue is the source — radio/SiriusXM shouldn't pollute the DJ memory.
+  // Record what actually started playing. Guest requests rely on this path
+  // (and Skip) for song memory — they are not recorded at enqueue. Only while
+  // the local queue is the source — radio/SiriusXM shouldn't pollute memory.
   // Skip DJ TTS / silence-bridge clips so filenames don't enter song memory.
   // Consume a searched origin when music advances to a *different* song (or
   // leaves the queue) — never when playback moves onto DJ announce pads, or

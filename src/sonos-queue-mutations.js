@@ -23,7 +23,6 @@ import {
   SHOUT_LEAD_BUFFER_SEC,
 } from "./shout-lead-buffer.js";
 import { spotifyTrackId } from "./sampler.js";
-import { recordPlayed } from "./play-history.js";
 import { getDjVoiceSettings } from "./settings.js";
 import {
   markOrigin,
@@ -158,6 +157,37 @@ export async function addTrackToQueue(...args) {
 const SET_REQUEST_SIZE = 5;
 
 /**
+ * Pure: pick Set Request tracks to enqueue — drop invalid URIs, songs already
+ * upcoming, and duplicate Spotify ids inside the same payload (Spotify top
+ * tracks can repeat). Preserves first-seen order up to `limit`.
+ * @param {Array<{ uri: string, name?: string, artist?: string }>} tracks
+ * @param {Iterable<string>|Set<string>} [upcomingIds]
+ * @param {number} [limit]
+ */
+export function filterSetRequestTracks(
+  tracks,
+  upcomingIds = [],
+  limit = SET_REQUEST_SIZE
+) {
+  const blocked =
+    upcomingIds instanceof Set ? upcomingIds : new Set(upcomingIds || []);
+  const max = Math.max(1, Math.floor(Number(limit) || SET_REQUEST_SIZE));
+  const seen = new Set();
+  const out = [];
+  for (const t of Array.isArray(tracks) ? tracks : []) {
+    if (!t || typeof t.uri !== "string" || !t.uri.startsWith("spotify:track:")) {
+      continue;
+    }
+    const id = spotifyTrackId(t.uri);
+    if (!id || blocked.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push(t);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/**
  * Guest Set Request: enqueue multiple searched tracks under one write lock so
  * they stay a contiguous block at the end of the request block.
  * @param {Array<{ uri: string, name?: string, artist?: string }>} tracks
@@ -171,18 +201,6 @@ async function addSetRequestToQueueUnlocked(
   tracks,
   { requestedBy = null, requestedByUser = null } = {}
 ) {
-  const list = (Array.isArray(tracks) ? tracks : [])
-    .filter(
-      (t) =>
-        t &&
-        typeof t.uri === "string" &&
-        t.uri.startsWith("spotify:track:")
-    )
-    .slice(0, SET_REQUEST_SIZE);
-  if (!list.length) {
-    throw new Error("No tracks to add for this Set Request.");
-  }
-
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
   await ensureOrderedPlayModeOn(coordinator);
@@ -217,10 +235,10 @@ async function addSetRequestToQueueUnlocked(
     if (itId) upcomingIds.add(itId);
   }
 
-  const toAdd = list.filter((t) => {
-    const id = spotifyTrackId(t.uri);
-    return id && !upcomingIds.has(id);
-  });
+  if (!filterSetRequestTracks(tracks, [], SET_REQUEST_SIZE).length) {
+    throw new Error("No tracks to add for this Set Request.");
+  }
+  const toAdd = filterSetRequestTracks(tracks, upcomingIds, SET_REQUEST_SIZE);
   if (!toAdd.length) {
     throw new Error(
       "Those songs are already coming up — try another artist."
@@ -251,15 +269,8 @@ async function addSetRequestToQueueUnlocked(
         appendInstance: upcomingIds.has(id),
       });
       upcomingIds.add(id);
-      recordPlayed([
-        {
-          id,
-          artist: t.artist || "",
-          name: t.name || "",
-          source: "searched",
-          requestedBy,
-        },
-      ]);
+      // Song memory waits until Now Playing / Skip — deleted-before-play
+      // requests must not burn the anti-repeat window.
     }
     added.push({
       uri: t.uri,
@@ -425,11 +436,8 @@ async function addTrackToQueueUnlocked(
     if (id) markOrigin([id], "searched", byOpts);
   }
 
-  // Guest requests enter song history too, so Random won't re-pick them the
-  // moment they leave the live queue (within the songMemory window).
-  if (id) {
-    recordPlayed([{ id, artist, name, source: "searched", requestedBy }]);
-  }
+  // Guest requests enter song memory when they are heard (Now Playing) or
+  // skipped — not at enqueue — so a host delete before play leaves Random free.
 
   const queueWasEmpty = items.length === 0;
   // Empty queue + shout-outs: skip auto-start so the DJ clip can lead.

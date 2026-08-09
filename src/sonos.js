@@ -75,6 +75,7 @@ export {
   addTrackToQueue,
   addSetRequestToQueue,
   SET_REQUEST_SIZE,
+  filterSetRequestTracks,
   addPlaylistToQueue,
   enqueueHttpAudio,
   insertAnnounceBlock,
