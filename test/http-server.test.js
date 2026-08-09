@@ -131,6 +131,7 @@ describe("HTTP server harness", { concurrency: false }, () => {
     const body = await join.json();
     assert.match(body.url || "", /^https?:\/\//);
     assert.match(body.qrSvg || "", /<svg[\s>]/i);
+    assert.match(body.qrPng || "", /^data:image\/png;base64,/);
   });
 
   test("request fairness controls are present in Queue settings", async () => {

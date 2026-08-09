@@ -2022,16 +2022,27 @@ async function loadJoinCode() {
     joinUrlCache = data.url || "";
     if (joinUrlEl) joinUrlEl.textContent = joinUrlCache;
     if (displayJoinUrl) displayJoinUrl.textContent = joinUrlCache;
-    if (data.qrSvg) {
-      if (joinQrEl) {
-        joinQrEl.innerHTML = data.qrSvg;
-        joinQrEl.classList.add("is-ready");
+    // Prefer PNG <img> — Fully/Android WebView often blanks stroke-based QR SVG.
+    const paintQr = (qrEl) => {
+      if (!qrEl) return;
+      if (data.qrPng) {
+        const img = document.createElement("img");
+        img.src = data.qrPng;
+        img.alt = "Join PartyQueue QR code";
+        img.width = 280;
+        img.height = 280;
+        img.decoding = "async";
+        qrEl.replaceChildren(img);
+        qrEl.classList.add("is-ready");
+        return;
       }
-      if (displayJoinQr) {
-        displayJoinQr.innerHTML = data.qrSvg;
-        displayJoinQr.classList.add("is-ready");
+      if (data.qrSvg) {
+        qrEl.innerHTML = data.qrSvg;
+        qrEl.classList.add("is-ready");
       }
-    }
+    };
+    paintQr(joinQrEl);
+    paintQr(displayJoinQr);
   } catch (err) {
     joinUrlCache = "";
     if (joinUrlEl) joinUrlEl.textContent = "";

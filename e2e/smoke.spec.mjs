@@ -120,6 +120,7 @@ test.describe("PartyQueue browser smoke", () => {
         status: 200,
         json: {
           url: "http://partyqueue.local",
+          qrPng: "data:image/png;base64,iVBORw0KGgo=",
           qrSvg: '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
         },
       })

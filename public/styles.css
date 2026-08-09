@@ -2716,7 +2716,8 @@ body.modal-open {
   background: #fff;
   border-radius: var(--radius);
 }
-.join-qr svg {
+.join-qr svg,
+.join-qr img {
   display: block;
   width: 100%;
   height: auto;
@@ -3403,7 +3404,8 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   display: none;
 }
 
-.party-display-qr svg {
+.party-display-qr svg,
+.party-display-qr img {
   width: 100%;
   height: auto;
   display: block;

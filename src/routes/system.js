@@ -45,17 +45,21 @@ export function registerSystemRoutes(app, ctx) {
     res.json(payload);
   });
 
-  // Join Code: public LAN URL + QR SVG so guests can scan into the queue app.
+  // Join Code: public LAN URL + QR (PNG for Fully/Android WebView; SVG kept for tools).
   app.get("/api/join", asyncHandler(async (_req, res) => {
     try {
       const url = getPublicBaseUrl();
-      const qrSvg = await QRCode.toString(url, {
-        type: "svg",
+      const qrOpts = {
         margin: 1,
         width: 280,
         errorCorrectionLevel: "M",
-      });
-      res.json({ url, qrSvg });
+      };
+      // PNG data URL — stroke-based SVG from qrcode often paints blank in Fully.
+      const [qrPng, qrSvg] = await Promise.all([
+        QRCode.toDataURL(url, qrOpts),
+        QRCode.toString(url, { type: "svg", ...qrOpts }),
+      ]);
+      res.json({ url, qrPng, qrSvg });
     } catch (err) {
       console.error("[join]", err.message);
       res.status(503).json({
