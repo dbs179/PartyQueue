@@ -3442,31 +3442,38 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   background: rgba(255, 183, 77, 0.12);
   border: 1px solid rgba(255, 183, 77, 0.3);
   border-radius: calc(8 * var(--pd));
-  font-size: calc(14 * var(--pd));
+  font-size: calc(21 * var(--pd));
 }
 
 .party-display-join-copy {
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .party-display-join-copy > p {
-  margin: calc(4 * var(--pd)) 0 0;
+  margin: calc(6 * var(--pd)) 0 0;
   color: var(--muted);
-  font-size: calc(14 * var(--pd));
+  font-size: calc(21 * var(--pd));
+  line-height: 1.25;
 }
 
 .party-display-join-copy > .party-display-label {
   margin: 0;
   color: var(--accent);
+  font-size: calc(21 * var(--pd));
 }
 
 .party-display-url {
-  max-width: 32ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Full URL visible — wrap instead of ellipsis. */
+  max-width: none;
+  overflow: visible;
+  text-overflow: unset;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   color: var(--text);
-  font-size: calc(16 * var(--pd));
+  font-size: calc(24 * var(--pd));
+  line-height: 1.25;
 }
 
 /* Phone/narrow only — never apply on Fully Kiosk TV (often misreports width). */
