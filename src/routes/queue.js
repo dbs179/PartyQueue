@@ -51,6 +51,7 @@ import {
   announceSetBatch,
   announcePartyRecap,
   isDjVoiceReady,
+  prepareSetAnnounceClip,
 } from "../dj-voice.js";
 import {
   extractHostToken,
@@ -81,6 +82,8 @@ import { spotifyTrackId } from "../sampler.js";
 import {
   addPlaylistToQueue,
   addRandomFromPlaylists,
+  planRandomFromPlaylists,
+  enqueueRandomBatch,
   addTrackToQueue,
   addSetRequestToQueue,
   SET_REQUEST_SIZE,
@@ -117,6 +120,8 @@ export function registerQueueRoutes(app, ctx) {
     addSetRequestToQueue,
     addPlaylistToQueue,
     addRandomFromPlaylists,
+    planRandomFromPlaylists,
+    enqueueRandomBatch,
     getQueueList,
     removeQueueTrack,
     removeUpcomingFillerTracks,
@@ -713,19 +718,46 @@ export function registerQueueRoutes(app, ctx) {
         }
       }
 
-      const result = await sonos.addRandomFromPlaylists(parseCount(count), ids, genreIds, {
+      const randomOpts = {
         similarCount: discoverEnabled ? similarCount : 0,
         filterExplicit,
         deferAutoStart: djReady,
         preemptGeneration,
         mood: moodId,
-      });
+      };
+      const batchPlan = await sonos.planRandomFromPlaylists(
+        parseCount(count),
+        ids,
+        genreIds,
+        randomOpts
+      );
+
+      // Overlap OpenAI script + TTS with Sonos enqueue when DJ will likely shout.
+      const likelyFresh =
+        !!clearForDj || (Number(batchPlan.queueTotalBefore) || 0) === 0;
+      const plannedCount = Array.isArray(batchPlan.order)
+        ? batchPlan.order.length
+        : 0;
+      let prepPromise = null;
+      if (djReady && plannedCount > 0) {
+        prepPromise = prepareSetAnnounceClip(
+          {
+            event: likelyFresh ? "session_start" : "session_refill",
+            count: plannedCount,
+            added: plannedCount,
+            highlights: batchPlan.highlightsPreview ?? [],
+            similarAdded: batchPlan.similarAddedPreview ?? 0,
+          },
+          { preemptGeneration }
+        );
+      }
+
+      const result = await sonos.enqueueRandomBatch(batchPlan, randomOpts);
 
       // Fresh idle Random: set announce at #1 + Play. Mid-party Random: set
       // announce immediately before the new batch (under guest requests) — never
       // only when deferredStart (that skipped announce while music was playing).
-      let announced = false;
-      const plan = randomDjAnnouncePlan({
+      const announcePlan = randomDjAnnouncePlan({
         djReady,
         added: result.added,
         queueTotalBefore: result.queueTotalBefore,
@@ -733,68 +765,97 @@ export function registerQueueRoutes(app, ctx) {
         deferredStart: result.deferredStart,
         firstAppendPosition: result.firstAppendPosition,
       });
-      if (plan.action === "fresh_set") {
-        try {
-          const voice = await announceFreshSet(result, { preemptGeneration });
-          announced = !!voice?.ok;
-          if (voice?.ok) {
-            result.started = true;
-          } else if (!queueWorkWasPreempted(preemptGeneration)) {
-            await sonos.play({ trackNumber: 1 });
-            result.started = true;
-          }
-        } catch (err) {
-          console.error("[queue/random] DJ announce failed:", err.message);
-          if (queueWorkWasPreempted(preemptGeneration)) {
-            result.preempted = true;
-          } else {
-            try {
-              await sonos.play({ trackNumber: 1 });
-              result.started = true;
-            } catch (playErr) {
-              console.error("[queue/random] fallback play failed:", playErr.message);
-            }
-          }
-        }
-      } else if (plan.action === "before_batch") {
-        try {
-          const voice = await announceSetBatch(result, {
-            queuePosition: plan.queuePosition,
-            startPlayback: false,
-            event: "session_refill",
-            preemptGeneration,
-          });
-          announced = !!voice?.ok;
-          if (
-            plan.resumePlay &&
-            !queueWorkWasPreempted(preemptGeneration)
-          ) {
-            // Leftover queue was STOPPED — resume without seeking to the
-            // bottom announce (guest requests at the front stay first).
-            await sonos.play();
-            result.started = true;
-          }
-        } catch (err) {
-          console.error("[queue/random] mid-queue set announce failed:", err.message);
-          if (
-            plan.resumePlay &&
-            !queueWorkWasPreempted(preemptGeneration)
-          ) {
-            try {
-              await sonos.play();
-              result.started = true;
-            } catch (playErr) {
-              console.error("[queue/random] resume play failed:", playErr.message);
-            }
-          }
-        }
-      }
+      const willAnnounce = announcePlan.action !== "none";
 
+      // Return as soon as songs are queued — DJ announce continues in background.
       res.json({
         ok: true,
         ...result,
-        announced,
+        announced: false,
+        announcing: willAnnounce,
       });
+
+      if (!willAnnounce) return;
+
+      void (async () => {
+        let prepared = null;
+        if (prepPromise) {
+          try {
+            prepared = await prepPromise;
+          } catch (err) {
+            console.error("[queue/random] announce prep failed:", err.message);
+          }
+        }
+        if (queueWorkWasPreempted(preemptGeneration)) return;
+
+        if (announcePlan.action === "fresh_set") {
+          try {
+            const voice = await announceFreshSet(result, {
+              preemptGeneration,
+              prepared,
+            });
+            if (voice?.ok) {
+              result.started = true;
+            } else if (!queueWorkWasPreempted(preemptGeneration)) {
+              await sonos.play({ trackNumber: 1 });
+              result.started = true;
+            }
+          } catch (err) {
+            console.error("[queue/random] DJ announce failed:", err.message);
+            if (queueWorkWasPreempted(preemptGeneration)) {
+              result.preempted = true;
+            } else {
+              try {
+                await sonos.play({ trackNumber: 1 });
+                result.started = true;
+              } catch (playErr) {
+                console.error(
+                  "[queue/random] fallback play failed:",
+                  playErr.message
+                );
+              }
+            }
+          }
+        } else if (announcePlan.action === "before_batch") {
+          try {
+            await announceSetBatch(result, {
+              queuePosition: announcePlan.queuePosition,
+              startPlayback: false,
+              event: "session_refill",
+              preemptGeneration,
+              prepared,
+            });
+            if (
+              announcePlan.resumePlay &&
+              !queueWorkWasPreempted(preemptGeneration)
+            ) {
+              // Leftover queue was STOPPED — resume without seeking to the
+              // bottom announce (guest requests at the front stay first).
+              await sonos.play();
+              result.started = true;
+            }
+          } catch (err) {
+            console.error(
+              "[queue/random] mid-queue set announce failed:",
+              err.message
+            );
+            if (
+              announcePlan.resumePlay &&
+              !queueWorkWasPreempted(preemptGeneration)
+            ) {
+              try {
+                await sonos.play();
+                result.started = true;
+              } catch (playErr) {
+                console.error(
+                  "[queue/random] resume play failed:",
+                  playErr.message
+                );
+              }
+            }
+          }
+        }
+      })();
     } catch (err) {
       console.error("[queue/random]", err.message);
       res.status(502).json({ error: err.message || "Could not add random songs." });

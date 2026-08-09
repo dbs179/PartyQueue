@@ -1768,6 +1768,30 @@ async function generateScriptWithLlm(summary) {
  * @param {string} prompt
  * @param {{ maxWords?: number, banList?: string|string[] }} [opts]
  */
+/** Cap OpenAI conversation waits so Random announce can fall back to templates. */
+export const LLM_SCRIPT_TIMEOUT_MS = 12_000;
+
+/**
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {number} ms
+ * @param {string} label
+ * @returns {Promise<T>}
+ */
+export async function withTimeout(promise, ms, label = "Operation timed out") {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(label)), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function generateDjSpeechFromPrompt(
   prompt,
   { maxWords = null, banList = null } = {}
@@ -1943,7 +1967,13 @@ export async function writeSetScript(summary = {}) {
 
   try {
     try {
-      const middle = stripEdgeCourtesies(await generateScriptWithLlm(payload));
+      const middle = stripEdgeCourtesies(
+        await withTimeout(
+          generateScriptWithLlm(payload),
+          LLM_SCRIPT_TIMEOUT_MS,
+          "LLM script timed out"
+        )
+      );
       const line = assembleAnnounceScript({
         intro,
         middle,
@@ -1961,8 +1991,17 @@ export async function writeSetScript(summary = {}) {
       rememberDjAnnounceScript(line);
       return line;
     } catch (err) {
-      console.error("[dj-voice] LLM script failed, using template:", err.message);
-      return buildSetScript(payload);
+      const timedOut = /timed out/i.test(err?.message || "");
+      console.error(
+        timedOut
+          ? "[dj-voice] LLM script timed out, using template"
+          : `[dj-voice] LLM script failed, using template: ${err.message}`
+      );
+      const line = buildSetScript(payload);
+      console.log(
+        `[dj-voice] script via template (${timedOut ? "template-timeout" : "template-error"})`
+      );
+      return line;
     }
   } finally {
     if (nextSetLines) consumeDjNextSet();
@@ -2541,8 +2580,51 @@ function withAnnounceLock(fn) {
   return run;
 }
 
+/**
+ * Write set script + generate TTS without touching the Sonos queue.
+ * Used to overlap announce prep with Random enqueue.
+ * @param {object} summary
+ * @param {{ preemptGeneration?: number }} [opts]
+ */
+export async function prepareSetAnnounceClip(
+  summary = {},
+  { preemptGeneration = queueWorkGeneration() } = {}
+) {
+  if (!getDjVoiceSettings().djVoiceEnabled || !isHaConfigured()) {
+    return { ok: false, skipped: true };
+  }
+  if (!(Number(summary.count ?? summary.added) > 0)) {
+    return { ok: false, skipped: true };
+  }
+  if (queueWorkWasPreempted(preemptGeneration)) {
+    return { ok: false, skipped: true, reason: "queue-preempted" };
+  }
+  try {
+    const message = await writeSetScript(summary);
+    if (queueWorkWasPreempted(preemptGeneration)) {
+      return { ok: false, skipped: true, reason: "queue-preempted" };
+    }
+    if (!message || !String(message).trim()) {
+      return { ok: false, error: "Empty announce message." };
+    }
+    const clip = await saveTtsClip(String(message).trim());
+    if (queueWorkWasPreempted(preemptGeneration)) {
+      return { ok: false, skipped: true, reason: "queue-preempted" };
+    }
+    console.log(
+      `[dj-voice] prepared announce clip ${clip.fileName} (${clip.bytes} bytes; ` +
+        `${clip.publicUrl === clip.localUrl ? "local media" : "external TTS media"})`
+    );
+    return { ok: true, message, clip };
+  } catch (err) {
+    console.error("[dj-voice] prepare announce clip failed:", err.message);
+    return { ok: false, error: err.message || "Prepare announce failed." };
+  }
+}
+
 // Insert TTS into the Sonos queue. Fresh sets use position 1 then Play;
 // refills insert at a boundary position while music keeps playing.
+// Pass `clip` from prepareSetAnnounceClip to skip a second TTS round-trip.
 export async function announceOnSonos(
   message,
   {
@@ -2550,6 +2632,7 @@ export async function announceOnSonos(
     startPlayback = false,
     queuePosition = 1,
     preemptGeneration = queueWorkGeneration(),
+    clip = null,
   } = {}
 ) {
   return withAnnounceLock(() =>
@@ -2558,6 +2641,7 @@ export async function announceOnSonos(
       startPlayback,
       queuePosition,
       preemptGeneration,
+      clip,
     })
   );
 }
@@ -2569,6 +2653,7 @@ async function announceOnSonosUnlocked(
     startPlayback = false,
     queuePosition = 1,
     preemptGeneration = queueWorkGeneration(),
+    clip: prebuiltClip = null,
   } = {}
 ) {
   const preempted = () => queueWorkWasPreempted(preemptGeneration);
@@ -2608,11 +2693,18 @@ async function announceOnSonosUnlocked(
     if (preempted()) {
       return { ok: false, skipped: true, reason: "queue-preempted" };
     }
-    const clip = await saveTtsClip(String(message).trim());
-    console.log(
-      `[dj-voice] saved ${clip.fileName} (${clip.bytes} bytes; ` +
-        `${clip.publicUrl === clip.localUrl ? "local media" : "external TTS media"})`
-    );
+    let clip = prebuiltClip;
+    if (!clip?.publicUrl) {
+      clip = await saveTtsClip(String(message).trim());
+      console.log(
+        `[dj-voice] saved ${clip.fileName} (${clip.bytes} bytes; ` +
+          `${clip.publicUrl === clip.localUrl ? "local media" : "external TTS media"})`
+      );
+    } else {
+      console.log(
+        `[dj-voice] using prebuilt TTS clip ${clip.fileName || clip.publicUrl}`
+      );
+    }
     if (preempted()) {
       return { ok: false, skipped: true, reason: "queue-preempted" };
     }
@@ -2904,33 +2996,43 @@ export async function checkPendingAnnounce(status) {
   return { ok: true, skipped: true, mode: "queue", alreadyEnqueued: true };
 }
 
-// Manual Random when a fresh set starts (playback was idle â†’ we deferred start).
+// Manual Random when a fresh set starts (playback was idle → we deferred start).
 // Music is already in the queue; insert TTS at position 1 and Play from track 1.
 export async function announceFreshSet(
   summary,
-  { preemptGeneration = queueWorkGeneration() } = {}
+  {
+    preemptGeneration = queueWorkGeneration(),
+    prepared = null,
+  } = {}
 ) {
   if (!getDjVoiceSettings().djVoiceEnabled || !isHaConfigured()) {
     return { ok: false, skipped: true };
   }
   if (!summary?.added) return { ok: false, skipped: true };
-  const message = await writeSetScript({
-    event: "session_start",
-    count: summary.added,
-    highlights: summary.highlights ?? [],
-    similarAdded: summary.similarAdded ?? 0,
-  });
+  let message = prepared?.ok ? prepared.message : null;
+  let clip = prepared?.ok ? prepared.clip : null;
+  if (!message || !clip?.publicUrl) {
+    message = await writeSetScript({
+      event: "session_start",
+      count: summary.added,
+      highlights: summary.highlights ?? [],
+      similarAdded: summary.similarAdded ?? 0,
+    });
+    clip = null;
+  }
   if (queueWorkWasPreempted(preemptGeneration)) {
     return { ok: false, skipped: true, reason: "queue-preempted" };
   }
   console.log(
-    `[dj-voice] fresh set announce (${summary.added} songs) â†’ queue insert`
+    `[dj-voice] fresh set announce (${summary.added} songs) → queue insert` +
+      (clip ? " (prebuilt clip)" : "")
   );
   console.log(`[dj-voice] script: ${message}`);
   const result = await announceOnSonos(message, {
     startPlayback: true,
     queuePosition: 1,
     preemptGeneration,
+    clip,
   });
   if (result?.ok) clearRefillAnnounceGuard();
   return result;
@@ -2944,6 +3046,7 @@ export async function announceSetBatch(
     startPlayback = false,
     event = "session_refill",
     preemptGeneration = queueWorkGeneration(),
+    prepared = null,
   } = {}
 ) {
   if (!getDjVoiceSettings().djVoiceEnabled || !isHaConfigured()) {
@@ -2969,12 +3072,17 @@ export async function announceSetBatch(
     /* best-effort — fall through to the planned position below */
   }
 
-  const message = await writeSetScript({
-    event,
-    count: summary.added,
-    highlights: summary.highlights ?? [],
-    similarAdded: summary.similarAdded ?? 0,
-  });
+  let message = prepared?.ok ? prepared.message : null;
+  let clip = prepared?.ok ? prepared.clip : null;
+  if (!message || !clip?.publicUrl) {
+    message = await writeSetScript({
+      event,
+      count: summary.added,
+      highlights: summary.highlights ?? [],
+      similarAdded: summary.similarAdded ?? 0,
+    });
+    clip = null;
+  }
   if (queueWorkWasPreempted(preemptGeneration)) {
     return { ok: false, skipped: true, reason: "queue-preempted" };
   }
@@ -3006,13 +3114,15 @@ export async function announceSetBatch(
   }
 
   console.log(
-    `[dj-voice] set batch announce (${summary.added} songs) â†’ queue #${insertAt}`
+    `[dj-voice] set batch announce (${summary.added} songs) → queue #${insertAt}` +
+      (clip ? " (prebuilt clip)" : "")
   );
   console.log(`[dj-voice] script: ${message}`);
   const result = await announceOnSonos(message, {
     startPlayback: !!startPlayback,
     queuePosition: insertAt,
     preemptGeneration,
+    clip,
   });
   if (result?.ok) clearRefillAnnounceGuard();
   return result;

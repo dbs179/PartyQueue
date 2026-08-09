@@ -62,11 +62,33 @@ import { queueWorkWasPreempted } from "./queue-preempt.js";
 // recently (recent-song memory + per-artist budget), never repeats a song, and
 // keeps topping up (re-sampling) until `count` songs are actually enqueued or
 // the pool of new songs runs out. Uses the cached per-playlist pool.
-export async function addRandomFromPlaylists(...args) {
-  return withSonosWriteLock(() => addRandomFromPlaylistsUnlocked(...args));
+//
+// Split into plan (Spotify/sampler, no write lock) + enqueue (Sonos write lock)
+// so DJ script/TTS can overlap with Sonos adds on the Random route.
+export async function planRandomFromPlaylists(
+  count = 50,
+  playlistIds = null,
+  genres = null,
+  opts = {}
+) {
+  return buildRandomPlan(count, playlistIds, genres, opts);
 }
 
-async function addRandomFromPlaylistsUnlocked(
+export async function enqueueRandomBatch(plan, opts = {}) {
+  return withSonosWriteLock(() => enqueueRandomBatchUnlocked(plan, opts));
+}
+
+export async function addRandomFromPlaylists(
+  count = 50,
+  playlistIds = null,
+  genres = null,
+  opts = {}
+) {
+  const plan = await planRandomFromPlaylists(count, playlistIds, genres, opts);
+  return enqueueRandomBatch(plan, opts);
+}
+
+async function buildRandomPlan(
   count = 50,
   playlistIds = null,
   genres = null,
@@ -536,6 +558,106 @@ async function addRandomFromPlaylistsUnlocked(
   for (const item of order) claimBatchArtist(item.artist);
   batchArtistSeed = syncBatchArtistBlocks();
 
+  const highlightsPreview = order.slice(0, 8).map((t) => ({
+    artist: t.artist || "",
+    name: t.name || "",
+    discovered: !!t.discovered,
+  }));
+
+  return {
+    count,
+    genres,
+    opts,
+    order,
+    usable,
+    exclude,
+    recentIds,
+    cfg,
+    batchArtists,
+    allowSameArtist,
+    lastPlaylistArtist,
+    batchArtistSeed,
+    blockedArtists,
+    totalTarget,
+    similarWant,
+    setLane,
+    activeMoodPack,
+    showcaseArtistKey,
+    showcaseArtistName,
+    firstAppendPosition,
+    queueTotalBefore: queueItems.length,
+    libraryIds,
+    artistByUri,
+    nameByUri,
+    relaxedArtist,
+    relaxedMemory,
+    memoryReuseCount,
+    laneHitAdded,
+    highlightsPreview,
+    similarAddedPreview: order.filter((t) => t.discovered).length,
+    moodAddedPreview: order.filter((t) => t.moodPick).length,
+    preemptGeneration: opts.preemptGeneration,
+  };
+}
+
+async function enqueueRandomBatchUnlocked(plan, opts = {}) {
+  const mergedOpts = { ...(plan?.opts || {}), ...opts };
+  const wasPreempted = () =>
+    mergedOpts.preemptGeneration != null &&
+    queueWorkWasPreempted(mergedOpts.preemptGeneration);
+
+  const count = plan.count;
+  const genres = plan.genres;
+  const order = Array.isArray(plan.order) ? plan.order : [];
+  const usable = plan.usable || [];
+  const exclude = plan.exclude instanceof Set ? plan.exclude : new Set();
+  const recentIds = plan.recentIds instanceof Set ? plan.recentIds : new Set();
+  const cfg = plan.cfg || getRandomnessSettings();
+  const batchArtists =
+    plan.batchArtists instanceof Set ? plan.batchArtists : new Set();
+  const allowSameArtist = !!plan.allowSameArtist;
+  let lastPlaylistArtist = plan.lastPlaylistArtist || null;
+  let batchArtistSeed = plan.batchArtistSeed;
+  const blockedArtists =
+    plan.blockedArtists instanceof Set ? plan.blockedArtists : new Set();
+  const totalTarget = Number(plan.totalTarget) || order.length;
+  const similarWant = Number(plan.similarWant) || 0;
+  const setLane = plan.setLane || null;
+  const activeMoodPack = plan.activeMoodPack || null;
+  const showcaseArtistKey = plan.showcaseArtistKey || null;
+  const showcaseArtistName = plan.showcaseArtistName || null;
+  const firstAppendPosition = Number(plan.firstAppendPosition) || 1;
+  const queueTotalBefore = Number(plan.queueTotalBefore) || 0;
+  const libraryIds =
+    plan.libraryIds instanceof Set ? plan.libraryIds : new Set();
+  const artistByUri = plan.artistByUri || new Map();
+  const nameByUri = plan.nameByUri || new Map();
+  let relaxedArtist = !!plan.relaxedArtist;
+  let relaxedMemory = !!plan.relaxedMemory;
+  let memoryReuseCount = Number(plan.memoryReuseCount) || 0;
+  let laneHitAdded = Number(plan.laneHitAdded) || 0;
+
+  const claimBatchArtist = (artist) => {
+    const a = primaryArtist(artist);
+    if (a) batchArtists.add(a);
+    return a;
+  };
+  const syncBatchArtistBlocks = () => {
+    if (allowSameArtist) {
+      cfg.blockedArtists = blockedArtists;
+      return cloneArtistCountMap(artistCountsInWindow(cfg.artistWindow));
+    }
+    cfg.blockedArtists = new Set([...blockedArtists, ...batchArtists]);
+    const seed = cloneArtistCountMap(artistCountsInWindow(cfg.artistWindow));
+    for (const a of batchArtists) {
+      seed.set(a, Math.max(seed.get(a) ?? 0, cfg.artistCap));
+    }
+    return seed;
+  };
+
+  const m = await getManager();
+  const coordinator = await resolveCoordinator(m);
+
   // 4) Enqueue in that order. `added` = total enqueued (playlist + discovery);
   // `similarAdded` is the discovery subset so the UI can badge the mix.
   let added = 0;
@@ -654,7 +776,7 @@ async function addRandomFromPlaylistsUnlocked(
         lane: setLane,
         count: totalTarget - added,
         excludeIds: new Set([...libraryIds, ...exclude, ...recentIds]),
-        filterExplicit: !!opts.filterExplicit,
+        filterExplicit: !!mergedOpts.filterExplicit,
         artistCap: cfg.artistCap,
         artistSeedCounts: batchArtistSeed,
         lastArtist: lastPlaylistArtist,
@@ -725,7 +847,7 @@ async function addRandomFromPlaylistsUnlocked(
         mood: activeMoodPack.id,
         count: totalTarget - added,
         excludeIds: new Set([...exclude, ...recentIds]),
-        filterExplicit: !!opts.filterExplicit,
+        filterExplicit: !!mergedOpts.filterExplicit,
         artistCap: cfg.artistCap,
         artistSeedCounts: batchArtistSeed,
         lastArtist: lastPlaylistArtist,
@@ -792,7 +914,7 @@ async function addRandomFromPlaylistsUnlocked(
   let started = false;
   let deferredStart = false;
   if (added > 0 && !wasPreempted()) {
-    if (opts.deferAutoStart) {
+    if (mergedOpts.deferAutoStart) {
       try {
         const transport = await coordinator.AVTransportService.GetTransportInfo();
         if (autoStartDecision(transport.CurrentTransportState) === "start") {
@@ -847,7 +969,7 @@ async function addRandomFromPlaylistsUnlocked(
     started,
     deferredStart,
     firstAppendPosition,
-    queueTotalBefore: queueItems.length,
+    queueTotalBefore,
     highlights,
     similarRequested: similarWant,
     similarAdded,
@@ -861,7 +983,7 @@ async function addRandomFromPlaylistsUnlocked(
       ? {
           artist: showcaseArtistName,
           key: showcaseArtistKey,
-          hostArmed: showcaseFromHost,
+          hostArmed: false,
         }
       : null,
     preempted: wasPreempted(),

@@ -100,4 +100,8 @@ export {
   isKnownSonosHost,
 } from "./sonos-groups.js";
 
-export { addRandomFromPlaylists } from "./sonos-random.js";
+export {
+  addRandomFromPlaylists,
+  planRandomFromPlaylists,
+  enqueueRandomBatch,
+} from "./sonos-random.js";

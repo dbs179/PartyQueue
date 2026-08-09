@@ -8,7 +8,11 @@
 import { GENRE_BUCKETS } from "./genres.js";
 import { loadSettings, saveSettings } from "./settings.js";
 
-const ALL_BUCKET_IDS = GENRE_BUCKETS.map((b) => b.id);
+// Lazy: genres.js → spotify → sampler → genre-flow while GENRE_BUCKETS is still
+// initializing. Reading the array at module top throws TDZ ReferenceError.
+function allBucketIds() {
+  return GENRE_BUCKETS.map((b) => b.id);
+}
 
 // Undirected affinity: each bucket lists neighbors that sit comfortably next
 // to it (self is always implied). "other" is handled as universal soft-fill.
@@ -43,7 +47,7 @@ function uniq(ids) {
 /** Buckets that comfortably sit next to `bucket` (includes self). */
 export function compatibleWith(bucket) {
   const id = String(bucket || "");
-  if (!id || id === "other") return new Set(ALL_BUCKET_IDS);
+  if (!id || id === "other") return new Set(allBucketIds());
   const neighbors = BUCKET_NEIGHBORS[id] || [];
   return new Set([id, ...neighbors, "other"]);
 }
@@ -175,7 +179,7 @@ export function pickSetLane({
 } = {}) {
   let pool = Array.isArray(enabled) && enabled.length
     ? enabled.map(String)
-    : ALL_BUCKET_IDS.filter((id) => id !== "other");
+    : allBucketIds().filter((id) => id !== "other");
   // Kids nights stay in kids/soundtrack; don't wander into metal.
   if (pool.includes("kids") && pool.length <= 3) {
     pool = pool.filter((id) => id === "kids" || id === "soundtrack");

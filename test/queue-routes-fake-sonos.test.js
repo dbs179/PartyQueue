@@ -90,6 +90,24 @@ function createFakeSonos() {
     async addRandomFromPlaylists() {
       return { added: 0 };
     },
+    async planRandomFromPlaylists() {
+      return {
+        order: [],
+        highlightsPreview: [],
+        similarAddedPreview: 0,
+        queueTotalBefore: 0,
+        firstAppendPosition: 1,
+      };
+    },
+    async enqueueRandomBatch() {
+      return {
+        added: 0,
+        deferredStart: false,
+        firstAppendPosition: 1,
+        queueTotalBefore: 0,
+        highlights: [],
+      };
+    },
     async play() {
       return { playing: true };
     },
