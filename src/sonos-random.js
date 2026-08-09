@@ -94,12 +94,16 @@ async function buildRandomPlan(
   genres = null,
   opts = {}
 ) {
+  const planStarted = Date.now();
   const wasPreempted = () =>
     opts.preemptGeneration != null &&
     queueWorkWasPreempted(opts.preemptGeneration);
   const m = await getManager();
 
   const playlists = await buildPlaylistPool();
+  console.log(
+    `[random] pool ready in ${Date.now() - planStarted}ms (${playlists.length} playlist(s))`
+  );
   let usable = playlists.filter((p) => (p.tracks || []).length > 0);
 
   // When a specific set of playlist IDs is provided, only draw from those.
@@ -375,6 +379,9 @@ async function buildRandomPlan(
 
   // 2) Outside-library slots: era charts (mood on) or Songs Like Discover.
   // Exact lane only — no neighbor soft-fit and no off-lane Discover retry.
+  // Wall-clock budget so Random HTTP can return quickly; playlist picks already
+  // cover most of the batch if Discover/lane-hits are slow.
+  const OUTSIDE_SLOT_BUDGET_MS = 5_500;
   let discoveries = [];
   let laneHitAdded = 0;
   const libraryIds = new Set();
@@ -384,146 +391,198 @@ async function buildRandomPlan(
       if (id) libraryIds.add(id);
     }
   }
-  if (!showcaseArtistKey && similarWant > 0 && activeMoodPack) {
-    try {
-      discoveries = await getMoodHits({
-        mood: activeMoodPack.id,
-        count: similarWant,
-        excludeIds: new Set([...libraryIds, ...exclude, ...recentIds]),
-        filterExplicit: !!opts.filterExplicit,
-        artistCap: cfg.artistCap,
-        artistSeedCounts: batchArtistSeed,
-        lastArtist: lastPlaylistArtist,
-        moodArtistCap: 1,
-        blockedArtists: cfg.blockedArtists,
-        enabledGenres: Array.isArray(genres) ? genres : null,
-        bucketsFor: bucketsForArtist,
-        preferLane: setLane,
-      });
-      console.log(
-        `[moods] ${activeMoodPack.id}: filled ${discoveries.length}/${similarWant} outside slots from era charts (lane=${setLane} exact)`
-      );
-    } catch (err) {
-      console.error("[moods] era slot fill failed:", err.message);
-    }
-  } else if (!showcaseArtistKey && similarWant > 0 && isDiscoveryAvailable()) {
-    const discExclude = new Set([...libraryIds, ...exclude, ...recentIds]);
-    // Prefer seeds already on the exact lane so Songs Like stays in-family.
-    const seeds = [];
-    for (const pl of usable) {
-      for (const t of pl.tracks || []) {
-        let buckets = bucketsForArtistSync(t.artist);
-        if (!buckets.length) buckets = ["other"];
-        if (fitsExactLane(buckets, setLane)) {
-          seeds.push({ artist: t.artist, name: t.name });
-        }
-      }
-    }
-    if (!seeds.length) {
-      for (const pl of usable) {
-        for (const t of pl.tracks || []) {
-          seeds.push({ artist: t.artist, name: t.name });
-        }
-      }
-    }
-    try {
-      discoveries = await getSimilarUris({
-        seeds,
-        excludeIds: discExclude,
-        enabledGenres: Array.isArray(genres) ? genres : null,
-        filterExplicit: !!opts.filterExplicit,
-        artistCap: cfg.artistCap,
-        artistSeedCounts: batchArtistSeed,
-        lastArtist: lastPlaylistArtist,
-        discoveryArtistCap: 1,
-        blockedArtists: cfg.blockedArtists,
-        flowState: cfg.flowState,
-        count: similarWant,
-        preferLane: setLane,
-      });
-      console.log(
-        `[discover] lane=${setLane || "?"} exact got ${discoveries.length}/${similarWant}`
-      );
-    } catch (err) {
-      console.error("[discover] failed:", err.message);
-    }
-  }
 
-  for (const d of discoveries) {
-    const artist = claimBatchArtist(d.artist);
-    if (artist) lastPlaylistArtist = artist;
-  }
-  batchArtistSeed = syncBatchArtistBlocks();
-
-  // If discovery came up short, try more exact-lane playlist picks first.
-  const discoveryShortfall = Math.max(0, similarWant - discoveries.length);
-  if (discoveryShortfall > 0) {
-    cfg.lastArtist = lastPlaylistArtist;
-    const fill = pickWithRelaxation(
-      usable,
-      exclude,
-      discoveryShortfall,
-      recentIds,
-      batchArtistSeed,
-      cfg
-    );
-    for (const uri of fill.uris) {
-      playlistUris.push(uri);
-      const id = spotifyTrackId(uri);
-      if (id) exclude.add(id);
-      const artist = claimBatchArtist(artistByUri.get(uri));
-      if (artist) lastPlaylistArtist = artist;
-    }
-    batchArtistSeed = syncBatchArtistBlocks();
-    relaxedArtist = relaxedArtist || fill.relaxedArtist;
-    relaxedMemory = relaxedMemory || fill.relaxedMemory;
-    memoryReuseCount += fill.memoryReuseCount;
-  }
-
-  // Still short of the batch target → Spotify / Last.fm exact-lane hits
-  // outside the library. Never pad with off-lane tracks.
-  {
-    const need = Math.max(
-      0,
-      totalTarget - playlistUris.length - discoveries.length
-    );
-    if (!showcaseArtistKey && need > 0 && setLane && !wasPreempted()) {
+  const outsideStarted = Date.now();
+  const outsideAc = new AbortController();
+  const outsideTimer = setTimeout(
+    () => outsideAc.abort(),
+    OUTSIDE_SLOT_BUDGET_MS
+  );
+  const outsideSignal = outsideAc.signal;
+  try {
+    if (!showcaseArtistKey && similarWant > 0 && activeMoodPack) {
       try {
-        const hits = await getLaneHits({
-          lane: setLane,
-          count: need,
+        discoveries = await getMoodHits({
+          mood: activeMoodPack.id,
+          count: similarWant,
           excludeIds: new Set([...libraryIds, ...exclude, ...recentIds]),
           filterExplicit: !!opts.filterExplicit,
           artistCap: cfg.artistCap,
           artistSeedCounts: batchArtistSeed,
           lastArtist: lastPlaylistArtist,
-          laneArtistCap: 1,
+          moodArtistCap: 1,
           blockedArtists: cfg.blockedArtists,
           enabledGenres: Array.isArray(genres) ? genres : null,
           bucketsFor: bucketsForArtist,
+          preferLane: setLane,
+          signal: outsideSignal,
         });
-        if (hits.length) {
-          for (const h of hits) {
-            if (h.id) exclude.add(h.id);
-            const artist = claimBatchArtist(h.artist);
-            if (artist) lastPlaylistArtist = artist;
-          }
-          discoveries = discoveries.concat(hits);
-          laneHitAdded += hits.length;
-          batchArtistSeed = syncBatchArtistBlocks();
-          console.log(
-            `[lane-hits] lane=${setLane} filled ${hits.length}/${need} Spotify exact-lane hit(s)`
+        console.log(
+          `[moods] ${activeMoodPack.id}: filled ${discoveries.length}/${similarWant} outside slots from era charts (lane=${setLane} exact) in ${Date.now() - outsideStarted}ms`
+        );
+      } catch (err) {
+        if (outsideSignal.aborted) {
+          console.warn(
+            `[moods] outside-slot budget ${OUTSIDE_SLOT_BUDGET_MS}ms hit; using ${discoveries.length} era pick(s)`
           );
         } else {
-          console.log(
-            `[lane-hits] lane=${setLane} need ${need}; none available (shorten batch)`
-          );
+          console.error("[moods] era slot fill failed:", err.message);
         }
+      }
+    } else if (!showcaseArtistKey && similarWant > 0 && isDiscoveryAvailable()) {
+      const discExclude = new Set([...libraryIds, ...exclude, ...recentIds]);
+      // Prefer seeds already on the exact lane so Songs Like stays in-family.
+      const seeds = [];
+      for (const pl of usable) {
+        for (const t of pl.tracks || []) {
+          let buckets = bucketsForArtistSync(t.artist);
+          if (!buckets.length) buckets = ["other"];
+          if (fitsExactLane(buckets, setLane)) {
+            seeds.push({ artist: t.artist, name: t.name });
+          }
+        }
+      }
+      if (!seeds.length) {
+        for (const pl of usable) {
+          for (const t of pl.tracks || []) {
+            seeds.push({ artist: t.artist, name: t.name });
+          }
+        }
+      }
+      try {
+        discoveries = await getSimilarUris({
+          seeds,
+          excludeIds: discExclude,
+          enabledGenres: Array.isArray(genres) ? genres : null,
+          filterExplicit: !!opts.filterExplicit,
+          artistCap: cfg.artistCap,
+          artistSeedCounts: batchArtistSeed,
+          lastArtist: lastPlaylistArtist,
+          discoveryArtistCap: 1,
+          blockedArtists: cfg.blockedArtists,
+          flowState: cfg.flowState,
+          count: similarWant,
+          preferLane: setLane,
+          signal: outsideSignal,
+        });
+        console.log(
+          `[discover] lane=${setLane || "?"} exact got ${discoveries.length}/${similarWant} in ${Date.now() - outsideStarted}ms`
+        );
       } catch (err) {
-        console.error("[lane-hits] shortfall fill failed:", err.message);
+        if (outsideSignal.aborted) {
+          console.warn(
+            `[discover] outside-slot budget ${OUTSIDE_SLOT_BUDGET_MS}ms hit; using ${discoveries.length} discovery pick(s)`
+          );
+        } else {
+          console.error("[discover] failed:", err.message);
+        }
       }
     }
+
+    for (const d of discoveries) {
+      const artist = claimBatchArtist(d.artist);
+      if (artist) lastPlaylistArtist = artist;
+    }
+    batchArtistSeed = syncBatchArtistBlocks();
+
+    // If discovery came up short, try more exact-lane playlist picks first.
+    const discoveryShortfall = Math.max(0, similarWant - discoveries.length);
+    if (discoveryShortfall > 0) {
+      cfg.lastArtist = lastPlaylistArtist;
+      const fill = pickWithRelaxation(
+        usable,
+        exclude,
+        discoveryShortfall,
+        recentIds,
+        batchArtistSeed,
+        cfg
+      );
+      for (const uri of fill.uris) {
+        playlistUris.push(uri);
+        const id = spotifyTrackId(uri);
+        if (id) exclude.add(id);
+        const artist = claimBatchArtist(artistByUri.get(uri));
+        if (artist) lastPlaylistArtist = artist;
+      }
+      batchArtistSeed = syncBatchArtistBlocks();
+      relaxedArtist = relaxedArtist || fill.relaxedArtist;
+      relaxedMemory = relaxedMemory || fill.relaxedMemory;
+      memoryReuseCount += fill.memoryReuseCount;
+    }
+
+    // Still short of the batch target → Spotify / Last.fm exact-lane hits
+    // outside the library. Never pad with off-lane tracks.
+    {
+      const need = Math.max(
+        0,
+        totalTarget - playlistUris.length - discoveries.length
+      );
+      if (
+        !showcaseArtistKey &&
+        need > 0 &&
+        setLane &&
+        !wasPreempted() &&
+        !outsideSignal.aborted
+      ) {
+        try {
+          const hits = await getLaneHits({
+            lane: setLane,
+            count: need,
+            excludeIds: new Set([...libraryIds, ...exclude, ...recentIds]),
+            filterExplicit: !!opts.filterExplicit,
+            artistCap: cfg.artistCap,
+            artistSeedCounts: batchArtistSeed,
+            lastArtist: lastPlaylistArtist,
+            laneArtistCap: 1,
+            blockedArtists: cfg.blockedArtists,
+            enabledGenres: Array.isArray(genres) ? genres : null,
+            bucketsFor: bucketsForArtist,
+            signal: outsideSignal,
+          });
+          if (hits.length) {
+            for (const h of hits) {
+              if (h.id) exclude.add(h.id);
+              const artist = claimBatchArtist(h.artist);
+              if (artist) lastPlaylistArtist = artist;
+            }
+            discoveries = discoveries.concat(hits);
+            laneHitAdded += hits.length;
+            batchArtistSeed = syncBatchArtistBlocks();
+            console.log(
+              `[lane-hits] lane=${setLane} filled ${hits.length}/${need} Spotify exact-lane hit(s) in ${Date.now() - outsideStarted}ms`
+            );
+          } else {
+            console.log(
+              `[lane-hits] lane=${setLane} need ${need}; none available (shorten batch)`
+            );
+          }
+        } catch (err) {
+          if (outsideSignal.aborted) {
+            console.warn(
+              `[lane-hits] outside-slot budget ${OUTSIDE_SLOT_BUDGET_MS}ms hit; skipping further fills`
+            );
+          } else {
+            console.error("[lane-hits] shortfall fill failed:", err.message);
+          }
+        }
+      } else if (outsideSignal.aborted && need > 0) {
+        console.warn(
+          `[lane-hits] skipped; outside-slot budget ${OUTSIDE_SLOT_BUDGET_MS}ms already spent`
+        );
+      }
+    }
+  } finally {
+    clearTimeout(outsideTimer);
+    console.log(
+      `[random] outside slots done in ${Date.now() - outsideStarted}ms` +
+        ` discoveries=${discoveries.length} laneHits=${laneHitAdded}` +
+        (outsideSignal.aborted ? " (budget)" : "")
+    );
   }
+  console.log(
+    `[random] plan ready in ${Date.now() - planStarted}ms` +
+      ` playlist=${playlistUris.length} outside=${discoveries.length}`
+  );
 
   // 3) Mix discoveries through playlist picks (always lead with a playlist
   // pick when any exist). Avoid adjacent Songs Like unless discoveries

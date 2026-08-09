@@ -94,7 +94,7 @@ export function laneSource(lane) {
   return id && LANE_SOURCES[id] ? { id, ...LANE_SOURCES[id] } : null;
 }
 
-async function lastfmTagTopTracks(tag, page = 1) {
+async function lastfmTagTopTracks(tag, page = 1, signal = null) {
   const params = new URLSearchParams({
     method: "tag.gettoptracks",
     tag,
@@ -103,8 +103,10 @@ async function lastfmTagTopTracks(tag, page = 1) {
     api_key: getLastfmApiKey(),
     format: "json",
   });
+  const timeout = AbortSignal.timeout(8000);
+  const combined = signal ? AbortSignal.any([timeout, signal]) : timeout;
   const res = await fetch(`${LASTFM_URL}?${params.toString()}`, {
-    signal: AbortSignal.timeout(8000),
+    signal: combined,
   });
   if (!res.ok) return [];
   const j = await res.json().catch(() => null);
@@ -113,16 +115,17 @@ async function lastfmTagTopTracks(tag, page = 1) {
     .filter((t) => t.artist && t.name);
 }
 
-async function fetchTagCandidates(source) {
+async function fetchTagCandidates(source, signal = null) {
   const seen = new Set();
   const out = [];
   for (const tag of source.lastfmTags) {
+    if (signal?.aborted) break;
     for (let page = 1; page <= 2; page++) {
-      if (out.length >= MAX_CANDIDATES) break;
+      if (signal?.aborted || out.length >= MAX_CANDIDATES) break;
       await sleep(REQ_GAP_MS);
       let rows = [];
       try {
-        rows = await lastfmTagTopTracks(tag, page);
+        rows = await lastfmTagTopTracks(tag, page, signal);
       } catch {
         rows = [];
       }
@@ -139,7 +142,7 @@ async function fetchTagCandidates(source) {
   return out;
 }
 
-export async function getLaneCandidates(lane, { force = false } = {}) {
+export async function getLaneCandidates(lane, { force = false, signal = null } = {}) {
   const source = laneSource(lane);
   if (!source || !getLastfmApiKey()) return [];
   loadCache();
@@ -153,7 +156,8 @@ export async function getLaneCandidates(lane, { force = false } = {}) {
   ) {
     return hit.candidates;
   }
-  const candidates = await fetchTagCandidates(source);
+  if (signal?.aborted) return [];
+  const candidates = await fetchTagCandidates(source, signal);
   if (candidates.length) {
     cache[source.id] = { at: Date.now(), candidates };
     persistCache();
@@ -178,11 +182,13 @@ export async function getLaneHits(
     laneArtistCap = 1,
     enabledGenres = null,
     bucketsFor = null,
+    signal = null,
   },
   deps = {}
 ) {
   const source = laneSource(lane);
   if (!source || !Number.isFinite(count) || count <= 0) return [];
+  const aborted = () => !!signal?.aborted;
 
   const resolveTrack = deps.resolveTrack || findTrackUri;
   const searchPage = deps.searchPage || searchTracksPage;
@@ -272,32 +278,38 @@ export async function getLaneHits(
   };
 
   try {
-    const candidates = await tagCandidates(source.id);
+    if (aborted()) return chosen;
+    const candidates = await tagCandidates(source.id, { signal });
     if (candidates.length) {
       let resolveCalls = 0;
       for (const c of shuffled(candidates)) {
+        if (aborted()) break;
         if (chosen.length >= count) break;
         if (resolveCalls >= MAX_RESOLVE_CALLS) break;
         resolveCalls += 1;
-        const found = await resolveTrack(c.artist, c.name);
+        const found = await resolveTrack(c.artist, c.name, { signal });
         if (!found || !acceptable(found)) continue;
         const buckets = await bucketsOf(found.artist);
         if (!passesFilters(buckets)) continue;
         accept(found);
       }
-      if (chosen.length >= count) return chosen;
+      if (chosen.length >= count || aborted()) return chosen;
     }
 
     // Fallback: Spotify search by lane terms when Last.fm is thin / unavailable.
     for (const term of source.searchTerms) {
-      if (chosen.length >= count) break;
+      if (aborted() || chosen.length >= count) break;
       for (const offset of FALLBACK_OFFSETS) {
-        if (chosen.length >= count) break;
+        if (aborted() || chosen.length >= count) break;
         let items = [];
         try {
-          items = await searchPage(`genre:${term}`, { limit: 50, offset });
+          items = await searchPage(`genre:${term}`, {
+            limit: 50,
+            offset,
+            signal,
+          });
           if (!items.length) {
-            items = await searchPage(term, { limit: 50, offset });
+            items = await searchPage(term, { limit: 50, offset, signal });
           }
         } catch (err) {
           console.error("[lane-hits] fallback search failed:", err.message);
@@ -305,7 +317,7 @@ export async function getLaneHits(
         }
         if (!items.length) break;
         for (const found of shuffled(items)) {
-          if (chosen.length >= count) break;
+          if (aborted() || chosen.length >= count) break;
           if (!acceptable(found)) continue;
           const buckets = await bucketsOf(found.artist);
           if (!passesFilters(buckets)) continue;

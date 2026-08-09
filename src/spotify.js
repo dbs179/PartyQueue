@@ -836,7 +836,11 @@ export async function getArtistTopTracks(artistId, { filterExplicit = false } = 
 // this exposes offset paging, track ids, and release year, and skips the
 // guest-search cache (mood candidates are cached at a higher level). Filter
 // queries like "year:1980-1989" are valid Spotify search syntax.
-export async function searchTracksPage(query, { limit = 50, offset = 0 } = {}) {
+export async function searchTracksPage(
+  query,
+  { limit = 50, offset = 0, signal = null } = {}
+) {
+  if (signal?.aborted) return [];
   const token = await getAccessToken();
   const market = getSpotifyAppCredentials().market;
   const params = new URLSearchParams({
@@ -846,8 +850,11 @@ export async function searchTracksPage(query, { limit = 50, offset = 0 } = {}) {
     offset: String(offset),
     market,
   });
+  const timeout = AbortSignal.timeout(8_000);
+  const combined = signal ? AbortSignal.any([timeout, signal]) : timeout;
   const res = await spotifyApiFetch(`${SEARCH_URL}?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
+    signal: combined,
   });
   if (!res.ok) {
     throw spotifyHttpError("search", res.status);
@@ -953,10 +960,11 @@ function normalizeLoose(s) {
     .trim();
 }
 
-export async function findTrackUri(artist, title) {
+export async function findTrackUri(artist, title, opts = {}) {
   const a = (artist || "").trim();
   const t = (title || "").trim();
   if (!a || !t) return null;
+  if (opts.signal?.aborted) return null;
 
   const cacheKey = `${a.toLowerCase()}|||${t.toLowerCase()}`;
   if (findTrackCache.has(cacheKey)) return findTrackCache.get(cacheKey);
@@ -970,6 +978,13 @@ export async function findTrackUri(artist, title) {
     market,
   });
 
+  // Discover/lane planning can issue many lookups; never hang Random on one.
+  // Also honor a caller abort (outside-slot wall budget) so in-flight finds stop.
+  const timeout = AbortSignal.timeout(8_000);
+  const signal = opts.signal
+    ? AbortSignal.any([timeout, opts.signal])
+    : timeout;
+
   let result = null;
   // Only cache definitive outcomes (hit or confirmed miss). Transient failures
   // (429 / network) must not poison discovery for the cache lifetime.
@@ -977,6 +992,7 @@ export async function findTrackUri(artist, title) {
   try {
     const res = await spotifyApiFetch(`${SEARCH_URL}?${params.toString()}`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal,
     });
     if (res.ok) {
       const data = await res.json();

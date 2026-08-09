@@ -115,3 +115,37 @@ test("getLaneHits honors exclude and library memory ids", async () => {
   );
   assert.deepEqual(out.map((t) => t.id), ["f2"]);
 });
+
+test("getLaneHits stops promptly when abort signal fires", async () => {
+  resetLaneCacheForTests();
+  const ac = new AbortController();
+  let resolves = 0;
+  const started = Date.now();
+  const out = await getLaneHits(
+    {
+      lane: "folk",
+      count: 5,
+      excludeIds: [],
+      bucketsFor: async () => ["folk"],
+      signal: ac.signal,
+    },
+    {
+      tagCandidates: async () =>
+        Array.from({ length: 40 }, (_, i) => ({
+          artist: `Folk${i}`,
+          name: `Song ${i}`,
+        })),
+      resolveTrack: async (artist, name) => {
+        resolves += 1;
+        if (resolves === 2) ac.abort();
+        await new Promise((r) => setTimeout(r, 40));
+        return hit(`id-${resolves}`, artist, name);
+      },
+      searchPage: async () => [],
+    }
+  );
+  const elapsed = Date.now() - started;
+  assert.ok(out.length <= 3, `expected early stop, got ${out.length}`);
+  assert.ok(resolves < 20, `expected few resolves, got ${resolves}`);
+  assert.ok(elapsed < 1500, `expected abort under 1.5s, took ${elapsed}ms`);
+});

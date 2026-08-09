@@ -112,7 +112,7 @@ const LASTFM_URL = "https://ws.audioscrobbler.com/2.0/";
 const REQ_GAP_MS = 250; // same throttle as Discover
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function lastfmTagTopTracks(tag, page = 1) {
+async function lastfmTagTopTracks(tag, page = 1, signal = null) {
   const params = new URLSearchParams({
     method: "tag.gettoptracks",
     tag,
@@ -121,8 +121,10 @@ async function lastfmTagTopTracks(tag, page = 1) {
     api_key: getLastfmApiKey(),
     format: "json",
   });
+  const timeout = AbortSignal.timeout(8000);
+  const combined = signal ? AbortSignal.any([timeout, signal]) : timeout;
   const res = await fetch(`${LASTFM_URL}?${params.toString()}`, {
-    signal: AbortSignal.timeout(8000),
+    signal: combined,
   });
   if (!res.ok) return [];
   const j = await res.json().catch(() => null);
@@ -131,16 +133,17 @@ async function lastfmTagTopTracks(tag, page = 1) {
     .filter((t) => t.artist && t.name);
 }
 
-async function fetchTagCandidates(pack) {
+async function fetchTagCandidates(pack, signal = null) {
   const seen = new Set();
   const out = [];
   for (const tag of pack.lastfmTags) {
+    if (signal?.aborted) break;
     for (let page = 1; page <= 2; page++) {
-      if (out.length >= MAX_CANDIDATES) break;
+      if (signal?.aborted || out.length >= MAX_CANDIDATES) break;
       await sleep(REQ_GAP_MS);
       let rows = [];
       try {
-        rows = await lastfmTagTopTracks(tag, page);
+        rows = await lastfmTagTopTracks(tag, page, signal);
       } catch {
         rows = [];
       }
@@ -161,7 +164,10 @@ async function fetchTagCandidates(pack) {
  * Chart candidates ({ artist, name }) for a mood, from the 24h disk cache or
  * fresh from Last.fm. Returns [] without a Last.fm key or on failure.
  */
-export async function getMoodCandidates(moodId, { force = false } = {}) {
+export async function getMoodCandidates(
+  moodId,
+  { force = false, signal = null } = {}
+) {
   const pack = moodPack(moodId);
   if (!pack || !getLastfmApiKey()) return [];
   loadCache();
@@ -175,7 +181,8 @@ export async function getMoodCandidates(moodId, { force = false } = {}) {
   ) {
     return hit.candidates;
   }
-  const candidates = await fetchTagCandidates(pack);
+  if (signal?.aborted) return [];
+  const candidates = await fetchTagCandidates(pack, signal);
   if (candidates.length) {
     cache[pack.id] = { at: Date.now(), candidates };
     persistCache();
@@ -215,11 +222,13 @@ export async function getMoodHits(
     enabledGenres = null,
     bucketsFor = null,
     preferLane = null,
+    signal = null,
   },
   deps = {}
 ) {
   const pack = moodPack(mood);
   if (!pack || !Number.isFinite(count) || count <= 0) return [];
+  const aborted = () => !!signal?.aborted;
 
   const resolveTrack = deps.resolveTrack || findTrackUri;
   const searchPage = deps.searchPage || searchTracksPage;
@@ -314,7 +323,8 @@ export async function getMoodHits(
   };
 
   try {
-    const candidates = await tagCandidates(pack.id);
+    if (aborted()) return chosen;
+    const candidates = await tagCandidates(pack.id, { signal });
     if (candidates.length) {
       // Last.fm chart path: crowd-tagged era hits, resolved via Spotify search.
       // Tag membership is the era evidence — no hard year check (remaster
@@ -325,10 +335,11 @@ export async function getMoodHits(
         : MAX_RESOLVE_CALLS;
       let resolveCalls = 0;
       for (const c of shuffled(candidates)) {
+        if (aborted()) break;
         if (chosen.length >= count) break;
         if (resolveCalls >= maxResolveCalls) break;
         resolveCalls += 1;
-        const found = await resolveTrack(c.artist, c.name);
+        const found = await resolveTrack(c.artist, c.name, { signal });
         if (!found || !acceptable(found)) continue;
         const buckets = await bucketsOf(found.artist);
         if (!passesGenres(buckets)) continue;
@@ -342,17 +353,17 @@ export async function getMoodHits(
     // Results carry release years, so keep the strict window here.
     const query = `year:${pack.years[0]}-${pack.years[1]}`;
     for (const offset of FALLBACK_OFFSETS) {
-      if (chosen.length >= count) break;
+      if (aborted() || chosen.length >= count) break;
       let items = [];
       try {
-        items = await searchPage(query, { limit: 50, offset });
+        items = await searchPage(query, { limit: 50, offset, signal });
       } catch (err) {
         console.error("[moods] fallback search failed:", err.message);
         break;
       }
       if (!items.length) break;
       for (const found of shuffled(items)) {
-        if (chosen.length >= count) break;
+        if (aborted() || chosen.length >= count) break;
         if (!trackFitsMood(found, pack)) continue;
         if (!acceptable(found)) continue;
         const buckets = await bucketsOf(found.artist);

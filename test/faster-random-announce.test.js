@@ -61,6 +61,21 @@ describe("writeSetScript template path", () => {
   });
 });
 
+describe("outside-slot planning budget", () => {
+  it("documents the Random Discover/lane wall budget", async () => {
+    // Kept in sync with OUTSIDE_SLOT_BUDGET_MS in sonos-random.js — Discover
+    // and lane-hits must honor AbortSignal so Random HTTP can return quickly.
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(
+        new URL("../src/sonos-random.js", import.meta.url),
+        "utf8"
+      )
+    );
+    assert.match(src, /OUTSIDE_SLOT_BUDGET_MS\s*=\s*5_500/);
+    assert.match(src, /signal:\s*outsideSignal/);
+  });
+});
+
 describe("announce prep overlap contract", () => {
   it("starts prep before enqueue finishes when sequenced like the Random route", async () => {
     const order = [];

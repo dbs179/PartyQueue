@@ -39,29 +39,34 @@ export function isDiscoveryAvailable() {
   return !!apiKey();
 }
 
-async function lastfm(params) {
+async function lastfm(params, signal = null) {
   const p = new URLSearchParams({
     ...params,
     api_key: apiKey(),
     autocorrect: "1",
     format: "json",
   });
+  const timeout = AbortSignal.timeout(8000);
+  const combined = signal ? AbortSignal.any([timeout, signal]) : timeout;
   const res = await fetch(`${LASTFM_URL}?${p.toString()}`, {
-    signal: AbortSignal.timeout(8000),
+    signal: combined,
   });
   if (!res.ok) return null;
   return res.json();
 }
 
 // Song-to-song similar tracks for a seed: [{ artist, name, match }].
-async function similarTracksFor(seed) {
+async function similarTracksFor(seed, signal = null) {
   try {
-    const j = await lastfm({
-      method: "track.getsimilar",
-      artist: seed.artist,
-      track: seed.name,
-      limit: "30",
-    });
+    const j = await lastfm(
+      {
+        method: "track.getsimilar",
+        artist: seed.artist,
+        track: seed.name,
+        limit: "30",
+      },
+      signal
+    );
     return (j?.similartracks?.track ?? [])
       .map((t) => ({ artist: t.artist?.name, name: t.name, match: Number(t.match) || 0 }))
       .filter((c) => c.artist && c.name && c.match >= MIN_MATCH);
@@ -71,14 +76,17 @@ async function similarTracksFor(seed) {
 }
 
 // Fallback: similar artists, then a couple of each one's top tracks.
-async function similarArtistTracksFor(seed) {
+async function similarArtistTracksFor(seed, signal = null) {
   let artists = [];
   try {
-    const j = await lastfm({
-      method: "artist.getsimilar",
-      artist: seed.artist,
-      limit: "12",
-    });
+    const j = await lastfm(
+      {
+        method: "artist.getsimilar",
+        artist: seed.artist,
+        limit: "12",
+      },
+      signal
+    );
     artists = (j?.similarartists?.artist ?? [])
       .map((a) => ({ name: a.name, match: Number(a.match) || 0 }))
       .filter((a) => a.name);
@@ -88,13 +96,17 @@ async function similarArtistTracksFor(seed) {
 
   const candidates = [];
   for (const a of artists.slice(0, 5)) {
+    if (signal?.aborted) break;
     await sleep(REQ_GAP_MS);
     try {
-      const j = await lastfm({
-        method: "artist.gettoptracks",
-        artist: a.name,
-        limit: "3",
-      });
+      const j = await lastfm(
+        {
+          method: "artist.gettoptracks",
+          artist: a.name,
+          limit: "3",
+        },
+        signal
+      );
       for (const t of j?.toptracks?.track ?? []) {
         if (t?.name) candidates.push({ artist: a.name, name: t.name, match: a.match });
       }
@@ -134,8 +146,10 @@ export async function getSimilarUris({
   blockedArtists = null,
   preferLane = null,
   flowState = null,
+  signal = null,
 }) {
   if (!apiKey() || !count || count <= 0 || !seeds?.length) return [];
+  const aborted = () => !!signal?.aborted;
 
   const enabled = Array.isArray(enabledGenres) ? new Set(enabledGenres) : null;
   const exclude = excludeIds instanceof Set ? excludeIds : new Set(excludeIds || []);
@@ -187,15 +201,18 @@ export async function getSimilarUris({
   let findTrackCalls = 0;
 
   for (const seed of seedQueue) {
+    if (aborted()) break;
     if (chosen.length >= count) break;
     if (findTrackCalls >= MAX_FIND_TRACK_CALLS) break;
     if (!seed?.artist || !seed?.name) continue;
 
     await sleep(REQ_GAP_MS);
-    let candidates = await similarTracksFor(seed);
+    if (aborted()) break;
+    let candidates = await similarTracksFor(seed, signal);
     if (candidates.length === 0) {
       await sleep(REQ_GAP_MS);
-      candidates = await similarArtistTracksFor(seed);
+      if (aborted()) break;
+      candidates = await similarArtistTracksFor(seed, signal);
     }
     candidates.sort((a, b) => b.match - a.match);
     // Prefer a different artist than the previous pick when several candidates
@@ -211,10 +228,11 @@ export async function getSimilarUris({
     }
 
     for (const c of candidates) {
+      if (aborted()) break;
       if (chosen.length >= count) break;
       if (findTrackCalls >= MAX_FIND_TRACK_CALLS) break;
       findTrackCalls += 1;
-      const found = await findTrackUri(c.artist, c.name);
+      const found = await findTrackUri(c.artist, c.name, { signal });
       if (!found) continue;
       if (filterExplicit && found.explicit) continue;
       if (isClosingTime(found.name, found.artist, found.uri)) continue;
