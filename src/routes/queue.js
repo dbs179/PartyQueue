@@ -4,6 +4,7 @@
 
 import { asyncHandler } from "../http/async-handler.js";
 import {
+  preemptQueueWork,
   queueWorkGeneration,
   queueWorkWasPreempted,
 } from "../queue-preempt.js";
