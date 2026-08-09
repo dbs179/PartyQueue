@@ -2001,7 +2001,9 @@ async function loadJoinCode() {
     errorEl.textContent = "";
   }
   for (const qrEl of [joinQrEl, displayJoinQr]) {
-    if (qrEl) qrEl.innerHTML = "";
+    if (!qrEl) continue;
+    qrEl.innerHTML = "";
+    qrEl.classList.remove("is-ready");
   }
   if (joinUrlEl) joinUrlEl.textContent = "Loading…";
   if (displayJoinUrl) displayJoinUrl.textContent = "Loading…";
@@ -2013,8 +2015,14 @@ async function loadJoinCode() {
     if (joinUrlEl) joinUrlEl.textContent = joinUrlCache;
     if (displayJoinUrl) displayJoinUrl.textContent = joinUrlCache;
     if (data.qrSvg) {
-      if (joinQrEl) joinQrEl.innerHTML = data.qrSvg;
-      if (displayJoinQr) displayJoinQr.innerHTML = data.qrSvg;
+      if (joinQrEl) {
+        joinQrEl.innerHTML = data.qrSvg;
+        joinQrEl.classList.add("is-ready");
+      }
+      if (displayJoinQr) {
+        displayJoinQr.innerHTML = data.qrSvg;
+        displayJoinQr.classList.add("is-ready");
+      }
     }
   } catch (err) {
     joinUrlCache = "";

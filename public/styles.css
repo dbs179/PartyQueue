@@ -3294,10 +3294,25 @@ body.party-display-active > .container {
   border-radius: 10px;
 }
 
+/* Empty box is transparent/hidden — white tile only when SVG is injected. */
+.party-display-qr:not(.is-ready) {
+  display: none;
+}
+
 .party-display-qr svg {
   width: 100%;
   height: auto;
   display: block;
+}
+
+#display-join-error.party-display-side-empty:not([hidden]) {
+  margin-top: 10px;
+  padding: 8px 10px;
+  color: #ffd88a;
+  background: rgba(255, 183, 77, 0.12);
+  border: 1px solid rgba(255, 183, 77, 0.3);
+  border-radius: 8px;
+  font-size: clamp(0.8rem, 1vw, 1rem);
 }
 
 .party-display-join-copy {
@@ -3320,6 +3335,134 @@ body.party-display-active > .container {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Living-room / Fully Kiosk: raise ceilings with vmin so type and art keep
+   growing past desktop clamp maxes. Avoid orientation queries — Android TV
+   often misreports portrait on landscape 4K. */
+@media (min-width: 1200px) and (min-height: 700px) {
+  body.party-display-active .party-display-shell {
+    padding: clamp(28px, 3.2vmin, 56px);
+    gap: clamp(18px, 2.2vmin, 32px);
+  }
+
+  body.party-display-active .party-display-layout {
+    column-gap: clamp(28px, 3.5vmin, 56px);
+    row-gap: clamp(18px, 2.2vmin, 32px);
+  }
+
+  body.party-display-active .party-display-side {
+    justify-content: space-between;
+    min-height: 100%;
+    align-self: stretch;
+  }
+
+  body.party-display-active .party-display-event {
+    font-size: clamp(2.5rem, 5.5vmin, 7rem);
+  }
+
+  body.party-display-active .party-display-kicker,
+  body.party-display-active .party-display-label {
+    font-size: clamp(0.85rem, 1.4vmin, 1.25rem);
+  }
+
+  body.party-display-active .party-display-art-wrap {
+    max-height: min(58vmin, 72dvh);
+  }
+
+  body.party-display-active .party-display-title {
+    font-size: clamp(3rem, 7.5vmin, 9.5rem);
+    max-width: 16ch;
+  }
+
+  body.party-display-active .party-display-artist {
+    font-size: clamp(1.6rem, 3.2vmin, 3.8rem);
+  }
+
+  body.party-display-active .party-display-album {
+    font-size: clamp(1.1rem, 1.9vmin, 1.85rem);
+  }
+
+  body.party-display-active .party-display-state {
+    font-size: clamp(0.9rem, 1.5vmin, 1.25rem);
+    padding: 8px 14px;
+  }
+
+  body.party-display-active .party-display-progress .np-progress-track {
+    height: 10px;
+  }
+
+  body.party-display-active .party-display-progress .np-progress-times {
+    font-size: clamp(0.95rem, 1.5vmin, 1.25rem);
+  }
+
+  body.party-display-active .party-display-reactions > span {
+    font-size: clamp(1.1rem, 1.9vmin, 1.7rem);
+    padding: 10px 6px;
+  }
+
+  body.party-display-active .party-display-lyrics {
+    --display-lyric-size: clamp(1.5rem, 3.4vmin, 3.4rem);
+    --display-lyric-line: 1.35;
+    --display-lyric-gap: 0.55rem;
+  }
+
+  body.party-display-active .party-display-queue {
+    padding: clamp(16px, 2vmin, 28px);
+  }
+
+  body.party-display-active .party-display-queue-count {
+    font-size: clamp(0.95rem, 1.5vmin, 1.25rem);
+  }
+
+  body.party-display-active .party-display-queue-list {
+    gap: 6px;
+  }
+
+  body.party-display-active .party-display-queue-list li {
+    grid-template-columns: 2.4rem minmax(0, 1fr);
+    padding: clamp(8px, 1.1vh, 14px) 0;
+  }
+
+  body.party-display-active .party-display-queue-index {
+    font-size: clamp(1.05rem, 1.7vmin, 1.4rem);
+  }
+
+  body.party-display-active .party-display-queue-meta strong {
+    font-size: clamp(1.15rem, 2.1vmin, 1.85rem);
+  }
+
+  body.party-display-active .party-display-queue-meta > span {
+    font-size: clamp(0.95rem, 1.6vmin, 1.35rem);
+  }
+
+  body.party-display-active .party-display-queue-meta .party-display-queue-source {
+    font-size: clamp(0.85rem, 1.4vmin, 1.15rem);
+  }
+
+  body.party-display-active .party-display-join {
+    padding: clamp(14px, 1.8vmin, 24px);
+  }
+
+  body.party-display-active .party-display-qr {
+    flex-basis: min(22vmin, 280px);
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  body.party-display-active .party-display-join-copy > p {
+    font-size: clamp(0.9rem, 1.5vmin, 1.25rem);
+  }
+
+  body.party-display-active .party-display-url {
+    max-width: 36ch;
+    font-size: clamp(1rem, 1.7vmin, 1.4rem);
+    color: var(--text);
+  }
+
+  body.party-display-active #display-join-error.party-display-side-empty:not([hidden]) {
+    font-size: clamp(0.95rem, 1.6vmin, 1.3rem);
+  }
 }
 
 /* Width-only: Android TV / Fully Kiosk often misreports orientation:portrait
