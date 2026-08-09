@@ -2986,7 +2986,7 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   align-self: stretch;
 }
 
-/* Two columns: big art (left) + compact meta centered beside it. */
+/* Two columns: big art (left) + bold meta filling the space to Up Next. */
 .party-display-hero {
   container-type: size;
   flex: 1 1 auto;
@@ -2996,7 +2996,7 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: calc(20 * var(--pd));
+  gap: calc(28 * var(--pd));
 }
 
 .party-display-art-wrap {
@@ -3047,20 +3047,21 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   min-height: 0;
   max-height: 100%;
   overflow: hidden;
-  align-self: center;
+  align-self: stretch;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: space-evenly;
+  padding: calc(8 * var(--pd)) 0;
 }
 
 .party-display-state {
   display: inline-flex;
   margin-bottom: 0;
-  padding: calc(3 * var(--pd)) calc(8 * var(--pd));
+  padding: calc(8 * var(--pd)) calc(14 * var(--pd));
   color: var(--muted);
   background: var(--surface-2);
   border-radius: 999px;
-  font-size: calc(11 * var(--pd));
+  font-size: calc(16 * var(--pd));
   font-weight: 750;
 }
 
@@ -3069,8 +3070,8 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: calc(5 * var(--pd));
-  margin-bottom: calc(6 * var(--pd));
+  gap: calc(8 * var(--pd));
+  margin-bottom: 0;
 }
 
 .party-display-pills .party-display-state {
@@ -3101,52 +3102,55 @@ body.party-display-active.party-display-kiosk .party-display-shell {
 
 .party-display-title {
   margin: 0;
-  max-width: 24ch;
-  font-size: calc(28 * var(--pd));
-  line-height: 1.08;
-  letter-spacing: -0.03em;
+  max-width: none;
+  width: 100%;
+  font-size: calc(48 * var(--pd));
+  line-height: 1.05;
+  letter-spacing: -0.035em;
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   overflow: hidden;
 }
 
 .party-display-artist {
-  margin: calc(6 * var(--pd)) 0 0;
+  margin: calc(10 * var(--pd)) 0 0;
   color: var(--text);
-  font-size: calc(16 * var(--pd));
+  font-size: calc(28 * var(--pd));
   font-weight: 650;
   line-height: 1.1;
 }
 
 .party-display-album {
-  margin: calc(3 * var(--pd)) 0 0;
+  margin: calc(6 * var(--pd)) 0 0;
   color: var(--muted);
-  font-size: calc(12 * var(--pd));
+  font-size: calc(18 * var(--pd));
 }
 
 .party-display-progress {
-  margin-top: calc(8 * var(--pd));
+  margin-top: 0;
+  width: 100%;
 }
 
 .party-display-progress .np-progress-track {
-  height: calc(4 * var(--pd));
+  height: calc(12 * var(--pd));
+  border-radius: 999px;
 }
 
 .party-display-progress .np-progress-times {
-  margin-top: calc(3 * var(--pd));
-  font-size: calc(11 * var(--pd));
+  margin-top: calc(8 * var(--pd));
+  font-size: calc(16 * var(--pd));
 }
 
 .party-display-reactions {
-  margin-top: calc(8 * var(--pd));
+  margin-top: 0;
   width: 100%;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-template-rows: auto auto;
-  gap: calc(5 * var(--pd));
+  gap: calc(8 * var(--pd));
 }
 
 .party-display-reactions[hidden] {
@@ -3158,11 +3162,11 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: calc(3 * var(--pd));
-  padding: calc(6 * var(--pd)) calc(4 * var(--pd));
+  gap: calc(5 * var(--pd));
+  padding: calc(10 * var(--pd)) calc(6 * var(--pd));
   background: var(--surface);
   border-radius: 999px;
-  font-size: calc(14 * var(--pd));
+  font-size: calc(20 * var(--pd));
 }
 
 .party-display-reactions strong {
