@@ -160,10 +160,13 @@ export function createLyricsUi(els, deps) {
     if (!displayLyrics || !syncedLines) return;
     const ul = document.createElement("ul");
     ul.className = "np-fs-lyrics-synced party-display-lyrics-window";
+    // 5-line karaoke window: two before, active, two after.
     const slots = [
+      { i: activeIdx - 2, cls: "is-past" },
       { i: activeIdx - 1, cls: "is-past" },
       { i: activeIdx, cls: "is-active" },
       { i: activeIdx + 1, cls: "is-next" },
+      { i: activeIdx + 2, cls: "is-next" },
     ];
     for (const slot of slots) {
       const li = document.createElement("li");

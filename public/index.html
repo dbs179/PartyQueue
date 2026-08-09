@@ -364,7 +364,7 @@
               </div>
             </section>
 
-            <aside class="party-display-side" aria-label="Upcoming songs and join code">
+            <aside class="party-display-side" aria-label="Upcoming songs">
               <section class="party-display-queue">
                 <div class="party-display-section-head">
                   <p class="party-display-label">Up Next</p>
@@ -372,16 +372,6 @@
                 </div>
                 <ol id="display-queue" class="party-display-queue-list"></ol>
                 <p id="display-queue-empty" class="party-display-side-empty">Connecting…</p>
-              </section>
-
-              <section class="party-display-join" aria-label="Join PartyQueue">
-                <div id="display-join-qr" class="party-display-qr" aria-hidden="true"></div>
-                <div class="party-display-join-copy">
-                  <p class="party-display-label">Join the Queue</p>
-                  <p>Scan on the same Wi-Fi</p>
-                  <p id="display-join-url" class="party-display-url"></p>
-                  <p id="display-join-error" class="party-display-side-empty" hidden></p>
-                </div>
               </section>
             </aside>
 
@@ -391,6 +381,16 @@
               aria-live="polite"
               aria-label="Lyrics"
             ></div>
+
+            <section class="party-display-join" aria-label="Join PartyQueue">
+              <div id="display-join-qr" class="party-display-qr" aria-hidden="true"></div>
+              <div class="party-display-join-copy">
+                <p class="party-display-label">Join the Queue</p>
+                <p>Scan on the same Wi-Fi</p>
+                <p id="display-join-url" class="party-display-url"></p>
+                <p id="display-join-error" class="party-display-side-empty" hidden></p>
+              </div>
+            </section>
           </div>
         </div>
       </div>
