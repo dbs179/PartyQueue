@@ -688,6 +688,8 @@ function fillSettings(s) {
   if (s.showVersion != null) {
     showVersionInput.checked = !!s.showVersion;
     if (headerVersion) headerVersion.hidden = !s.showVersion;
+    const displayVersion = document.getElementById("display-version");
+    if (displayVersion) displayVersion.hidden = !s.showVersion;
     persistBrandingCache({ showVersion: !!s.showVersion });
   }
   if (s.showQueueGenre != null) {
@@ -2751,10 +2753,16 @@ async function loadVersion() {
     if (!data?.version) return;
     const next = `v${data.version}`;
     if (el && el.textContent !== next) el.textContent = next;
-    if (displayEl) {
-      displayEl.textContent = next;
-      displayEl.hidden = false;
-    }
+    if (displayEl) displayEl.textContent = next;
+    // Visibility follows Booth "Show version" (headerVersion.hidden / input).
+    const show =
+      showVersionInput != null
+        ? !!showVersionInput.checked
+        : headerVersion
+          ? !headerVersion.hidden
+          : true;
+    if (el) el.hidden = !show;
+    if (displayEl) displayEl.hidden = !show;
     persistBrandingCache({ version: data.version });
     document.getElementById("header-title")?.setAttribute("data-ready", "1");
   } catch {

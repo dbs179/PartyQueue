@@ -341,9 +341,12 @@ export function createBrandingUi(els, deps) {
   }
 
   showVersionInput?.addEventListener("change", () => {
-    saveSettings({ showVersion: showVersionInput.checked });
-    if (headerVersion) headerVersion.hidden = !showVersionInput.checked;
-    persistBrandingCache({ showVersion: showVersionInput.checked });
+    const show = !!showVersionInput.checked;
+    saveSettings({ showVersion: show });
+    if (headerVersion) headerVersion.hidden = !show;
+    const displayVersion = document.getElementById("display-version");
+    if (displayVersion) displayVersion.hidden = !show;
+    persistBrandingCache({ showVersion: show });
   });
 
   showQueueGenreInput?.addEventListener("change", () => {

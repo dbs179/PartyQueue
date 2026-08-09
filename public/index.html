@@ -56,9 +56,9 @@
           verEl.hidden = !showVer;
         }
         var displayVerEl = document.getElementById("display-version");
-        if (displayVerEl && b.version) {
-          displayVerEl.textContent = "v" + b.version;
-          displayVerEl.hidden = false;
+        if (displayVerEl) {
+          if (b.version) displayVerEl.textContent = "v" + b.version;
+          displayVerEl.hidden = !b.showVersion;
         }
         if (titleEl) titleEl.setAttribute("data-ready", "1");
         if (subEl) {
