@@ -10,6 +10,7 @@
 import {
   DEFAULT_END_OF_NIGHT,
   getDjVoiceSettings,
+  loadSettings,
 } from "./settings.js";
 
 function trackIdFromUri(uri) {
@@ -25,11 +26,32 @@ function trackIdFromUri(uri) {
 }
 
 /**
+ * Lightweight end-of-night fields for hot match paths (Random sampling).
+ * Avoids getDjVoiceSettings() — that runs DJ-icon seeding/migrations and is
+ * far too heavy to call once per track while scanning the playlist pool.
+ */
+function endOfNightMatchConfig(dj = null) {
+  if (dj && typeof dj === "object") {
+    return {
+      endOfNightTrackUri: dj.endOfNightTrackUri || null,
+      endOfNightTrackName: dj.endOfNightTrackName || null,
+      endOfNightTrackArtist: dj.endOfNightTrackArtist || null,
+    };
+  }
+  const s = loadSettings();
+  return {
+    endOfNightTrackUri: s.endOfNightTrackUri || null,
+    endOfNightTrackName: s.endOfNightTrackName || null,
+    endOfNightTrackArtist: s.endOfNightTrackArtist || null,
+  };
+}
+
+/**
  * Effective end-of-night song for display / scripts.
  * @returns {{ uri: string|null, name: string, artist: string, isDefault: boolean }}
  */
 export function getEndOfNightTrack(dj = null) {
-  const s = dj || getDjVoiceSettings();
+  const s = endOfNightMatchConfig(dj);
   const uri = s.endOfNightTrackUri || null;
   if (uri) {
     return {
@@ -60,7 +82,7 @@ function artistIncludes(haystack, needle) {
  * @param {ReturnType<typeof getDjVoiceSettings>|null} [dj]
  */
 export function isEndOfNightTrack(track = {}, dj = null) {
-  const s = dj || getDjVoiceSettings();
+  const s = endOfNightMatchConfig(dj);
   const configuredUri = s.endOfNightTrackUri || null;
   const trackId = trackIdFromUri(track.uri);
   const configuredId = trackIdFromUri(configuredUri);

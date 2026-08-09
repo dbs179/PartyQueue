@@ -809,15 +809,32 @@ export function djIconUrl(iconName) {
   return name ? `/dj-icon/${name}` : DJ_ICON_DEFAULT_URL;
 }
 
-export function getDjVoiceSettings() {
-  const s = loadSettings();
-  const name = cleanDjName(s.djName);
-  // One-time move / rename of older icon filenames into the short gallery names.
+// Icon seed/migrate touches the filesystem (readdir/rename). Run once per
+// process — never on every getDjVoiceSettings() call (Random sampling used to
+// invoke that per track via isClosingTime and stall Add Random for minutes).
+let djIconHousekeepingDone = false;
+let djIconMigrationMap = new Map();
+function ensureDjIconHousekeeping() {
+  if (djIconHousekeepingDone) return djIconMigrationMap;
+  djIconHousekeepingDone = true;
   seedStarterDjIcons();
-  const migrated = new Map([
+  djIconMigrationMap = new Map([
     ...migrateLegacyIcons(),
     ...migrateDjIconFilenames(),
   ]);
+  return djIconMigrationMap;
+}
+
+/** Test hook: allow unit tests to re-run icon housekeeping. */
+export function resetDjIconHousekeepingForTests() {
+  djIconHousekeepingDone = false;
+  djIconMigrationMap = new Map();
+}
+
+export function getDjVoiceSettings() {
+  const s = loadSettings();
+  const name = cleanDjName(s.djName);
+  const migrated = ensureDjIconHousekeeping();
   let iconRaw = cleanDjIcon(s.djIcon);
   if (iconRaw && migrated.has(iconRaw)) {
     iconRaw = migrated.get(iconRaw);

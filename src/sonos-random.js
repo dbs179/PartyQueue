@@ -104,6 +104,7 @@ async function buildRandomPlan(
   console.log(
     `[random] pool ready in ${Date.now() - planStarted}ms (${playlists.length} playlist(s))`
   );
+  const afterPoolAt = Date.now();
   let usable = playlists.filter((p) => (p.tracks || []).length > 0);
 
   // When a specific set of playlist IDs is provided, only draw from those.
@@ -165,6 +166,9 @@ async function buildRandomPlan(
   // enqueued or that failed to enqueue. This lets us re-sample to fill `count`.
   const coordinator = await resolveCoordinator(m);
   const queue = await coordinator.GetQueue();
+  console.log(
+    `[random] queue snapshot in ${Date.now() - afterPoolAt}ms`
+  );
   const queueItems = Array.isArray(queue.Result) ? queue.Result : [];
   // 1-based index where this batch will land (append). DJ set announce inserts
   // immediately before this so Random/Discover stay under guest requests.
@@ -330,6 +334,7 @@ async function buildRandomPlan(
   let relaxedArtist = false;
   let relaxedMemory = false;
   let memoryReuseCount = 0;
+  const pickStarted = Date.now();
   const firstPick = pickWithRelaxation(
     usable,
     exclude,
@@ -337,6 +342,10 @@ async function buildRandomPlan(
     recentIds,
     artistSeed,
     cfg
+  );
+  console.log(
+    `[random] playlist picks in ${Date.now() - pickStarted}ms` +
+      ` want=${playlistWant} got=${firstPick.uris.length}`
   );
   const playlistUris = firstPick.uris;
   relaxedArtist = firstPick.relaxedArtist;

@@ -107,4 +107,24 @@ describe("end of night matcher", () => {
     setDjVoiceSettings({ djPartyRecapEnabled: false });
     assert.equal(shouldAnnouncePartyRecap(), false);
   });
+
+  it("isClosingTime stays cheap across a full playlist-sized scan", () => {
+    setDjVoiceSettings({
+      endOfNightTrackUri: null,
+      endOfNightTrackName: null,
+      endOfNightTrackArtist: null,
+    });
+    const started = Date.now();
+    let hits = 0;
+    for (let i = 0; i < 10_000; i++) {
+      if (isClosingTime(`Song ${i}`, `Artist ${i}`, `spotify:track:${i}`)) {
+        hits += 1;
+      }
+    }
+    const elapsed = Date.now() - started;
+    assert.equal(hits, 0);
+    // Regression guard: previously called getDjVoiceSettings (icon migrations)
+    // per track and took ~10s+ for a ~9k pool scan on Random.
+    assert.ok(elapsed < 500, `expected <500ms, took ${elapsed}ms`);
+  });
 });
