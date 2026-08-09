@@ -1223,7 +1223,7 @@ export function setContentSettings(partial = {}) {
 export const BRANDING_DEFAULTS = {
   eventName: "PartyQueue",
   subtitle: "",
-  showVersion: false,
+  showVersion: true,
   // Up Next pills: matched genre + From Playlists next to origin badge.
   showQueueGenre: false,
   heroBanner: null, // null = built-in public/hero.jpg; otherwise a data/banners file
