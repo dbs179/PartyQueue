@@ -74,6 +74,7 @@ export {
   SET_REQUEST_SIZE,
   addPlaylistToQueue,
   enqueueHttpAudio,
+  insertAnnounceBlock,
   removeQueueTrack,
   removeUpcomingAnnouncePads,
   removeUpcomingFillerTracks,

@@ -944,6 +944,9 @@ export function registerQueueRoutes(app, ctx) {
 
   app.post("/api/queue/clear", destructiveLimit, requireHostControls, asyncHandler(async (_req, res) => {
     try {
+      // Bump preempt before awaiting clear work so an in-flight announce block
+      // aborts between pad inserts instead of finishing the whole ramp/TTS/restore.
+      preemptQueueWork();
       const result = await sonos.clearQueueWithoutAutoRefill();
       res.json({ ok: true, ...result });
     } catch (err) {

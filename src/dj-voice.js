@@ -2520,53 +2520,6 @@ export async function previewTtsVoice(
   };
 }
 
-async function enqueueDjClip(publicUrl, { durationSec, position = 1 } = {}) {
-  const { enqueueHttpAudio, pauseQueueTrim } = await import("./sonos.js");
-  const { djName } = getDjVoiceSettings();
-  // Keep maintenance from deleting the clip if the playhead is still on music.
-  pauseQueueTrim(25000);
-  return enqueueHttpAudio(publicUrl, {
-    title: djName || DJ_VOICE_DEFAULTS.djName,
-    artist: "PartyQueue",
-    durationSec,
-    position,
-  });
-}
-
-// Silent MP3 before the DJ clip — volume boost window after music ends.
-async function enqueueSilenceRamp(position) {
-  const { enqueueHttpAudio, pauseQueueTrim } = await import("./sonos.js");
-  const ramp = ensureSilenceRamp();
-  pauseQueueTrim(25000);
-  await enqueueHttpAudio(ramp.publicUrl, {
-    title: "PartyQueue Volume Ramp",
-    artist: "PartyQueue",
-    durationSec: ramp.durationSec,
-    position,
-  });
-  console.log(
-    `[dj-voice] enqueued ${ramp.durationSec}s volume-ramp silence at queue position ${position}`
-  );
-  return ramp;
-}
-
-// Silent MP3 after the DJ clip — stepped restore completes before music resumes.
-async function enqueueSilenceRestore(position) {
-  const { enqueueHttpAudio, pauseQueueTrim } = await import("./sonos.js");
-  const bridge = ensureSilenceBridge();
-  pauseQueueTrim(25000);
-  await enqueueHttpAudio(bridge.publicUrl, {
-    title: "PartyQueue Silence Bridge",
-    artist: "PartyQueue",
-    durationSec: bridge.durationSec,
-    position,
-  });
-  console.log(
-    `[dj-voice] enqueued ${bridge.durationSec}s restore silence at queue position ${position}`
-  );
-  return bridge;
-}
-
 async function startQueuePlayback(trackNumber = 1) {
   // SwitchToQueue â†’ SeekTrack(N) â†’ Play. Seek is required after inserting TTS
   // at the front, otherwise the playhead can stay on the first Spotify track.
@@ -2673,61 +2626,71 @@ async function announceOnSonosUnlocked(
         /* best-effort */
       }
     }
-    // Queue order: ramp silence â†’ DJ TTS â†’ restore silence â†’ music.
+    // Queue order: ramp silence → DJ TTS → restore silence → music.
     // Volume rises during the lead pad and returns exactly during the trailing pad.
     //
-    // Strip any unplayed ramp/TTS pads first so a new shout supersedes one that
-    // hasn't started yet (avoids back-to-back DJ clips). Adjust insert if pads
-    // sat before our planned position.
-    const { removeUpcomingAnnouncePads, pauseQueueTrim } = await import(
-      "./sonos.js"
-    );
-    pauseQueueTrim(25000);
-    let rampPos = Number(queuePosition) || 1;
-    try {
-      const wiped = await removeUpcomingAnnouncePads({
-        beforePosition: rampPos,
-      });
-      if (wiped.removedBefore > 0) {
-        rampPos = Math.max(1, rampPos - wiped.removedBefore);
-        console.log(
-          `[dj-voice] supersede: removed ${wiped.removed} pad(s); insert ${queuePosition} â†’ ${rampPos}`
-        );
-      } else if (wiped.removed > 0) {
-        console.log(
-          `[dj-voice] supersede: removed ${wiped.removed} upcoming announce pad(s)`
-        );
-      }
-      if (wiped.protectedThrough >= rampPos) {
-        const requested = rampPos;
-        rampPos = wiped.protectedThrough + 1;
-        console.log(
-          `[dj-voice] active announce block protected; insert ${requested} → ${rampPos}`
-        );
-      }
-    } catch (err) {
-      console.warn("[dj-voice] supersede pad strip failed:", err.message);
-    }
+    // Insert the whole block under one Sonos write lock so guest adds / Random
+    // cannot land between pads. Clear Queue preempts between steps; Pause uses
+    // the transport lane and does not wait on this lock.
     if (preempted()) {
       return { ok: false, skipped: true, reason: "queue-preempted" };
     }
-    const ttsPos = rampPos + 1;
-    const restorePos = ttsPos + 1;
-    const ramp = await enqueueSilenceRamp(rampPos);
-    if (preempted()) {
-      return { ok: false, skipped: true, reason: "queue-preempted" };
-    }
-    await enqueueDjClip(clip.publicUrl, {
-      durationSec: clip.approxDurationSec,
-      position: ttsPos,
+    const ramp = ensureSilenceRamp();
+    const restore = ensureSilenceBridge();
+    const { djName } = getDjVoiceSettings();
+    const { insertAnnounceBlock } = await import("./sonos.js");
+    const block = await insertAnnounceBlock({
+      queuePosition,
+      preemptGeneration,
+      ramp: {
+        url: ramp.publicUrl,
+        title: "PartyQueue Volume Ramp",
+        artist: "PartyQueue",
+        durationSec: ramp.durationSec,
+      },
+      tts: {
+        url: clip.publicUrl,
+        title: djName || DJ_VOICE_DEFAULTS.djName,
+        artist: "PartyQueue",
+        durationSec: clip.approxDurationSec,
+      },
+      restore: {
+        url: restore.publicUrl,
+        title: "PartyQueue Silence Bridge",
+        artist: "PartyQueue",
+        durationSec: restore.durationSec,
+      },
     });
-    if (preempted()) {
-      return { ok: false, skipped: true, reason: "queue-preempted" };
+    if (!block?.ok) {
+      if (block?.wiped?.removed > 0) {
+        console.log(
+          `[dj-voice] announce aborted after supersede removed ${block.wiped.removed} pad(s)` +
+            (block.partial ? " (partial insert)" : "")
+        );
+      }
+      return {
+        ok: false,
+        skipped: !!block?.skipped,
+        reason: block?.reason || "announce-block-failed",
+        partial: !!block?.partial,
+      };
     }
-    console.log(`[dj-voice] enqueued TTS at queue position ${ttsPos}`);
-    const restore = await enqueueSilenceRestore(restorePos);
+    const { rampPos, ttsPos, restorePos, wiped } = block;
+    if (wiped?.removedBefore > 0) {
+      console.log(
+        `[dj-voice] supersede: removed ${wiped.removed} pad(s); insert ${queuePosition} → ${rampPos}`
+      );
+    } else if (wiped?.removed > 0) {
+      console.log(
+        `[dj-voice] supersede: removed ${wiped.removed} upcoming announce pad(s)`
+      );
+    }
+    console.log(
+      `[dj-voice] enqueued ramp@${rampPos} TTS@${ttsPos} restore@${restorePos} ` +
+        `(${ramp.durationSec}s / ~${clip.approxDurationSec}s / ${restore.durationSec}s)`
+    );
 
-    // Fresh sets / empty-queue shouts: Play ramp â†’ boost â†’ DJ â†’ music.
+    // Fresh sets / empty-queue shouts: Play ramp → boost → DJ → music.
     const vol = await beginVolumeSession({
       publicUrl: clip.publicUrl,
       approxDurationSec: clip.approxDurationSec,

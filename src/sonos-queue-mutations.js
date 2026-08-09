@@ -31,6 +31,7 @@ import {
   isFiller,
 } from "./queue-origin.js";
 import { parseSonosTime } from "./sonos-snapshots.js";
+import { queueWorkWasPreempted } from "./queue-preempt.js";
 
 // Remove already-played songs (everything before the current track) so the queue
 // stays lean and newly added songs are never buried under a night's history.
@@ -519,6 +520,133 @@ async function enqueueHttpAudioUnlocked(
   const coordinator = await enqueueMeta(m, meta, position);
   invalidateSonosSnapshots();
   return { room: coordinator.Name, group: coordinator.GroupName, url, position };
+}
+
+/**
+ * Strip superseded announce pads and insert ramp → TTS → restore under a
+ * single write lock so guest adds / Random cannot split the block. Checks
+ * preempt between Sonos calls so Clear Queue can abort mid-insert (Pause
+ * stays on the transport lane and does not wait for this lock).
+ *
+ * @param {{
+ *   queuePosition?: number,
+ *   preemptGeneration?: number,
+ *   ramp: { url: string, title?: string, artist?: string, durationSec?: number },
+ *   tts: { url: string, title?: string, artist?: string, durationSec?: number },
+ *   restore: { url: string, title?: string, artist?: string, durationSec?: number },
+ *   ops?: {
+ *     removePads?: Function,
+ *     enqueue?: Function,
+ *     pauseTrim?: Function,
+ *   }
+ * }} opts
+ */
+export async function insertAnnounceBlock(opts) {
+  return withSonosWriteLock(() => insertAnnounceBlockUnlocked(opts));
+}
+
+async function insertAnnounceBlockUnlocked({
+  queuePosition = 1,
+  preemptGeneration,
+  ramp,
+  tts,
+  restore,
+  ops = {},
+} = {}) {
+  const removePads = ops.removePads || removeUpcomingAnnouncePadsUnlocked;
+  const enqueue = ops.enqueue || enqueueHttpAudioUnlocked;
+  const pauseTrim = ops.pauseTrim || pauseQueueTrim;
+  const preempted = () =>
+    preemptGeneration != null && queueWorkWasPreempted(preemptGeneration);
+
+  if (preempted()) {
+    return { ok: false, skipped: true, reason: "queue-preempted" };
+  }
+  if (!ramp?.url || !tts?.url || !restore?.url) {
+    throw new Error("insertAnnounceBlock requires ramp, tts, and restore urls.");
+  }
+
+  pauseTrim(25000);
+  let rampPos = Number(queuePosition) || 1;
+  let wiped = { removed: 0, removedBefore: 0, protectedThrough: 0 };
+  try {
+    wiped = await removePads({ beforePosition: rampPos });
+    if (wiped.removedBefore > 0) {
+      rampPos = Math.max(1, rampPos - wiped.removedBefore);
+    }
+    if (wiped.protectedThrough >= rampPos) {
+      rampPos = wiped.protectedThrough + 1;
+    }
+  } catch (err) {
+    console.warn(
+      "[announce-block] supersede pad strip failed:",
+      err?.message || err
+    );
+  }
+
+  if (preempted()) {
+    return { ok: false, skipped: true, reason: "queue-preempted", wiped };
+  }
+
+  const ttsPos = rampPos + 1;
+  const restorePos = ttsPos + 1;
+  const clipOpts = (clip, position) => ({
+    title: clip.title,
+    artist: clip.artist,
+    durationSec: clip.durationSec,
+    position,
+  });
+
+  await enqueue(ramp.url, clipOpts(ramp, rampPos));
+  if (preempted()) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "queue-preempted",
+      partial: true,
+      wiped,
+      rampPos,
+      ttsPos,
+      restorePos,
+    };
+  }
+
+  await enqueue(tts.url, clipOpts(tts, ttsPos));
+  if (preempted()) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "queue-preempted",
+      partial: true,
+      wiped,
+      rampPos,
+      ttsPos,
+      restorePos,
+    };
+  }
+
+  await enqueue(restore.url, clipOpts(restore, restorePos));
+  if (preempted()) {
+    // Pads are fully in; still skip handoff/Play so Clear can own the room.
+    return {
+      ok: false,
+      skipped: true,
+      reason: "queue-preempted",
+      partial: true,
+      wiped,
+      rampPos,
+      ttsPos,
+      restorePos,
+    };
+  }
+
+  return {
+    ok: true,
+    rampPos,
+    ttsPos,
+    restorePos,
+    wiped,
+  };
 }
 
 // Find a queued track's CURRENT absolute 1-based position from a fresh queue

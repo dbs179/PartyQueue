@@ -385,6 +385,8 @@ export function nudgeAutoFill() {
  * }} [options]
  */
 export async function clearQueueWithoutAutoRefill(options = {}) {
+  // Immediate cancel token so announce pad inserts / Random can abort before
+  // this function even acquires the Sonos write lock.
   preemptQueueWork();
   queueClearPauseCount += 1;
   clearTimer();
@@ -394,6 +396,9 @@ export async function clearQueueWithoutAutoRefill(options = {}) {
     const cancelDj = options.cancelDj || cancelActiveDjVolumeHandoff;
     await cancelDj("queue cleared by host");
     clearTimer();
+    // Re-bump after cancel work in case a long handoff cancel overlapped a
+    // newly started announce that sampled the earlier generation.
+    preemptQueueWork();
     const clear = options.clear || clearQueue;
     return await clear();
   } finally {
