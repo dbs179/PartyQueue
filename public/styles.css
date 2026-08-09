@@ -3083,17 +3083,12 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   padding: 0;
 }
 
-/* Song / artist / transport — fills space between pills (top) and reactions (bottom). */
+/* Song / artist / transport — centered between pills (top) and reactions (bottom). */
 .party-display-track {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
-}
-
-/* PC: vertically center track block between pills and reactions. */
-body.party-display-active:not(.party-display-kiosk) .party-display-track {
   justify-content: center;
 }
 
