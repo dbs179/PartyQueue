@@ -66,9 +66,11 @@ import {
   paintGuestLockBanner,
 } from "./guest-lock-banner.js";
 import {
+  isPartyDisplayKiosk,
   partyDisplayHashView,
   syncPartyDisplayViewport,
 } from "./party-display-viewport.js";
+import { createPartyDisplayIdle } from "./party-display-idle.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -1698,6 +1700,15 @@ function applyPartySettings(payload) {
   maybeAnnounceClosingTime(payload.closingTimeAt, payload.partyRecap);
 }
 
+const partyDisplayIdle = createPartyDisplayIdle();
+
+function syncPartyDisplayIdleState() {
+  partyDisplayIdle.setDisplayState({
+    active: currentView === "display",
+    kiosk: isPartyDisplayKiosk(),
+  });
+}
+
 function showView(name) {
   const target = VIEWS[name] ? name : "main";
   const previousView = currentView;
@@ -1706,6 +1717,7 @@ function showView(name) {
   for (const key of Object.keys(VIEWS)) VIEWS[key].hidden = key !== target;
   document.body.classList.toggle("party-display-active", target === "display");
   syncPartyDisplayViewport(target === "display");
+  syncPartyDisplayIdleState();
   // The DJ Booth and everything behind it require the host PIN. While locked,
   // keep the view hidden and skip its data loads (they'd 401 anyway).
   const hostLocked = isHostArea(target) && !settingsGateOk();
@@ -2596,6 +2608,10 @@ function renderNowPlaying(transport) {
 
   renderPartyDisplayNowPlaying(np, hasTrack);
   lyricsUi.sync(np);
+  partyDisplayIdle.syncPlayback({
+    isPlaying: !!np?.isPlaying,
+    hasTrack,
+  });
   prefetchUpcomingAlbumArt(lastQueueTracks);
 }
 

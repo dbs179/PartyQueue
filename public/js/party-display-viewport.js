@@ -10,6 +10,9 @@
  *   - Page zoom 100%
  *   - Desktop mode OFF (or leave consistent after first good load)
  *   - Disable auto-zoom on input / force desktop width overrides
+ *
+ * Idle (screensaver / dim after quiet playback) also needs the JS interface;
+ * see party-display-idle.js.
  */
 
 const PD_VW = "--pd-vw";
