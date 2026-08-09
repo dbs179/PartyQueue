@@ -11,6 +11,7 @@ import { recordSkip } from "./play-history.js";
 import { originOf, moodOf, clearConsumedDedication } from "./queue-origin.js";
 import {
   cancelActiveDjVolumeHandoff,
+  getDjVolumeHandoffState,
   isDjVolumeHandoffActive,
 } from "./dj-volume-handoff.js";
 import {
@@ -288,6 +289,29 @@ async function nextUnlocked(opts = {}) {
 
   if (decision.action === "seekNearEnd") {
     try {
+      // Pads can survive a container restart while the in-memory volume session
+      // does not. Re-arm before we roll into the ramp so volume still bumps.
+      // Use phase (not volumeLocked): a waiting handoff is unlocked until the
+      // ramp pad is seen, but must not be superseded here.
+      if (getDjVolumeHandoffState().phase === "idle") {
+        try {
+          const { rearmDjVolumeHandoffFromQueue } = await import(
+            "./dj-voice.js"
+          );
+          const rearm = await rearmDjVolumeHandoffFromQueue({
+            queueItems,
+            currentTrack: track,
+          });
+          if (rearm?.ok) {
+            console.info("[next] rearmed DJ volume handoff before seek-near-end");
+          }
+        } catch (rearmErr) {
+          console.warn(
+            "[next] could not rearm DJ volume handoff:",
+            rearmErr?.message || rearmErr
+          );
+        }
+      }
       if (!decision.alreadyNearEnd) {
         await coordinator.SeekPosition(
           formatSonosRelTime(decision.targetSec)

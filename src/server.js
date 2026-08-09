@@ -458,23 +458,43 @@ function runListenStartup({ seed = true, warm = true } = {}) {
     seedStarterDjIcons();
     seedStarterBanners();
     import("./dj-voice.js")
-      .then(({ getPublicBaseUrl, ensureSilenceBridge, ensureSilenceRamp }) => {
-        log.info(`Sonos media base ${getPublicBaseUrl()}`, { event: "dj-voice" });
-        try {
-          const bridge = ensureSilenceBridge();
-          const ramp = ensureSilenceRamp();
-          log.info(`silence restore ready → ${bridge.publicUrl}`, {
-            event: "dj-voice",
-          });
-          log.info(`silence ramp ready → ${ramp.publicUrl}`, {
-            event: "dj-voice",
-          });
-        } catch (err) {
-          log.warn(`silence pads not ready: ${err.message}`, {
-            event: "dj-voice",
-          });
+      .then(
+        async ({
+          getPublicBaseUrl,
+          ensureSilenceBridge,
+          ensureSilenceRamp,
+          rearmOrphanedDjVolumeHandoff,
+        }) => {
+          log.info(`Sonos media base ${getPublicBaseUrl()}`, { event: "dj-voice" });
+          try {
+            const bridge = ensureSilenceBridge();
+            const ramp = ensureSilenceRamp();
+            log.info(`silence restore ready → ${bridge.publicUrl}`, {
+              event: "dj-voice",
+            });
+            log.info(`silence ramp ready → ${ramp.publicUrl}`, {
+              event: "dj-voice",
+            });
+          } catch (err) {
+            log.warn(`silence pads not ready: ${err.message}`, {
+              event: "dj-voice",
+            });
+          }
+          // Announce pads in Sonos outlive the process; restore volume control.
+          try {
+            const rearm = await rearmOrphanedDjVolumeHandoff();
+            if (rearm?.ok) {
+              log.info("rearmed orphaned DJ volume handoff", {
+                event: "dj-volume",
+              });
+            }
+          } catch (err) {
+            log.warn(`orphaned DJ volume rearm failed: ${err.message}`, {
+              event: "dj-volume",
+            });
+          }
         }
-      })
+      )
       .catch((err) => {
         log.warn(`PUBLIC_BASE_URL not ready: ${err.message}`, {
           event: "dj-voice",

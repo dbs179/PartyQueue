@@ -4,10 +4,13 @@ import {
   SEEK_END_LEAD_SEC,
   decideSkipAnnounceAction,
   findNextMusicTrackNumber,
+  findUpcomingAnnounceHandoffPlan,
   formatSonosRelTime,
+  parseSilencePadSec,
 } from "../src/skip-announce-policy.js";
 
 const RAMP = "http://partyqueue/media/tts/silence-ramp-3s.mp3";
+const RESTORE = "http://partyqueue/media/tts/silence-3s.mp3";
 const TTS = "http://partyqueue/media/tts/tts-announce.mp3";
 const MUSIC = "x-sonos-http:track%3aid%3aspotify%3atrack%3anext";
 const SONG = "x-sonos-http:track%3aid%3aspotify%3atrack%3acurrent";
@@ -117,4 +120,60 @@ test("findNextMusicTrackNumber skips the announce block", () => {
   assert.equal(findNextMusicTrackNumber(items, 3), 4);
   // Current on last music → none.
   assert.equal(findNextMusicTrackNumber(items, 4), null);
+});
+
+test("parseSilencePadSec reads ramp and restore lengths", () => {
+  assert.equal(parseSilencePadSec(RAMP), 3);
+  assert.equal(parseSilencePadSec(RESTORE), 3);
+  assert.equal(parseSilencePadSec("http://x/media/tts/silence-ramp-2.5s.mp3"), 2.5);
+  assert.equal(parseSilencePadSec(TTS), null);
+});
+
+test("findUpcomingAnnounceHandoffPlan maps ramp→TTS→restore→music", () => {
+  const items = [
+    { TrackUri: SONG, Title: "A" },
+    { TrackUri: RAMP, Title: "PartyQueue Volume Ramp" },
+    { TrackUri: TTS, Title: "DJ", Duration: "0:00:09" },
+    { TrackUri: RESTORE, Title: "PartyQueue Silence Bridge" },
+    { TrackUri: MUSIC, Title: "B" },
+  ];
+  const plan = findUpcomingAnnounceHandoffPlan(items, 1);
+  assert.deepEqual(plan, {
+    rampPosition: 2,
+    ttsPosition: 3,
+    restorePosition: 4,
+    musicPosition: 5,
+    ttsUri: TTS,
+    silenceSec: 3,
+    approxDurationSec: 9,
+  });
+});
+
+test("findUpcomingAnnounceHandoffPlan works when already on the ramp", () => {
+  const items = [
+    { TrackUri: RAMP, Title: "PartyQueue Volume Ramp" },
+    { TrackUri: TTS, Title: "DJ" },
+    { TrackUri: RESTORE, Title: "PartyQueue Silence Bridge" },
+    { TrackUri: MUSIC, Title: "B" },
+  ];
+  const plan = findUpcomingAnnounceHandoffPlan(items, 1);
+  assert.equal(plan?.rampPosition, 1);
+  assert.equal(plan?.ttsPosition, 2);
+  assert.equal(plan?.musicPosition, 4);
+  assert.equal(plan?.approxDurationSec, 12);
+});
+
+test("findUpcomingAnnounceHandoffPlan returns null without a DJ clip", () => {
+  assert.equal(
+    findUpcomingAnnounceHandoffPlan(
+      [
+        { TrackUri: SONG },
+        { TrackUri: RAMP, Title: "PartyQueue Volume Ramp" },
+        { TrackUri: MUSIC },
+      ],
+      1
+    ),
+    null
+  );
+  assert.equal(findUpcomingAnnounceHandoffPlan([{ TrackUri: MUSIC }], 1), null);
 });

@@ -36,7 +36,11 @@ import {
 } from "./settings.js";
 import { GENRE_BUCKETS, bucketsForArtistSync } from "./genres.js";
 import { moodLabel as eraMoodLabel } from "./moods.js";
-import { beginDjVolumeHandoff } from "./dj-volume-handoff.js";
+import {
+  beginDjVolumeHandoff,
+  getDjVolumeHandoffState,
+} from "./dj-volume-handoff.js";
+import { findUpcomingAnnounceHandoffPlan } from "./skip-announce-policy.js";
 import { SHOUT_LEAD_BUFFER_SEC } from "./shout-lead-buffer.js";
 import {
   queueWorkGeneration,
@@ -2172,6 +2176,67 @@ async function beginVolumeSession({
     startHold: startPlayback ? startHold : null,
     handoff,
   };
+}
+
+/**
+ * Re-arm DJ volume handoff when announce pads remain in the Sonos queue but the
+ * in-memory session was lost (container restart / crash). Safe no-op when a
+ * handoff is already running or no announce block is found.
+ *
+ * @param {{
+ *   queueItems?: Array,
+ *   currentTrack?: number,
+ * }} [opts]
+ */
+export async function rearmDjVolumeHandoffFromQueue({
+  queueItems,
+  currentTrack,
+} = {}) {
+  const state = getDjVolumeHandoffState();
+  if (state.phase !== "idle") {
+    return { ok: false, reason: "already-active", phase: state.phase };
+  }
+  const plan = findUpcomingAnnounceHandoffPlan(queueItems, currentTrack);
+  if (!plan) return { ok: false, reason: "no-announce-block" };
+
+  const vol = await beginVolumeSession({
+    publicUrl: plan.ttsUri,
+    approxDurationSec: plan.approxDurationSec,
+    silenceSec: plan.silenceSec,
+    startPlayback: false,
+    ttsPosition: plan.ttsPosition,
+    musicPosition: plan.musicPosition,
+  });
+  console.info(
+    `[dj-volume] rearmed orphaned announce handoff ` +
+      `(tts@${plan.ttsPosition}` +
+      `${plan.rampPosition != null ? ` ramp@${plan.rampPosition}` : ""}` +
+      ` music@${plan.musicPosition})`
+  );
+  return { ok: true, plan, handoff: vol.handoff };
+}
+
+/** Live Sonos lookup + rearm (startup / recovery). */
+export async function rearmOrphanedDjVolumeHandoff() {
+  try {
+    const { getManager, resolveCoordinator } = await import("./sonos-core.js");
+    const m = await getManager();
+    const coordinator = await resolveCoordinator(m);
+    const [pos, queue] = await Promise.all([
+      coordinator.AVTransportService.GetPositionInfo(),
+      coordinator.GetQueue().catch(() => ({ Result: [] })),
+    ]);
+    return rearmDjVolumeHandoffFromQueue({
+      queueItems: Array.isArray(queue.Result) ? queue.Result : [],
+      currentTrack: Number(pos.Track) || 0,
+    });
+  } catch (err) {
+    console.warn(
+      "[dj-volume] orphaned handoff rearm failed:",
+      err?.message || err
+    );
+    return { ok: false, reason: "lookup-failed", error: err?.message || String(err) };
+  }
 }
 
 function pickLanIpv4() {
