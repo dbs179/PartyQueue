@@ -2908,6 +2908,16 @@ body.party-display-active.party-display-kiosk .party-display-shell {
   flex: 0 0 auto;
 }
 
+/* Brand + version stay over the art column (not into Up Next). */
+.party-display-brand {
+  display: flex;
+  align-items: baseline;
+  gap: calc(12 * var(--pd));
+  min-width: 0;
+  /* Match art width: square sized to most of the Now band height. */
+  max-width: min(100%, calc(var(--pd-vh, 100dvh) * 0.62));
+}
+
 .party-display-kicker,
 .party-display-label {
   margin: 0;
@@ -2920,12 +2930,30 @@ body.party-display-active.party-display-kiosk .party-display-shell {
 
 .party-display-event {
   margin: 0;
+  min-width: 0;
   color: var(--accent);
   font-size: calc(52 * var(--pd));
   font-weight: 800;
   line-height: 1.05;
   letter-spacing: normal;
   text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.party-display-version {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: calc(16 * var(--pd));
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+.party-display-version[hidden] {
+  display: none;
 }
 
 .party-display-back {

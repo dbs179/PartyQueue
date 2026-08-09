@@ -2743,13 +2743,18 @@ syncPolling();
 // only when missing or different (avoids title+pill layout flash on restart).
 async function loadVersion() {
   const el = document.getElementById("app-version");
-  if (!el) return;
+  const displayEl = document.getElementById("display-version");
+  if (!el && !displayEl) return;
   try {
     const res = await fetch("/api/health");
     const data = await res.json();
     if (!data?.version) return;
     const next = `v${data.version}`;
-    if (el.textContent !== next) el.textContent = next;
+    if (el && el.textContent !== next) el.textContent = next;
+    if (displayEl) {
+      displayEl.textContent = next;
+      displayEl.hidden = false;
+    }
     persistBrandingCache({ version: data.version });
     document.getElementById("header-title")?.setAttribute("data-ready", "1");
   } catch {

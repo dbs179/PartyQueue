@@ -55,6 +55,11 @@
           else verEl.textContent = "";
           verEl.hidden = !showVer;
         }
+        var displayVerEl = document.getElementById("display-version");
+        if (displayVerEl && b.version) {
+          displayVerEl.textContent = "v" + b.version;
+          displayVerEl.hidden = false;
+        }
         if (titleEl) titleEl.setAttribute("data-ready", "1");
         if (subEl) {
           var sub = b.subtitle == null ? "" : String(b.subtitle);
@@ -305,10 +310,11 @@
       <div id="view-display" class="view party-display-view" hidden>
         <div class="party-display-shell">
           <div class="party-display-topline">
-            <div>
+            <div class="party-display-brand">
               <h2 id="display-event-name" class="party-display-event">
                 PartyQueue
               </h2>
+              <span id="display-version" class="party-display-version" hidden></span>
             </div>
             <a href="#/" class="party-display-back">Back</a>
           </div>
