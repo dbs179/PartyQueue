@@ -32,7 +32,8 @@ ENV NODE_ENV=production
 ENV PORT=8080
 EXPOSE 8080
 
-# Liveness only — readiness is /api/ready and does not require Sonos/Spotify.
+# Liveness only (process up). Deploy/orchestration party checks use /api/ready
+# (data writable + partyReady for Spotify/Sonos control plane).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 

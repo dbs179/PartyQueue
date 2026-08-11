@@ -6,6 +6,11 @@ import { asyncHandler } from "../http/async-handler.js";
 import { getSpotifyAppStatus } from "../spotify-app.js";
 import { getPublicBaseUrl } from "../dj-voice.js";
 import { requireHostStrict } from "../host-auth.js";
+import { getSonosHost } from "../sonos-config.js";
+import {
+  evaluateReadiness,
+  probeDataWritable,
+} from "../readiness.js";
 import {
   nowPlayingDiagnostics,
   nowPlayingMonitor,
@@ -25,23 +30,22 @@ export function registerSystemRoutes(app, ctx) {
     });
   });
 
-  // Orchestrator / Docker readiness. Does not require Sonos or Spotify — a fresh
-  // install must still serve the setup UI. Returns 503 while shutting down.
+  // Readiness: process up + data writable. partyReady also needs Spotify keys
+  // and Sonos connected/connecting or a configured speaker host. Fresh installs
+  // can still be ready=true with partyReady=false so the setup UI serves.
+  // Returns 503 when ready is false (not merely when partyReady is false).
   app.get("/api/ready", (_req, res) => {
-    const listening = isListening();
-    const ready = listening && !isShuttingDown();
-    const payload = {
-      ready,
+    const payload = evaluateReadiness({
       version: VERSION,
-      checks: {
-        listening,
-        shuttingDown: isShuttingDown(),
-        spotifyConfigured: !!getSpotifyAppStatus().configured,
-        sonos: nowPlayingMonitor?.health?.status || "unknown",
-        nowPlaying: nowPlayingDiagnostics(),
-      },
-    };
-    if (!ready) return res.status(503).json(payload);
+      listening: isListening(),
+      shuttingDown: isShuttingDown(),
+      dataWritable: probeDataWritable(),
+      spotifyConfigured: !!getSpotifyAppStatus().configured,
+      sonosStatus: nowPlayingMonitor?.health?.status || "unknown",
+      sonosHostConfigured: !!String(getSonosHost() || "").trim(),
+    });
+    payload.checks.nowPlaying = nowPlayingDiagnostics();
+    if (!payload.ready) return res.status(503).json(payload);
     res.json(payload);
   });
 

@@ -7,6 +7,13 @@ import {
 } from "./sonos-manager-health.js";
 import { pickGroupByTarget } from "./sonos-queue-policy.js";
 import { getSonosTargetRoom } from "./settings.js";
+import { envTimeoutMs, withTimeout } from "./with-timeout.js";
+
+/** Connect / discovery budget (discovery itself asks for ~10s). */
+const SONOS_CONNECT_TIMEOUT_MS = envTimeoutMs(
+  "PARTYQUEUE_SONOS_CONNECT_TIMEOUT_MS",
+  15_000
+);
 
 // Sonos Spotify "region" codes used when building track metadata.
 // These map to the SA_RINCON<region> service id the library embeds.
@@ -67,9 +74,17 @@ export async function getManager() {
     const host = String(getSonosHost() || "").trim();
 
     if (host) {
-      await m.InitializeFromDevice(host);
+      await withTimeout(
+        m.InitializeFromDevice(host),
+        SONOS_CONNECT_TIMEOUT_MS,
+        `Sonos connect timed out after ${Math.ceil(SONOS_CONNECT_TIMEOUT_MS / 1000)}s`
+      );
     } else {
-      const found = await m.InitializeWithDiscovery(10);
+      const found = await withTimeout(
+        m.InitializeWithDiscovery(10),
+        SONOS_CONNECT_TIMEOUT_MS,
+        `Sonos discovery timed out after ${Math.ceil(SONOS_CONNECT_TIMEOUT_MS / 1000)}s`
+      );
       if (!found || m.Devices.length === 0) {
         throw new Error(
           "No Sonos devices found on the network. Set a speaker IP under DJ Booth → Settings → Connections (or SONOS_HOST), especially across VLANs/VPNs."
@@ -78,7 +93,6 @@ export async function getManager() {
     }
 
     manager = m;
-    initializing = null;
     noteSonosReadSuccess();
     return manager;
   })();
@@ -86,9 +100,10 @@ export async function getManager() {
   try {
     return await initializing;
   } catch (err) {
-    initializing = null;
     noteSonosReadFailure();
     throw err;
+  } finally {
+    initializing = null;
   }
 }
 

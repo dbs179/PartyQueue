@@ -1,6 +1,6 @@
 # PartyQueue
 
-**Version 10.6.8**
+**Version 10.6.9**
 
 PartyQueue lets everyone at your party help choose the music. Guests open a
 web page on their phones, search Spotify, and add songs to your Sonos queue.
@@ -415,8 +415,8 @@ Node.js 20 or newer.
 
 Useful health checks:
 
-- `/api/health` — confirms PartyQueue is running and shows its version
-- `/api/ready` — reports startup and shutdown readiness
+- `/api/health` — liveness only (process up + version)
+- `/api/ready` — readiness: `ready` means listening with a writable `data/` volume; `partyReady` also requires Spotify credentials and Sonos connected/connecting or a configured speaker host. Unraid deploy waits for both
 - `/api/rooms` — shows the Sonos rooms PartyQueue can find
 
 PartyQueue uses the MIT license. It is not affiliated with or endorsed by

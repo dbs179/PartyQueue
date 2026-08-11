@@ -1779,26 +1779,7 @@ async function generateScriptWithLlm(summary) {
 /** Cap OpenAI conversation waits so Random announce can fall back to templates. */
 export const LLM_SCRIPT_TIMEOUT_MS = 12_000;
 
-/**
- * @template T
- * @param {Promise<T>} promise
- * @param {number} ms
- * @param {string} label
- * @returns {Promise<T>}
- */
-export async function withTimeout(promise, ms, label = "Operation timed out") {
-  let timer;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(label)), ms);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
+export { withTimeout } from "./with-timeout.js";
 
 export async function generateDjSpeechFromPrompt(
   prompt,

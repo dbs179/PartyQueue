@@ -3,9 +3,16 @@ import assert from "node:assert/strict";
 import {
   withSonosWriteLock,
   withSonosTransportLane,
+  setSonosLaneTimeoutsForTests,
+  setSonosLaneTimeoutHookForTests,
+  resetSonosLaneTimeoutsForTests,
 } from "../src/sonos-lock.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+test.afterEach(() => {
+  resetSonosLaneTimeoutsForTests();
+});
 
 test("transport lane does not wait behind a long queue write", async () => {
   const order = [];
@@ -57,4 +64,26 @@ test("transport lane is reentrant (nested setVolume during next)", async () => {
     order.push("after");
   });
   assert.deepEqual(order, ["outer", "inner", "after"]);
+});
+
+test("write lock times out a hung mutation and unblocks the next caller", async () => {
+  setSonosLaneTimeoutsForTests({ writeMs: 40 });
+  setSonosLaneTimeoutHookForTests(() => {});
+  const started = Date.now();
+  await assert.rejects(
+    withSonosWriteLock(() => new Promise(() => {})),
+    /Sonos queue operation timed out/
+  );
+  assert.ok(Date.now() - started < 500, "timeout should not wait forever");
+  assert.equal(await withSonosWriteLock(() => "recovered"), "recovered");
+});
+
+test("transport lane times out a hung command and unblocks the next caller", async () => {
+  setSonosLaneTimeoutsForTests({ transportMs: 40 });
+  setSonosLaneTimeoutHookForTests(() => {});
+  await assert.rejects(
+    withSonosTransportLane(() => new Promise(() => {})),
+    /Sonos transport operation timed out/
+  );
+  assert.equal(await withSonosTransportLane(() => "ok"), "ok");
 });

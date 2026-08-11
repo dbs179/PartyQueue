@@ -74,13 +74,19 @@ describe("HTTP server harness", { concurrency: false }, () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.ready, true);
+    assert.equal(typeof body.partyReady, "boolean");
     assert.equal(body.checks.listening, true);
     assert.equal(body.checks.shuttingDown, false);
+    assert.equal(body.checks.dataWritable, true);
+    assert.equal(typeof body.checks.spotifyConfigured, "boolean");
+    assert.equal(typeof body.checks.sonosHostConfigured, "boolean");
+    assert.equal(typeof body.checks.sonosOk, "boolean");
     assert.ok(
       ["connecting", "connected", "disconnected", "unknown"].includes(
         body.checks.sonos
       )
     );
+    assert.equal(typeof body.checks.nowPlaying, "object");
   });
 
   test("cross-origin POSTs are blocked by the CSRF guard", async () => {

@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "./atomic-write.js";
 import { getSpotifyAppCredentials } from "./spotify-app.js";
 import { spotifyTrackId } from "./sampler.js";
+import { envTimeoutMs } from "./with-timeout.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -20,6 +21,12 @@ const TOKEN_URL = "https://accounts.spotify.com/api/token";
 const AUTH_URL = "https://accounts.spotify.com/authorize";
 const SEARCH_URL = "https://api.spotify.com/v1/search";
 const API_BASE = "https://api.spotify.com/v1";
+
+/** Wall-clock budget for Spotify HTTP (token + API). Override via env for tests. */
+export const SPOTIFY_FETCH_TIMEOUT_MS = envTimeoutMs(
+  "PARTYQUEUE_SPOTIFY_FETCH_TIMEOUT_MS",
+  10_000
+);
 
 function spotifyHttpError(operation, status) {
   const err = new Error(`Spotify ${operation} failed (HTTP ${status}).`);
@@ -62,20 +69,56 @@ export function spotifyCooldownMs() {
 const NETWORK_FAIL_BACKOFF_MS = 10_000;
 let networkFailedUntil = 0;
 
-/** fetch() that trips/honors the outage backoff on network-level failures. */
-async function spotifyNetworkFetch(url, opts) {
+/** Test helper: clear outage/rate-limit gates and token single-flight. */
+export function resetSpotifyNetworkStateForTests() {
+  networkFailedUntil = 0;
+  rateLimitedUntil = 0;
+  clientCredentialsInFlight = null;
+  userRefreshInFlight = null;
+  cachedToken = null;
+  tokenExpiresAt = 0;
+  userAccessToken = null;
+  userTokenExpiresAt = 0;
+}
+
+function isAbortOrTimeout(err) {
+  const name = err?.name || "";
+  return (
+    name === "AbortError" ||
+    name === "TimeoutError" ||
+    /aborted|timed out/i.test(String(err?.message || ""))
+  );
+}
+
+/**
+ * fetch() that trips/honors the outage backoff on network-level failures and
+ * always applies a hard deadline so a hung Spotify socket cannot pin token
+ * single-flight (search / Random / playlists) forever.
+ *
+ * @param {string} url
+ * @param {RequestInit & { timeoutMs?: number }} [opts]
+ */
+async function spotifyNetworkFetch(url, opts = {}) {
   const wait = networkFailedUntil - Date.now();
   if (wait > 0) {
     throw new Error(
       `Spotify is unreachable; retrying in ${Math.ceil(wait / 1000)}s`
     );
   }
+  const { timeoutMs = SPOTIFY_FETCH_TIMEOUT_MS, signal, ...rest } = opts;
+  const deadline = AbortSignal.timeout(timeoutMs);
+  const combined = signal ? AbortSignal.any([deadline, signal]) : deadline;
   try {
-    const res = await fetch(url, opts);
+    const res = await fetch(url, { ...rest, signal: combined });
     networkFailedUntil = 0;
     return res;
   } catch (err) {
     networkFailedUntil = Date.now() + NETWORK_FAIL_BACKOFF_MS;
+    if (isAbortOrTimeout(err)) {
+      throw new Error(
+        `Spotify request timed out after ${Math.ceil(timeoutMs / 1000)}s`
+      );
+    }
     throw new Error(`Spotify request failed: ${err?.message || err}`);
   }
 }
@@ -157,7 +200,7 @@ export async function exchangeCodeForTokens(code) {
   const { clientId, clientSecret } = getCredentials();
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
-  const res = await fetch(TOKEN_URL, {
+  const res = await spotifyNetworkFetch(TOKEN_URL, {
     method: "POST",
     headers: {
       Authorization: `Basic ${basic}`,

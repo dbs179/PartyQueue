@@ -629,10 +629,15 @@ button.guest-name:focus-visible {
   margin-bottom: 0;
 }
 
-.np-connection-status {
+.np-connection-status,
+.queue-connection-status {
   margin: -4px 0 8px;
   color: var(--muted);
   font-size: 0.84rem;
+}
+
+.queue-section.is-stale .queue-box {
+  opacity: 0.72;
 }
 
 /* Collapsible main-page panels (Controls, Suggestion Box, …). */
@@ -3597,6 +3602,17 @@ body.party-display-active.party-display-preview .party-display-view {
 /* Up Next type (PC + TV shared) — ~1.5× prior TV sizes; list count fits height. */
 .party-display-queue .party-display-label {
   font-size: calc(30 * var(--pd));
+}
+
+.party-display-queue-status {
+  margin: calc(8 * var(--pd)) 0 0;
+  color: #ffd88a;
+  font-size: calc(16 * var(--pd));
+  line-height: 1.3;
+}
+
+.party-display-queue.is-stale .party-display-queue-list {
+  opacity: 0.72;
 }
 
 .party-display-queue-count {

@@ -196,6 +196,8 @@ const npProgressElapsed = document.getElementById("np-progress-elapsed");
 const npProgressDuration = document.getElementById("np-progress-duration");
 const npEmpty = document.getElementById("np-empty");
 const npConnectionStatus = document.getElementById("np-connection-status");
+const queueSection = document.getElementById("queue-section");
+const queueConnectionStatus = document.getElementById("queue-connection-status");
 const npState = document.getElementById("np-state");
 const npOrigin = document.getElementById("np-origin");
 const npPills = document.getElementById("np-pills");
@@ -1640,6 +1642,8 @@ const displayProgressDuration = document.getElementById(
   "display-progress-duration"
 );
 const displayQueueCount = document.getElementById("display-queue-count");
+const displayQueueSection = document.getElementById("display-queue-section");
+const displayQueueStatus = document.getElementById("display-queue-status");
 const displayQueue = document.getElementById("display-queue");
 const displayQueueEmpty = document.getElementById("display-queue-empty");
 const displayJoinQr = document.getElementById("display-join-qr");
@@ -2738,6 +2742,10 @@ liveStreams = createLiveStreams(
     npCard,
     npConnectionStatus,
     displayConnectionStatus,
+    queueSection,
+    queueConnectionStatus,
+    displayQueueSection,
+    displayQueueStatus,
   },
   {
     getCurrentView: () => currentView,

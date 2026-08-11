@@ -223,6 +223,15 @@
             <button id="queue-edit-toggle" type="button" aria-pressed="false" title="Turn on to delete or drag-reorder songs" hidden>Edit</button>
             <span class="chevron" aria-hidden="true">&#9662;</span>
           </h2>
+          <p
+            id="queue-connection-status"
+            class="queue-connection-status"
+            role="status"
+            aria-live="polite"
+            hidden
+          >
+            Queue reconnecting — showing the last known list.
+          </p>
           <div class="queue-box">
             <span id="queue-edit-hint" class="queue-edit-hint" hidden>Drag to reorder &middot; tap &times; to remove</span>
             <ul id="queue" class="results"></ul>
@@ -380,11 +389,20 @@
             </section>
 
             <aside class="party-display-side" aria-label="Upcoming songs">
-              <section class="party-display-queue">
+              <section id="display-queue-section" class="party-display-queue">
                 <div class="party-display-section-head">
                   <p class="party-display-label">Up Next</p>
                   <span id="display-queue-count" class="party-display-queue-count"></span>
                 </div>
+                <p
+                  id="display-queue-status"
+                  class="party-display-queue-status"
+                  role="status"
+                  aria-live="polite"
+                  hidden
+                >
+                  Queue reconnecting — showing the last known list.
+                </p>
                 <ol id="display-queue" class="party-display-queue-list"></ol>
                 <p id="display-queue-empty" class="party-display-side-empty">Connecting…</p>
               </section>

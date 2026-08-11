@@ -15,6 +15,10 @@ export const QUEUE_FALLBACK_DELAY_MS = 5000;
 export const PARTY_FALLBACK_MS = 20000;
 export const PARTY_FALLBACK_DELAY_MS = 5000;
 
+/** Shown on Up Next / Party Display when the queue stream is stale. */
+export const QUEUE_STALE_MESSAGE =
+  "Queue reconnecting — showing the last known list.";
+
 /** @param {object|null|undefined} snapshot */
 export function nowPlayingLooksActive(snapshot) {
   const state = String(snapshot?.state || "");
@@ -43,6 +47,10 @@ export function shouldPollView(visibilityState, currentView) {
  *   npCard?: HTMLElement|null,
  *   npConnectionStatus?: HTMLElement|null,
  *   displayConnectionStatus?: HTMLElement|null,
+ *   queueSection?: HTMLElement|null,
+ *   queueConnectionStatus?: HTMLElement|null,
+ *   displayQueueSection?: HTMLElement|null,
+ *   displayQueueStatus?: HTMLElement|null,
  * }} els
  * @param {{
  *   fetch?: typeof fetch,
@@ -60,7 +68,15 @@ export function shouldPollView(visibilityState, currentView) {
  * }} deps
  */
 export function createLiveStreams(els, deps) {
-  const { npCard, npConnectionStatus, displayConnectionStatus } = els || {};
+  const {
+    npCard,
+    npConnectionStatus,
+    displayConnectionStatus,
+    queueSection,
+    queueConnectionStatus,
+    displayQueueSection,
+    displayQueueStatus,
+  } = els || {};
 
   const fetchFn = deps.fetch || fetch;
   const EventSourceCtor =
@@ -205,6 +221,24 @@ export function createLiveStreams(els, deps) {
       if (disconnected) {
         displayConnectionStatus.textContent =
           message || "Sonos reconnecting — showing the last update.";
+      }
+    }
+  }
+
+  function setQueueConnectionStatus(status, message = "") {
+    const disconnected = status === "disconnected";
+    queueSection?.classList.toggle("is-stale", disconnected);
+    displayQueueSection?.classList.toggle("is-stale", disconnected);
+    if (queueConnectionStatus) {
+      queueConnectionStatus.hidden = !disconnected;
+      if (disconnected) {
+        queueConnectionStatus.textContent = message || QUEUE_STALE_MESSAGE;
+      }
+    }
+    if (displayQueueStatus) {
+      displayQueueStatus.hidden = !disconnected;
+      if (disconnected) {
+        displayQueueStatus.textContent = message || QUEUE_STALE_MESSAGE;
       }
     }
   }
@@ -366,6 +400,7 @@ export function createLiveStreams(els, deps) {
       if (queueSource !== source) return;
       queueStreamConnected = true;
       stopQueueFallback();
+      setQueueConnectionStatus("connected");
     };
     source.addEventListener("queue-status", (event) => {
       if (queueSource !== source) return;
@@ -374,9 +409,13 @@ export function createLiveStreams(els, deps) {
         if (health?.status === "disconnected") {
           queueStreamConnected = false;
           startQueueFallback();
+          setQueueConnectionStatus("disconnected");
         } else if (health?.status === "connected") {
           queueStreamConnected = true;
           stopQueueFallback();
+          setQueueConnectionStatus("connected");
+        } else if (health?.status === "connecting") {
+          // Keep last paint; don't clear a reconnect banner mid-blip.
         }
       } catch {
         /* ignore malformed status events */
@@ -394,6 +433,7 @@ export function createLiveStreams(els, deps) {
       if (queueSource !== source) return;
       queueStreamConnected = false;
       startQueueFallback();
+      setQueueConnectionStatus("disconnected");
     };
   }
 
@@ -404,6 +444,8 @@ export function createLiveStreams(els, deps) {
       queueSource.close();
       queueSource = null;
     }
+    // Leave any stale banner until the next connected status / open — closing
+    // the stream (hidden tab) must not pretend the last queue is fresh.
   }
 
   function stopPartyFallback() {

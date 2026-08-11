@@ -5,8 +5,17 @@ param(
   [string]$RemoteShare = "\\10.10.1.30\appdata\PartyQueue",
   [string]$RemotePath = "/mnt/user/appdata/PartyQueue",
   [string]$IdentityFile = "$HOME\.ssh\partyqueue_unraid_ed25519",
-  [string]$HealthUrl = "http://10.10.1.30:8088/api/health"
+  [string]$BaseUrl = "http://10.10.1.30:8088",
+  # Kept for callers that still pass -HealthUrl; derived from BaseUrl otherwise.
+  [string]$HealthUrl = ""
 )
+
+if (-not $HealthUrl) {
+  $HealthUrl = "$BaseUrl/api/health"
+}
+$ReadyUrl = "$BaseUrl/api/ready"
+$RoomsUrl = "$BaseUrl/api/rooms"
+$AppUrl = "$BaseUrl/"
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
@@ -89,15 +98,16 @@ try {
     throw "The Unraid Docker rebuild failed."
   }
 
-  Write-Host "Waiting for PartyQueue v$expectedVersion ..."
+  Write-Host "Waiting for PartyQueue v$expectedVersion (liveness) ..."
   $deadline = (Get-Date).AddMinutes(2)
-  $deployed = $false
+  $health = $null
+  $live = $false
   do {
     Start-Sleep -Seconds 2
     try {
       $health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 5
       if ($health.ok -and $health.version -eq $expectedVersion) {
-        $deployed = $true
+        $live = $true
         break
       }
     } catch {
@@ -105,12 +115,71 @@ try {
     }
   } while ((Get-Date) -lt $deadline)
 
-  if ($deployed) {
-    Write-Host "Deployed PartyQueue v$expectedVersion successfully."
-    return
+  if (-not $live) {
+    $actualVersion = if ($health -and $health.version) { $health.version } else { "unavailable" }
+    throw "Health verification failed: expected v$expectedVersion, got $actualVersion."
   }
-  $actualVersion = if ($health.version) { $health.version } else { "unavailable" }
-  throw "Health verification failed: expected v$expectedVersion, got $actualVersion."
+
+  Write-Host "Checking readiness + party control plane ..."
+  $readyDeadline = (Get-Date).AddMinutes(2)
+  $ready = $null
+  $partyOk = $false
+  do {
+    try {
+      $ready = Invoke-RestMethod -Uri $ReadyUrl -TimeoutSec 5
+      if (
+        $ready.version -eq $expectedVersion -and
+        $ready.ready -eq $true -and
+        $ready.partyReady -eq $true
+      ) {
+        $partyOk = $true
+        break
+      }
+    } catch {
+      # 503 while data volume / startup settles.
+    }
+    Start-Sleep -Seconds 2
+  } while ((Get-Date) -lt $readyDeadline)
+
+  if (-not $partyOk) {
+    $detail = if ($ready) {
+      "ready=$($ready.ready) partyReady=$($ready.partyReady) " +
+      "dataWritable=$($ready.checks.dataWritable) " +
+      "spotifyConfigured=$($ready.checks.spotifyConfigured) " +
+      "sonos=$($ready.checks.sonos) " +
+      "sonosHostConfigured=$($ready.checks.sonosHostConfigured)"
+    } else {
+      "ready endpoint unavailable"
+    }
+    throw "Readiness verification failed for v$expectedVersion ($detail)."
+  }
+
+  # Smoke: UI shell + rooms. Rooms may 503 if Sonos is briefly offline; allow
+  # that only when a speaker host is configured (rediscovery path exists).
+  try {
+    $app = Invoke-WebRequest -Uri $AppUrl -TimeoutSec 5 -UseBasicParsing
+    if ($app.StatusCode -ne 200) {
+      throw "App shell returned HTTP $($app.StatusCode)."
+    }
+  } catch {
+    throw "App shell smoke failed: $($_.Exception.Message)"
+  }
+
+  try {
+    $roomsResponse = Invoke-WebRequest -Uri $RoomsUrl -TimeoutSec 8 -UseBasicParsing
+    if ($roomsResponse.StatusCode -ne 200) {
+      throw "Rooms smoke returned HTTP $($roomsResponse.StatusCode)."
+    }
+  } catch {
+    if ($ready.checks.sonosHostConfigured) {
+      Write-Warning "Rooms smoke failed but SONOS_HOST is configured; continuing. $($_.Exception.Message)"
+    } else {
+      throw "Rooms / Sonos smoke failed (no SONOS_HOST configured): $($_.Exception.Message)"
+    }
+  }
+
+  Write-Host "Deployed PartyQueue v$expectedVersion successfully (live + partyReady)."
+  return
 } finally {
   Set-Location $repo
   Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
