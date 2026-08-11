@@ -126,6 +126,8 @@ export function createHostPinUi(els, deps) {
   const syncHostControlsVisibility = deps.syncHostControlsVisibility || (() => {});
 
   let settingsPinRequired = false;
+  /** False until the first /api/settings/pin-required response settles. */
+  let pinStatusReady = false;
   /** @type {null | "reveal-settings" | "reveal-controls" | "reveal-host" | "restart"} */
   let pendingPinAction = null;
   /** @type {{ required?: boolean, source?: string|null, removable?: boolean, bootstrapRequired?: boolean }|null} */
@@ -266,6 +268,7 @@ export function createHostPinUi(els, deps) {
       hostPinInfo = { required: true };
       settingsPinRequired = true;
     }
+    pinStatusReady = true;
     paintHostPinSettings();
     syncHostControlsVisibility();
   }
@@ -434,6 +437,8 @@ export function createHostPinUi(els, deps) {
         pendingPinAction = null;
         if (action === "restart") {
           void confirmAndRestart();
+        } else if (action === "reveal-controls") {
+          navigate("main");
         } else if (isHostArea(getCurrentView())) {
           showView(getCurrentView());
         }
@@ -576,6 +581,7 @@ export function createHostPinUi(els, deps) {
     refreshHostPinStatus,
     verifyHostSessionStillValid,
     isPinRequired,
+    isPinStatusReady: () => pinStatusReady,
     isPinGateOpen,
     getPendingPinAction,
     clearPendingPinAction,

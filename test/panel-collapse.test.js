@@ -97,3 +97,28 @@ test("wirePanelCollapse honors stored expanded state", () => {
   });
   assert.equal(section.classList.contains("collapsed"), false);
 });
+
+test("wirePanelCollapse setCollapsed expands and can fire onExpand", () => {
+  const section = el("sec");
+  const toggle = el("tog", { tag: "button" });
+  globalThis.document = {
+    getElementById: (id) =>
+      id === "sec" ? section : id === "tog" ? toggle : null,
+  };
+  let expands = 0;
+  const api = wirePanelCollapse("sec", "tog", "pq.testCollapse", {
+    defaultCollapsed: true,
+    onExpand: () => {
+      expands += 1;
+    },
+  });
+  assert.ok(api);
+  assert.equal(api.isCollapsed(), true);
+  api.setCollapsed(false, { persist: true, fireOnExpand: true });
+  assert.equal(api.isCollapsed(), false);
+  assert.equal(memory.get("pq.testCollapse"), "0");
+  assert.equal(expands, 1);
+  api.setCollapsed(true);
+  assert.equal(api.isCollapsed(), true);
+  assert.equal(memory.get("pq.testCollapse"), "1");
+});

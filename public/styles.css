@@ -620,6 +620,23 @@ button.guest-name:focus-visible {
   display: none;
 }
 
+/* Unlocked-host shortcut row (DJ Booth outside collapsed Tools). */
+.host-quick-bar {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  margin: 0 0 14px;
+}
+
+.host-quick-bar[hidden] {
+  display: none;
+}
+
+.host-quick-bar .pill-btn {
+  flex: 1;
+  min-height: 44px;
+}
+
 /* Search results only need a gap when there actually are results. */
 #results:not(:empty) {
   margin-top: 14px;

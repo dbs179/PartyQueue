@@ -9,6 +9,10 @@
  *   defaultCollapsed?: boolean,
  *   ignoreClickSelector?: string|null,
  * }} [opts]
+ * @returns {{
+ *   setCollapsed: (collapsed: boolean, opts?: { persist?: boolean, fireOnExpand?: boolean }) => void,
+ *   isCollapsed: () => boolean,
+ * }|null}
  */
 export function wirePanelCollapse(
   sectionId,
@@ -18,12 +22,26 @@ export function wirePanelCollapse(
 ) {
   const section = document.getElementById(sectionId);
   const toggle = document.getElementById(toggleId);
-  if (!section || !toggle) return;
+  if (!section || !toggle) return null;
 
   function apply(collapsed) {
     if (collapsed) section.classList.add("collapsed");
     else section.classList.remove("collapsed");
     toggle.setAttribute("aria-expanded", String(!collapsed));
+  }
+
+  /**
+   * @param {boolean} collapsed
+   * @param {{ persist?: boolean, fireOnExpand?: boolean }} [opts]
+   */
+  function setCollapsed(collapsed, { persist = true, fireOnExpand = false } = {}) {
+    if (persist) localStorage.setItem(storageKey, collapsed ? "1" : "0");
+    apply(!!collapsed);
+    if (!collapsed && fireOnExpand && typeof onExpand === "function") onExpand();
+  }
+
+  function isCollapsed() {
+    return section.classList.contains("collapsed");
   }
 
   const stored = localStorage.getItem(storageKey);
@@ -38,9 +56,7 @@ export function wirePanelCollapse(
       return;
     }
     const collapsed = !section.classList.contains("collapsed");
-    localStorage.setItem(storageKey, collapsed ? "1" : "0");
-    apply(collapsed);
-    if (!collapsed && typeof onExpand === "function") onExpand();
+    setCollapsed(collapsed, { persist: true, fireOnExpand: true });
   });
 
   toggle.addEventListener("keydown", (e) => {
@@ -50,4 +66,6 @@ export function wirePanelCollapse(
       toggle.click();
     }
   });
+
+  return { setCollapsed, isCollapsed };
 }

@@ -102,6 +102,7 @@ const {
   refreshHostPinStatus,
   verifyHostSessionStillValid,
   isPinRequired,
+  isPinStatusReady,
   isPinGateOpen,
   getPendingPinAction,
   clearPendingPinAction,
@@ -263,9 +264,14 @@ wirePanelCollapse("queue-section", "queue-toggle", "pq.queueCollapsed", {
 // loadGroups bound after createSonosGroups (below)
 let loadGroups = async () => {};
 let invalidateGroups = () => {};
-wirePanelCollapse("controls-section", "controls-toggle", "pq.controlsCollapsed", {
-  onExpand: () => loadGroups(true),
-});
+const controlsPanel = wirePanelCollapse(
+  "controls-section",
+  "controls-toggle",
+  "pq.controlsCollapsed",
+  {
+    onExpand: () => loadGroups(true),
+  }
+);
 wirePanelCollapse("suggestion-section", "suggestion-toggle", "pq.suggestionCollapsed", {
   defaultCollapsed: true,
 });
@@ -285,11 +291,15 @@ const toolbarBoothBtn = document.getElementById("toolbar-booth");
 const toolbarStatsBtn = document.getElementById("toolbar-stats");
 const toolbarJoinBtn = document.getElementById("toolbar-join");
 const toolbarDisplayBtn = document.getElementById("toolbar-display");
+const hostQuickBar = document.getElementById("host-quick-bar");
+const hostBoothBtn = document.getElementById("host-booth-btn");
 const moodNeedSpotify = document.getElementById("mood-need-spotify");
 const musicMixHub = document.getElementById("music-mix-hub");
 
 // Late-bound Music Mix (created after navigateMixPanel + playlist state exist).
 let musicMix = null;
+/** Last host-session open state for Controls auto-expand edge detection. */
+let hostChromeOpen = null;
 
 function syncToolbarMoodVisibility() {
   musicMix?.syncToolbarMoodVisibility();
@@ -342,6 +352,9 @@ if (toolbarMoodBtn) {
 }
 if (toolbarBoothBtn) {
   toolbarBoothBtn.addEventListener("click", () => navigate("booth"));
+}
+if (hostBoothBtn) {
+  hostBoothBtn.addEventListener("click", () => navigate("booth"));
 }
 if (toolbarStatsBtn) {
   toolbarStatsBtn.addEventListener("click", () => navigate("stats"));
@@ -1700,6 +1713,23 @@ let currentView = "main";
 /** Last non-Settings view — PIN Cancel returns here (fallback: main). */
 let lastNonSettingsView = "main";
 
+function syncHostChrome() {
+  // Wait for pin-required status so guests don't flash Booth / open Controls
+  // before we know a PIN is required.
+  if (!isPinStatusReady()) {
+    if (hostQuickBar) hostQuickBar.hidden = true;
+    return;
+  }
+  const open = settingsGateOk();
+  if (hostQuickBar) hostQuickBar.hidden = !open;
+  // Expand Controls when the host session opens; leave guest collapse alone.
+  // Do not re-expand on every sync — hosts can still collapse while unlocked.
+  if (open && hostChromeOpen !== true) {
+    controlsPanel?.setCollapsed(false, { persist: true, fireOnExpand: true });
+  }
+  hostChromeOpen = open;
+}
+
 function syncHostControlsVisibility() {
   const body = document.getElementById("controls-body");
   const protectedControls = document.getElementById("controls-host-protected");
@@ -1710,6 +1740,7 @@ function syncHostControlsVisibility() {
   if (protectedControls) protectedControls.hidden = locked;
   if (lock) lock.hidden = !locked;
   queueUi.setGuestEditLocked(locked);
+  syncHostChrome();
 }
 
 // Late-bound live streams (created after NP/queue apply helpers exist).
