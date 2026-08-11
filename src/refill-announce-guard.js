@@ -29,14 +29,18 @@ function cleanFlavorPart(value) {
 export function refillSetFlavorChanged(
   guard,
   nextGenreLane = null,
-  nextMood = null
+  nextMood = null,
+  nextReactionSet = null
 ) {
   if (!guard) return false;
+  const gRs = cleanFlavorPart(guard.reactionSet);
+  const nRs = cleanFlavorPart(nextReactionSet);
+  if (gRs !== nRs) return true;
   const gLane = cleanFlavorPart(guard.genreLane);
   const gMood = cleanFlavorPart(guard.mood);
   const nLane = cleanFlavorPart(nextGenreLane);
   const nMood = cleanFlavorPart(nextMood);
-  if (!gLane && !gMood && !nLane && !nMood) return false;
+  if (!gLane && !gMood && !nLane && !nMood && !gRs && !nRs) return false;
   return gLane !== nLane || gMood !== nMood;
 }
 
@@ -77,12 +81,15 @@ export function buildRefillAnnounceGuard(summary, createdAt = Date.now()) {
   );
   const genreLane = cleanFlavorPart(summary?.genreLane) || null;
   const mood = cleanFlavorPart(summary?.mood) || null;
+  const reactionSet =
+    cleanFlavorPart(summary?.reactionSet?.kind || summary?.reactionSet) || null;
   return {
     highlights,
     setSize,
     createdAt: Number(createdAt) || Date.now(),
     genreLane,
     mood,
+    reactionSet,
   };
 }
 
@@ -118,7 +125,7 @@ export function setRefillAnnounceGuardForTests(guard = null) {
  * @param {{
  *   findUpcoming?: (track: { name?: string, artist?: string }) => Promise<number|null>,
  *   now?: number,
- *   nextSummary?: { genreLane?: string|null, mood?: string|null }|null,
+ *   nextSummary?: { genreLane?: string|null, mood?: string|null, reactionSet?: { kind?: string }|string|null }|null,
  *   nextGenreLane?: string|null,
  *   nextMood?: string|null,
  * }} [opts]
@@ -145,9 +152,15 @@ export async function isRefillAnnounceSuppressed({
       : nextSummary?.mood != null
         ? nextSummary.mood
         : null;
+  const reactionSet =
+    nextSummary?.reactionSet?.kind != null
+      ? nextSummary.reactionSet.kind
+      : nextSummary?.reactionSet != null
+        ? nextSummary.reactionSet
+        : null;
 
   // New set flavor — allow without Sonos highlight lookups.
-  if (refillSetFlavorChanged(guard, lane, mood)) {
+  if (refillSetFlavorChanged(guard, lane, mood, reactionSet)) {
     refillAnnounceGuard = null;
     return false;
   }

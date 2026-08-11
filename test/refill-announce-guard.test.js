@@ -61,6 +61,20 @@ describe("refill announce guard", () => {
     assert.equal(refillSetFlavorChanged(null, "hiphop", "party"), false);
   });
 
+  test("refillSetFlavorChanged treats reactionSet as a flavor change", () => {
+    const guard = buildRefillAnnounceGuard({
+      added: 5,
+      genreLane: null,
+      mood: null,
+      reactionSet: { kind: "loved" },
+      highlights: [{ name: "A", artist: "B" }],
+    });
+    assert.equal(guard.reactionSet, "loved");
+    assert.equal(refillSetFlavorChanged(guard, null, null, "loved"), false);
+    assert.equal(refillSetFlavorChanged(guard, null, null, "hated"), true);
+    assert.equal(refillSetFlavorChanged(guard, null, null, null), true);
+  });
+
   test("shouldSuppress: no guard allows announce", () => {
     assert.equal(
       shouldSuppressRefillAnnounce({

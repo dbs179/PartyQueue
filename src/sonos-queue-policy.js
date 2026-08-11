@@ -338,6 +338,10 @@ export function queueTrackGenreFields(artist, meta, { djClip = false } = {}) {
   ) {
     return emptyQueueGenreFields();
   }
+  // Most Loved / Most Hated sets are reaction-flavored, not genre-laned.
+  if (meta?.reactionSet === "loved" || meta?.reactionSet === "hated") {
+    return emptyQueueGenreFields();
+  }
 
   // Keep the full mapped set until we prioritize the enqueue lane — slicing
   // first can drop the set lane when two Last.fm tags expand to 3 buckets

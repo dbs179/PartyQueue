@@ -386,6 +386,14 @@ const artistWindowInput = document.getElementById("set-artist-window");
 const artistCapInput = document.getElementById("set-artist-cap");
 const sameArtistBatchInput = document.getElementById("set-same-artist-batch");
 const sameArtistEveryInput = document.getElementById("set-same-artist-every");
+const lovedReactionSetInput = document.getElementById("set-loved-reaction-set");
+const lovedReactionEveryInput = document.getElementById(
+  "set-loved-reaction-every"
+);
+const hatedReactionSetInput = document.getElementById("set-hated-reaction-set");
+const hatedReactionEveryInput = document.getElementById(
+  "set-hated-reaction-every"
+);
 const strictFillInput = document.getElementById("set-strict-fill");
 const settingsSaveBtn = document.getElementById("settings-save");
 const settingsResetBtn = document.getElementById("settings-reset");
@@ -627,6 +635,18 @@ function fillSettings(s) {
   if (s.sameArtistBatchEveryN != null && sameArtistEveryInput) {
     sameArtistEveryInput.value = s.sameArtistBatchEveryN;
   }
+  if (s.lovedReactionSetEnabled != null && lovedReactionSetInput) {
+    lovedReactionSetInput.checked = !!s.lovedReactionSetEnabled;
+  }
+  if (s.lovedReactionSetEveryN != null && lovedReactionEveryInput) {
+    lovedReactionEveryInput.value = s.lovedReactionSetEveryN;
+  }
+  if (s.hatedReactionSetEnabled != null && hatedReactionSetInput) {
+    hatedReactionSetInput.checked = !!s.hatedReactionSetEnabled;
+  }
+  if (s.hatedReactionSetEveryN != null && hatedReactionEveryInput) {
+    hatedReactionEveryInput.value = s.hatedReactionSetEveryN;
+  }
   if (s.discoverEnabled != null) discoverEnabledInput.checked = !!s.discoverEnabled;
   if (s.randomMoodEnabled != null && randomMoodToggle) {
     randomMoodToggle.checked = !!s.randomMoodEnabled;
@@ -782,6 +802,8 @@ function currentSettingsPayload() {
     artistCap: Number(artistCapInput.value),
     strictFill: strictFillInput.checked,
     sameArtistBatchEveryN: Number(sameArtistEveryInput?.value),
+    lovedReactionSetEveryN: Number(lovedReactionEveryInput?.value),
+    hatedReactionSetEveryN: Number(hatedReactionEveryInput?.value),
     discoverEnabled: discoverEnabledInput.checked,
     similarCount: Number(similarCountInput.value),
     endlessQueueCount: Number(endlessCountInput?.value),
@@ -904,6 +926,18 @@ strictFillInput.addEventListener("change", () => {
 
 sameArtistBatchInput?.addEventListener("change", () => {
   saveSettings({ sameArtistBatchEnabled: !!sameArtistBatchInput.checked });
+});
+
+lovedReactionSetInput?.addEventListener("change", () => {
+  saveSettings({
+    lovedReactionSetEnabled: !!lovedReactionSetInput.checked,
+  });
+});
+
+hatedReactionSetInput?.addEventListener("change", () => {
+  saveSettings({
+    hatedReactionSetEnabled: !!hatedReactionSetInput.checked,
+  });
 });
 
 // Host bypass lives on the Booth page now, away from the Queue panel's Save
@@ -1225,7 +1259,7 @@ settingsClearFairnessBtn?.addEventListener("click", async () => {
 const boothNewPartyBtn = document.getElementById("booth-new-party");
 boothNewPartyBtn?.addEventListener("click", async () => {
   const ok = await confirmModal(
-    "Start a new party? Clears DJ shout memory and fairness limits so guests and the DJ start fresh. Song memory, reactions, Karaoke, Stats, and the queue stay.",
+    "Start a new party? Clears DJ shout memory, fairness limits, and Loved/Hated already-played-this-party memory. Song memory, reactions, Karaoke, Stats, and the queue stay.",
     "New party"
   );
   if (!ok) return;
@@ -1234,7 +1268,7 @@ boothNewPartyBtn?.addEventListener("click", async () => {
     const res = await hostFetch("/api/settings/new-party", { method: "POST" });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Could not start a new party.");
-    showToast("New party ready — DJ memory and fairness cleared");
+    showToast("New party ready — DJ memory, fairness, and Loved/Hated set memory cleared");
     refreshGuestFairness();
   } catch (err) {
     showToast(err.message, true);

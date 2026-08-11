@@ -33,6 +33,12 @@ import {
   filterPlaylistsByPrimaryArtist,
 } from "./same-artist-batch.js";
 import {
+  reactionSetDue,
+  pickReactionSetTracks,
+  noteReactionSetPlayed,
+  noteReactionSetBuilt,
+} from "./reaction-sets.js";
+import {
   recentTrackIds,
   recentEntries,
   artistCountsInWindow,
@@ -223,6 +229,82 @@ async function buildRandomPlan(
   cfg.recentBuckets = recentBuckets;
   cfg.bucketsFor = bucketsForArtistSync;
   cfg.lastArtist = queueTailArtist;
+
+  // Most Loved / Most Hated: every-N, genre-agnostic, uniform sample from
+  // reaction pool. Checked before same-artist showcase; Loved wins ties.
+  // Independent schedules: if Loved is due but unfillable, Hated may still play.
+  const reactionSetSize = Math.max(1, Math.floor(Number(count) || 5));
+  let reactionSetKind = null;
+  for (const kind of ["loved", "hated"]) {
+    if (!reactionSetDue(kind, cfg)) continue;
+    const picked = pickReactionSetTracks(kind, reactionSetSize, {
+      excludeIds: exclude,
+    });
+    if (!picked?.length) continue;
+    reactionSetKind = kind;
+    const order = picked.map((t) => ({
+      uri: t.uri,
+      id: t.id,
+      artist: t.artist || "",
+      name: t.name || "",
+      discovered: false,
+      moodPick: false,
+      reactionSet: kind,
+    }));
+    const batchArtists = new Set();
+    for (const item of order) {
+      const a = primaryArtist(item.artist);
+      if (a) batchArtists.add(a);
+    }
+    const artistByUri = new Map();
+    const nameByUri = new Map();
+    for (const item of order) {
+      artistByUri.set(item.uri, item.artist);
+      nameByUri.set(item.uri, item.name);
+    }
+    console.log(`[random] reaction set=${kind} size=${order.length}`);
+    return {
+      count,
+      genres,
+      opts,
+      order,
+      usable: [],
+      exclude,
+      recentIds,
+      cfg,
+      batchArtists,
+      allowSameArtist: false,
+      lastPlaylistArtist: null,
+      batchArtistSeed: cloneArtistCountMap(
+        artistCountsInWindow(cfg.artistWindow)
+      ),
+      blockedArtists,
+      totalTarget: order.length,
+      similarWant: 0,
+      setLane: null,
+      activeMoodPack: null,
+      showcaseArtistKey: null,
+      showcaseArtistName: null,
+      reactionSetKind,
+      firstAppendPosition,
+      queueTotalBefore: queueItems.length,
+      libraryIds: new Set(),
+      artistByUri,
+      nameByUri,
+      relaxedArtist: false,
+      relaxedMemory: false,
+      memoryReuseCount: 0,
+      laneHitAdded: 0,
+      highlightsPreview: order.slice(0, 8).map((t) => ({
+        artist: t.artist || "",
+        name: t.name || "",
+        discovered: false,
+      })),
+      similarAddedPreview: 0,
+      moodAddedPreview: 0,
+      preemptGeneration: opts.preemptGeneration,
+    };
+  }
 
   // Same-artist showcase: automatic every-N from the current Mood/Genre pool.
   // Filters the pool to one artist; Discover / lane-hits / era top-ups off.
@@ -705,6 +787,10 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
   const activeMoodPack = plan.activeMoodPack || null;
   const showcaseArtistKey = plan.showcaseArtistKey || null;
   const showcaseArtistName = plan.showcaseArtistName || null;
+  const reactionSetKind =
+    plan.reactionSetKind === "loved" || plan.reactionSetKind === "hated"
+      ? plan.reactionSetKind
+      : null;
   const firstAppendPosition = Number(plan.firstAppendPosition) || 1;
   const queueTotalBefore = Number(plan.queueTotalBefore) || 0;
   const libraryIds =
@@ -818,11 +904,20 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
       mood: activeMoodPack?.id || null,
       ...laneOpts,
     });
-  if (fillerIds.length) markOrigin(fillerIds, "filler", laneOpts);
+  if (fillerIds.length) {
+    markOrigin(fillerIds, "filler", {
+      ...laneOpts,
+      ...(reactionSetKind ? { reactionSet: reactionSetKind } : {}),
+    });
+  }
+  if (reactionSetKind && fillerIds.length) {
+    noteReactionSetPlayed(reactionSetKind, fillerIds);
+  }
 
   // 5) Top up if some enqueues failed (or we are still under totalTarget).
   // Exact-lane playlist leftovers first, then Spotify lane hits — never off-lane.
-  while (added < totalTarget && !wasPreempted()) {
+  // Reaction sets stay reaction-only (no playlist/Discover top-up).
+  while (!reactionSetKind && added < totalTarget && !wasPreempted()) {
     batchArtistSeed = syncBatchArtistBlocks();
     cfg.lastArtist = lastPlaylistArtist;
     const more = pickWithRelaxation(
@@ -952,7 +1047,13 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
   // from outside the library. Excludes everything queued this batch plus the
   // song-memory window; the library itself is fair game here (anything still
   // eligible would already have been picked above).
-  if (!showcaseArtistKey && activeMoodPack && added < totalTarget && !wasPreempted()) {
+  if (
+    !reactionSetKind &&
+    !showcaseArtistKey &&
+    activeMoodPack &&
+    added < totalTarget &&
+    !wasPreempted()
+  ) {
     try {
       batchArtistSeed = syncBatchArtistBlocks();
       const hits = await getMoodHits({
@@ -1056,10 +1157,17 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
     discovered: !!t.discovered,
   }));
 
-  if (showcaseArtistKey) {
-    if (added > 0) noteRandomSetBuilt({ wasShowcase: true });
-  } else if (added > 0) {
-    noteRandomSetBuilt({ wasShowcase: false });
+  if (added > 0) {
+    if (reactionSetKind) {
+      noteReactionSetBuilt({ kind: reactionSetKind });
+      noteRandomSetBuilt({ wasShowcase: false });
+    } else if (showcaseArtistKey) {
+      noteRandomSetBuilt({ wasShowcase: true });
+      noteReactionSetBuilt({ kind: null });
+    } else {
+      noteRandomSetBuilt({ wasShowcase: false });
+      noteReactionSetBuilt({ kind: null });
+    }
   }
 
   if (added > 0) {
@@ -1070,6 +1178,7 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
         `discover=${similarAdded} laneHits=${laneHitAdded}` +
         (activeMoodPack ? ` mood=${activeMoodPack.id} (${moodAdded} era hits)` : "") +
         (showcaseArtistKey ? ` showcase=${showcaseArtistName}` : "") +
+        (reactionSetKind ? ` reactionSet=${reactionSetKind}` : "") +
         (short ? ` short=${short}` : "")
     );
   }
@@ -1085,12 +1194,13 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
     highlights,
     similarRequested: similarWant,
     similarAdded,
-    mood: activeMoodPack?.id ?? null,
+    mood: reactionSetKind ? null : activeMoodPack?.id ?? null,
     moodAdded,
     relaxedArtist,
     relaxedMemory,
     memoryReuseCount,
-    genreLane: setLane,
+    genreLane: reactionSetKind ? null : setLane,
+    reactionSet: reactionSetKind ? { kind: reactionSetKind } : null,
     sameArtistBatch: showcaseArtistKey
       ? {
           artist: showcaseArtistName,

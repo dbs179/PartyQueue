@@ -71,6 +71,14 @@ test("queueOriginBadgeHtml covers dedication, request, discover, era, random", (
   );
   assert.match(queueOriginBadgeHtml({ discovered: true }), /Discover/);
   assert.match(
+    queueOriginBadgeHtml({ reactionSet: "loved" }),
+    /Most Loved/
+  );
+  assert.match(
+    queueOriginBadgeHtml({ reactionSet: "hated" }),
+    /Most Hated/
+  );
+  assert.match(
     queueOriginBadgeHtml({ searched: true, dedication: "For Sam", requestedBy: "Alex" }),
     /For Sam/
   );

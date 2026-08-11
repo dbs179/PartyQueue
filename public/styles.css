@@ -804,6 +804,16 @@ button.guest-name:focus-visible {
   background: linear-gradient(135deg, #3a8dde, #2f6fd0);
 }
 
+.np-origin.origin-loved {
+  color: #fff;
+  background: linear-gradient(135deg, #e11d48, #f43f5e);
+}
+
+.np-origin.origin-hated {
+  color: #fff;
+  background: linear-gradient(135deg, #64748b, #475569);
+}
+
 /* Reaction buttons share the full Now Playing width evenly (like the
    Display page progress bar) instead of packing left: one row of 8 when
    there's room, two even rows of 4 on phones. */
@@ -1197,17 +1207,9 @@ button.guest-name:focus-visible {
   font-size: 0.9em;
 }
 
-.booth-new-party-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 4px 0 2px;
-}
-
-.booth-new-party-hint {
-  margin: 0;
-  max-width: 36rem;
+/* When Booth has New party + Back, only the first action absorbs the left gap. */
+#view-booth .subpage-head .subpage-back + .subpage-back {
+  margin-left: 0;
 }
 
 .booth-tv-preview-actions {
@@ -1274,6 +1276,28 @@ button.guest-name:focus-visible {
   white-space: nowrap;
   color: #fff;
   background: linear-gradient(135deg, #7c5cff, #b14cff);
+}
+
+/* Most Loved / Most Hated reaction-set badges. */
+.reaction-set-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  white-space: nowrap;
+  color: #fff;
+}
+
+.reaction-set-loved {
+  background: linear-gradient(135deg, #e11d48, #f43f5e);
+}
+
+.reaction-set-hated {
+  background: linear-gradient(135deg, #64748b, #475569);
 }
 
 /* Era hit added by the Decades mood (outside the host's playlists). */

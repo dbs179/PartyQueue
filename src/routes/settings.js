@@ -44,6 +44,7 @@ import {
 import { clearHistory } from "../play-history.js";
 import { clearRequests } from "../request-log.js";
 import { clearDjNightMemory } from "../dj-night-memory.js";
+import { clearReactionSetMemory } from "../reaction-sets.js";
 import {
   clearMoodReactions,
   clearKaraokeReactions,
@@ -192,14 +193,19 @@ export function registerSettingsRoutes(app) {
     }
   });
 
-  // One-tap between parties: DJ shout memory + fairness quotas only.
-  // Keeps song memory, reactions, karaoke, stats, suggestions, and the queue
-  // (reactions feed future Favorite / Hated sets once enough data exists).
+  // One-tap between parties: DJ shout memory + fairness + Loved/Hated
+  // already-played-this-party memory. Keeps song memory, reactions, karaoke,
+  // stats, suggestions, and the queue.
   app.post("/api/settings/new-party", requireHostStrict, (_req, res) => {
     try {
       clearDjNightMemory();
+      clearReactionSetMemory();
       const fairnessResetAt = resetFairnessQuotas();
-      res.json({ ok: true, fairnessResetAt, cleared: ["djMemory", "fairness"] });
+      res.json({
+        ok: true,
+        fairnessResetAt,
+        cleared: ["djMemory", "fairness", "reactionSetMemory"],
+      });
     } catch (err) {
       console.error("[settings/new-party]", err.message);
       res.status(500).json({ error: err.message || "Could not start a new party." });

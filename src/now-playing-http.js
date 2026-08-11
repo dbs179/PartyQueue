@@ -115,6 +115,11 @@ export function resolveDisplayGenre(
   const trackLane =
     typeof np.genreLane === "string" && np.genreLane ? np.genreLane : null;
 
+  // Most Loved / Most Hated sets are not genre-laned.
+  if (np.reactionSet === "loved" || np.reactionSet === "hated") {
+    return { mixGenreLane: null, mixGenreLabel: null };
+  }
+
   // Discover: prefer the artist's strongest tag-mapped bucket (array order from
   // tagsToBuckets), not set-lane inheritance or dominantBucket's metal-first bias.
   if (origin === "discovered") {

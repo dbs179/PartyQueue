@@ -63,6 +63,8 @@ export function bustSettingsCache() {
 //   strictFill         - when true, never drop song memory just to fill a short batch
   //   sameArtistBatchEnabled / sameArtistBatchEveryN — Booth: automatic same-artist
   //     showcase every N Random/Never-Ending sets (overrides unique-artist harden).
+  //   loved/hatedReactionSet* — Most Loved / Most Hated sets from guest reactions
+  //     (threshold 10; every N independent schedules).
 export const RANDOMNESS_DEFAULTS = {
   songMemory: 500,
   artistWindow: 30,
@@ -71,6 +73,10 @@ export const RANDOMNESS_DEFAULTS = {
   strictFill: true,
   sameArtistBatchEnabled: true,
   sameArtistBatchEveryN: 8,
+  lovedReactionSetEnabled: true,
+  lovedReactionSetEveryN: 6,
+  hatedReactionSetEnabled: true,
+  hatedReactionSetEveryN: 6,
 };
 
 // Generous sanity bounds so a typo can't wedge the picker (e.g. a 10-million
@@ -81,6 +87,8 @@ const RANDOMNESS_BOUNDS = {
   artistCap: { min: 1, max: 100 },
   endlessQueueCount: { min: 1, max: 100 },
   sameArtistBatchEveryN: { min: 1, max: 100 },
+  lovedReactionSetEveryN: { min: 1, max: 100 },
+  hatedReactionSetEveryN: { min: 1, max: 100 },
 };
 
 const RANDOMNESS_INT_KEYS = [
@@ -89,6 +97,8 @@ const RANDOMNESS_INT_KEYS = [
   "artistCap",
   "endlessQueueCount",
   "sameArtistBatchEveryN",
+  "lovedReactionSetEveryN",
+  "hatedReactionSetEveryN",
 ];
 
 function clampInt(value, fallback, { min, max }) {
@@ -110,6 +120,14 @@ export function getRandomnessSettings() {
     typeof s.sameArtistBatchEnabled === "boolean"
       ? s.sameArtistBatchEnabled
       : RANDOMNESS_DEFAULTS.sameArtistBatchEnabled;
+  out.lovedReactionSetEnabled =
+    typeof s.lovedReactionSetEnabled === "boolean"
+      ? s.lovedReactionSetEnabled
+      : RANDOMNESS_DEFAULTS.lovedReactionSetEnabled;
+  out.hatedReactionSetEnabled =
+    typeof s.hatedReactionSetEnabled === "boolean"
+      ? s.hatedReactionSetEnabled
+      : RANDOMNESS_DEFAULTS.hatedReactionSetEnabled;
   return out;
 }
 
@@ -1347,6 +1365,12 @@ export function setRandomnessSettings(partial = {}) {
   if (partial.strictFill != null) next.strictFill = !!partial.strictFill;
   if (partial.sameArtistBatchEnabled != null) {
     next.sameArtistBatchEnabled = !!partial.sameArtistBatchEnabled;
+  }
+  if (partial.lovedReactionSetEnabled != null) {
+    next.lovedReactionSetEnabled = !!partial.lovedReactionSetEnabled;
+  }
+  if (partial.hatedReactionSetEnabled != null) {
+    next.hatedReactionSetEnabled = !!partial.hatedReactionSetEnabled;
   }
   saveSettings(next);
   return getRandomnessSettings();

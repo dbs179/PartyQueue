@@ -42,6 +42,7 @@ export function queueTrackSig(track, { showQueueGenre = false } = {}) {
     track.requestedBy || "",
     track.requestedByUser || "",
     track.dedication || "",
+    track.reactionSet || "",
     track.title || "",
     track.artist || "",
     track.djVoice ? 1 : 0,
@@ -66,6 +67,12 @@ export function queueOriginBadgeHtml(track, { eraLabel = "" } = {}) {
   }
   if (track.discovered) {
     return `<span class="songs-like-badge" title="Added by Discover (similar to your music)">\u2728 Discover</span>`;
+  }
+  if (track.reactionSet === "loved") {
+    return `<span class="reaction-set-badge reaction-set-loved" title="Most Loved set from guest reactions">\u2764\uFE0F Most Loved</span>`;
+  }
+  if (track.reactionSet === "hated") {
+    return `<span class="reaction-set-badge reaction-set-hated" title="Most Hated set from guest reactions">\u{1F922} Most Hated</span>`;
   }
   if (track.searched) {
     if (dedication) {

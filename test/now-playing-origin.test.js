@@ -32,6 +32,16 @@ test("nowPlayingOriginLabel covers Discover, Requested, and Random", () => {
     nowPlayingOriginLabel({ origin: "filler" }, true).text,
     "Random"
   );
+  assert.equal(
+    nowPlayingOriginLabel({ origin: "filler", reactionSet: "loved" }, true)
+      .text,
+    "Most Loved"
+  );
+  assert.equal(
+    nowPlayingOriginLabel({ origin: "filler", reactionSet: "hated" }, true)
+      .cls,
+    "origin-hated"
+  );
 });
 
 test("nowPlayingOriginLabel prefers dedication text for searched tracks", () => {

@@ -1851,8 +1851,16 @@ export async function writeSetScript(summary = {}) {
   const dj = getDjVoiceSettings();
   const event =
     summary.event === "session_refill" ? "session_refill" : "session_start";
-  const discoveryEnabled =
-    summary.discoveryEnabled != null
+  const reactionSetKind =
+    summary.reactionSet?.kind === "loved" ||
+    summary.reactionSet?.kind === "hated"
+      ? summary.reactionSet.kind
+      : summary.reactionSet === "loved" || summary.reactionSet === "hated"
+        ? summary.reactionSet
+        : null;
+  const discoveryEnabled = reactionSetKind
+    ? false
+    : summary.discoveryEnabled != null
       ? !!summary.discoveryEnabled
       : !!getDiscoverySettings().discoverEnabled;
   const similarAdded = discoveryEnabled ? Number(summary.similarAdded) || 0 : 0;
@@ -1861,15 +1869,61 @@ export async function writeSetScript(summary = {}) {
       ? Number(summary.nameIntroPercent)
       : dj.djNameIntroPercent;
   const highlights = summary.highlights ?? [];
-  const moodContext =
-    summary.moodContext ||
-    resolveDjMoodContext({
-      genres: summary.genres ?? enabledGenresFromSettings(),
-      highlights,
-      eraMood: summary.eraMood ?? loadSettings()?.mood ?? null,
-    });
+  const moodContext = reactionSetKind
+    ? {
+        mood: reactionSetKind === "loved" ? "party" : "wild",
+        moodLabel:
+          reactionSetKind === "loved" ? "Most Loved" : "Most Hated",
+        genreLabels: [],
+        energySignature:
+          reactionSetKind === "loved"
+            ? "crowd-favorite energy"
+            : "glorious trainwreck energy",
+        eraLabel: null,
+      }
+    : summary.moodContext ||
+      resolveDjMoodContext({
+        genres: summary.genres ?? enabledGenresFromSettings(),
+        highlights,
+        eraMood: summary.eraMood ?? loadSettings()?.mood ?? null,
+      });
   let characterKnobs =
     summary.characterKnobs || resolveDjCharacterKnobs(summary, dj);
+  if (reactionSetKind === "loved") {
+    characterKnobs = {
+      ...characterKnobs,
+      alwaysInstructions: [
+        characterKnobs.alwaysInstructions,
+        "This is a MOST LOVED set — songs the room voted up with likes, hearts, and fire.",
+        'Open by calling it the party\'s "most loved" / crowd favorites set. Do not name genres or lanes.',
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      neverInstructions: [
+        characterKnobs.neverInstructions,
+        "Do not frame this as a genre or mood lane set.",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    };
+  } else if (reactionSetKind === "hated") {
+    characterKnobs = {
+      ...characterKnobs,
+      alwaysInstructions: [
+        characterKnobs.alwaysInstructions,
+        "This is a MOST HATED set — songs the room piled on with thumbs-down and vomit.",
+        'Open by calling it the party\'s "most hated" / infamous bombs set — playful, not mean. Do not name genres or lanes.',
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      neverInstructions: [
+        characterKnobs.neverInstructions,
+        "Do not frame this as a genre or mood lane set.",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    };
+  }
   announceOrdinal += 1;
   const saltHint =
     (announceOrdinal * 17 +
@@ -1897,9 +1951,10 @@ export async function writeSetScript(summary = {}) {
     summary.outro != null && String(summary.outro).trim()
       ? String(summary.outro).trim()
       : null;
-  const nextSetLines = summary.skipNextSetPack
-    ? null
-    : pickDjNextSetLines({ salt: saltHint + 41 });
+  const nextSetLines =
+    summary.skipNextSetPack || reactionSetKind
+      ? null
+      : pickDjNextSetLines({ salt: saltHint + 41 });
   if (nextSetLines) {
     const { pack: nextPack, intro: packIntro, blurb, outro: packOutro } = nextSetLines;
     if (packIntro) intro = packIntro;
@@ -1925,7 +1980,13 @@ export async function writeSetScript(summary = {}) {
     );
   }
   if (intro == null) {
-    intro = reserveIntroPhrase(event, saltHint + 19)?.text || "";
+    if (reactionSetKind === "loved") {
+      intro = "Up next: the room's most loved songs.";
+    } else if (reactionSetKind === "hated") {
+      intro = "Up next: the room's most hated songs.";
+    } else {
+      intro = reserveIntroPhrase(event, saltHint + 19)?.text || "";
+    }
   }
   if (outro == null) {
     const outroPhrase = reserveOutroPhrase(pack, moodContext.mood, saltHint + 23);
@@ -1934,8 +1995,12 @@ export async function writeSetScript(summary = {}) {
   const descriptor =
     summary.descriptor != null && String(summary.descriptor).trim()
       ? String(summary.descriptor).trim()
-      : reserveSetDescriptor(moodContext.mood, saltHint + 29)?.text ||
-        "hand-picked";
+      : reactionSetKind === "loved"
+        ? "most-loved"
+        : reactionSetKind === "hated"
+          ? "most-hated"
+          : reserveSetDescriptor(moodContext.mood, saltHint + 29)?.text ||
+            "hand-picked";
 
   // Occasional DJ-name mention lives in the middle now (intensity/host knob).
   const nameMention =

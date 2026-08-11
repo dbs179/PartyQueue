@@ -49,6 +49,20 @@ export function nowPlayingOriginLabel(np, hasTrack) {
       cls: "origin-searched",
     };
   }
+  if (np.reactionSet === "loved") {
+    return {
+      text: "Most Loved",
+      title: "Most Loved set from guest reactions",
+      cls: "origin-loved",
+    };
+  }
+  if (np.reactionSet === "hated") {
+    return {
+      text: "Most Hated",
+      title: "Most Hated set from guest reactions",
+      cls: "origin-hated",
+    };
+  }
   if (origin === "filler") {
     return {
       text: "Random",
@@ -79,6 +93,8 @@ export function displayOriginLabel(track, activeEraMood = null) {
     return era ? `${era} Hit` : "Era Hit";
   }
   if (track.discovered) return "Discover";
+  if (track.reactionSet === "loved") return "Most Loved";
+  if (track.reactionSet === "hated") return "Most Hated";
   return "Random";
 }
 
@@ -87,6 +103,8 @@ const ORIGIN_TONE_CLASSES = [
   "origin-discovered",
   "origin-random",
   "origin-mood",
+  "origin-loved",
+  "origin-hated",
 ];
 
 /**
@@ -101,6 +119,8 @@ export function displayOriginTone(track) {
   if (origin === "searched" || track.searched) return "origin-searched";
   if (origin === "discovered" || track.discovered) return "origin-discovered";
   if (origin === "mood" || track.moodPick) return "origin-mood";
+  if (track.reactionSet === "loved") return "origin-loved";
+  if (track.reactionSet === "hated") return "origin-hated";
   return "origin-random";
 }
 

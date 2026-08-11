@@ -629,6 +629,14 @@
       <div id="view-booth" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">DJ Booth</h2>
+          <button
+            id="booth-new-party"
+            type="button"
+            class="pill-btn subpage-back"
+            title="Clear DJ shout memory, fairness, and Loved/Hated set memory for the next party"
+          >
+            New party
+          </button>
           <button id="booth-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
         </div>
         <div class="controls-divider" aria-hidden="true"></div>
@@ -687,20 +695,6 @@
                 <span class="autofill-hint">Guests can still search, request songs, react, and view the queue</span>
               </span>
             </label>
-            <div class="booth-new-party-actions">
-              <button
-                id="booth-new-party"
-                type="button"
-                class="pill-btn warning"
-                title="Clear DJ night memory and request fairness for the next party"
-              >
-                New party
-              </button>
-              <p class="setting-hint booth-new-party-hint">
-                Clears DJ shout memory and fairness limits. Keeps song memory,
-                reactions, Karaoke, Stats, and the queue.
-              </p>
-            </div>
             <div class="controls-divider" aria-hidden="true"></div>
             <p class="section-label settings-banner-label booth-toggle-group">Look</p>
             <label class="autofill" title="Show or hide the build tag next to the title">
@@ -767,6 +761,22 @@
               <span class="autofill-text">
                 <span class="autofill-label">Same-artist sets</span>
                 <span class="autofill-hint">Automatic showcase batches — tune “every N” under Queue</span>
+              </span>
+            </label>
+            <label class="autofill" title="Every so often, play 5 guest Most Loved songs (10+ likes; ignore genre)">
+              <input type="checkbox" id="set-loved-reaction-set" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Most Loved sets</span>
+                <span class="autofill-hint">Crowd favorites from reactions — tune every N under Queue</span>
+              </span>
+            </label>
+            <label class="autofill" title="Every so often, play 5 guest Most Hated songs (10+ hates; ignore genre)">
+              <input type="checkbox" id="set-hated-reaction-set" class="autofill-input" />
+              <span class="autofill-switch" aria-hidden="true"></span>
+              <span class="autofill-text">
+                <span class="autofill-label">Most Hated sets</span>
+                <span class="autofill-hint">Crowd bombs from reactions — tune every N under Queue</span>
               </span>
             </label>
             <label class="autofill" title="Prevent one guest from filling the searched queue">
@@ -903,6 +913,16 @@
             <label class="setting-label" for="set-same-artist-every">Same-artist every</label>
             <input type="number" id="set-same-artist-every" class="setting-input" min="1" max="100" step="1" inputmode="numeric" />
             <span class="setting-hint">Random/Never-Ending sets between automatic same-artist showcases (default 8). Toggle lives on Booth.</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="set-loved-reaction-every">Most Loved every</label>
+            <input type="number" id="set-loved-reaction-every" class="setting-input" min="1" max="100" step="1" inputmode="numeric" />
+            <span class="setting-hint">Sets between Most Loved batches (default 6). Needs 5 songs with 10+ likes not yet played this party. Toggle on Booth.</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="set-hated-reaction-every">Most Hated every</label>
+            <input type="number" id="set-hated-reaction-every" class="setting-input" min="1" max="100" step="1" inputmode="numeric" />
+            <span class="setting-hint">Sets between Most Hated batches (default 6). Needs 5 songs with 10+ hates not yet played this party. Toggle on Booth.</span>
           </div>
 
           <div class="setting-row">

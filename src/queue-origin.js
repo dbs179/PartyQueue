@@ -55,6 +55,11 @@ function newInstanceKey() {
   return randomBytes(8).toString("hex");
 }
 
+function cleanReactionSet(value) {
+  const s = String(value || "").trim().toLowerCase();
+  return s === "loved" || s === "hated" ? s : null;
+}
+
 function rowMeta(e) {
   return {
     key: e.key || null,
@@ -64,6 +69,7 @@ function rowMeta(e) {
     dedication: e.dedication || null,
     mood: e.mood || null,
     genreLane: e.genreLane || null,
+    reactionSet: cleanReactionSet(e.reactionSet),
     setRequest: !!e.setRequest,
   };
 }
@@ -101,6 +107,7 @@ function load() {
             dedication: sanitizeDedication(e.dedication),
             mood: typeof e.mood === "string" && e.mood ? e.mood : null,
             genreLane: cleanGenreLane(e.genreLane),
+            reactionSet: cleanReactionSet(e.reactionSet),
             setRequest: !!e.setRequest,
           }))
       : null;
@@ -146,6 +153,7 @@ function persistNow() {
       if (e.dedication) row.dedication = e.dedication;
       if (e.mood) row.mood = e.mood;
       if (e.genreLane) row.genreLane = e.genreLane;
+      if (e.reactionSet) row.reactionSet = e.reactionSet;
       if (e.setRequest) row.setRequest = true;
       return row;
     });
@@ -196,7 +204,7 @@ function removeAllForId(id) {
  * Record the source for one or more track IDs.
  * @param {string[]} ids
  * @param {string} source
- * @param {{ requestedBy?: string|null, requestedByUser?: string|null, dedication?: string|null, mood?: string|null, genreLane?: string|null, appendInstance?: boolean, setRequest?: boolean }} [opts]
+ * @param {{ requestedBy?: string|null, requestedByUser?: string|null, dedication?: string|null, mood?: string|null, genreLane?: string|null, reactionSet?: string|null, appendInstance?: boolean, setRequest?: boolean }} [opts]
  */
 export function markOrigin(ids, source, opts = {}) {
   if (!VALID.has(source)) return;
@@ -218,6 +226,7 @@ export function markOrigin(ids, source, opts = {}) {
       ? opts.mood
       : null;
   const genreLaneOpt = cleanGenreLane(opts.genreLane);
+  const reactionSetOpt = cleanReactionSet(opts.reactionSet);
   const appendInstance = source === "searched" && !!opts.appendInstance;
   const setRequest = source === "searched" && !!opts.setRequest;
   load();
@@ -254,6 +263,10 @@ export function markOrigin(ids, source, opts = {}) {
     const genreLane = SET_SOURCES.has(source)
       ? genreLaneOpt || prevRollup?.genreLane || null
       : null;
+    const reactionSet =
+      source === "filler"
+        ? reactionSetOpt || prevRollup?.reactionSet || null
+        : null;
 
     entries.push({
       key: newInstanceKey(),
@@ -264,6 +277,7 @@ export function markOrigin(ids, source, opts = {}) {
       dedication: ded,
       mood,
       genreLane,
+      reactionSet,
       setRequest,
     });
   }
