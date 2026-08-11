@@ -8,7 +8,6 @@ import {
 } from "./now-playing-utils.js";
 import { showToast } from "./toast.js";
 import { wirePanelCollapse } from "./panel-collapse.js";
-import { createHostDesktopRail } from "./host-desktop-rail.js";
 import { createConfirmModal } from "./confirm-modal.js";
 import { createHostPinUi } from "./host-pin-ui.js";
 import { createGuestNameUi } from "./guest-name-ui.js";
@@ -296,12 +295,6 @@ const hostQuickBar = document.getElementById("host-quick-bar");
 const hostBoothBtn = document.getElementById("host-booth-btn");
 const moodNeedSpotify = document.getElementById("mood-need-spotify");
 const musicMixHub = document.getElementById("music-mix-hub");
-
-const hostDesktopRail = createHostDesktopRail({
-  rail: document.getElementById("host-transport-rail"),
-  home: document.getElementById("controls-host-home"),
-  getProtectedEl: () => document.getElementById("controls-host-protected"),
-});
 
 // Late-bound Music Mix (created after navigateMixPanel + playlist state exist).
 let musicMix = null;
@@ -1725,7 +1718,6 @@ function syncHostChrome() {
   // before we know a PIN is required.
   if (!isPinStatusReady()) {
     if (hostQuickBar) hostQuickBar.hidden = true;
-    hostDesktopRail.setHostOpen(false);
     return;
   }
   const open = settingsGateOk();
@@ -1736,8 +1728,6 @@ function syncHostChrome() {
     controlsPanel?.setCollapsed(false, { persist: true, fireOnExpand: true });
   }
   hostChromeOpen = open;
-  // Wide unlocked hosts get transport beside NP/queue; guests stay single-column.
-  hostDesktopRail.setHostOpen(open);
 }
 
 function syncHostControlsVisibility() {

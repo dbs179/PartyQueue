@@ -131,10 +131,6 @@
 
         <ul id="results" class="results"></ul>
 
-        <!-- Host desktop stage: NP + Up Next stay primary; transport docks in the
-             rail when the host session is unlocked on a wide viewport. -->
-        <div id="host-stage" class="host-stage">
-        <div class="host-stage-primary">
         <!-- NOW PLAYING - album art + track info, always visible (never collapses).
              Tap the card to open a full-screen view with lyrics. -->
         <section id="nowplaying-section" class="nowplaying">
@@ -245,14 +241,6 @@
             <p id="queue-empty" class="np-empty" hidden>The queue is empty.</p>
           </div>
         </section>
-        </div>
-        <aside
-          id="host-transport-rail"
-          class="host-transport-rail"
-          aria-label="Host transport"
-          hidden
-        ></aside>
-        </div>
 
         <!-- CONTROLS - transport + Add Random. Collapsible; collapsed by default. -->
         <section id="controls-section" class="controls-panel collapsed">
@@ -265,7 +253,6 @@
             <button id="controls-host-unlock" type="button" class="pill-btn success">Unlock controls</button>
           </div>
           <div class="controls" id="controls-body" aria-label="Playback controls">
-            <div id="controls-host-home">
             <div id="controls-host-protected">
               <p class="settings-intro">Sonos playback controls</p>
               <div class="transport-grid">
@@ -283,7 +270,6 @@
                 <button id="vol-up-10-btn" type="button" class="pill-btn info vol-btn vol-btn-10" aria-label="Volume up 10" title="Volume +10">+10</button>
               </div>
               <button id="clearQueue" type="button" class="pill-btn danger clear-full" title="Clear the entire queue">Clear Queue</button>
-            </div>
             </div>
             <div id="controls-random" class="controls-block" hidden>
               <div class="controls-divider" aria-hidden="true"></div>
