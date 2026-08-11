@@ -244,7 +244,7 @@
         <!-- Desktop: Controls | Up Next equal columns; phones stack Up Next then Controls. -->
         <div class="main-ops-row">
         <section id="queue-section" class="queue-section">
-          <h2 class="section-label section-toggle" id="queue-toggle" role="button" tabindex="0" aria-expanded="true" title="Collapse / expand">
+          <h2 class="section-label section-toggle" id="queue-toggle" role="button" tabindex="0" aria-expanded="true">
             <span>Up next <span id="queue-count" class="queue-count"></span></span>
             <span class="chevron" aria-hidden="true">&#9662;</span>
             <button id="queue-edit-toggle" type="button" aria-pressed="false" title="Turn on to delete or drag-reorder songs" hidden>Edit</button>
@@ -265,9 +265,9 @@
           </div>
         </section>
 
-        <!-- CONTROLS - transport + Add Random. Collapsible; collapsed by default. -->
-        <section id="controls-section" class="controls-panel collapsed">
-          <h2 class="section-label section-toggle" id="controls-toggle" role="button" tabindex="0" aria-expanded="false" title="Collapse / expand">
+        <!-- CONTROLS - transport + Add Random. Always open on the main page. -->
+        <section id="controls-section" class="controls-panel">
+          <h2 class="section-label section-toggle" id="controls-toggle" role="button" tabindex="0" aria-expanded="true">
             <span>Controls</span>
             <span class="chevron" aria-hidden="true">&#9662;</span>
           </h2>
@@ -307,8 +307,8 @@
 
         <!-- Desktop: Tools + Suggestion Box share one equal-width row; phones stay stacked. -->
         <div class="main-tools-row">
-        <section id="toolbar-section" class="controls-panel collapsed">
-          <h2 class="section-label section-toggle" id="toolbar-toggle" role="button" tabindex="0" aria-expanded="false" title="Collapse / expand">
+        <section id="toolbar-section" class="controls-panel">
+          <h2 class="section-label section-toggle" id="toolbar-toggle" role="button" tabindex="0" aria-expanded="true">
             <span>Tools</span>
             <span class="chevron" aria-hidden="true">&#9662;</span>
           </h2>
@@ -324,8 +324,8 @@
           </div>
         </section>
 
-        <section id="suggestion-section" class="controls-panel collapsed">
-          <h2 class="section-label section-toggle suggestion-head" id="suggestion-toggle" role="button" tabindex="0" aria-expanded="false" title="Collapse / expand">
+        <section id="suggestion-section" class="controls-panel">
+          <h2 class="section-label section-toggle suggestion-head" id="suggestion-toggle" role="button" tabindex="0" aria-expanded="true">
             <span class="suggestion-head-title">Suggestion Box</span>
             <span id="suggestion-count" class="suggestion-count" aria-live="polite">0 / 280</span>
             <button id="suggestion-submit" type="button" class="suggestion-submit-link" title="Send suggestion">

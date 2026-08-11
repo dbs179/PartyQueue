@@ -84,7 +84,7 @@ body {
 .control-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
+  gap: 12px;
 }
 
 .music-mix-toggles {
@@ -94,7 +94,7 @@ body {
 .toolbar-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
+  gap: 12px;
 }
 .toolbar-grid-5 {
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -106,20 +106,24 @@ body {
 .toolbar-grid .pill-btn {
   width: 100%;
   min-height: 44px;
-  height: auto;
-  max-height: none;
-  padding: 8px 4px;
+  height: 44px;
+  max-height: 44px;
+  padding: 4px 4px;
   font-size: 0.72rem;
   line-height: 1.15;
   white-space: normal;
   text-wrap: balance;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .transport-grid,
 .random-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
+  gap: 12px;
 }
 
 .random-grid {
@@ -161,13 +165,18 @@ body {
 
 .clear-full {
   font-size: 0.85rem;
-  margin-top: 10px;
+  margin-top: 12px;
   margin-bottom: 0;
 }
 
 /* Keep prev/next row spaced from the volume grid below. */
 .transport-grid {
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+}
+
+/* Same 12px rhythm when Add Random is visible under Clear Queue. */
+#view-main #controls-random:not([hidden]) {
+  margin-top: 12px;
 }
 
 .hero {
@@ -646,31 +655,6 @@ button.subpage-head-link:active {
     padding-top: 10px;
   }
 
-  #view-main .main-ops-row #controls-random:not([hidden]) {
-    margin-top: 12px;
-  }
-
-  /* Desktop: Up Next + Controls stay open (no collapse chrome). */
-  #view-main .main-ops-row > #queue-section.collapsed > .queue-box,
-  #view-main .main-ops-row > #controls-section.collapsed > .controls,
-  #view-main .main-ops-row > #controls-section.collapsed > .host-lock-panel {
-    display: flex;
-  }
-
-  #view-main .main-ops-row > #queue-section.collapsed > .queue-box {
-    flex-direction: column;
-  }
-
-  #view-main .main-ops-row #queue-toggle .chevron,
-  #view-main .main-ops-row #controls-toggle .chevron {
-    display: none;
-  }
-
-  #view-main .main-ops-row #queue-toggle,
-  #view-main .main-ops-row #controls-toggle {
-    cursor: default;
-  }
-
   #view-main .main-tools-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -698,26 +682,6 @@ button.subpage-head-link:active {
   #view-main .main-tools-row > #suggestion-section .suggestion-compose {
     flex: 1 1 auto;
     min-height: 0;
-  }
-
-  /* Desktop: Tools + Suggestion Box stay open (no collapse chrome). */
-  #view-main .main-tools-row > #toolbar-section.collapsed > .controls,
-  #view-main .main-tools-row > #suggestion-section.collapsed > .controls {
-    display: flex;
-  }
-
-  #view-main .main-tools-row #toolbar-toggle .chevron,
-  #view-main .main-tools-row #suggestion-toggle .chevron {
-    display: none;
-  }
-
-  #view-main .main-tools-row #toolbar-toggle,
-  #view-main .main-tools-row #suggestion-toggle {
-    cursor: default;
-  }
-
-  #view-main .main-ops-row #queue-edit-toggle {
-    cursor: pointer;
   }
 
   /*
@@ -1107,7 +1071,7 @@ button.guest-name:focus-visible {
   opacity: 0.72;
 }
 
-/* Collapsible main-page panels (Controls, Suggestion Box, …). */
+/* Collapsible panels (genre maps, etc.). Main-view ops stay open below. */
 .controls-panel.collapsed > .controls {
   display: none;
 }
@@ -1118,6 +1082,37 @@ button.guest-name:focus-visible {
 
 .controls-panel.collapsed .chevron {
   transform: rotate(-90deg);
+}
+
+/* Main page: Up Next, Controls, Tools, Suggestion stay open (phone + desktop). */
+#view-main #queue-section.collapsed > .queue-box,
+#view-main #controls-section.collapsed > .controls,
+#view-main #controls-section.collapsed > .host-lock-panel,
+#view-main #toolbar-section.collapsed > .controls,
+#view-main #suggestion-section.collapsed > .controls {
+  display: flex;
+}
+
+#view-main #queue-section.collapsed > .queue-box {
+  flex-direction: column;
+}
+
+#view-main #queue-toggle .chevron,
+#view-main #controls-toggle .chevron,
+#view-main #toolbar-toggle .chevron,
+#view-main #suggestion-toggle .chevron {
+  display: none;
+}
+
+#view-main #queue-toggle,
+#view-main #controls-toggle,
+#view-main #toolbar-toggle,
+#view-main #suggestion-toggle {
+  cursor: default;
+}
+
+#view-main #queue-edit-toggle {
+  cursor: pointer;
 }
 
 .genre-head-intro {

@@ -227,7 +227,6 @@ const groupAllBtn = document.getElementById("group-all-btn");
 const queueList = document.getElementById("queue");
 const queueCount = document.getElementById("queue-count");
 const queueEmpty = document.getElementById("queue-empty");
-const queueToggle = document.getElementById("queue-toggle");
 const queueEditToggle = document.getElementById("queue-edit-toggle");
 const queueEditHint = document.getElementById("queue-edit-hint");
 
@@ -254,14 +253,9 @@ function loadPlaylists() {
   return playlistsUi?.loadPlaylists();
 }
 
-// Collapse/expand Up Next + main-page panels (Controls, Suggestion Box, …).
-// Each panel remembers its own state in localStorage.
-// Desktop (≥960px): Up Next + Controls stay open beside each other.
-const desktopMainOpsMq =
-  typeof window.matchMedia === "function"
-    ? window.matchMedia("(min-width: 960px)")
-    : null;
-const canCollapseMainOps = () => !desktopMainOpsMq?.matches;
+// Main-page panels (Up Next, Controls, Tools, Suggestion) stay open on phone
+// and desktop — no collapse chrome.
+const canCollapseMainOps = () => false;
 
 const queuePanel = wirePanelCollapse(
   "queue-section",
@@ -282,6 +276,7 @@ const controlsPanel = wirePanelCollapse(
   "controls-toggle",
   "pq.controlsCollapsed",
   {
+    defaultCollapsed: false,
     onExpand: () => loadGroups(true),
     canCollapse: canCollapseMainOps,
   }
@@ -292,7 +287,7 @@ const toolbarPanel = wirePanelCollapse(
   "toolbar-toggle",
   "pq.toolbarCollapsed",
   {
-    defaultCollapsed: true,
+    defaultCollapsed: false,
     canCollapse: canCollapseMainOps,
   }
 );
@@ -301,14 +296,13 @@ const suggestionPanel = wirePanelCollapse(
   "suggestion-toggle",
   "pq.suggestionCollapsed",
   {
-    defaultCollapsed: true,
+    defaultCollapsed: false,
     canCollapse: canCollapseMainOps,
     ignoreClickSelector: "#suggestion-submit",
   }
 );
 
-function syncDesktopMainOpsPanels() {
-  if (!desktopMainOpsMq?.matches) return;
+function syncMainPanelsOpen() {
   queuePanel?.setCollapsed(false, { persist: false });
   controlsPanel?.setCollapsed(false, {
     persist: false,
@@ -317,14 +311,7 @@ function syncDesktopMainOpsPanels() {
   toolbarPanel?.setCollapsed(false, { persist: false });
   suggestionPanel?.setCollapsed(false, { persist: false });
 }
-if (desktopMainOpsMq) {
-  if (typeof desktopMainOpsMq.addEventListener === "function") {
-    desktopMainOpsMq.addEventListener("change", syncDesktopMainOpsPanels);
-  } else if (typeof desktopMainOpsMq.addListener === "function") {
-    desktopMainOpsMq.addListener(syncDesktopMainOpsPanels);
-  }
-  syncDesktopMainOpsPanels();
-}
+syncMainPanelsOpen();
 wirePanelCollapse("genre-map-section", "genre-map-toggle", "pq.genreMapCollapsed", {
   defaultCollapsed: true,
 });
@@ -3002,19 +2989,6 @@ loadPinRequired();
 // refresh plus the interval), which only actually runs when we're visible and on
 // the main view.
 document.addEventListener("visibilitychange", syncPolling);
-// Phones: collapse Up next by default so Search + Now Playing own the first screen.
-try {
-  if (
-    queueSection &&
-    queueToggle &&
-    window.matchMedia("(max-width: 640px)").matches
-  ) {
-    queueSection.classList.add("collapsed");
-    queueToggle.setAttribute("aria-expanded", "false");
-  }
-} catch {
-  /* matchMedia unavailable */
-}
 
 // Initial route: deferred to here (see the hashchange listener) so deep links
 // land on their view only after every declaration above has run.

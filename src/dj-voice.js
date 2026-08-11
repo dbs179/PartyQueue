@@ -83,6 +83,9 @@ import {
   rememberDjClipScript,
   reserveDjPhrase,
 } from "./dj-night-memory.js";
+import { withTimeout } from "./with-timeout.js";
+
+export { withTimeout };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TTS_DIR = path.join(__dirname, "..", "data", "tts");
@@ -1781,8 +1784,6 @@ async function generateScriptWithLlm(summary) {
  */
 /** Cap OpenAI conversation waits so Random announce can fall back to templates. */
 export const LLM_SCRIPT_TIMEOUT_MS = 12_000;
-
-export { withTimeout } from "./with-timeout.js";
 
 export async function generateDjSpeechFromPrompt(
   prompt,
