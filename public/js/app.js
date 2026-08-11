@@ -1214,10 +1214,32 @@ settingsClearFairnessBtn?.addEventListener("click", async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Could not reset fairness.");
     showToast("Fairness limits cleared");
+    refreshGuestFairness();
   } catch (err) {
     showToast(err.message, true);
   } finally {
     settingsClearFairnessBtn.disabled = false;
+  }
+});
+
+const boothNewPartyBtn = document.getElementById("booth-new-party");
+boothNewPartyBtn?.addEventListener("click", async () => {
+  const ok = await confirmModal(
+    "Start a new party? Clears DJ shout memory and fairness limits so guests and the DJ start fresh. Song memory, reactions, Karaoke, Stats, and the queue stay.",
+    "New party"
+  );
+  if (!ok) return;
+  boothNewPartyBtn.disabled = true;
+  try {
+    const res = await hostFetch("/api/settings/new-party", { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not start a new party.");
+    showToast("New party ready — DJ memory and fairness cleared");
+    refreshGuestFairness();
+  } catch (err) {
+    showToast(err.message, true);
+  } finally {
+    boothNewPartyBtn.disabled = false;
   }
 });
 

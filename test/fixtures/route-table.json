@@ -96,6 +96,7 @@
   "POST /api/settings/clear-reactions :: requireHostStrict > <anonymous>",
   "POST /api/settings/clear-stats :: requireHostStrict > <anonymous>",
   "POST /api/settings/clear-suggestions :: requireHostStrict > <anonymous>",
+  "POST /api/settings/new-party :: requireHostStrict > <anonymous>",
   "POST /api/settings/pin :: <anonymous>",
   "POST /api/settings/verify-pin :: <anonymous>",
   "POST /api/shuffle :: transportLimit > requireHostControls > <anonymous>",

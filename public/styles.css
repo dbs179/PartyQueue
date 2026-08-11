@@ -1197,6 +1197,19 @@ button.guest-name:focus-visible {
   font-size: 0.9em;
 }
 
+.booth-new-party-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0 2px;
+}
+
+.booth-new-party-hint {
+  margin: 0;
+  max-width: 36rem;
+}
+
 .booth-tv-preview-actions {
   display: flex;
   flex-wrap: wrap;

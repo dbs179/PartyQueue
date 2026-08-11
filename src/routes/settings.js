@@ -192,6 +192,20 @@ export function registerSettingsRoutes(app) {
     }
   });
 
+  // One-tap between parties: DJ shout memory + fairness quotas only.
+  // Keeps song memory, reactions, karaoke, stats, suggestions, and the queue
+  // (reactions feed future Favorite / Hated sets once enough data exists).
+  app.post("/api/settings/new-party", requireHostStrict, (_req, res) => {
+    try {
+      clearDjNightMemory();
+      const fairnessResetAt = resetFairnessQuotas();
+      res.json({ ok: true, fairnessResetAt, cleared: ["djMemory", "fairness"] });
+    } catch (err) {
+      console.error("[settings/new-party]", err.message);
+      res.status(500).json({ error: err.message || "Could not start a new party." });
+    }
+  });
+
   // Forget Now Playing mood reactions (keeps Karaoke mic list).
   app.post("/api/settings/clear-reactions", requireHostStrict, (_req, res) => {
     try {

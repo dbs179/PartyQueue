@@ -148,6 +148,7 @@ describe("HTTP server harness", { concurrency: false }, () => {
     assert.match(html, /id="set-set-request-fairness-enabled"/);
     assert.match(html, /id="set-set-request-fairness-window"/);
     assert.match(html, /id="settings-clear-fairness"/);
+    assert.match(html, /id="booth-new-party"/);
   });
 
   test("GET /api/settings/pin-required reports whether a host PIN is set", async () => {
