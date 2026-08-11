@@ -22,9 +22,10 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    command: "node e2e/start-harness.mjs",
+    // dist/ is gitignored — always build the client before the harness serves UI.
+    command: "npm run build:client && node e2e/start-harness.mjs",
     url: `${baseURL}/api/health`,
     reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
+    timeout: 120_000,
   },
 });

@@ -5,6 +5,16 @@ const ONE_PX_PNG = Buffer.from(
   "base64"
 );
 
+// Keep in sync with PIN_SETUP_SEEN_KEY in public/js/host-pin-ui.js.
+const PIN_SETUP_SEEN_KEY = "pq.pinSetupSeen";
+
+// Fresh harness has no host PIN, so the first-run setup modal would block UI.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript((key) => {
+    localStorage.setItem(key, "1");
+  }, PIN_SETUP_SEEN_KEY);
+});
+
 async function mockCover(page, pathLiteral) {
   await page.route(`**${pathLiteral}`, (route) =>
     route.fulfill({

@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   test:
-    name: Node 20 (${{ matrix.os }})
+    name: Node 22 (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -25,7 +25,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install locked dependencies
@@ -54,11 +54,14 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install locked dependencies
         run: npm ci
+
+      - name: Build browser client bundle
+        run: npm run build:client
 
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
