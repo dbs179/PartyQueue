@@ -22,23 +22,12 @@ import {
   sanitizeDisplayName,
 } from "../display-name.js";
 import { getHistory } from "../play-history.js";
-import { getTracksByIds } from "../spotify.js";
 import { originOf, moodOf, requestedByOf } from "../queue-origin.js";
-import {
-  getRequests,
-  summarizeRequests,
-  topRequesters,
-  listDedications,
-} from "../request-log.js";
 import {
   getReactions,
   setReaction,
-  listKaraokeTracks,
-  listReactedTracks,
-  listTopLikedTracks,
-  listPartyMusicTracks,
-  listMostHatedTracks,
 } from "../reactions.js";
+import { getPartyStatsPayload } from "../party-stats.js";
 import {
   addSuggestion,
   getSuggestions,
@@ -48,9 +37,6 @@ import {
 } from "../suggestion-box.js";
 import { LyricsUnavailableError, lookupLyrics } from "../lyrics.js";
 import { nudgeNowPlayingStream } from "../now-playing-http.js";
-
-// Party Stats / social strip: rolling "tonight" window (hours).
-const STATS_WINDOW_HOURS = 12;
 
 /** @param {import('express').Express} app */
 export function registerGuestRoutes(app) {
@@ -185,63 +171,10 @@ export function registerGuestRoutes(app) {
 
   // Party Stats: most-requested songs/artists/requesters from guest search-and-adds,
   // for both "tonight" (a rolling window) and all-time. Lazy-loaded by the UI panel.
+  // Short TTL cache in party-stats.js; invalidated on request/reaction writes.
   app.get("/api/stats", asyncHandler(async (_req, res) => {
     try {
-      const events = getRequests();
-      const sinceTonight = Date.now() - STATS_WINDOW_HOURS * 60 * 60_000;
-      const tonight = summarizeRequests(events, sinceTonight);
-      const allTime = summarizeRequests(events, 0);
-      const karaoke = listKaraokeTracks(50);
-      const reacted = listReactedTracks(50);
-      const topLiked = listTopLikedTracks(50);
-      const partyMusic = listPartyMusicTracks(50);
-      const mostHated = listMostHatedTracks(50);
-      const reactionLists = [
-        karaoke,
-        reacted,
-        topLiked,
-        partyMusic,
-        mostHated,
-      ];
-      // Fill missing titles from Spotify when taps didn't send meta.
-      const needIds = [
-        ...new Set(
-          reactionLists.flat().filter((k) => !k.name).map((k) => k.id)
-        ),
-      ];
-      if (needIds.length) {
-        try {
-          const map = await getTracksByIds(needIds);
-          for (const row of reactionLists.flat()) {
-            if (row.name) continue;
-            const info = map.get(row.id);
-            if (info) {
-              row.name = info.title || "";
-              row.artist = info.artist || "";
-            }
-          }
-        } catch (err) {
-          console.warn("[stats] reaction title lookup:", err.message);
-        }
-      }
-      res.json({
-        windowHours: STATS_WINDOW_HOURS,
-        karaoke,
-        reacted,
-        topLiked,
-        partyMusic,
-        mostHated,
-        tonight: {
-          ...tonight,
-          topRequesters: topRequesters(events, sinceTonight),
-          dedications: listDedications(sinceTonight, 40),
-        },
-        allTime: {
-          ...allTime,
-          topRequesters: topRequesters(events, 0),
-          dedications: listDedications(0, 40),
-        },
-      });
+      res.json(await getPartyStatsPayload());
     } catch (err) {
       console.error("[stats]", err.message);
       res.status(500).json({ error: err.message || "Could not load stats." });

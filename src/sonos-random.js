@@ -63,6 +63,7 @@ import { getSimilarUris, isDiscoveryAvailable } from "./similar.js";
 import { getLaneHits } from "./lane-hits.js";
 import { markOrigin } from "./queue-origin.js";
 import { queueWorkWasPreempted } from "./queue-preempt.js";
+import { yieldToEventLoop } from "./yield-event-loop.js";
 
 // Add `count` random tracks drawn from the host's playlists. Picks one song per
 // randomly-chosen playlist (rotating playlists), avoids the same artist back-to-
@@ -169,6 +170,9 @@ async function buildRandomPlan(
       );
     }
   }
+
+  // Pool filters above are sync over every track — breathe before Sonos reads.
+  await yieldToEventLoop();
 
   // Track IDs to avoid: already in the queue, plus (as we go) ones we've already
   // enqueued or that failed to enqueue. This lets us re-sample to fill `count`.
@@ -368,6 +372,7 @@ async function buildRandomPlan(
       }
     }
   }
+  await yieldToEventLoop();
   const flowPrev = getGenreFlowState();
   const setLane = pickSetLane({
     enabled: enabledLanePool,
@@ -411,6 +416,7 @@ async function buildRandomPlan(
       nameByUri.set(t.uri, t.name ?? "");
     }
   }
+  await yieldToEventLoop();
 
   // 1) Collect the playlist picks up front (pure, no enqueue) so we can mix the
   // discoveries in rather than tacking them on at the end. Mark them excluded so
@@ -484,6 +490,7 @@ async function buildRandomPlan(
       if (id) libraryIds.add(id);
     }
   }
+  await yieldToEventLoop();
 
   const outsideStarted = Date.now();
   const outsideAc = new AbortController();
@@ -542,6 +549,7 @@ async function buildRandomPlan(
           }
         }
       }
+      await yieldToEventLoop();
       try {
         discoveries = await getSimilarUris({
           seeds,
@@ -918,6 +926,9 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
   // Exact-lane playlist leftovers first, then Spotify lane hits — never off-lane.
   // Reaction sets stay reaction-only (no playlist/Discover top-up).
   while (!reactionSetKind && added < totalTarget && !wasPreempted()) {
+    // Top-up sampling can rescan the pool; yield so search/SSE stay responsive.
+    await yieldToEventLoop();
+    if (wasPreempted()) break;
     batchArtistSeed = syncBatchArtistBlocks();
     cfg.lastArtist = lastPlaylistArtist;
     const more = pickWithRelaxation(

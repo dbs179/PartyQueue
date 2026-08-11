@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "./atomic-write.js";
 import { sanitizeDisplayName } from "./display-name.js";
+import { invalidatePartyStatsCache } from "./party-stats.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STORE_FILE =
@@ -279,6 +280,7 @@ export function setReaction(trackId, kind, guestId, meta = {}) {
   cache.byTrack[trackId] = row;
   pruneIfOverCap(trackId);
   schedulePersist();
+  invalidatePartyStatsCache();
   return { ok: true, ...snapshot(trackId, guest) };
 }
 
@@ -430,6 +432,7 @@ export function clearMoodReactions() {
     else cache.byTrack[id] = row;
   }
   persist();
+  invalidatePartyStatsCache();
 }
 
 /** Wipe Karaoke mic tags only (keeps mood reactions). */
@@ -446,6 +449,7 @@ export function clearKaraokeReactions() {
     else cache.byTrack[id] = row;
   }
   persist();
+  invalidatePartyStatsCache();
 }
 
 /** Wipe all reactions + karaoke mic tags (tests / full wipe). */
@@ -461,6 +465,7 @@ export function clearReactions() {
     /* ignore */
   }
   persist();
+  invalidatePartyStatsCache();
 }
 
 /** Test helper — next read reloads from disk. */

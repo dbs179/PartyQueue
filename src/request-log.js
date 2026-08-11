@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "./atomic-write.js";
 import { sanitizeDisplayName, sanitizeDedication } from "./display-name.js";
+import { invalidatePartyStatsCache } from "./party-stats.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REQUESTS_FILE =
@@ -135,6 +136,7 @@ export function recordRequest(
   while (list.length > MAX) list.shift();
   cache = list;
   persist();
+  invalidatePartyStatsCache();
 }
 
 /**
@@ -194,6 +196,7 @@ export function setRequestDedication(id, dedication) {
       else delete list[i].dedication;
       cache = list;
       persist();
+      invalidatePartyStatsCache();
       return true;
     }
   }
@@ -236,6 +239,7 @@ export function clearRequests() {
   } catch {
     /* nothing to remove */
   }
+  invalidatePartyStatsCache();
 }
 
 function normArtist(name) {
