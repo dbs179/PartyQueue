@@ -2,7 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   SHOUT_LEAD_BUFFER_SEC,
+  IMMINENT_ANNOUNCE_PAUSE_SEC,
   needsShoutLeadBuffer,
+  shouldPauseForImminentAnnounce,
   findShoutBufferTrackNumber,
   requestPosAfterShoutBuffer,
 } from "../src/shout-lead-buffer.js";
@@ -99,4 +101,52 @@ test("requestPosAfterShoutBuffer matches Sonos demote landing", () => {
   assert.equal(requestPosAfterShoutBuffer(2, 3), 3);
   assert.equal(requestPosAfterShoutBuffer(2, 4), 4);
   assert.equal(requestPosAfterShoutBuffer(5, 3), 5);
+});
+
+test("shouldPauseForImminentAnnounce uses a narrower window than lead buffer", () => {
+  assert.ok(IMMINENT_ANNOUNCE_PAUSE_SEC < SHOUT_LEAD_BUFFER_SEC);
+  const base = {
+    queuePosition: 2,
+    currentTrack: 1,
+    isPlaying: true,
+    playingFromQueue: true,
+  };
+  assert.equal(
+    shouldPauseForImminentAnnounce({
+      ...base,
+      remainingSec: IMMINENT_ANNOUNCE_PAUSE_SEC,
+    }),
+    true
+  );
+  assert.equal(
+    shouldPauseForImminentAnnounce({
+      ...base,
+      remainingSec: IMMINENT_ANNOUNCE_PAUSE_SEC + 1,
+    }),
+    false
+  );
+  // Mid lead-buffer window: demote preferred; do not hard-pause.
+  assert.equal(
+    shouldPauseForImminentAnnounce({
+      ...base,
+      remainingSec: 30,
+    }),
+    false
+  );
+  assert.equal(
+    needsShoutLeadBuffer({
+      requestAbsPos: 2,
+      currentTrack: 1,
+      remainingSec: 30,
+    }),
+    true
+  );
+  assert.equal(
+    shouldPauseForImminentAnnounce({
+      ...base,
+      remainingSec: 5,
+      isPlaying: false,
+    }),
+    false
+  );
 });

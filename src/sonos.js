@@ -89,7 +89,9 @@ export {
 
 export {
   SHOUT_LEAD_BUFFER_SEC,
+  IMMINENT_ANNOUNCE_PAUSE_SEC,
   needsShoutLeadBuffer,
+  shouldPauseForImminentAnnounce,
   findShoutBufferTrackNumber,
   requestPosAfterShoutBuffer,
 } from "./shout-lead-buffer.js";

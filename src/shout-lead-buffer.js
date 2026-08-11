@@ -4,14 +4,21 @@
  * non-request track so music keeps playing (no hard-pause). Announce still
  * inserts immediately before the request.
  *
- * Last-song / empty-buffer edge case keeps the imminent pause in dj-voice.
+ * Last-song / empty-buffer edge case keeps a narrower imminent pause in
+ * dj-voice (see IMMINENT_ANNOUNCE_PAUSE_SEC).
  */
 
 import { isAnnounceQueuePad } from "./sonos-queue-policy.js";
 import { spotifyTrackId } from "./sampler.js";
 
-/** Same window as the old hard-pause race guard (TTS + script latency). */
+/** Demote window: prefer filler ahead of the request while music keeps playing. */
 export const SHOUT_LEAD_BUFFER_SEC = 45;
+
+/**
+ * Hard-pause only when TTS + pad insert likely cannot finish before the song
+ * ends (last-song / no-filler edge). Wider remaining times rely on lead buffer.
+ */
+export const IMMINENT_ANNOUNCE_PAUSE_SEC = 15;
 
 /**
  * True when the request is next-up and remaining time is too short to rely on
@@ -33,6 +40,32 @@ export function needsShoutLeadBuffer({
   const rem = Number(remainingSec);
   if (!Number.isFinite(rem)) return false;
   return rem <= thresholdSec;
+}
+
+/**
+ * Pure eligibility for the last-song hard pause (no filler to demote behind).
+ * Insert at/before next track + playing from queue + rem within pause window.
+ */
+export function shouldPauseForImminentAnnounce({
+  queuePosition,
+  currentTrack,
+  remainingSec,
+  isPlaying,
+  playingFromQueue,
+  pauseThresholdSec = IMMINENT_ANNOUNCE_PAUSE_SEC,
+} = {}) {
+  if (!playingFromQueue || !isPlaying) return false;
+  const pos = Math.floor(Number(queuePosition));
+  const track = Math.floor(Number(currentTrack));
+  if (!Number.isFinite(pos) || pos < 1) return false;
+  if (!Number.isFinite(track) || track < 1) return false;
+  if (pos > track + 1) return false;
+  if (remainingSec == null || remainingSec === "") return false;
+  const rem = Number(remainingSec);
+  if (!Number.isFinite(rem)) return false;
+  const threshold = Number(pauseThresholdSec);
+  if (!Number.isFinite(threshold) || threshold < 0) return false;
+  return rem <= threshold;
 }
 
 /**

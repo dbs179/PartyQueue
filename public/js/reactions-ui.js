@@ -15,9 +15,32 @@ export const NP_REACTION_KINDS = [
 export const NP_MOOD_REACTION_KINDS = NP_REACTION_KINDS.filter((k) => k !== "mic");
 
 export const REACT_GUEST_KEY = "pq.reactGuestId";
+export const REACTIONS_HINT_SEEN_KEY = "pq.reactionsHintSeen";
 
 export function emptyReactionCounts() {
   return Object.fromEntries(NP_REACTION_KINDS.map((k) => [k, 0]));
+}
+
+/**
+ * @param {Pick<Storage, "getItem">|null|undefined} storage
+ */
+export function reactionsHintSeen(storage = globalThis.localStorage) {
+  try {
+    return storage?.getItem(REACTIONS_HINT_SEEN_KEY) === "1";
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * @param {Pick<Storage, "setItem">|null|undefined} storage
+ */
+export function markReactionsHintSeen(storage = globalThis.localStorage) {
+  try {
+    storage?.setItem(REACTIONS_HINT_SEEN_KEY, "1");
+  } catch {
+    /* ignore quota / private mode */
+  }
 }
 
 /**
@@ -108,6 +131,7 @@ export function computeOptimisticReaction({ counts, mine, micMine, kind }) {
 /**
  * @param {{
  *   npReactions?: HTMLElement|null,
+ *   npReactionsHint?: HTMLElement|null,
  *   displayReactions?: HTMLElement|null,
  *   clearReactionsBtn?: HTMLElement|null,
  *   clearKaraokeBtn?: HTMLElement|null,
@@ -123,11 +147,13 @@ export function computeOptimisticReaction({ counts, mine, micMine, kind }) {
  *   guestBadgeName: () => string,
  *   getCurrentView: () => string,
  *   loadStats: () => void|Promise<void>,
+ *   storage?: Pick<Storage, "getItem"|"setItem">|null,
  * }} deps
  */
 export function createReactionsUi(els, deps) {
   const {
     npReactions,
+    npReactionsHint,
     displayReactions,
     clearReactionsBtn,
     clearKaraokeBtn,
@@ -143,6 +169,7 @@ export function createReactionsUi(els, deps) {
   const guestBadgeName = deps.guestBadgeName;
   const getCurrentView = deps.getCurrentView;
   const loadStats = deps.loadStats;
+  const storage = deps.storage ?? globalThis.localStorage;
 
   let counts = emptyReactionCounts();
   /** @type {string|null} */
@@ -151,6 +178,20 @@ export function createReactionsUi(els, deps) {
   let busy = false;
   /** @type {string|null} */
   let syncedFor = null;
+
+  function dismissReactionsHint() {
+    if (npReactionsHint) npReactionsHint.hidden = true;
+    markReactionsHintSeen(storage);
+  }
+
+  function syncReactionsHint(reactionsVisible) {
+    if (!npReactionsHint) return;
+    if (!reactionsVisible || reactionsHintSeen(storage)) {
+      npReactionsHint.hidden = true;
+      return;
+    }
+    npReactionsHint.hidden = false;
+  }
 
   function paint(data) {
     counts = normalizeReactionCounts(data);
@@ -221,11 +262,13 @@ export function createReactionsUi(els, deps) {
   function applyFromNowPlaying(np, { hasTrack, updating }) {
     if (!hasTrack) {
       if (npReactions) npReactions.hidden = true;
+      syncReactionsHint(false);
       syncedFor = null;
       paint({ mine: null, micMine: false });
       return;
     }
     if (npReactions) npReactions.hidden = updating;
+    syncReactionsHint(!!npReactions && !updating && !npReactions.hidden);
     if (np?.reactions) {
       paint({
         ...np.reactions,
@@ -251,6 +294,12 @@ export function createReactionsUi(els, deps) {
     return syncedFor;
   }
 
+  npReactionsHint?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dismissReactionsHint();
+  });
+
   npReactions?.addEventListener("click", async (e) => {
     const btn = e.target.closest("[data-react]");
     if (!btn || busy) return;
@@ -259,6 +308,8 @@ export function createReactionsUi(els, deps) {
     const kind = btn.getAttribute("data-react");
     const id = getNowPlayingId();
     if (!id || !NP_REACTION_KINDS.includes(kind)) return;
+
+    dismissReactionsHint();
 
     const displayName = await ensureDisplayName({ required: true });
     if (!displayName) return;

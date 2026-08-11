@@ -15,6 +15,45 @@ import {
 } from "./sonos-volume.js";
 import { pickGroupByTarget } from "./sonos-queue-policy.js";
 import { getSonosTargetRoom, setSonosTargetRoom } from "./settings.js";
+import { isDjVolumeHandoffActive } from "./dj-volume-handoff.js";
+import {
+  getAnnouncePlaybackContext,
+  resumeQueuePlayback,
+} from "./sonos-transport.js";
+import {
+  shouldResumeAfterTopology,
+  wasPlayingFromQueue,
+} from "./sonos-topology-resume.js";
+
+async function captureTargetWasPlaying() {
+  try {
+    return wasPlayingFromQueue(await getAnnouncePlaybackContext());
+  } catch {
+    return false;
+  }
+}
+
+async function maybeResumeTargetAfterTopology(wasPlaying) {
+  try {
+    const after = await getAnnouncePlaybackContext();
+    if (
+      !shouldResumeAfterTopology({
+        wasPlaying,
+        handoffActive: isDjVolumeHandoffActive(),
+        after,
+      })
+    ) {
+      return;
+    }
+    await resumeQueuePlayback();
+    console.log("[sonos-groups] resumed target after topology change");
+  } catch (err) {
+    console.warn(
+      "[sonos-groups] resume after topology change failed:",
+      err.message
+    );
+  }
+}
 
 export async function listRooms() {
   const m = await getManager();
@@ -143,6 +182,8 @@ export async function leaveSpeakerGroup(room) {
     return { room: device.Name, alreadyStandalone: true };
   }
 
+  const wasPlaying = await captureTargetWasPlaying();
+
   await device.AVTransportService.BecomeCoordinatorOfStandaloneGroup({
     InstanceID: 0,
   });
@@ -156,6 +197,7 @@ export async function leaveSpeakerGroup(room) {
   }
 
   invalidateSonosSnapshots();
+  await maybeResumeTargetAfterTopology(wasPlaying);
   return { room: device.Name, left: true };
 }
 
@@ -163,6 +205,7 @@ export async function leaveSpeakerGroup(room) {
 export async function ungroupAll() {
   const m = await getManager();
   let changed = 0;
+  const wasPlaying = await captureTargetWasPlaying();
 
   // Snapshot membership first; BecomeCoordinator changes topology as we go.
   const groups = await getZoneGroups(m, { fresh: true });
@@ -191,6 +234,7 @@ export async function ungroupAll() {
   await sleep(SETTLE_MS);
   clearZoneCache();
   invalidateSonosSnapshots();
+  if (changed > 0) await maybeResumeTargetAfterTopology(wasPlaying);
   return { players: m.Devices.length, ungrouped: changed };
 }
 

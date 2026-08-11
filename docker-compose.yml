@@ -24,6 +24,21 @@ services:
       NODE_OPTIONS: "--max-old-space-size=384"
     # Show the app's icon in the UnRaid Docker tab (served by the app itself).
     # Uses PUBLIC_BASE_URL from .env when set; otherwise localhost (host network).
+    # autoheal=true lets the sibling autoheal service restart unhealthy containers
+    # (HEALTHCHECK hits /api/ready — process + writable data/, not partyReady).
     labels:
+      autoheal: "true"
       net.unraid.docker.icon: "${PUBLIC_BASE_URL:-http://127.0.0.1:8080}/icon.png"
     restart: unless-stopped
+
+  # Restarts labeled containers when Docker HEALTHCHECK fails (willfarrell/autoheal).
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    container_name: partyqueue-autoheal
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: "10"
+      AUTOHEAL_START_PERIOD: "30"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

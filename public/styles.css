@@ -941,6 +941,18 @@ body.host-desktop-rail #controls-host-home:empty {
   display: none;
 }
 
+.np-reactions-hint {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  text-wrap: balance;
+}
+
+.np-reactions-hint[hidden] {
+  display: none;
+}
+
 .np-react-btn {
   display: inline-flex;
   align-items: center;

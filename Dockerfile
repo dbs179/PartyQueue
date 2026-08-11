@@ -32,9 +32,10 @@ ENV NODE_ENV=production
 ENV PORT=8080
 EXPOSE 8080
 
-# Liveness only (process up). Deploy/orchestration party checks use /api/ready
-# (data writable + partyReady for Spotify/Sonos control plane).
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+# Process + writable data/ (HTTP 200 from /api/ready). Do not require partyReady
+# here — missing Spotify keys or brief Sonos discovery must not restart-loop.
+# Deploy smoke still waits for ready + partyReady; autoheal uses this check.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/api/ready').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "src/server.js"]

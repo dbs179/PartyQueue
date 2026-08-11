@@ -41,7 +41,10 @@ import {
   getDjVolumeHandoffState,
 } from "./dj-volume-handoff.js";
 import { findUpcomingAnnounceHandoffPlan } from "./skip-announce-policy.js";
-import { SHOUT_LEAD_BUFFER_SEC } from "./shout-lead-buffer.js";
+import {
+  IMMINENT_ANNOUNCE_PAUSE_SEC,
+  shouldPauseForImminentAnnounce,
+} from "./shout-lead-buffer.js";
 import {
   queueWorkGeneration,
   queueWorkWasPreempted,
@@ -2172,14 +2175,16 @@ async function pauseIfAnnounceImminent(queuePosition) {
   try {
     const { getAnnouncePlaybackContext, pause } = await import("./sonos.js");
     const ctx = await getAnnouncePlaybackContext();
-    if (!ctx?.playingFromQueue || !ctx.isPlaying) return false;
     const pos = Number(queuePosition) || 0;
-    if (pos < 1) return false;
-    // Insert at/before the next track → playhead can hit it when this song ends.
-    if (pos > ctx.track + 1) return false;
     if (
-      ctx.remainingSec == null ||
-      ctx.remainingSec > SHOUT_LEAD_BUFFER_SEC
+      !shouldPauseForImminentAnnounce({
+        queuePosition: pos,
+        currentTrack: ctx?.track,
+        remainingSec: ctx?.remainingSec,
+        isPlaying: ctx?.isPlaying,
+        playingFromQueue: ctx?.playingFromQueue,
+        pauseThresholdSec: IMMINENT_ANNOUNCE_PAUSE_SEC,
+      })
     ) {
       return false;
     }
@@ -2931,10 +2936,10 @@ async function announceOnSonosUnlocked(
       await startQueuePlayback(rampPos);
       didStart = true;
     } else if (pausedForImminent) {
-      // Resume the current song; ramp+DJ are now ahead of the request.
+      // Resume the current song without SeekTrack (keeps queue index).
       try {
-        const { play } = await import("./sonos.js");
-        await play();
+        const { resumeQueuePlayback } = await import("./sonos.js");
+        await resumeQueuePlayback();
       } catch (err) {
         console.warn("[dj-voice] resume after imminent pause failed:", err.message);
       }

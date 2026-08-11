@@ -2337,6 +2337,7 @@ document.addEventListener("visibilitychange", () => {
 const reactionsUi = createReactionsUi(
   {
     npReactions: document.getElementById("np-reactions"),
+    npReactionsHint: document.getElementById("np-reactions-hint"),
     displayReactions: document.getElementById("display-reactions"),
     clearReactionsBtn: settingsClearReactionsBtn,
     clearKaraokeBtn: settingsClearKaraokeBtn,
