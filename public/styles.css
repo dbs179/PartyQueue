@@ -352,20 +352,23 @@ body {
   display: none;
 }
 
-/* Sub-page header: Back button + title on one row. */
+/* Sub-page header: title left, Back flush right — same label metrics. */
 .subpage-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 12px;
+  width: 100%;
   margin-bottom: 8px;
 }
 .subpage-title {
   margin: 0;
+  line-height: 1.2;
 }
-/* Plain section-label Back (and other header actions) on the right. */
-.subpage-back {
+/* Plain section-label Back on the right (must beat button.subpage-head-link margin). */
+button.subpage-head-link.subpage-back {
   margin-left: auto;
   flex: 0 0 auto;
+  text-align: right;
 }
 
 button.subpage-head-link {
@@ -374,12 +377,13 @@ button.subpage-head-link {
   background: transparent;
   padding: 0;
   margin: 0;
+  display: inline-block;
   font-family: inherit;
   font-size: 0.8rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  line-height: inherit;
+  line-height: 1.2;
   color: var(--muted);
   cursor: pointer;
 }
@@ -1236,7 +1240,7 @@ button.guest-name:focus-visible {
 .booth-subpage-head {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  align-items: center;
+  align-items: baseline;
   gap: 12px;
 }
 
@@ -1250,6 +1254,7 @@ button.guest-name:focus-visible {
 
 .booth-subpage-head #booth-back {
   justify-self: end;
+  margin-left: 0;
   text-align: right;
 }
 
