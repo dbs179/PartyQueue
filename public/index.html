@@ -22,11 +22,18 @@
   </head>
   <body>
     <header class="header">
-      <img id="hero" class="hero" alt="Event banner" />
-      <h1 id="header-title">
-        <span id="event-name"></span><span id="app-version" class="version-tag" title="Running version"></span>
-      </h1>
-      <p id="subtitle" class="subtitle" hidden></p>
+      <div class="header-banner">
+        <img id="hero" class="hero" alt="Event banner" />
+        <div class="header-copy">
+          <div class="header-brand">
+            <h1 id="header-title">
+              <span id="event-name"></span>
+            </h1>
+            <span id="app-version" class="version-tag" title="Running version"></span>
+          </div>
+          <p id="subtitle" class="subtitle" hidden></p>
+        </div>
+      </div>
     </header>
     <script nonce="__PQ_NONCE__">
       (function () {
@@ -94,22 +101,24 @@
       <div id="view-main" class="view">
         <!-- SEARCH - sticky bar keeps name chip, field, and pause banner in view. -->
         <div class="search-bar">
-          <button
-            id="guest-name"
-            type="button"
-            class="guest-name"
-            title="Tap to set or change your name"
-            aria-label="Set your name to request songs"
-          >
-            Set your name
-          </button>
-          <p
-            id="guest-fairness"
-            class="guest-fairness"
-            hidden
-            role="status"
-            aria-live="polite"
-          ></p>
+          <div class="guest-meta-row">
+            <button
+              id="guest-name"
+              type="button"
+              class="guest-name"
+              title="Tap to set or change your name"
+              aria-label="Set your name to request songs"
+            >
+              Set your name
+            </button>
+            <p
+              id="guest-fairness"
+              class="guest-fairness"
+              hidden
+              role="status"
+              aria-live="polite"
+            ></p>
+          </div>
           <div class="search-input-wrap">
             <input
               id="search"
@@ -160,71 +169,72 @@
             Sonos reconnecting — showing the last update.
           </p>
           <div class="np-card" id="np-card" role="button" tabindex="0" aria-label="Open full-screen Now Playing" title="Tap for full-screen + lyrics">
-            <img id="np-art" class="np-art" alt="" />
-            <div class="np-meta">
-              <div id="np-title" class="np-title"></div>
-              <div id="np-artist" class="np-artist"></div>
-              <div id="np-album" class="np-album"></div>
-              <div id="np-progress" class="np-progress" hidden>
-                <div class="np-progress-track" role="progressbar" aria-label="Track progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                  <span id="np-progress-fill" class="np-progress-fill"></span>
+            <div class="np-card-main">
+              <img id="np-art" class="np-art" alt="" />
+              <div class="np-meta">
+                <div id="np-title" class="np-title"></div>
+                <div id="np-artist" class="np-artist"></div>
+                <div id="np-album" class="np-album"></div>
+                <div id="np-progress" class="np-progress" hidden>
+                  <div class="np-progress-track" role="progressbar" aria-label="Track progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                    <span id="np-progress-fill" class="np-progress-fill"></span>
+                  </div>
+                  <div class="np-progress-times" aria-hidden="true">
+                    <span id="np-progress-elapsed">0:00</span>
+                    <span id="np-progress-duration">0:00</span>
+                  </div>
                 </div>
-                <div class="np-progress-times" aria-hidden="true">
-                  <span id="np-progress-elapsed">0:00</span>
-                  <span id="np-progress-duration">0:00</span>
-                </div>
+                <div id="np-empty" class="np-empty" hidden></div>
               </div>
-              <div id="np-empty" class="np-empty" hidden></div>
+              <div class="np-pills" id="np-pills" hidden>
+                <span id="np-state" class="np-pill np-state" hidden></span>
+                <span id="np-origin" class="np-pill np-origin" hidden></span>
+              </div>
             </div>
-            <div class="np-pills" id="np-pills" hidden>
-              <span id="np-state" class="np-pill np-state" hidden></span>
-              <span id="np-origin" class="np-pill np-origin" hidden></span>
+            <div id="np-reactions" class="np-reactions" hidden>
+              <button type="button" class="np-react-btn" data-react="up" title="Thumbs up" aria-label="Thumbs up">
+                <span class="np-react-emoji" aria-hidden="true">&#128077;</span>
+                <span class="np-react-count" data-count="up">0</span>
+              </button>
+              <button type="button" class="np-react-btn" data-react="down" title="Thumbs down" aria-label="Thumbs down">
+                <span class="np-react-emoji" aria-hidden="true">&#128078;</span>
+                <span class="np-react-count" data-count="down">0</span>
+              </button>
+              <button type="button" class="np-react-btn" data-react="heart" title="Love" aria-label="React with love">
+                <span class="np-react-emoji" aria-hidden="true">&#10084;&#65039;</span>
+                <span class="np-react-count" data-count="heart">0</span>
+              </button>
+              <button type="button" class="np-react-btn" data-react="fire" title="Fire" aria-label="React with fire">
+                <span class="np-react-emoji" aria-hidden="true">&#128293;</span>
+                <span class="np-react-count" data-count="fire">0</span>
+              </button>
+              <button type="button" class="np-react-btn" data-react="laugh" title="Funny" aria-label="React with laugh">
+                <span class="np-react-emoji" aria-hidden="true">&#128514;</span>
+                <span class="np-react-count" data-count="laugh">0</span>
+              </button>
+              <button type="button" class="np-react-btn" data-react="vomit" title="Nope" aria-label="React with vomit">
+                <span class="np-react-emoji" aria-hidden="true">&#129326;</span>
+                <span class="np-react-count" data-count="vomit">0</span>
+              </button>
+              <button type="button" class="np-react-btn" data-react="party" title="Party" aria-label="React with party">
+                <span class="np-react-emoji" aria-hidden="true">&#127881;</span>
+                <span class="np-react-count" data-count="party">0</span>
+              </button>
+              <button type="button" class="np-react-btn" data-react="mic" title="Karaoke — save for the mic list" aria-label="Save for karaoke">
+                <span class="np-react-emoji" aria-hidden="true">&#127908;</span>
+                <span class="np-react-count" data-count="mic">0</span>
+              </button>
             </div>
           </div>
-          <div id="np-reactions" class="np-reactions" hidden>
-            <button type="button" class="np-react-btn" data-react="up" title="Thumbs up" aria-label="Thumbs up">
-              <span class="np-react-emoji" aria-hidden="true">&#128077;</span>
-              <span class="np-react-count" data-count="up">0</span>
-            </button>
-            <button type="button" class="np-react-btn" data-react="down" title="Thumbs down" aria-label="Thumbs down">
-              <span class="np-react-emoji" aria-hidden="true">&#128078;</span>
-              <span class="np-react-count" data-count="down">0</span>
-            </button>
-            <button type="button" class="np-react-btn" data-react="heart" title="Love" aria-label="React with love">
-              <span class="np-react-emoji" aria-hidden="true">&#10084;&#65039;</span>
-              <span class="np-react-count" data-count="heart">0</span>
-            </button>
-            <button type="button" class="np-react-btn" data-react="fire" title="Fire" aria-label="React with fire">
-              <span class="np-react-emoji" aria-hidden="true">&#128293;</span>
-              <span class="np-react-count" data-count="fire">0</span>
-            </button>
-            <button type="button" class="np-react-btn" data-react="laugh" title="Funny" aria-label="React with laugh">
-              <span class="np-react-emoji" aria-hidden="true">&#128514;</span>
-              <span class="np-react-count" data-count="laugh">0</span>
-            </button>
-            <button type="button" class="np-react-btn" data-react="vomit" title="Nope" aria-label="React with vomit">
-              <span class="np-react-emoji" aria-hidden="true">&#129326;</span>
-              <span class="np-react-count" data-count="vomit">0</span>
-            </button>
-            <button type="button" class="np-react-btn" data-react="party" title="Party" aria-label="React with party">
-              <span class="np-react-emoji" aria-hidden="true">&#127881;</span>
-              <span class="np-react-count" data-count="party">0</span>
-            </button>
-            <button type="button" class="np-react-btn" data-react="mic" title="Karaoke — save for the mic list" aria-label="Save for karaoke">
-              <span class="np-react-emoji" aria-hidden="true">&#127908;</span>
-              <span class="np-react-count" data-count="mic">0</span>
-            </button>
-          </div>
-          <p id="np-reactions-hint" class="np-reactions-hint" hidden>
-            Tap how this song feels — mic saves it for Karaoke.
-          </p>
         </section>
 
+        <!-- Desktop: Controls | Up Next equal columns; phones stack Up Next then Controls. -->
+        <div class="main-ops-row">
         <section id="queue-section" class="queue-section">
           <h2 class="section-label section-toggle" id="queue-toggle" role="button" tabindex="0" aria-expanded="true" title="Collapse / expand">
             <span>Up next <span id="queue-count" class="queue-count"></span></span>
-            <button id="queue-edit-toggle" type="button" aria-pressed="false" title="Turn on to delete or drag-reorder songs" hidden>Edit</button>
             <span class="chevron" aria-hidden="true">&#9662;</span>
+            <button id="queue-edit-toggle" type="button" aria-pressed="false" title="Turn on to delete or drag-reorder songs" hidden>Edit</button>
           </h2>
           <p
             id="queue-connection-status"
@@ -254,7 +264,6 @@
           </div>
           <div class="controls" id="controls-body" aria-label="Playback controls">
             <div id="controls-host-protected">
-              <p class="settings-intro">Sonos playback controls</p>
               <div class="transport-grid">
                 <button id="prev-btn" type="button" class="pill-btn info vol-btn" aria-label="Previous track" title="Previous track">&#9198;&#65039;</button>
                 <button id="next-btn" type="button" class="pill-btn info vol-btn" aria-label="Skip to next track" title="Skip track (remembers it + cools down the artist)">&#9197;&#65039;</button>
@@ -272,8 +281,6 @@
               <button id="clearQueue" type="button" class="pill-btn danger clear-full" title="Clear the entire queue">Clear Queue</button>
             </div>
             <div id="controls-random" class="controls-block" hidden>
-              <div class="controls-divider" aria-hidden="true"></div>
-              <p class="settings-intro">Add random songs</p>
               <div class="random-grid">
                 <button type="button" class="pill-btn accent random-btn" data-count="2" title="Add 2 random songs">&#127922; 2</button>
                 <button type="button" class="pill-btn accent random-btn" data-count="5" title="Add 5 random songs">&#127922; 5</button>
@@ -283,35 +290,10 @@
             </div>
           </div>
         </section>
-
-        <!-- Host-only shortcut: visible after PIN unlock (not nested in Tools). -->
-        <div id="host-quick-bar" class="host-quick-bar" hidden>
-          <button id="host-booth-btn" type="button" class="pill-btn accent" title="Open DJ Booth">
-            DJ Booth
-          </button>
         </div>
 
-        <section id="suggestion-section" class="controls-panel collapsed">
-          <h2 class="section-label section-toggle" id="suggestion-toggle" role="button" tabindex="0" aria-expanded="false" title="Collapse / expand">
-            <span>Suggestion Box</span>
-            <span class="chevron" aria-hidden="true">&#9662;</span>
-          </h2>
-          <div class="controls" aria-label="Suggestion Box">
-            <p class="settings-intro">Got an idea for PartyQueue? Leave a note for the host — your name is attached.</p>
-            <textarea
-              id="suggestion-text"
-              class="setting-input suggestion-input"
-              rows="3"
-              maxlength="280"
-              placeholder="e.g. More 90s hip-hop, darker theme, …"
-            ></textarea>
-            <div class="suggestion-submit-row">
-              <span id="suggestion-count" class="suggestion-count" aria-live="polite">0 / 280</span>
-              <button id="suggestion-submit" type="button" class="pill-btn success">Send suggestion</button>
-            </div>
-          </div>
-        </section>
-
+        <!-- Desktop: Tools + Suggestion Box share one equal-width row; phones stay stacked. -->
+        <div class="main-tools-row">
         <section id="toolbar-section" class="controls-panel collapsed">
           <h2 class="section-label section-toggle" id="toolbar-toggle" role="button" tabindex="0" aria-expanded="false" title="Collapse / expand">
             <span>Tools</span>
@@ -328,6 +310,29 @@
             </div>
           </div>
         </section>
+
+        <section id="suggestion-section" class="controls-panel collapsed">
+          <h2 class="section-label section-toggle suggestion-head" id="suggestion-toggle" role="button" tabindex="0" aria-expanded="false" title="Collapse / expand">
+            <span class="suggestion-head-title">Suggestion Box</span>
+            <span id="suggestion-count" class="suggestion-count" aria-live="polite">0 / 280</span>
+            <button id="suggestion-submit" type="button" class="suggestion-submit-link" title="Send suggestion">
+              Submit
+            </button>
+            <span class="chevron" aria-hidden="true">&#9662;</span>
+          </h2>
+          <div class="controls" aria-label="Suggestion Box">
+            <div class="suggestion-compose">
+              <textarea
+                id="suggestion-text"
+                class="suggestion-input"
+                rows="5"
+                maxlength="280"
+                placeholder="e.g. More 90s hip-hop, darker theme, …"
+              ></textarea>
+            </div>
+          </div>
+        </section>
+        </div>
 
 
       </div>

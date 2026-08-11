@@ -8,6 +8,7 @@
  *   onExpand?: (() => void)|null,
  *   defaultCollapsed?: boolean,
  *   ignoreClickSelector?: string|null,
+ *   canCollapse?: (() => boolean)|null,
  * }} [opts]
  * @returns {{
  *   setCollapsed: (collapsed: boolean, opts?: { persist?: boolean, fireOnExpand?: boolean }) => void,
@@ -18,11 +19,20 @@ export function wirePanelCollapse(
   sectionId,
   toggleId,
   storageKey,
-  { onExpand = null, defaultCollapsed = true, ignoreClickSelector = null } = {}
+  {
+    onExpand = null,
+    defaultCollapsed = true,
+    ignoreClickSelector = null,
+    canCollapse = null,
+  } = {}
 ) {
   const section = document.getElementById(sectionId);
   const toggle = document.getElementById(toggleId);
   if (!section || !toggle) return null;
+
+  function collapseAllowed() {
+    return typeof canCollapse !== "function" || !!canCollapse();
+  }
 
   function apply(collapsed) {
     if (collapsed) section.classList.add("collapsed");
@@ -35,9 +45,12 @@ export function wirePanelCollapse(
    * @param {{ persist?: boolean, fireOnExpand?: boolean }} [opts]
    */
   function setCollapsed(collapsed, { persist = true, fireOnExpand = false } = {}) {
-    if (persist) localStorage.setItem(storageKey, collapsed ? "1" : "0");
-    apply(!!collapsed);
-    if (!collapsed && fireOnExpand && typeof onExpand === "function") onExpand();
+    const next = !!collapsed && collapseAllowed();
+    if (persist && collapseAllowed()) {
+      localStorage.setItem(storageKey, next ? "1" : "0");
+    }
+    apply(next);
+    if (!next && fireOnExpand && typeof onExpand === "function") onExpand();
   }
 
   function isCollapsed() {
@@ -45,7 +58,11 @@ export function wirePanelCollapse(
   }
 
   const stored = localStorage.getItem(storageKey);
-  apply(stored == null ? defaultCollapsed : stored === "1");
+  if (!collapseAllowed()) {
+    apply(false);
+  } else {
+    apply(stored == null ? defaultCollapsed : stored === "1");
+  }
 
   toggle.addEventListener("click", (e) => {
     if (
@@ -55,12 +72,14 @@ export function wirePanelCollapse(
     ) {
       return;
     }
+    if (!collapseAllowed()) return;
     const collapsed = !section.classList.contains("collapsed");
     setCollapsed(collapsed, { persist: true, fireOnExpand: true });
   });
 
   toggle.addEventListener("keydown", (e) => {
     if (ignoreClickSelector && e.target !== toggle) return;
+    if (!collapseAllowed()) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       toggle.click();

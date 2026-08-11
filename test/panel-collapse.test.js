@@ -122,3 +122,23 @@ test("wirePanelCollapse setCollapsed expands and can fire onExpand", () => {
   assert.equal(api.isCollapsed(), true);
   assert.equal(memory.get("pq.testCollapse"), "1");
 });
+
+test("wirePanelCollapse canCollapse false keeps panel open", () => {
+  memory.set("pq.testCollapse", "1");
+  const section = el("sec");
+  const toggle = el("tog", { tag: "button" });
+  globalThis.document = {
+    getElementById: (id) =>
+      id === "sec" ? section : id === "tog" ? toggle : null,
+  };
+  const api = wirePanelCollapse("sec", "tog", "pq.testCollapse", {
+    defaultCollapsed: true,
+    canCollapse: () => false,
+  });
+  assert.equal(api.isCollapsed(), false);
+  toggle.click();
+  assert.equal(api.isCollapsed(), false);
+  api.setCollapsed(true, { persist: true });
+  assert.equal(api.isCollapsed(), false);
+  assert.equal(memory.get("pq.testCollapse"), "1");
+});

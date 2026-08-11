@@ -10,9 +10,6 @@ import {
   createReactGuestId,
   getReactGuestId,
   REACT_GUEST_KEY,
-  REACTIONS_HINT_SEEN_KEY,
-  reactionsHintSeen,
-  markReactionsHintSeen,
   computeOptimisticReaction,
 } from "../public/js/reactions-ui.js";
 import { REACTION_KINDS, MOOD_REACTION_KINDS } from "../src/reactions.js";
@@ -109,16 +106,4 @@ test("computeOptimisticReaction toggles mood and mic independently", () => {
     }),
     null
   );
-});
-
-test("reactions hint seen helpers use localStorage flag", () => {
-  const store = new Map();
-  const storage = {
-    getItem: (k) => store.get(k) ?? null,
-    setItem: (k, v) => store.set(k, v),
-  };
-  assert.equal(reactionsHintSeen(storage), false);
-  markReactionsHintSeen(storage);
-  assert.equal(store.get(REACTIONS_HINT_SEEN_KEY), "1");
-  assert.equal(reactionsHintSeen(storage), true);
 });

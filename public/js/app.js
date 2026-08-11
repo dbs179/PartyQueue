@@ -256,11 +256,24 @@ function loadPlaylists() {
 
 // Collapse/expand Up Next + main-page panels (Controls, Suggestion Box, …).
 // Each panel remembers its own state in localStorage.
-wirePanelCollapse("queue-section", "queue-toggle", "pq.queueCollapsed", {
-  defaultCollapsed: false,
-  // Edit sits inside the queue header; don't collapse when it's used.
-  ignoreClickSelector: "#queue-edit-toggle",
-});
+// Desktop (≥960px): Up Next + Controls stay open beside each other.
+const desktopMainOpsMq =
+  typeof window.matchMedia === "function"
+    ? window.matchMedia("(min-width: 960px)")
+    : null;
+const canCollapseMainOps = () => !desktopMainOpsMq?.matches;
+
+const queuePanel = wirePanelCollapse(
+  "queue-section",
+  "queue-toggle",
+  "pq.queueCollapsed",
+  {
+    defaultCollapsed: false,
+    // Edit sits inside the queue header; don't collapse when it's used.
+    ignoreClickSelector: "#queue-edit-toggle",
+    canCollapse: canCollapseMainOps,
+  }
+);
 // loadGroups bound after createSonosGroups (below)
 let loadGroups = async () => {};
 let invalidateGroups = () => {};
@@ -270,14 +283,48 @@ const controlsPanel = wirePanelCollapse(
   "pq.controlsCollapsed",
   {
     onExpand: () => loadGroups(true),
+    canCollapse: canCollapseMainOps,
   }
 );
-wirePanelCollapse("suggestion-section", "suggestion-toggle", "pq.suggestionCollapsed", {
-  defaultCollapsed: true,
-});
-wirePanelCollapse("toolbar-section", "toolbar-toggle", "pq.toolbarCollapsed", {
-  defaultCollapsed: true,
-});
+
+const toolbarPanel = wirePanelCollapse(
+  "toolbar-section",
+  "toolbar-toggle",
+  "pq.toolbarCollapsed",
+  {
+    defaultCollapsed: true,
+    canCollapse: canCollapseMainOps,
+  }
+);
+const suggestionPanel = wirePanelCollapse(
+  "suggestion-section",
+  "suggestion-toggle",
+  "pq.suggestionCollapsed",
+  {
+    defaultCollapsed: true,
+    canCollapse: canCollapseMainOps,
+    ignoreClickSelector: "#suggestion-submit",
+  }
+);
+
+function syncDesktopMainOpsPanels() {
+  if (!desktopMainOpsMq?.matches) return;
+  queuePanel?.setCollapsed(false, { persist: false });
+  controlsPanel?.setCollapsed(false, {
+    persist: false,
+    fireOnExpand: true,
+  });
+  toolbarPanel?.setCollapsed(false, { persist: false });
+  suggestionPanel?.setCollapsed(false, { persist: false });
+}
+if (desktopMainOpsMq) {
+  if (typeof desktopMainOpsMq.addEventListener === "function") {
+    desktopMainOpsMq.addEventListener("change", syncDesktopMainOpsPanels);
+  } else if (typeof desktopMainOpsMq.addListener === "function") {
+    desktopMainOpsMq.addListener(syncDesktopMainOpsPanels);
+  }
+  syncDesktopMainOpsPanels();
+}
 wirePanelCollapse("genre-map-section", "genre-map-toggle", "pq.genreMapCollapsed", {
   defaultCollapsed: true,
 });
@@ -291,8 +338,6 @@ const toolbarBoothBtn = document.getElementById("toolbar-booth");
 const toolbarStatsBtn = document.getElementById("toolbar-stats");
 const toolbarJoinBtn = document.getElementById("toolbar-join");
 const toolbarDisplayBtn = document.getElementById("toolbar-display");
-const hostQuickBar = document.getElementById("host-quick-bar");
-const hostBoothBtn = document.getElementById("host-booth-btn");
 const moodNeedSpotify = document.getElementById("mood-need-spotify");
 const musicMixHub = document.getElementById("music-mix-hub");
 
@@ -352,9 +397,6 @@ if (toolbarMoodBtn) {
 }
 if (toolbarBoothBtn) {
   toolbarBoothBtn.addEventListener("click", () => navigate("booth"));
-}
-if (hostBoothBtn) {
-  hostBoothBtn.addEventListener("click", () => navigate("booth"));
 }
 if (toolbarStatsBtn) {
   toolbarStatsBtn.addEventListener("click", () => navigate("stats"));
@@ -1714,14 +1756,10 @@ let currentView = "main";
 let lastNonSettingsView = "main";
 
 function syncHostChrome() {
-  // Wait for pin-required status so guests don't flash Booth / open Controls
-  // before we know a PIN is required.
-  if (!isPinStatusReady()) {
-    if (hostQuickBar) hostQuickBar.hidden = true;
-    return;
-  }
+  // Wait for pin-required status so guests don't open Controls before we know
+  // a PIN is required.
+  if (!isPinStatusReady()) return;
   const open = settingsGateOk();
-  if (hostQuickBar) hostQuickBar.hidden = !open;
   // Expand Controls when the host session opens; leave guest collapse alone.
   // Do not re-expand on every sync — hosts can still collapse while unlocked.
   if (open && hostChromeOpen !== true) {
@@ -2327,7 +2365,6 @@ document.addEventListener("visibilitychange", () => {
 const reactionsUi = createReactionsUi(
   {
     npReactions: document.getElementById("np-reactions"),
-    npReactionsHint: document.getElementById("np-reactions-hint"),
     displayReactions: document.getElementById("display-reactions"),
     clearReactionsBtn: settingsClearReactionsBtn,
     clearKaraokeBtn: settingsClearKaraokeBtn,

@@ -24,6 +24,7 @@ const STARTER_BANNERS = [
   { src: "backyard.jpg", dest: "banner-backyard.jpg" },
   { src: "karaoke.jpg", dest: "banner-karaoke.jpg" },
   { src: "records.jpg", dest: "banner-records.jpg" },
+  { src: "swinefeld.png", dest: "banner-swinefeld.png" },
 ];
 const STARTER_DEST = new Set(STARTER_BANNERS.map((s) => s.dest));
 

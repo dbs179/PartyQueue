@@ -29,6 +29,45 @@ body {
   padding: 16px 16px 8px;
 }
 
+.header-banner {
+  position: relative;
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.header-copy {
+  position: absolute;
+  top: -4px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px 10px;
+  min-width: 0;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.header-copy > * {
+  pointer-events: auto;
+}
+
+.header-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(70%, 22ch);
+  flex: 0 1 auto;
+}
+
 /* Unified control panel: consistent section blocks, grids, and button heights. */
 .controls {
   display: flex;
@@ -138,8 +177,8 @@ body {
 .hero {
   display: block;
   width: 100%;
-  max-width: 600px;
-  margin: 4px auto 14px;
+  max-width: none;
+  margin: 0;
   border-radius: 12px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
 }
@@ -318,28 +357,35 @@ body {
 }
 
 .header h1 {
-  max-width: 600px;
-  margin: 0 auto;
-  font-size: clamp(2rem, 9vw, 3.2rem);
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-  text-wrap: balance;
+  max-width: none;
+  width: max-content;
+  margin: 0;
+  text-align: left;
+  color: var(--accent);
+  font-size: clamp(1.35rem, 5.5vw, 2.4rem);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: normal;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 18px rgba(0, 0, 0, 0.55);
 }
 
-/* Small build/version pill to the right of the title, sitting along its
-   baseline (bottom-aligned with the big title text). */
+/* Version pill under the title, left-aligned with Party Display accent. */
 .version-tag {
   display: inline-block;
-  margin-left: 8px;
-  padding: 2px 7px;
+  margin: 0;
+  padding: 3px 9px;
   border-radius: 999px;
-  border: 1px solid var(--border, #2a2a32);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--muted);
-  font-size: 0.7rem;
+  border: 1px solid var(--accent);
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--accent);
+  font-size: 0.82rem;
   font-weight: 700;
   letter-spacing: 0.02em;
-  vertical-align: baseline;
+  text-shadow: none;
   white-space: nowrap;
 }
 .version-tag:empty,
@@ -420,17 +466,358 @@ button.subpage-head-link:active {
 }
 
 .subtitle {
-  max-width: 600px;
-  margin: 6px auto 0;
-  color: var(--muted);
-  font-size: clamp(1rem, 4.6vw, 1.6rem);
+  max-width: min(42%, 28ch);
+  margin: 0;
+  color: var(--accent);
+  font-size: clamp(0.85rem, 2.8vw, 1.25rem);
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: 0.06em;
+  text-align: right;
+  text-transform: uppercase;
   text-wrap: balance;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 16px rgba(0, 0, 0, 0.5);
 }
 
 .container {
   max-width: 640px;
   margin: 0 auto;
   padding: 16px;
+}
+
+/* Desktop / 1440p host: wide shell, header brand | hero, Up Next | Controls. */
+@media (min-width: 960px) {
+  .container {
+    max-width: min(2000px, 96vw);
+  }
+
+  .header {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: min(2000px, 96vw);
+    margin: 0 auto;
+    padding: 16px 16px 8px;
+  }
+
+  .header-banner {
+    max-width: none;
+  }
+
+  .header-copy {
+    top: -6px;
+    padding: 0 18px 14px;
+  }
+
+  .header-brand {
+    max-width: none;
+  }
+
+  .header h1 {
+    font-size: clamp(1.8rem, 2.6vw, 2.8rem);
+  }
+
+  .header .subtitle {
+    max-width: min(40%, 32ch);
+    font-size: clamp(1rem, 1.5vw, 1.35rem);
+  }
+
+  #view-main .main-ops-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 16px;
+    align-items: stretch;
+    margin-bottom: 14px;
+  }
+
+  /* Desktop: Controls left, Up Next right — equal width; Up Next matches Controls height. */
+  #view-main .main-ops-row > #controls-section {
+    order: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    margin-bottom: 0;
+    height: auto;
+  }
+
+  #view-main .main-ops-row > #controls-section > .controls,
+  #view-main .main-ops-row > #controls-section > .host-lock-panel {
+    flex: 0 0 auto;
+  }
+
+  #view-main .main-ops-row > #queue-section {
+    order: 2;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    margin-bottom: 0;
+    height: 0;
+    min-height: 100%;
+    overflow: hidden;
+  }
+
+  #view-main .main-ops-row > #queue-section > .queue-box {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #view-main .main-ops-row > #queue-section #queue.results {
+    flex: 1 1 auto;
+    max-height: none;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  /* Tight top spacing once the Controls intros were removed. */
+  #view-main .main-ops-row > #controls-section > .controls {
+    padding-top: 10px;
+  }
+
+  #view-main .main-ops-row #controls-random:not([hidden]) {
+    margin-top: 12px;
+  }
+
+  /* Desktop: Up Next + Controls stay open (no collapse chrome). */
+  #view-main .main-ops-row > #queue-section.collapsed > .queue-box,
+  #view-main .main-ops-row > #controls-section.collapsed > .controls,
+  #view-main .main-ops-row > #controls-section.collapsed > .host-lock-panel {
+    display: flex;
+  }
+
+  #view-main .main-ops-row > #queue-section.collapsed > .queue-box {
+    flex-direction: column;
+  }
+
+  #view-main .main-ops-row #queue-toggle .chevron,
+  #view-main .main-ops-row #controls-toggle .chevron {
+    display: none;
+  }
+
+  #view-main .main-ops-row #queue-toggle,
+  #view-main .main-ops-row #controls-toggle {
+    cursor: default;
+  }
+
+  #view-main .main-tools-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 16px;
+    align-items: stretch;
+    margin-bottom: 14px;
+  }
+
+  #view-main .main-tools-row > #toolbar-section,
+  #view-main .main-tools-row > #suggestion-section {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    margin-bottom: 0;
+  }
+
+  #view-main .main-tools-row > #toolbar-section > .controls,
+  #view-main .main-tools-row > #suggestion-section > .controls {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  #view-main .main-tools-row > #suggestion-section .suggestion-compose {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /* Desktop: Tools + Suggestion Box stay open (no collapse chrome). */
+  #view-main .main-tools-row > #toolbar-section.collapsed > .controls,
+  #view-main .main-tools-row > #suggestion-section.collapsed > .controls {
+    display: flex;
+  }
+
+  #view-main .main-tools-row #toolbar-toggle .chevron,
+  #view-main .main-tools-row #suggestion-toggle .chevron {
+    display: none;
+  }
+
+  #view-main .main-tools-row #toolbar-toggle,
+  #view-main .main-tools-row #suggestion-toggle {
+    cursor: default;
+  }
+
+  #view-main .main-ops-row #queue-edit-toggle {
+    cursor: pointer;
+  }
+
+  /*
+   * Fit the guest/host main screen to one viewport: no document scroll.
+   * Subpages (Booth, Settings, …) keep normal scrolling.
+   */
+  body:has(#view-main:not([hidden])) {
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  body:has(#view-main:not([hidden])) > .header {
+    flex: 0 0 auto;
+    padding: 8px 16px 4px;
+  }
+
+  /* Full-width banner, natural aspect (no crop / no letterbox). */
+  body:has(#view-main:not([hidden])) > .header .hero {
+    width: 100%;
+    max-width: none;
+    height: auto;
+    margin: 0;
+  }
+
+  body:has(#view-main:not([hidden])) > .container {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 6px 16px 10px;
+    box-sizing: border-box;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .search-bar {
+    flex: 0 0 auto;
+    position: relative;
+    top: auto;
+    gap: 4px;
+    padding-bottom: 0;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main #search {
+    padding: 10px 48px 10px 14px;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .section-label {
+    margin: 6px 0;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .nowplaying {
+    flex: 0 0 auto;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .np-card {
+    padding: 10px;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .np-art {
+    width: 96px;
+    height: 96px;
+  }
+
+  /* Size to Controls content (~2 Up Next rows visible); queue scrolls for more. */
+  body:has(#view-main:not([hidden])) #view-main .main-ops-row {
+    flex: 0 0 auto;
+    min-height: 0;
+    margin-bottom: 0;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .main-tools-row {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .controls {
+    padding: 10px 12px;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .suggestion-compose {
+    min-height: 0;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .transport-grid {
+    margin-bottom: 12px;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .transport-grid,
+  body:has(#view-main:not([hidden])) #view-main .random-grid,
+  body:has(#view-main:not([hidden])) #view-main .control-grid {
+    gap: 12px;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .vol-btn,
+  body:has(#view-main:not([hidden])) #view-main .random-btn,
+  body:has(#view-main:not([hidden])) #view-main .clear-full {
+    height: 40px;
+    min-height: 40px;
+    max-height: 40px;
+    font-size: 0.85rem;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .vol-btn-10 {
+    font-size: 0.76rem;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .clear-full {
+    margin-top: 12px;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .toolbar-grid {
+    gap: 12px;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .toolbar-grid .pill-btn {
+    min-height: 40px;
+    height: 40px;
+    max-height: 40px;
+    padding: 4px 4px;
+    font-size: 0.72rem;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .np-reactions {
+    gap: 0.35rem;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .np-react-btn {
+    min-height: 40px;
+    height: 40px;
+    max-height: 40px;
+    padding: 0.25rem 0.4rem;
+    font-size: 0.76rem;
+    gap: 0.22rem;
+    box-sizing: border-box;
+  }
+
+  body:has(#view-main:not([hidden])) #view-main .np-react-emoji {
+    font-size: 1.05rem;
+  }
+
+  /* Keep search hits in a floating panel so they don't grow the page. */
+  body:has(#view-main:not([hidden])) #view-main #results:not(:empty) {
+    position: absolute;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    max-height: min(42vh, 360px);
+    margin-top: 6px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    background: var(--bg);
+    border: 1px solid var(--border, #2a2a32);
+    border-radius: var(--radius);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  }
 }
 
 .search-bar {
@@ -577,12 +964,23 @@ button.np-vibe-link:focus-visible {
   display: none;
 }
 
+/* Name + fairness on one row above Search. */
+.guest-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+}
+
 /* Name chip above Search — separate from the search field itself. */
 button.guest-name {
   display: inline-flex;
   align-items: center;
+  flex: 0 1 auto;
   width: fit-content;
-  max-width: 100%;
+  max-width: min(60%, 28ch);
   min-height: 44px;
   margin: 0;
   padding: 0 2px;
@@ -618,23 +1016,6 @@ button.guest-name:focus-visible {
 
 .host-lock-panel[hidden] {
   display: none;
-}
-
-/* Unlocked-host shortcut row (DJ Booth outside collapsed Tools). */
-.host-quick-bar {
-  display: flex;
-  gap: 10px;
-  align-items: stretch;
-  margin: 0 0 14px;
-}
-
-.host-quick-bar[hidden] {
-  display: none;
-}
-
-.host-quick-bar .pill-btn {
-  flex: 1;
-  min-height: 44px;
 }
 
 /* Search results only need a gap when there actually are results. */
@@ -678,13 +1059,21 @@ button.guest-name:focus-visible {
 
 .np-card {
   display: flex;
-  align-items: center;
-  gap: 14px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
   background: linear-gradient(135deg, var(--surface), var(--surface-2));
   border-radius: var(--radius);
   padding: 14px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+}
+
+.np-card-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
 }
 
 .np-card:focus-visible {
@@ -872,7 +1261,8 @@ button.guest-name:focus-visible {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
   gap: 0.45rem;
-  margin-top: 0.65rem;
+  margin: 0;
+  width: 100%;
 }
 
 @media (max-width: 640px) {
@@ -885,15 +1275,7 @@ button.guest-name:focus-visible {
   display: none;
 }
 
-.np-reactions-hint {
-  margin: 0.4rem 0 0;
-  color: var(--muted);
-  font-size: 0.82rem;
-  line-height: 1.35;
-  text-wrap: balance;
-}
-
-.np-reactions-hint[hidden] {
+.np-card.is-empty .np-reactions {
   display: none;
 }
 
@@ -942,13 +1324,23 @@ button.guest-name:focus-visible {
 }
 
 .guest-fairness {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(55%, 36ch);
   margin: 0;
   padding: 0 2px;
   color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 600;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: right;
   font-variant-numeric: tabular-nums;
   line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .guest-fairness[hidden] {
@@ -1110,25 +1502,30 @@ button.guest-name:focus-visible {
 .section-toggle {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   cursor: pointer;
   user-select: none;
 }
 
+/* Plain chevron next to the section title — same type as .section-label. */
 .section-toggle .chevron {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: var(--surface-2);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: var(--text);
-  font-size: 1.1rem;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   line-height: 1;
-  transition: transform 0.2s ease, background 0.15s ease, border-color 0.15s ease;
+  transition: transform 0.2s ease, color 0.15s ease;
 }
 
 .queue-section.collapsed .chevron {
@@ -1837,27 +2234,101 @@ button.guest-name:focus-visible {
   overflow-y: auto;
 }
 
-.suggestion-input {
+/* Suggestion Box title | char count | Submit — one header row. */
+.suggestion-head {
   width: 100%;
-  min-height: 4.5rem;
-  resize: vertical;
+  gap: 10px;
+}
+
+.suggestion-head-title {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.suggestion-head .suggestion-count {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  color: var(--muted);
   font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.suggestion-submit-link {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.suggestion-submit-link:hover,
+.suggestion-submit-link:focus-visible {
+  color: var(--text, #e8e8ef);
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.suggestion-submit-link:disabled {
+  opacity: 0.55;
+  cursor: default;
+  text-decoration: none;
+}
+
+.suggestion-compose {
+  display: flex;
+  flex-direction: column;
+  min-height: 7.5rem;
+  background: var(--surface-2);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.suggestion-compose:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.suggestion-input {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 5.5rem;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  resize: none;
+  font: inherit;
+  font-size: 0.95rem;
   line-height: 1.35;
   padding: 10px 12px;
   box-sizing: border-box;
 }
 
-.suggestion-submit-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 10px;
-}
-
-.suggestion-count {
-  font-size: 0.78rem;
-  color: var(--muted);
+.suggestion-input:focus,
+.suggestion-input:focus-visible {
+  outline: none;
 }
 
 .suggestions-filter {
@@ -2405,13 +2876,12 @@ button.guest-name:focus-visible {
   font-size: 0.9rem;
 }
 
-/* Edit lives in the Up next header row, centered between title and chevron.
-   Styled as clickable text (like the "Adding as" name chip), not a pill. */
+/* Edit sits on the right of the Up next header; chevron stays beside the title. */
 #queue-edit-toggle {
   display: inline-flex;
   align-items: center;
-  min-height: 44px;
-  margin: 0 auto;
+  min-height: 0;
+  margin: 0 0 0 auto;
   padding: 0 2px;
   border: 0;
   background: none;
@@ -3016,18 +3486,16 @@ body.modal-open {
 /* ---- Phase 3: phone composition + reduced motion ---------------------- */
 
 @media (max-width: 640px) {
-  /* Show the full 3:2 banner — cropping it to a strip cut the art off. */
-  .hero {
-    margin-bottom: 8px;
+  .header-copy {
+    padding: 8px 10px;
   }
 
   .header h1 {
-    font-size: clamp(1.55rem, 7.5vw, 2.4rem);
+    font-size: clamp(1.1rem, 5vw, 1.55rem);
   }
 
   .header .subtitle {
-    font-size: 0.9rem;
-    margin-bottom: 4px;
+    font-size: 0.8rem;
   }
 
   .np-reactions {
