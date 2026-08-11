@@ -48,8 +48,10 @@ import {
 } from "./queue-preempt.js";
 import {
   clearRefillAnnounceGuard,
+  getRefillAnnounceGuard,
   installRefillAnnounceGuard,
   isRefillAnnounceSuppressed,
+  refillSetFlavorChanged,
 } from "./refill-announce-guard.js";
 
 export {
@@ -60,6 +62,7 @@ export {
   getRefillAnnounceGuard,
   setRefillAnnounceGuardForTests,
   isRefillAnnounceSuppressed,
+  refillSetFlavorChanged,
 } from "./refill-announce-guard.js";
 import {
   DJ_BOOTH_ASIDES,
@@ -2955,9 +2958,26 @@ export async function scheduleRefillAnnounce(
     return null;
   }
 
-  // Keep gapless top-ups, but do not spend OpenAI/TTS on a second intro while
-  // the previously announced Never-Ending set is still in the queue.
-  if (await isRefillAnnounceSuppressed()) {
+  // Same-lane/same-mood early top-ups stay silent while the prior announced
+  // set is still queued. A new set flavor (genre lane or mood) always intros.
+  const priorGuard = getRefillAnnounceGuard();
+  const nextLane = summary?.genreLane || null;
+  const nextMood = summary?.mood || null;
+  if (
+    priorGuard &&
+    refillSetFlavorChanged(priorGuard, nextLane, nextMood)
+  ) {
+    const fromLane = priorGuard.genreLane || "?";
+    const toLane = nextLane || "?";
+    const moodBit =
+      priorGuard.mood || nextMood
+        ? ` (mood ${priorGuard.mood || "?"} → ${nextMood || "?"})`
+        : "";
+    console.log(
+      `[dj-voice] refill announce allowed; set changed ${fromLane} → ${toLane}${moodBit}`
+    );
+  }
+  if (await isRefillAnnounceSuppressed({ nextSummary: summary })) {
     console.log(
       "[dj-voice] skipping refill announce; prior set still queued"
     );

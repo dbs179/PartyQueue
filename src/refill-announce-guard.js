@@ -1,10 +1,43 @@
 // Never-Ending refill DJ intro suppression.
 // Pure helpers stay free of Sonos/settings imports; live queue lookup is injected.
+//
+// Same genreLane + mood early top-ups stay silent while the prior announced
+// batch is still queued. A new set flavor (lane or mood change) always allows
+// an intro so genre rotation is never mute.
 
 /** Safety TTL so unmatched/renamed tracks cannot mute refill intros forever. */
 export function refillAnnounceGuardTtlMs(setSize) {
   const n = Math.max(0, Math.floor(Number(setSize) || 0));
   return Math.max(20 * 60_000, n * 4 * 60_000);
+}
+
+function cleanFlavorPart(value) {
+  const s = String(value || "").trim();
+  return s || "";
+}
+
+/**
+ * True when the next batch is a different set flavor than the guard.
+ * Empty vs empty on both lane and mood is not a change (same unknown set).
+ * Empty vs a concrete lane/mood counts as a change so the first labeled set
+ * after an unlabeled guard still announces.
+ *
+ * @param {object|null|undefined} guard
+ * @param {string|null|undefined} nextGenreLane
+ * @param {string|null|undefined} nextMood
+ */
+export function refillSetFlavorChanged(
+  guard,
+  nextGenreLane = null,
+  nextMood = null
+) {
+  if (!guard) return false;
+  const gLane = cleanFlavorPart(guard.genreLane);
+  const gMood = cleanFlavorPart(guard.mood);
+  const nLane = cleanFlavorPart(nextGenreLane);
+  const nMood = cleanFlavorPart(nextMood);
+  if (!gLane && !gMood && !nLane && !nMood) return false;
+  return gLane !== nLane || gMood !== nMood;
 }
 
 /**
@@ -15,8 +48,11 @@ export function shouldSuppressRefillAnnounce({
   guard = null,
   anyHighlightQueued = false,
   now = Date.now(),
+  nextGenreLane = null,
+  nextMood = null,
 } = {}) {
   if (!guard) return false;
+  if (refillSetFlavorChanged(guard, nextGenreLane, nextMood)) return false;
   const createdAt = Number(guard.createdAt) || 0;
   if (now - createdAt >= refillAnnounceGuardTtlMs(guard.setSize)) return false;
   const highlights = Array.isArray(guard.highlights) ? guard.highlights : [];
@@ -39,11 +75,20 @@ export function buildRefillAnnounceGuard(summary, createdAt = Date.now()) {
     0,
     Math.floor(Number(summary?.added ?? summary?.count ?? highlights.length) || 0)
   );
-  return { highlights, setSize, createdAt: Number(createdAt) || Date.now() };
+  const genreLane = cleanFlavorPart(summary?.genreLane) || null;
+  const mood = cleanFlavorPart(summary?.mood) || null;
+  return {
+    highlights,
+    setSize,
+    createdAt: Number(createdAt) || Date.now(),
+    genreLane,
+    mood,
+  };
 }
 
 // After a successful Never-Ending refill intro, suppress the next intro until
-// that announced batch is no longer current/upcoming (silent top-ups still run).
+// that announced batch is no longer current/upcoming — unless the next batch
+// is a new set flavor (lane/mood). Silent same-set top-ups still run.
 let refillAnnounceGuard = null;
 
 export function clearRefillAnnounceGuard() {
@@ -66,20 +111,46 @@ export function setRefillAnnounceGuardForTests(guard = null) {
 
 /**
  * True when the prior refill-announce batch is still in the queue (or the
- * guard TTL has not elapsed for a highlight-less guard). Cleared when expired
- * or when no guarded highlights remain.
+ * guard TTL has not elapsed for a highlight-less guard), and the next batch
+ * is the same set flavor. Cleared when expired, when no guarded highlights
+ * remain, or when the next batch is a new lane/mood.
  *
  * @param {{
  *   findUpcoming?: (track: { name?: string, artist?: string }) => Promise<number|null>,
  *   now?: number,
+ *   nextSummary?: { genreLane?: string|null, mood?: string|null }|null,
+ *   nextGenreLane?: string|null,
+ *   nextMood?: string|null,
  * }} [opts]
  */
 export async function isRefillAnnounceSuppressed({
   findUpcoming = null,
   now = Date.now(),
+  nextSummary = null,
+  nextGenreLane = null,
+  nextMood = null,
 } = {}) {
   const guard = refillAnnounceGuard;
   if (!guard) return false;
+
+  const lane =
+    nextGenreLane != null
+      ? nextGenreLane
+      : nextSummary?.genreLane != null
+        ? nextSummary.genreLane
+        : null;
+  const mood =
+    nextMood != null
+      ? nextMood
+      : nextSummary?.mood != null
+        ? nextSummary.mood
+        : null;
+
+  // New set flavor — allow without Sonos highlight lookups.
+  if (refillSetFlavorChanged(guard, lane, mood)) {
+    refillAnnounceGuard = null;
+    return false;
+  }
 
   const highlights = Array.isArray(guard.highlights) ? guard.highlights : [];
   let anyHighlightQueued = false;
@@ -115,6 +186,8 @@ export async function isRefillAnnounceSuppressed({
     guard,
     anyHighlightQueued,
     now,
+    nextGenreLane: lane,
+    nextMood: mood,
   });
   if (!suppress) {
     refillAnnounceGuard = null;
