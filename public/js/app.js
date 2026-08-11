@@ -226,7 +226,6 @@ const groupAllBtn = document.getElementById("group-all-btn");
 const queueList = document.getElementById("queue");
 const queueCount = document.getElementById("queue-count");
 const queueEmpty = document.getElementById("queue-empty");
-const queueSection = document.getElementById("queue-section");
 const queueToggle = document.getElementById("queue-toggle");
 const queueEditToggle = document.getElementById("queue-edit-toggle");
 const queueEditHint = document.getElementById("queue-edit-hint");
