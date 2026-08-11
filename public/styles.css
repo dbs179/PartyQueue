@@ -52,17 +52,16 @@ body {
   box-sizing: border-box;
 }
 
+/* 1fr | title | 1fr keeps the title centered; version sits in the right track
+   so showing/hiding it does not shift title or subtitle. */
 .header-brand {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: baseline;
-  justify-content: center;
-  gap: 0;
+  column-gap: 0;
   min-width: 0;
   max-width: 600px;
   width: 100%;
-  flex: 0 1 auto;
 }
 
 /* Unified control panel: consistent section blocks, grids, and button heights. */
@@ -355,9 +354,10 @@ body {
 
 /* Classic phone header type (pre-overlay): large title, muted subtitle. */
 .header h1 {
-  max-width: 600px;
+  grid-column: 2;
+  max-width: 100%;
   width: auto;
-  margin: 0 auto;
+  margin: 0;
   text-align: center;
   color: var(--text);
   font-size: clamp(2rem, 9vw, 3.2rem);
@@ -369,10 +369,17 @@ body {
   text-wrap: balance;
 }
 
-/* Small muted version pill beside the title on phones. */
+/* Small muted version pill to the right of the centered title on phones. */
+.header-brand > .version-tag {
+  grid-column: 3;
+  justify-self: start;
+  align-self: baseline;
+  margin: 0 0 0 8px;
+}
+
 .version-tag {
   display: inline-block;
-  margin: 0 0 0 8px;
+  margin: 0;
   padding: 2px 7px;
   border-radius: 999px;
   border: 1px solid var(--border, #2a2a32);
@@ -525,6 +532,7 @@ button.subpage-head-link:active {
   }
 
   .header-brand {
+    display: flex;
     flex-direction: column;
     flex-wrap: nowrap;
     align-items: flex-start;
@@ -535,6 +543,7 @@ button.subpage-head-link:active {
   }
 
   .header h1 {
+    grid-column: auto;
     width: max-content;
     max-width: 100%;
     margin: 0;
@@ -550,6 +559,13 @@ button.subpage-head-link:active {
     text-shadow:
       0 1px 2px rgba(0, 0, 0, 0.9),
       0 0 18px rgba(0, 0, 0, 0.55);
+  }
+
+  .header-brand > .version-tag {
+    grid-column: auto;
+    justify-self: auto;
+    align-self: auto;
+    margin: 0;
   }
 
   .version-tag {
