@@ -86,16 +86,37 @@ try {
       -Destination (Join-Path $RemoteShare $file) -Force
   }
 
-  Write-Host "Rebuilding PartyQueue on Unraid ..."
+  Write-Host "Backing up Unraid data/ then rebuilding PartyQueue ..."
   $target = "$UnraidUser@$UnraidHost"
-  # chown keeps the mounted data volume writable by the container's non-root
-  # node user (uid/gid 1000) introduced with the hardened Dockerfile.
-  $remoteCommand =
-    "cd $RemotePath && mkdir -p data && chown -R 1000:1000 data && " +
-    "docker compose build --no-cache && docker compose up -d"
+  # Stop first so graceful shutdown flushes debounced stores, then snapshot
+  # data/, rebuild, and start. Keep the last 10 data backups on Unraid.
+  $remoteBackupDir = "/mnt/user/appdata/PartyQueue-backups"
+  # Bash on Unraid: stop flushes debounced writes, then tar data/, then rebuild.
+  $remoteCommand = @"
+set -e
+cd '$RemotePath'
+mkdir -p data '$remoteBackupDir'
+docker compose stop || true
+STAMP=`$(date +%Y%m%d-%H%M%S)
+BACKUP='$remoteBackupDir/data-v$expectedVersion-`$STAMP.tar.gz'
+tar -czf "`$BACKUP" -C data .
+echo "Data backup: `$BACKUP"
+ls -1t '$remoteBackupDir'/data-v*.tar.gz 2>/dev/null | tail -n +11 | xargs -r rm -- || true
+chown -R 1000:1000 data
+docker compose build --no-cache
+docker compose up -d
+"@
   & ssh -i $IdentityFile -o BatchMode=yes $target $remoteCommand
   if ($LASTEXITCODE -ne 0) {
     throw "The Unraid Docker rebuild failed."
+  }
+
+  # Also keep a Windows-side copy when the SMB share is available.
+  try {
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "backup-data.ps1") `
+      -Source Unraid -Version $expectedVersion | Out-Host
+  } catch {
+    Write-Warning "Local SMB data backup skipped: $($_.Exception.Message)"
   }
 
   Write-Host "Waiting for PartyQueue v$expectedVersion (liveness) ..."

@@ -514,6 +514,54 @@ export function isDiscovered(id) {
   return originOf(id) === "discovered";
 }
 
+/**
+ * Drop origin rows that are no longer represented in the live Sonos queue.
+ * Searched instances keep multiplicity (oldest first); filler/discovered/mood
+ * keep a single row when the id still appears at least once.
+ *
+ * @param {string[]} trackIds Spotify ids in queue order (pads already stripped)
+ * @returns {{ kept: number, removed: number, liveTrackCount: number }}
+ */
+export function reconcileOriginsWithQueue(trackIds) {
+  load();
+  const live = (Array.isArray(trackIds) ? trackIds : []).filter(
+    (id) => typeof id === "string" && id
+  );
+  const counts = new Map();
+  for (const id of live) {
+    counts.set(id, (counts.get(id) || 0) + 1);
+  }
+
+  const before = entries.length;
+  const keptSearched = new Map(); // id -> how many searched rows kept
+  const next = [];
+  for (const e of entries) {
+    const liveCount = counts.get(e.id) || 0;
+    if (liveCount <= 0) continue;
+    if (e.source === "searched") {
+      const used = keptSearched.get(e.id) || 0;
+      if (used >= liveCount) continue;
+      keptSearched.set(e.id, used + 1);
+      next.push(e);
+      continue;
+    }
+    // Non-searched: one row per id — keep the first surviving row only.
+    if (next.some((row) => row.id === e.id && row.source !== "searched")) {
+      continue;
+    }
+    next.push(e);
+  }
+
+  entries = next;
+  buildIndex();
+  persistNow();
+  return {
+    kept: entries.length,
+    removed: Math.max(0, before - entries.length),
+    liveTrackCount: live.length,
+  };
+}
+
 // Snapshot: id -> rollup meta (last write / first searched for badges).
 export function originSnapshot() {
   load();

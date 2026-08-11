@@ -446,43 +446,57 @@ function runListenStartup({ seed = true, warm = true } = {}) {
     seedStarterDjIcons();
     seedStarterBanners();
     import("./dj-voice.js")
-      .then(
-        async ({
-          getPublicBaseUrl,
-          ensureSilenceBridge,
-          ensureSilenceRamp,
-          rearmOrphanedDjVolumeHandoff,
-        }) => {
-          log.info(`Sonos media base ${getPublicBaseUrl()}`, { event: "dj-voice" });
-          try {
-            const bridge = ensureSilenceBridge();
-            const ramp = ensureSilenceRamp();
-            log.info(`silence restore ready → ${bridge.publicUrl}`, {
-              event: "dj-voice",
+      .then(async ({ getPublicBaseUrl, ensureSilenceBridge, ensureSilenceRamp }) => {
+        log.info(`Sonos media base ${getPublicBaseUrl()}`, { event: "dj-voice" });
+        try {
+          const bridge = ensureSilenceBridge();
+          const ramp = ensureSilenceRamp();
+          log.info(`silence restore ready → ${bridge.publicUrl}`, {
+            event: "dj-voice",
+          });
+          log.info(`silence ramp ready → ${ramp.publicUrl}`, {
+            event: "dj-voice",
+          });
+        } catch (err) {
+          log.warn(`silence pads not ready: ${err.message}`, {
+            event: "dj-voice",
+          });
+        }
+        // Announce pads / origin metadata outlive the process — repair vs Sonos.
+        try {
+          const { runStartupQueueReconcile } = await import(
+            "./startup-reconcile.js"
+          );
+          const result = await runStartupQueueReconcile();
+          if (!result.ok) {
+            log.warn(`startup queue reconcile failed: ${result.error}`, {
+              event: "startup-reconcile",
             });
-            log.info(`silence ramp ready → ${ramp.publicUrl}`, {
-              event: "dj-voice",
-            });
-          } catch (err) {
-            log.warn(`silence pads not ready: ${err.message}`, {
-              event: "dj-voice",
-            });
+            return;
           }
-          // Announce pads in Sonos outlive the process; restore volume control.
-          try {
-            const rearm = await rearmOrphanedDjVolumeHandoff();
-            if (rearm?.ok) {
-              log.info("rearmed orphaned DJ volume handoff", {
-                event: "dj-volume",
-              });
-            }
-          } catch (err) {
-            log.warn(`orphaned DJ volume rearm failed: ${err.message}`, {
+          if (result.rearm?.ok) {
+            log.info("rearmed orphaned DJ volume handoff", {
               event: "dj-volume",
             });
           }
+          if (result.padsRemoved > 0) {
+            log.info(`removed ${result.padsRemoved} orphan announce pad(s)`, {
+              event: "startup-reconcile",
+            });
+          }
+          if (result.origins?.removed > 0) {
+            log.info(
+              `pruned ${result.origins.removed} stale queue-origin row(s) ` +
+                `(${result.origins.kept} kept, ${result.origins.liveTrackCount} live)`,
+              { event: "startup-reconcile" }
+            );
+          }
+        } catch (err) {
+          log.warn(`startup queue reconcile failed: ${err.message}`, {
+            event: "startup-reconcile",
+          });
         }
-      )
+      })
       .catch((err) => {
         log.warn(`PUBLIC_BASE_URL not ready: ${err.message}`, {
           event: "dj-voice",

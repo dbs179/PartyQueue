@@ -1,6 +1,6 @@
 # PartyQueue
 
-**Version 10.6.9**
+**Version 10.6.10**
 
 PartyQueue lets everyone at your party help choose the music. Guests open a
 web page on their phones, search Spotify, and add songs to your Sonos queue.
@@ -301,8 +301,12 @@ Spotify credentials, tokens, Home Assistant credentials, user notes, and your
 Host PIN hash.
 
 - Keep the `data` folder private.
-- Back it up if you want to preserve your setup.
-- Never upload it to GitHub or include it in a shared copy.
+- Unraid deploy stops the container (flushing debounced writes), archives
+  `data/` under `/mnt/user/appdata/PartyQueue-backups/`, then rebuilds. It also
+  tries a local SMB zip via `npm run backup:data`.
+- Restore: stop PartyQueue, extract a `data-v…tar.gz` (or zip) into `data/`,
+  `chown -R 1000:1000 data` on Unraid, start again.
+- Never upload `data/` to GitHub or include it in a shared copy.
 - Never share your `.env` file.
 
 Saved secrets are not sent back to the browser after they are stored.

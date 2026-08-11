@@ -382,3 +382,29 @@ test("stores badge alias and requestedByUser separately", () => {
   origin.markOrigin(["legacy"], "searched", { requestedBy: "Sam" });
   assert.equal(origin.requestedByUserOf("legacy"), "Sam");
 });
+
+test("reconcileOriginsWithQueue drops stale ids and excess searched copies", () => {
+  origin.markOrigin(["keep"], "searched", {
+    requestedBy: "Ada",
+    appendInstance: true,
+  });
+  origin.markOrigin(["keep"], "searched", {
+    requestedBy: "Bob",
+    appendInstance: true,
+  });
+  origin.markOrigin(["keep"], "searched", {
+    requestedBy: "Cy",
+    appendInstance: true,
+  });
+  origin.markOrigin(["gone"], "filler");
+  origin.markOrigin(["fillerKeep"], "filler");
+
+  const result = origin.reconcileOriginsWithQueue(["keep", "fillerKeep", "keep"]);
+  assert.equal(result.removed, 2); // one excess searched + gone filler
+  assert.equal(result.kept, 3); // Ada, Bob, fillerKeep
+  assert.equal(origin.searchedInstancesOf("keep").length, 2);
+  assert.equal(origin.searchedInstancesOf("keep")[0].requestedBy, "Ada");
+  assert.equal(origin.searchedInstancesOf("keep")[1].requestedBy, "Bob");
+  assert.equal(origin.originOf("gone"), null);
+  assert.equal(origin.originOf("fillerKeep"), "filler");
+});
