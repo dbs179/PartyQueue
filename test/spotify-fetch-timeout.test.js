@@ -9,14 +9,22 @@ function hungFetch(_url, opts = {}) {
   return new Promise((_resolve, reject) => {
     const signal = opts.signal;
     if (!signal) return;
+    // AbortSignal.timeout() uses an unref'd timer. Real fetch keeps the event
+    // loop alive via the socket; this mock must hold a ref'd handle or Node
+    // exits before the deadline fires (CI cancelledByParent).
+    const keepAlive = setInterval(() => {}, 60_000);
+    const fail = (err) => {
+      clearInterval(keepAlive);
+      reject(err);
+    };
     if (signal.aborted) {
-      reject(new DOMException("The operation was aborted", "AbortError"));
+      fail(new DOMException("The operation was aborted", "AbortError"));
       return;
     }
     signal.addEventListener(
       "abort",
       () => {
-        reject(new DOMException("The operation was aborted", "AbortError"));
+        fail(new DOMException("The operation was aborted", "AbortError"));
       },
       { once: true }
     );

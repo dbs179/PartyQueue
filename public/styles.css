@@ -701,11 +701,15 @@ button.subpage-head-link:active {
     padding: 8px 16px 4px;
   }
 
-  /* Full-width banner, natural aspect (no crop / no letterbox). */
+  /* Full-width thin strip: cap height so Controls/Up Next stay on screen.
+     Tall source art is cropped (cover), not letterboxed. */
   body:has(#view-main:not([hidden])) > .header .hero {
     width: 100%;
     max-width: none;
     height: auto;
+    max-height: min(18vh, 160px);
+    object-fit: cover;
+    object-position: center;
     margin: 0;
   }
 
