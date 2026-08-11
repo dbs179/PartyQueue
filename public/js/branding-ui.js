@@ -9,6 +9,7 @@ import {
 export const BRANDING_STORAGE_KEY = "pq.branding";
 export const MAX_DJ_ICON_BYTES = 2 * 1024 * 1024;
 export const MAX_BANNER_BYTES = 8 * 1024 * 1024;
+export const DESKTOP_BANNER_MQ = "(min-width: 960px)";
 
 /**
  * @param {object} [partial]
@@ -38,6 +39,10 @@ export function persistBrandingCache(partial = {}, opts = {}) {
         partial.heroBanner !== undefined
           ? partial.heroBanner || null
           : prev.heroBanner || null,
+      heroBannerMobile:
+        partial.heroBannerMobile !== undefined
+          ? partial.heroBannerMobile || null
+          : prev.heroBannerMobile || null,
       version: partial.version != null ? partial.version : prev.version || "",
       showVersion:
         partial.showVersion != null
@@ -68,6 +73,9 @@ export function persistBrandingCache(partial = {}, opts = {}) {
  *   bannerUploadBtn?: HTMLElement|null,
  *   bannerFileInput?: HTMLInputElement|null,
  *   bannerGallery?: HTMLElement|null,
+ *   bannerMobileUploadBtn?: HTMLElement|null,
+ *   bannerMobileFileInput?: HTMLInputElement|null,
+ *   bannerMobileGallery?: HTMLElement|null,
  *   djIconUploadBtn?: HTMLElement|null,
  *   djIconFileInput?: HTMLInputElement|null,
  *   djIconGallery?: HTMLElement|null,
@@ -96,6 +104,9 @@ export function createBrandingUi(els, deps) {
     bannerUploadBtn,
     bannerFileInput,
     bannerGallery,
+    bannerMobileUploadBtn,
+    bannerMobileFileInput,
+    bannerMobileGallery,
     djIconUploadBtn,
     djIconFileInput,
     djIconGallery,
@@ -109,17 +120,74 @@ export function createBrandingUi(els, deps) {
   const onDjIconChange = deps.onDjIconChange || (() => {});
   const onShowQueueGenreChange = deps.onShowQueueGenreChange || (() => {});
 
-  function applyHero(name, { force = false } = {}) {
-    if (!heroImg) return;
+  /** @type {string|null} */
+  let desktopBanner = null;
+  /** @type {string|null} */
+  let mobileBanner = null;
+  try {
+    const cached = JSON.parse(
+      (typeof localStorage !== "undefined" &&
+        localStorage.getItem(BRANDING_STORAGE_KEY)) ||
+        "{}"
+    );
+    if (cached?.heroBanner) desktopBanner = cached.heroBanner;
+    if (cached?.heroBannerMobile) mobileBanner = cached.heroBannerMobile;
+  } catch {
+    /* ignore */
+  }
+  try {
+    const boot = globalThis.window?.__PQ_BRAND__;
+    if (boot && typeof boot === "object") {
+      if (boot.heroBanner !== undefined) desktopBanner = boot.heroBanner || null;
+      if (boot.heroBannerMobile !== undefined) {
+        mobileBanner = boot.heroBannerMobile || null;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  function isDesktopViewport() {
+    try {
+      return globalThis.matchMedia?.(DESKTOP_BANNER_MQ)?.matches ?? true;
+    } catch {
+      return true;
+    }
+  }
+
+  function bannerUrlForViewport() {
+    const desktop = isDesktopViewport();
+    const name = desktop ? desktopBanner : mobileBanner || desktopBanner;
     const key = name || "default";
-    persistBrandingCache({ heroBanner: name || null });
+    const slot = desktop ? "desktop" : "mobile";
+    return {
+      key: `${slot}:${key}`,
+      src: `/banner?slot=${encodeURIComponent(slot)}&b=${encodeURIComponent(key)}`,
+    };
+  }
+
+  function syncHeroSrc({ force = false } = {}) {
+    if (!heroImg) return;
+    const { key, src } = bannerUrlForViewport();
     if (!force && heroImg.dataset.bannerKey === key) {
       heroImg.setAttribute("data-ready", "1");
       return;
     }
     heroImg.dataset.bannerKey = key;
-    heroImg.src = `/banner?b=${encodeURIComponent(key)}`;
+    heroImg.src = src;
     heroImg.setAttribute("data-ready", "1");
+  }
+
+  function applyHero(name, { force = false } = {}) {
+    desktopBanner = name || null;
+    persistBrandingCache({ heroBanner: desktopBanner });
+    syncHeroSrc({ force });
+  }
+
+  function applyHeroMobile(name, { force = false } = {}) {
+    mobileBanner = name || null;
+    persistBrandingCache({ heroBannerMobile: mobileBanner });
+    syncHeroSrc({ force });
   }
 
   function applyBranding(eventName, subtitle) {
@@ -201,34 +269,60 @@ export function createBrandingUi(els, deps) {
   }
 
   function renderBanners(data) {
-    if (!bannerGallery) return;
-    mountThumbGallery(bannerGallery, buildBannerGalleryItems(data), {
-      deleteAriaLabel: "Delete banner",
-      onSelect: selectBanner,
-      onDelete: deleteBanner,
-    });
+    if (bannerGallery) {
+      mountThumbGallery(bannerGallery, buildBannerGalleryItems(data), {
+        deleteAriaLabel: "Delete banner",
+        onSelect: (name) => selectBanner(name, "desktop"),
+        onDelete: deleteBanner,
+      });
+    }
+    if (bannerMobileGallery) {
+      mountThumbGallery(
+        bannerMobileGallery,
+        buildBannerGalleryItems({
+          ...data,
+          active: data.activeMobile ?? null,
+        }),
+        {
+          deleteAriaLabel: "Delete banner",
+          onSelect: (name) => selectBanner(name, "mobile"),
+          onDelete: deleteBanner,
+        }
+      );
+    }
   }
 
   async function loadBanners() {
     try {
       const res = await fetchFn("/api/banners");
       if (!res.ok) return;
-      renderBanners(await res.json());
+      const data = await res.json();
+      if (data.active !== undefined) desktopBanner = data.active || null;
+      if (data.activeMobile !== undefined) {
+        mobileBanner = data.activeMobile || null;
+      }
+      persistBrandingCache({
+        heroBanner: desktopBanner,
+        heroBannerMobile: mobileBanner,
+      });
+      syncHeroSrc();
+      renderBanners(data);
     } catch {
       /* leave gallery as-is on transient errors */
     }
   }
 
-  async function selectBanner(name) {
+  async function selectBanner(name, slot = "desktop") {
     try {
       const res = await hostFetch("/api/banners/select", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, slot }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not switch banner.");
       applyHero(data.active);
+      applyHeroMobile(data.activeMobile);
       renderBanners(data);
     } catch (err) {
       showToast(err.message, true);
@@ -244,11 +338,49 @@ export function createBrandingUi(els, deps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not delete banner.");
       applyHero(data.active);
+      applyHeroMobile(data.activeMobile);
       renderBanners(data);
       showToast("Banner deleted");
     } catch (err) {
       showToast(err.message, true);
     }
+  }
+
+  function wireBannerUpload(btn, input, slot) {
+    if (!btn || !input) return;
+    btn.addEventListener("click", () => input.click());
+    input.addEventListener("change", () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      if (file.size > MAX_BANNER_BYTES) {
+        showToast("Image is too large (8 MB max).", true);
+        input.value = "";
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = async () => {
+        btn.disabled = true;
+        try {
+          const res = await hostFetch("/api/banners", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ image: reader.result, slot }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Upload failed.");
+          applyHero(data.active);
+          applyHeroMobile(data.activeMobile);
+          renderBanners(data);
+          showToast(slot === "mobile" ? "Phone banner updated" : "Desktop banner updated");
+        } catch (err) {
+          showToast(err.message, true);
+        } finally {
+          btn.disabled = false;
+          input.value = "";
+        }
+      };
+      reader.readAsDataURL(file);
+    });
   }
 
   if (djIconUploadBtn && djIconFileInput) {
@@ -285,39 +417,16 @@ export function createBrandingUi(els, deps) {
     });
   }
 
-  if (bannerUploadBtn && bannerFileInput) {
-    bannerUploadBtn.addEventListener("click", () => bannerFileInput.click());
-    bannerFileInput.addEventListener("change", () => {
-      const file = bannerFileInput.files && bannerFileInput.files[0];
-      if (!file) return;
-      if (file.size > MAX_BANNER_BYTES) {
-        showToast("Image is too large (8 MB max).", true);
-        bannerFileInput.value = "";
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = async () => {
-        bannerUploadBtn.disabled = true;
-        try {
-          const res = await hostFetch("/api/banners", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ image: reader.result }),
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || "Upload failed.");
-          applyHero(data.active);
-          renderBanners(data);
-          showToast("Banner updated");
-        } catch (err) {
-          showToast(err.message, true);
-        } finally {
-          bannerUploadBtn.disabled = false;
-          bannerFileInput.value = "";
-        }
-      };
-      reader.readAsDataURL(file);
-    });
+  wireBannerUpload(bannerUploadBtn, bannerFileInput, "desktop");
+  wireBannerUpload(bannerMobileUploadBtn, bannerMobileFileInput, "mobile");
+
+  try {
+    const mq = globalThis.matchMedia?.(DESKTOP_BANNER_MQ);
+    const onViewportChange = () => syncHeroSrc();
+    if (mq?.addEventListener) mq.addEventListener("change", onViewportChange);
+    else if (mq?.addListener) mq.addListener(onViewportChange);
+  } catch {
+    /* matchMedia unavailable */
   }
 
   function saveLookText() {
@@ -357,7 +466,9 @@ export function createBrandingUi(els, deps) {
   return {
     persistBrandingCache,
     applyHero,
+    applyHeroMobile,
     applyBranding,
+    syncHeroSrc,
     loadBanners,
     loadDjIcons,
     selectDjIcon,

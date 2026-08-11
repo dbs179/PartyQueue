@@ -30,25 +30,40 @@ import { spotifyTrackId } from "../sampler.js";
 import { getTracksByIds } from "../spotify.js";
 import { isKnownSonosHost } from "../sonos.js";
 
+/** @param {unknown} raw @returns {"desktop"|"mobile"} */
+function bannerSlot(raw) {
+  return raw === "mobile" ? "mobile" : "desktop";
+}
+
+function bannersResponse() {
+  const branding = getBrandingSettings();
+  return {
+    active: branding.heroBanner,
+    activeMobile: branding.heroBannerMobile,
+    defaultUrl: "/hero.jpg",
+    banners: listBanners(),
+  };
+}
+
 /** @param {import('express').Express} app */
 export function registerMediaRoutes(app) {
-  // Hero banners: list stored banners + the active one, upload a new one, pick an
-  // existing one, or delete. The active banner is tracked in branding settings
-  // (`heroBanner`); null means the built-in public/hero.jpg.
+  // Hero banners: shared upload pool with independent desktop / phone active picks.
+  // Null desktop → built-in public/hero.jpg; null phone → falls back to desktop.
   app.get("/api/banners", requireHost, (_req, res) => {
-    res.json({
-      active: getBrandingSettings().heroBanner,
-      defaultUrl: "/hero.jpg",
-      banners: listBanners(),
-    });
+    res.json(bannersResponse());
   });
 
   // Larger JSON limit only here, since banners arrive as base64 data URLs.
   app.post("/api/banners", requireHost, express.json({ limit: "12mb" }), (req, res) => {
     try {
       const name = saveBanner(req.body?.image);
-      setBrandingSettings({ heroBanner: name }); // newly uploaded becomes active
-      res.json({ ok: true, active: name, banners: listBanners() });
+      const slot = bannerSlot(req.body?.slot);
+      if (slot === "mobile") {
+        setBrandingSettings({ heroBannerMobile: name });
+      } else {
+        setBrandingSettings({ heroBanner: name });
+      }
+      res.json({ ok: true, ...bannersResponse() });
     } catch (err) {
       console.error("[banners] upload:", err.message);
       res.status(400).json({ error: err.message || "Could not save banner." });
@@ -60,22 +75,29 @@ export function registerMediaRoutes(app) {
     if (name !== null && !bannerExists(name)) {
       return res.status(404).json({ error: "Banner not found." });
     }
-    setBrandingSettings({ heroBanner: name }); // null reverts to the built-in hero
-    res.json({ ok: true, active: name, banners: listBanners() });
+    const slot = bannerSlot(req.body?.slot);
+    if (slot === "mobile") {
+      setBrandingSettings({ heroBannerMobile: name });
+    } else {
+      setBrandingSettings({ heroBanner: name });
+    }
+    res.json({ ok: true, ...bannersResponse() });
   });
 
   app.delete("/api/banners/:name", requireHost, (req, res) => {
     try {
       const { name } = req.params;
+      const branding = getBrandingSettings();
       const existed = deleteBanner(name);
-      // If we just removed the active banner, fall back to the built-in default.
-      if (existed && getBrandingSettings().heroBanner === name) {
-        setBrandingSettings({ heroBanner: null });
+      if (existed) {
+        const patch = {};
+        if (branding.heroBanner === name) patch.heroBanner = null;
+        if (branding.heroBannerMobile === name) patch.heroBannerMobile = null;
+        if (Object.keys(patch).length) setBrandingSettings(patch);
       }
       res.json({
         ok: true,
-        active: getBrandingSettings().heroBanner,
-        banners: listBanners(),
+        ...bannersResponse(),
       });
     } catch (err) {
       res.status(400).json({ error: err.message || "Could not delete banner." });

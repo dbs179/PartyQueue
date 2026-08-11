@@ -31,40 +31,34 @@ body {
 
 .header-banner {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   width: 100%;
   max-width: 600px;
   margin: 0 auto;
 }
 
+/* Phone default: banner, then title / version / subtitle centered underneath. */
 .header-copy {
-  position: absolute;
-  top: -4px;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 1;
+  position: static;
   display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 14px 10px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 10px 12px 0;
   min-width: 0;
-  pointer-events: none;
   box-sizing: border-box;
-}
-
-.header-copy > * {
-  pointer-events: auto;
 }
 
 .header-brand {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   gap: 6px;
   min-width: 0;
-  max-width: min(70%, 22ch);
+  max-width: 100%;
   flex: 0 1 auto;
 }
 
@@ -357,10 +351,10 @@ body {
 }
 
 .header h1 {
-  max-width: none;
   width: max-content;
+  max-width: 100%;
   margin: 0;
-  text-align: left;
+  text-align: center;
   color: var(--accent);
   font-size: clamp(1.35rem, 5.5vw, 2.4rem);
   font-weight: 800;
@@ -368,9 +362,6 @@ body {
   letter-spacing: normal;
   text-transform: uppercase;
   white-space: nowrap;
-  text-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.9),
-    0 0 18px rgba(0, 0, 0, 0.55);
 }
 
 /* Version pill under the title, left-aligned with Party Display accent. */
@@ -466,19 +457,16 @@ button.subpage-head-link:active {
 }
 
 .subtitle {
-  max-width: min(42%, 28ch);
+  max-width: min(92%, 36ch);
   margin: 0;
   color: var(--accent);
   font-size: clamp(0.85rem, 2.8vw, 1.25rem);
   font-weight: 800;
   line-height: 1.25;
   letter-spacing: 0.06em;
-  text-align: right;
+  text-align: center;
   text-transform: uppercase;
   text-wrap: balance;
-  text-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.9),
-    0 0 16px rgba(0, 0, 0, 0.5);
 }
 
 .container {
@@ -505,22 +493,46 @@ button.subpage-head-link:active {
     max-width: none;
   }
 
+  /* Desktop: title / version / subtitle overlaid on the wide thin hero. */
   .header-copy {
+    position: absolute;
     top: -6px;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 1;
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
     padding: 0 18px 14px;
+    pointer-events: none;
+  }
+
+  .header-copy > * {
+    pointer-events: auto;
   }
 
   .header-brand {
-    max-width: none;
+    align-items: flex-start;
+    max-width: min(70%, 22ch);
   }
 
   .header h1 {
+    text-align: left;
     font-size: clamp(1.8rem, 2.6vw, 2.8rem);
+    text-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.9),
+      0 0 18px rgba(0, 0, 0, 0.55);
   }
 
   .header .subtitle {
     max-width: min(40%, 32ch);
+    text-align: right;
     font-size: clamp(1rem, 1.5vw, 1.35rem);
+    text-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.9),
+      0 0 16px rgba(0, 0, 0, 0.5);
   }
 
   #view-main .main-ops-row {
@@ -3487,7 +3499,7 @@ body.modal-open {
 
 @media (max-width: 640px) {
   .header-copy {
-    padding: 8px 10px;
+    padding: 8px 10px 0;
   }
 
   .header h1 {

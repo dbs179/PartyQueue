@@ -528,6 +528,9 @@ const lookTextSaveBtn = document.getElementById("look-text-save");
 const bannerUploadBtn = document.getElementById("banner-upload-btn");
 const bannerFileInput = document.getElementById("banner-file");
 const bannerGallery = document.getElementById("banner-gallery");
+const bannerMobileUploadBtn = document.getElementById("banner-mobile-upload-btn");
+const bannerMobileFileInput = document.getElementById("banner-mobile-file");
+const bannerMobileGallery = document.getElementById("banner-mobile-gallery");
 let settingsDefaults = {
   songMemory: 500,
   artistWindow: 30,
@@ -570,6 +573,7 @@ function syncShowQueueGenre(enabled, { rerender = true } = {}) {
 
 const {
   applyHero,
+  applyHeroMobile,
   applyBranding,
   loadBanners,
   loadDjIcons,
@@ -588,6 +592,9 @@ const {
     bannerUploadBtn,
     bannerFileInput,
     bannerGallery,
+    bannerMobileUploadBtn,
+    bannerMobileFileInput,
+    bannerMobileGallery,
     djIconUploadBtn,
     djIconFileInput,
     djIconGallery,
@@ -793,6 +800,7 @@ function fillSettings(s) {
     syncShowQueueGenre(!!s.showQueueGenre, { rerender: true });
   }
   if (s.heroBanner !== undefined) applyHero(s.heroBanner);
+  if (s.heroBannerMobile !== undefined) applyHeroMobile(s.heroBannerMobile);
   applyBranding(s.eventName, s.subtitle);
   if (s.defaults) settingsDefaults = s.defaults;
 }
@@ -1225,6 +1233,7 @@ settingsResetBtn?.addEventListener("click", () => {
   delete rest.showVersion;
   delete rest.showQueueGenre;
   delete rest.heroBanner;
+  delete rest.heroBannerMobile;
   fillSettings(rest);
   saveSettings({ ...rest }, { toastMessage: "Set to Default" });
 });

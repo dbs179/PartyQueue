@@ -28,7 +28,11 @@ import {
 } from "./party-settings-http.js";
 import { setSonosDemandChecker } from "./sonos-manager-health.js";
 import { registerApiRoutes } from "./routes/index.js";
-import { getBrandingSettings, setDiscoverySettings } from "./settings.js";
+import {
+  getBrandingSettings,
+  resolveBannerForSlot,
+  setDiscoverySettings,
+} from "./settings.js";
 import {
   bannerExists,
   bannerPath,
@@ -218,12 +222,19 @@ async function renderIndexHtml(brandJson) {
 
 async function sendBrandedIndex(_req, res) {
   try {
-    const { eventName, subtitle, heroBanner, showVersion, showQueueGenre } =
-      getBrandingSettings();
+    const {
+      eventName,
+      subtitle,
+      heroBanner,
+      heroBannerMobile,
+      showVersion,
+      showQueueGenre,
+    } = getBrandingSettings();
     const brandJson = JSON.stringify({
       eventName,
       subtitle: subtitle ?? "",
       heroBanner: heroBanner || null,
+      heroBannerMobile: heroBannerMobile || null,
       version: VERSION || "",
       showVersion: !!showVersion,
       showQueueGenre: !!showQueueGenre,
@@ -274,9 +285,12 @@ app.use(
       res.setHeader("Cache-Control", "public, max-age=604800"),
   })
 );
-app.get("/banner", (_req, res) => {
+app.get("/banner", (req, res) => {
   res.setHeader("Cache-Control", "no-cache");
-  const name = getBrandingSettings().heroBanner;
+  const slot = req.query?.slot === "mobile" ? "mobile" : "desktop";
+  // Optional ?b= is a cache-buster key from the client; resolution uses settings.
+  void req.query?.b;
+  const name = resolveBannerForSlot(slot);
   if (name && bannerExists(name)) {
     const file = bannerPath(name);
     if (file) return res.sendFile(file);

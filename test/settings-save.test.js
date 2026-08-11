@@ -36,6 +36,33 @@ test("saveSettings persists to disk and updates the cache", () => {
   assert.equal(disk.eventName, "P2 Test");
 });
 
+test("heroBannerMobile falls back to desktop in resolveBannerForSlot", async () => {
+  const banners = await import("../src/banners.js");
+  banners.seedStarterBanners();
+  assert.equal(banners.bannerExists("banner-vinyl.jpg"), true);
+
+  settings.setBrandingSettings({
+    heroBanner: "banner-vinyl.jpg",
+    heroBannerMobile: null,
+  });
+  assert.equal(settings.getBrandingSettings().heroBanner, "banner-vinyl.jpg");
+  assert.equal(settings.getBrandingSettings().heroBannerMobile, null);
+  assert.equal(settings.resolveBannerForSlot("desktop"), "banner-vinyl.jpg");
+  assert.equal(settings.resolveBannerForSlot("mobile"), "banner-vinyl.jpg");
+
+  if (banners.bannerExists("banner-speakers.jpg")) {
+    settings.setBrandingSettings({ heroBannerMobile: "banner-speakers.jpg" });
+    assert.equal(
+      settings.resolveBannerForSlot("mobile"),
+      "banner-speakers.jpg"
+    );
+    assert.equal(settings.resolveBannerForSlot("desktop"), "banner-vinyl.jpg");
+  }
+
+  settings.setBrandingSettings({ heroBannerMobile: null });
+  assert.equal(settings.resolveBannerForSlot("mobile"), "banner-vinyl.jpg");
+});
+
 test("saveSettings throws when the path is not writable", () => {
   // Point the write at a directory named like the settings file so rename fails.
   if (fs.existsSync(STORE)) fs.unlinkSync(STORE);

@@ -42,3 +42,15 @@ test("persistBrandingCache clears heroBanner when null", () => {
   const saved = JSON.parse(storage.getItem(BRANDING_STORAGE_KEY));
   assert.equal(saved.heroBanner, null);
 });
+
+test("persistBrandingCache keeps heroBannerMobile independently", () => {
+  const storage = fakeStorage();
+  persistBrandingCache(
+    { heroBanner: "desktop.png", heroBannerMobile: "phone.png" },
+    { storage }
+  );
+  persistBrandingCache({ heroBannerMobile: null }, { storage });
+  const saved = JSON.parse(storage.getItem(BRANDING_STORAGE_KEY));
+  assert.equal(saved.heroBanner, "desktop.png");
+  assert.equal(saved.heroBannerMobile, null);
+});

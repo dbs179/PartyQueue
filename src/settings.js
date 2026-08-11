@@ -1262,6 +1262,8 @@ export const BRANDING_DEFAULTS = {
   // Up Next pills: matched genre + From Playlists next to origin badge.
   showQueueGenre: false,
   heroBanner: null, // null = built-in public/hero.jpg; otherwise a data/banners file
+  // Phone header banner; null falls back to heroBanner (then built-in hero.jpg).
+  heroBannerMobile: null,
 };
 const BRANDING_MAXLEN = { eventName: 60, subtitle: 120 };
 
@@ -1271,21 +1273,40 @@ function cleanText(value, max) {
   return value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, max);
 }
 
+/** @param {string|null|undefined} name @param {Map<string, string>} renamed */
+function normalizeBannerName(name, renamed) {
+  let next = typeof name === "string" ? name : null;
+  if (next && renamed.has(next)) next = renamed.get(next);
+  if (next && !bannerExists(next)) next = null;
+  return next;
+}
+
 export function getBrandingSettings() {
   const s = loadSettings();
   const name = cleanText(s.eventName, BRANDING_MAXLEN.eventName);
   const sub = cleanText(s.subtitle, BRANDING_MAXLEN.subtitle);
   const renamed = migrateBannerFilenames();
-  let heroBanner = typeof s.heroBanner === "string" ? s.heroBanner : null;
-  if (heroBanner && renamed.has(heroBanner)) {
-    heroBanner = renamed.get(heroBanner);
+  let heroBanner = normalizeBannerName(s.heroBanner, renamed);
+  let heroBannerMobile = normalizeBannerName(s.heroBannerMobile, renamed);
+  const migratedDesktop =
+    typeof s.heroBanner === "string" &&
+    renamed.has(s.heroBanner) &&
+    heroBanner === renamed.get(s.heroBanner);
+  const migratedMobile =
+    typeof s.heroBannerMobile === "string" &&
+    renamed.has(s.heroBannerMobile) &&
+    heroBannerMobile === renamed.get(s.heroBannerMobile);
+  if (migratedDesktop || migratedMobile) {
     try {
-      saveSettings({ ...s, heroBanner });
+      saveSettings({
+        ...s,
+        ...(migratedDesktop ? { heroBanner } : {}),
+        ...(migratedMobile ? { heroBannerMobile } : {}),
+      });
     } catch {
       /* migration is best-effort */
     }
   }
-  if (heroBanner && !bannerExists(heroBanner)) heroBanner = null;
   return {
     eventName: name || BRANDING_DEFAULTS.eventName,
     subtitle: sub == null ? BRANDING_DEFAULTS.subtitle : sub,
@@ -1298,7 +1319,20 @@ export function getBrandingSettings() {
         ? s.showQueueGenre
         : BRANDING_DEFAULTS.showQueueGenre,
     heroBanner,
+    heroBannerMobile,
   };
+}
+
+/**
+ * Resolve which banner file to serve for a viewport slot.
+ * Mobile null falls back to desktop; both null → built-in hero.jpg at the route.
+ * @param {"desktop"|"mobile"} [slot]
+ * @returns {string|null}
+ */
+export function resolveBannerForSlot(slot = "desktop") {
+  const b = getBrandingSettings();
+  if (slot === "mobile") return b.heroBannerMobile || b.heroBanner || null;
+  return b.heroBanner || null;
 }
 
 // Persist a partial branding update; returns the effective settings. Leaves
@@ -1318,6 +1352,12 @@ export function setBrandingSettings(partial = {}) {
   if (partial.heroBanner !== undefined) {
     next.heroBanner =
       typeof partial.heroBanner === "string" && partial.heroBanner ? partial.heroBanner : null;
+  }
+  if (partial.heroBannerMobile !== undefined) {
+    next.heroBannerMobile =
+      typeof partial.heroBannerMobile === "string" && partial.heroBannerMobile
+        ? partial.heroBannerMobile
+        : null;
   }
   saveSettings(next);
   return getBrandingSettings();

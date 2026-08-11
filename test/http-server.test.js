@@ -127,6 +127,24 @@ describe("HTTP server harness", { concurrency: false }, () => {
     assert.doesNotMatch(html, /__PQ_VERSION__/);
   });
 
+  test("brand JSON and Look page expose desktop + phone banners", async () => {
+    const page = await fetch(`${baseUrl}/`);
+    assert.equal(page.status, 200);
+    const html = await page.text();
+    assert.match(html, /heroBannerMobile/);
+    assert.match(html, /id="banner-mobile-gallery"/);
+    assert.match(html, /id="banner-mobile-upload-btn"/);
+    assert.match(html, /slot=.*mobile|matchMedia\("\(min-width: 960px\)"\)/);
+
+    const desktopBanner = await fetch(`${baseUrl}/banner?slot=desktop&b=default`);
+    assert.equal(desktopBanner.status, 200);
+    assert.match(desktopBanner.headers.get("content-type") || "", /image\//);
+
+    const mobileBanner = await fetch(`${baseUrl}/banner?slot=mobile&b=default`);
+    assert.equal(mobileBanner.status, 200);
+    assert.match(mobileBanner.headers.get("content-type") || "", /image\//);
+  });
+
   test("Party Display assets and join QR are available without Sonos", async () => {
     const page = await fetch(`${baseUrl}/`);
     assert.equal(page.status, 200);
