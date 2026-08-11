@@ -21,6 +21,7 @@ Before you begin, make sure you have:
 - A free Spotify Developer app (instructions below)
 - A computer or Unraid server that stays on during the party
 - All phones, Sonos speakers, and PartyQueue on the same home network
+  (or across VLANs if you run a multicast relay so Sonos discovery still works)
 
 Last.fm, Home Assistant, and DJ Voice are optional. You can add them later.
 
