@@ -29,7 +29,7 @@ Last.fm, Home Assistant, and DJ Voice are optional. You can add them later.
 1. [Create a Spotify Developer app](#1-create-a-spotify-developer-app).
 2. [Install and start PartyQueue](#2-install-partyqueue).
 3. Open PartyQueue in a browser.
-4. Go to **DJ Booth → Settings → Connections**.
+4. Go to **DJ Booth → Connections**.
 5. Enter your Spotify details, save them, and select **Test**.
 6. Open PartyQueue on a phone and add a song.
 
@@ -82,7 +82,9 @@ The included Docker setup uses host networking because Sonos discovery usually
 does not work through Docker's normal bridge network. It also stores your
 settings in the local `data` folder so they survive updates.
 
-Use the same two-line command after downloading a PartyQueue update.
+Use the same two-line command after downloading a PartyQueue update. Maintainers
+with the Windows deploy script can instead run `npm run deploy:unraid` from a
+dev machine after committing.
 
 ### Windows, macOS, or Linux
 
@@ -104,7 +106,7 @@ use the PartyQueue computer's network address, for example:
 
 ## 3. Finish first-time setup
 
-Open **DJ Booth → Settings → Connections**.
+Open **DJ Booth → Connections**.
 
 ### Spotify (required)
 
@@ -121,7 +123,7 @@ Select **Save**, then **Test**.
 
 PartyQueue normally finds Sonos automatically. If it does not:
 
-1. Open **Connections → Sonos**.
+1. Open **DJ Booth → Connections → Sonos**.
 2. Enter the IP address of one Sonos speaker.
 3. Optionally enter the room you want PartyQueue to control.
 4. Save and test again.
@@ -136,7 +138,7 @@ tools.
 
 On a new install:
 
-1. Open **Connections → Host PIN**.
+1. Open **DJ Booth → Connections → Host PIN**.
 2. Find the temporary six-digit setup code in
    `data/host-bootstrap-code.json`.
 3. Enter that setup code and choose your Host PIN.
@@ -169,6 +171,7 @@ example `http://YOUR_UNRAID_IP:8080`. PartyQueue uses it for:
                                                            ▼
                                               Optional: DJ Voice shouts,
                                               Set Request, fairness caps,
+                                              Loved/Hated sets, dedications,
                                               Party Display on a TV
                                                            │
                                                            ▼
@@ -187,13 +190,15 @@ example `http://YOUR_UNRAID_IP:8080`. PartyQueue uses it for:
    left.
 3. **Run the room** — Use play / pause / skip / volume on the main page. Random
    adds a fresh batch; Never-Ending tops up while music is playing from the
-   queue. Same-artist showcase batches are optional in the Booth.
-4. **Extras** — DJ Voice can announce requests and refills. Party Display
-   (`#/display`) is meant for a TV or Fully Kiosk Browser. Stats stay on the
-   main toolbar.
+   queue. Same-artist showcase batches and Most Loved / Most Hated reaction
+   sets are optional in the Booth.
+4. **Extras** — DJ Voice can announce requests and refills. Guests can dedicate
+   songs from Up Next. Party Display (`#/display`) is meant for a TV or Fully
+   Kiosk Browser. Stats stay on the main toolbar.
 5. **Last call** — When Closing Time (or your configured last song) is added,
    Never-Ending stops so the night can wind down. Clear the queue or use Party
-   Over when you are finished.
+   Over when you are finished. Use **New party** in the Booth header to clear
+   shout memory, fairness, and Loved/Hated set memory before the next gathering.
 
 Useful music tools:
 
@@ -204,12 +209,15 @@ Useful music tools:
 - **Edit queue** lets you remove or rearrange songs. It is off by default.
 - **Request fairness** can limit how many songs or sets one person adds. It is
   off by default; guests see remaining quota when it is on.
+- **Most Loved / Most Hated sets** (optional) insert short reaction-driven
+  mini-sets every N fills when enough guest likes/hates have piled up.
 - **Last call** stops Never-Ending when the configured final song is added.
   The default final song is “Closing Time” by Semisonic.
 
-Host settings, user notes, branding, connections, reset, and restart tools are
-under **DJ Booth**. Stats, Sonos groups, and Vibe are available from the
-main toolbar.
+Host tools live under **DJ Booth**: toggles on the Booth home page, plus hub
+cards for Look, Queue, DJ, Users, Connections, Memory, Suggestions, and Reset.
+**Tools** on the main page covers Join QR, Party Display, and related guest
+helpers. Stats, Sonos groups, and Vibe are on the main toolbar.
 
 ## Network and security posture
 
@@ -257,7 +265,7 @@ Last.fm adds genre information and similar-song discovery.
 
 1. Request a free key at
    [last.fm/api/account/create](https://www.last.fm/api/account/create).
-2. Open **DJ Booth → Settings → Connections → Last.fm**.
+2. Open **DJ Booth → Connections → Last.fm**.
 3. Paste the key, save, and test.
 
 ### Home Assistant and DJ Voice
@@ -267,20 +275,23 @@ ElevenLabs or OpenAI TTS.
 
 1. In Home Assistant, add the ElevenLabs or OpenAI TTS integration.
 2. Create a Home Assistant long-lived access token from your profile.
-3. In PartyQueue, open **Connections → Home Assistant**.
+3. In PartyQueue, open **DJ Booth → Connections → Home Assistant**.
 4. Enter the Home Assistant URL and token, then select **Test**.
    The URL must be a private LAN / `.local` address, localhost, or HTTPS
    Nabu Casa unless you explicitly allow another public HTTPS host.
-5. Open **Settings → DJ**, choose the provider and voice, and test it.
-6. Enable **DJ Voice** and any request shout-outs you want.
+5. Open **DJ Booth → DJ**, choose the provider and voice, and test it.
+6. Enable **DJ Voice** (and shout-outs / party summary if you want them) on the
+   Booth home page.
 
 During an announcement, PartyQueue temporarily adjusts the volume and then
 returns every speaker to its exact previous level before music continues.
 
 ### Party Display
 
-Open `#/display` (or `#/display?kiosk=1` for Fully Kiosk) on a TV. Idle quiet
-time can dim the display so a kiosk screen is not bright all night.
+Open `#/display` from **Tools → Party Display**, or use `#/display?kiosk=1`
+for Fully Kiosk Browser on a TV. The Booth **Party Display TV** section has a
+copyable Fully start URL, preview controls, and idle dim so a kiosk screen is
+not bright all night.
 
 ## Where settings are stored
 
@@ -316,7 +327,7 @@ logs, diagnostics, and other private files.
 
 - Confirm PartyQueue and Sonos are on the same network.
 - For Docker or Unraid, confirm the container uses host networking.
-- Enter a speaker's IP address under **Connections → Sonos**.
+- Enter a speaker's IP address under **DJ Booth → Connections → Sonos**.
 - Avoid guest Wi-Fi, VPNs, or network isolation between PartyQueue and Sonos.
 
 ### Search returns no songs
@@ -395,9 +406,11 @@ Run all automated tests:
 npm test
 ```
 
-GitHub Actions tests Node.js 20 on Linux and Windows and audits production
-dependencies. Hardware smoke tests are manual because they control real Sonos
-and Home Assistant devices.
+GitHub Actions runs Node.js 22 on Linux and Windows (`npm test`), a Chromium
+Playwright smoke suite, a Docker image build, and an `npm audit` of production
+dependencies (high/critical). Hardware smoke tests are manual because they
+control real Sonos and Home Assistant devices. Local development still supports
+Node.js 20 or newer.
 
 Useful health checks:
 
