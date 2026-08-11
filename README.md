@@ -217,6 +217,8 @@ Useful music tools:
 
 Host tools live under **DJ Booth**: toggles on the Booth home page, plus hub
 cards for Look, Queue, DJ, Users, Connections, Memory, Suggestions, and Reset.
+**Look** covers the party title and separate Desktop / Phone hero banners
+(phones stack the banner above the title; desktop uses the wide overlay).
 **Tools** on the main page covers Join QR, Party Display, and related guest
 helpers. Stats, Sonos groups, and Vibe are on the main toolbar.
 
