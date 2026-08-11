@@ -637,6 +637,62 @@ button.guest-name:focus-visible {
   min-height: 44px;
 }
 
+/* Desktop host rail — NP/queue left, transport sticky right (host + wide only). */
+.host-stage {
+  display: block;
+}
+
+.host-transport-rail {
+  display: none;
+}
+
+.host-transport-rail[hidden] {
+  display: none;
+}
+
+body.host-desktop-rail .container {
+  max-width: 1080px;
+}
+
+body.host-desktop-rail #view-main .host-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 240px);
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 14px;
+}
+
+body.host-desktop-rail #view-main .host-transport-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: sticky;
+  /* Sit below the sticky search bar while scrolling a long Up Next list. */
+  top: 108px;
+  padding: 14px 12px;
+  background: linear-gradient(135deg, var(--surface), var(--surface-2));
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+body.host-desktop-rail #view-main .host-transport-rail .settings-intro {
+  margin-top: 0;
+  font-size: 0.82rem;
+}
+
+body.host-desktop-rail #view-main .host-transport-rail .control-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+body.host-desktop-rail #view-main .host-transport-rail .clear-full {
+  margin-top: 10px;
+}
+
+/* Transport lives in the rail — don't leave an empty home slot in Controls. */
+body.host-desktop-rail #controls-host-home:empty {
+  display: none;
+}
+
 /* Search results only need a gap when there actually are results. */
 #results:not(:empty) {
   margin-top: 14px;
