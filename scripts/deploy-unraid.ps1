@@ -92,13 +92,14 @@ try {
   # data/, rebuild, and start. Keep the last 10 data backups on Unraid.
   $remoteBackupDir = "/mnt/user/appdata/PartyQueue-backups"
   # Bash on Unraid: stop flushes debounced writes, then tar data/, then rebuild.
+  # Double-quote BACKUP so `$STAMP` expands on the remote shell.
   $remoteCommand = @"
 set -e
 cd '$RemotePath'
 mkdir -p data '$remoteBackupDir'
 docker compose stop || true
 STAMP=`$(date +%Y%m%d-%H%M%S)
-BACKUP='$remoteBackupDir/data-v$expectedVersion-`$STAMP.tar.gz'
+BACKUP="$remoteBackupDir/data-v$expectedVersion-`$STAMP.tar.gz"
 tar -czf "`$BACKUP" -C data .
 echo "Data backup: `$BACKUP"
 ls -1t '$remoteBackupDir'/data-v*.tar.gz 2>/dev/null | tail -n +11 | xargs -r rm -- || true
