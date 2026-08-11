@@ -414,7 +414,7 @@
       <div id="view-join" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Join Code</h2>
-          <button id="join-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="join-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="controls join-panel" aria-label="Join Code">
           <p class="settings-intro">Scan this QR on the same Wi‑Fi to open PartyQueue and join the queue.</p>
@@ -432,7 +432,7 @@
       <div id="view-sonos" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Sonos Group</h2>
-          <button id="sonos-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="sonos-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="controls" aria-label="Sonos group">
           <p id="group-intro" class="settings-intro">Songs go to this group&apos;s queue. Pick a group below, or Edit groups to join / leave speakers.</p>
@@ -459,7 +459,7 @@
       <div id="view-mood" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Vibe</h2>
-          <button id="mood-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="mood-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <!-- Queue behavior toggles — always available; playlist hub is Spotify-gated. -->
         <div class="controls music-mix-toggles" aria-label="Queue behavior">
@@ -544,7 +544,7 @@
       <div id="view-mood-presets" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Mood</h2>
-          <button id="mood-presets-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="mood-presets-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="controls" aria-label="Mood and Decades">
           <p class="settings-intro">Select a mood to include specific genres</p>
@@ -593,7 +593,7 @@
       <div id="view-genres" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Genres</h2>
-          <button id="genres-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="genres-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="controls" aria-label="Genres">
           <div class="genre-head">
@@ -627,17 +627,17 @@
 
       <!-- DJ BOOTH VIEW — host destinations (same hub card format as Settings) -->
       <div id="view-booth" class="view" hidden>
-        <div class="subpage-head">
+        <div class="subpage-head booth-subpage-head">
           <h2 class="section-label subpage-title">DJ Booth</h2>
           <button
             id="booth-new-party"
             type="button"
-            class="pill-btn subpage-back"
+            class="subpage-head-link"
             title="Clear DJ shout memory, fairness, and Loved/Hated set memory for the next party"
           >
             New party
           </button>
-          <button id="booth-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="booth-back" type="button" class="subpage-head-link">Back</button>
         </div>
         <div class="controls-divider" aria-hidden="true"></div>
         <!-- Every host switch lives here at the Booth root, grouped by area.
@@ -857,7 +857,7 @@
       <div id="view-settings-look" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Look</h2>
-          <button id="settings-look-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="settings-look-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="settings-box settings-panel">
           <p class="settings-intro">Party branding — banner and header text. The version-tag switch lives on the Booth page.</p>
@@ -890,7 +890,7 @@
       <div id="view-settings-queue" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Queue</h2>
-          <button id="settings-queue-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="settings-queue-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="settings-box settings-panel">
           <p class="settings-intro">Tune how Random and Never-Ending choose songs and avoid repeats.</p>
@@ -1010,7 +1010,7 @@
       <div id="view-settings-dj" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">DJ</h2>
-          <button id="settings-dj-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="settings-dj-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="settings-box settings-hub">
           <p class="settings-intro">DJ Voice, shout-out, and Party Summary switches live on the Booth page. Open a section to tune the rest. Guest notes live under Users.</p>
@@ -1067,7 +1067,7 @@
       <div id="view-settings-dj-banner" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Banner</h2>
-          <button id="settings-dj-banner-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="settings-dj-banner-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="settings-box settings-panel">
           <p class="settings-intro">Upload an icon (PNG, JPG, WEBP, GIF or SVG, 2&nbsp;MB max). Keeps the newest five.</p>
@@ -1085,7 +1085,7 @@
       <div id="view-settings-dj-name" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Name</h2>
-          <button id="settings-dj-name-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="settings-dj-name-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="settings-box settings-panel">
           <p class="settings-intro">Name used in announcements and on Now Playing.</p>
@@ -1103,7 +1103,7 @@
       <div id="view-settings-dj-voice" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Voice &amp; character</h2>
-          <button id="settings-dj-voice-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="settings-dj-voice-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="settings-box settings-panel">
           <p class="settings-intro">Tune announcement voice, character, intros, and length.</p>
@@ -1193,7 +1193,7 @@
       <div id="view-settings-dj-advanced" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Advanced DJ</h2>
-          <button id="settings-dj-advanced-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="settings-dj-advanced-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="settings-box settings-panel">
           <p class="settings-intro">Customize the DJ without exposing or weakening the locked safety, privacy, length, and output rules.</p>
@@ -1230,7 +1230,7 @@
       <div id="view-settings-dj-volume" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Volume &amp; silence</h2>
-          <button id="settings-dj-volume-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="settings-dj-volume-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="settings-box settings-panel">
           <p class="settings-intro">How loud the DJ sits over the music, and the quiet pad before the song resumes.</p>
@@ -1266,7 +1266,7 @@
       <div id="view-settings-dj-shouts" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Shout-out timing</h2>
-          <button id="settings-dj-shouts-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="settings-dj-shouts-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="settings-box settings-panel">
           <p class="settings-intro">How often shout-outs fire after the first request of the night. Needs shout-outs and DJ Voice on.</p>
@@ -1298,7 +1298,7 @@
       <div id="view-settings-dj-lastcall" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Last call</h2>
-          <button id="settings-dj-lastcall-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="settings-dj-lastcall-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="settings-box settings-panel">
           <p class="settings-intro">Hand-adding this song turns off Never-Ending and signals last call. Default is Closing Time by Semisonic.</p>
@@ -1319,7 +1319,7 @@
       <div id="view-settings-users" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Users</h2>
-          <button id="settings-users-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="settings-users-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="settings-box settings-hub">
           <p class="settings-intro">Guest notes and birthdays for DJ shout-outs. Tap a person to edit.</p>
@@ -1330,7 +1330,7 @@
       <div id="view-settings-user-edit" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title" id="settings-user-edit-title">User</h2>
-          <button id="settings-user-edit-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="settings-user-edit-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="settings-box settings-panel">
           <p class="settings-intro" id="settings-user-edit-intro">Add short notes for the DJ. Set a birthday for a happy-birthday line on the day.</p>
@@ -1391,7 +1391,7 @@
       <div id="view-settings-connections" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Connections</h2>
-          <button id="settings-connections-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="settings-connections-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="settings-box settings-panel">
           <p class="settings-intro">API credentials and cache. Set once; rarely touched on party night.</p>
@@ -1538,7 +1538,7 @@
       <div id="view-settings-reset" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Reset</h2>
-          <button id="settings-reset-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="settings-reset-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="settings-box settings-hub">
           <p class="settings-intro">Destructive clears — each one asks for confirmation first.</p>
@@ -1584,7 +1584,7 @@
       <div id="view-stats" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Stats</h2>
-          <button id="stats-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="stats-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="stats-box" id="stats-box">
           <p class="settings-intro">Top guest requests for tonight or all time.</p>
@@ -1638,7 +1638,7 @@
       <div id="view-playlists" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Playlists</h2>
-          <button id="playlists-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="playlists-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <p class="settings-intro">Choose which Spotify playlists feed Random and Never-Ending.</p>
 
@@ -1662,7 +1662,7 @@
       <div id="view-memory" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Memory <span id="memory-count" class="queue-count"></span></h2>
-          <button id="memory-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="memory-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
 
         <div class="memory-box" id="memory-box">
@@ -1676,7 +1676,7 @@
       <div id="view-suggestions" class="view" hidden>
         <div class="subpage-head">
           <h2 class="section-label subpage-title">Suggestions <span id="suggestions-count" class="queue-count"></span></h2>
-          <button id="suggestions-back" type="button" class="pill-btn subpage-back">&#8592; Back</button>
+          <button id="suggestions-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
 
         <div class="memory-box" id="suggestions-box">

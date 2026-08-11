@@ -362,10 +362,35 @@ body {
 .subpage-title {
   margin: 0;
 }
-/* Pill-styled Back button pushed to the right edge of the sub-page header. */
+/* Plain section-label Back (and other header actions) on the right. */
 .subpage-back {
   margin-left: auto;
   flex: 0 0 auto;
+}
+
+button.subpage-head-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  line-height: inherit;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+button.subpage-head-link:hover,
+button.subpage-head-link:focus-visible {
+  color: var(--text, #fff);
+}
+
+button.subpage-head-link:active {
+  opacity: 0.85;
 }
 .back-btn {
   flex: 0 0 auto;
@@ -1207,9 +1232,25 @@ button.guest-name:focus-visible {
   font-size: 0.9em;
 }
 
-/* When Booth has New party + Back, only the first action absorbs the left gap. */
-#view-booth .subpage-head .subpage-back + .subpage-back {
-  margin-left: 0;
+/* Booth header: title | New party (centered) | Back — plain section-label text. */
+.booth-subpage-head {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+}
+
+.booth-subpage-head .subpage-title {
+  justify-self: start;
+}
+
+.booth-subpage-head #booth-new-party {
+  justify-self: center;
+}
+
+.booth-subpage-head #booth-back {
+  justify-self: end;
+  text-align: right;
 }
 
 .booth-tv-preview-actions {
