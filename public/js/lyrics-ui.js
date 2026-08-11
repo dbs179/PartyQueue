@@ -457,10 +457,12 @@ export function createLyricsUi(els, deps) {
       setNpFsLyricsStatus("No lyrics for this track");
       return;
     }
-    const hasPaintedLyrics = lyricsContainers().some((el) =>
-      el.querySelector(".np-fs-lyrics-synced, .np-fs-lyrics-plain")
-    );
-    if (!hasPaintedLyrics) setNpFsLyricsStatus("Loading lyrics…");
+    // Drop previous karaoke immediately. Otherwise Party Display keeps the
+    // last track's synced lines (and ticker) until a slow miss returns.
+    if (retryCount === 0) {
+      stopLyricTicker();
+      setNpFsLyricsStatus("Loading lyrics…");
+    }
     const params = new URLSearchParams({
       title: np.title,
       artist: np.artist,
@@ -509,11 +511,9 @@ export function createLyricsUi(els, deps) {
         const retryAfterSec = Number.isFinite(err.retryAfterSec)
           ? Math.max(1, Math.min(30, err.retryAfterSec))
           : 10;
-        if (!hasPaintedLyrics) {
-          setNpFsLyricsStatus(
-            `Lyrics service is busy — retrying in ${retryAfterSec}s…`
-          );
-        }
+        setNpFsLyricsStatus(
+          `Lyrics service is busy — retrying in ${retryAfterSec}s…`
+        );
         lyricsRetryTimer = setTimeout(() => {
           lyricsRetryTimer = null;
           const last = getLastNowPlaying();
@@ -523,9 +523,7 @@ export function createLyricsUi(els, deps) {
         }, retryAfterSec * 1000);
         return;
       }
-      if (!hasPaintedLyrics) {
-        setNpFsLyricsStatus(err.message || "Could not load lyrics");
-      }
+      setNpFsLyricsStatus(err.message || "Could not load lyrics");
     }
   }
 
@@ -538,6 +536,8 @@ export function createLyricsUi(els, deps) {
       lyricsKey = key;
       clearLyricsRetry();
       stopLyricTicker();
+      // Clear paint before the async fetch so the prior track cannot linger.
+      setNpFsLyricsStatus("Loading lyrics…");
       loadOverlayLyrics(np);
       return;
     }
