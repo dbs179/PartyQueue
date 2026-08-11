@@ -86,16 +86,41 @@ test("resolveDisplayGenre prefers the track's enqueue lane over the latest set l
     ),
     { mixGenreLane: "pop", mixGenreLabel: "Pop" }
   );
+});
+
+test("resolveDisplayGenre uses artist genre for Discover, not off-lane set label", async () => {
+  const { resolveDisplayGenre } = await import("../src/now-playing-http.js");
+  // Bieber-style: pop strongest, junk metal also mapped — show pop, not set metal.
   assert.deepEqual(
     resolveDisplayGenre(
       {
-        title: "Discover Hit",
-        artist: "Band",
-        uri: "spotify:track:2",
+        title: "Intentions",
+        artist: "Justin Bieber",
+        uri: "spotify:track:bieber",
+        origin: "discovered",
+        genreLane: "metal",
+      },
+      {
+        setLane: "metal",
+        bucketsFor: () => ["pop", "metal"],
+      }
+    ),
+    { mixGenreLane: "pop", mixGenreLabel: "Pop" }
+  );
+  // Untagged Discover still falls back to enqueue set lane.
+  assert.deepEqual(
+    resolveDisplayGenre(
+      {
+        title: "Unknown Discover",
+        artist: "Mystery",
+        uri: "spotify:track:x",
         origin: "discovered",
         genreLane: "rock",
       },
-      { setLane: "electronic" }
+      {
+        setLane: "electronic",
+        bucketsFor: () => [],
+      }
     ),
     { mixGenreLane: "rock", mixGenreLabel: "Rock" }
   );

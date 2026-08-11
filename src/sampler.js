@@ -105,6 +105,21 @@ export function enforceUniqueArtistsInBatch(
 }
 
 /**
+ * When any non-Discover item exists, move the first one to the front so a set
+ * never opens on Songs Like (DJ copy + Sonos play order stay aligned).
+ */
+export function ensurePlaylistLead(items) {
+  const list = Array.isArray(items) ? items.slice() : [];
+  if (!list.length || !list[0]?.discovered) return list;
+  const swapAt = list.findIndex((x, idx) => idx > 0 && !x?.discovered);
+  if (swapAt <= 0) return list;
+  const tmp = list[0];
+  list[0] = list[swapAt];
+  list[swapAt] = tmp;
+  return list;
+}
+
+/**
  * Automatic same-artist showcase gate (Booth: Same-artist sets + every N).
  * Guest Set Request (main search) is separate — this only gates Random auto sets.
  *
@@ -503,8 +518,25 @@ export function mixPlaylistAndDiscovery(playlistItems, discoveryItems) {
   return mixed;
 }
 
+/** After swapping i↔j, would any discovered:true pair sit adjacent? */
+function swapCreatesAdjacentDiscovery(items, i, j) {
+  const at = (idx) => {
+    if (idx < 0 || idx >= items.length) return null;
+    if (idx === i) return items[j];
+    if (idx === j) return items[i];
+    return items[idx];
+  };
+  for (const idx of [i, j]) {
+    const cur = at(idx);
+    if (!cur?.discovered) continue;
+    if (at(idx - 1)?.discovered || at(idx + 1)?.discovered) return true;
+  }
+  return false;
+}
+
 // Best-effort: if two neighbors share a primary artist, swap the later one
 // with a later item that breaks the clash without creating a new one.
+// Never clump Songs Like — spacing beats an unresolved artist adjacency.
 function avoidAdjacentSameArtist(items) {
   const out = items.slice();
   for (let i = 1; i < out.length; i++) {
@@ -520,6 +552,7 @@ function avoidAdjacentSameArtist(items) {
       // Neighbors of j must not clash with cur.
       if (beforeJ && beforeJ === cur) continue;
       if (afterJ && afterJ === cur) continue;
+      if (swapCreatesAdjacentDiscovery(out, i, j)) continue;
       const tmp = out[i];
       out[i] = out[j];
       out[j] = tmp;

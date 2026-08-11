@@ -27,7 +27,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { writeFileAtomic } from "./atomic-write.js";
-import { sanitizeDedication, sanitizeDisplayName } from "./display-name.js";
+import {
+  resolveGuestIdentity,
+  sanitizeDedication,
+  sanitizeDisplayName,
+} from "./display-name.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STORE_FILE =
@@ -339,25 +343,56 @@ export function genreLaneOf(id) {
   return indexById.get(id)?.genreLane ?? null;
 }
 
+function originEntryOwnerKey(entry) {
+  return (
+    sanitizeDisplayName(entry?.requestedByUser) ||
+    sanitizeDisplayName(entry?.requestedBy) ||
+    null
+  );
+}
+
+function sameGuestUser(a, b) {
+  if (!a || !b) return false;
+  return String(a).toLowerCase() === String(b).toLowerCase();
+}
+
 /**
- * Set or clear dedication on the newest searched instance of a track
- * (toast Dedicate right after Add).
+ * Set or clear dedication on the newest searched instance of a track owned by
+ * this guest (toast Dedicate after Add, or Dedicate from Up Next).
+ * @param {string} id
+ * @param {string|null|undefined} dedication
+ * @param {{ requestedBy?: string|null, requestedByUser?: string|null }} [opts]
  * @returns {{ ok: true, dedication: string|null } | { ok: false, error: string }}
  */
-export function setDedication(id, dedication) {
+export function setDedication(id, dedication, opts = {}) {
   if (!id || typeof id !== "string") {
     return { ok: false, error: "Missing track id." };
   }
+  const { user } = resolveGuestIdentity({
+    requestedBy: opts.requestedBy,
+    requestedByUser: opts.requestedByUser,
+  });
+  if (!user) {
+    return { ok: false, error: "Your name is required to dedicate." };
+  }
   load();
   let at = -1;
+  let anySearched = false;
   for (let i = entries.length - 1; i >= 0; i--) {
-    if (entries[i].id === id && entries[i].source === "searched") {
+    if (entries[i].id !== id || entries[i].source !== "searched") continue;
+    anySearched = true;
+    if (sameGuestUser(originEntryOwnerKey(entries[i]), user)) {
       at = i;
       break;
     }
   }
   if (at === -1) {
-    return { ok: false, error: "Track is not a guest request." };
+    return {
+      ok: false,
+      error: anySearched
+        ? "Only the person who requested this song can dedicate it."
+        : "Track is not a guest request.",
+    };
   }
   const row = entries[at];
   const ded = sanitizeDedication(dedication);

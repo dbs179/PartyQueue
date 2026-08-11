@@ -613,17 +613,25 @@ export function registerQueueRoutes(app, ctx) {
     })
   );
 
-  // Optional post-Add dedication (toast chip). Guest-accessible; only updates
-  // searched origins. If a mid-queue shout pad is still upcoming, supersede it
-  // so the DJ can say “goes out to …”.
+  // Optional post-Add / Up Next dedication. Guest-accessible; only the
+  // requester may update their searched origin. If a mid-queue shout pad is
+  // still upcoming, supersede it so the DJ can say “goes out to …”.
   app.post("/api/queue/dedication", asyncHandler(async (req, res) => {
     const preemptGeneration = queueWorkGeneration();
-    const { uri, dedication, name, artist } = req.body ?? {};
+    const { uri, dedication, name, artist, requestedBy, requestedByUser } =
+      req.body ?? {};
     const id = spotifyTrackId(uri);
     if (!id) {
       return res.status(400).json({ error: "Missing track uri." });
     }
-    const updated = setDedication(id, dedication);
+    const identity = resolveGuestIdentity({ requestedBy, requestedByUser });
+    if (!identity.user) {
+      return res.status(400).json({ error: "Your name is required to dedicate." });
+    }
+    const updated = setDedication(id, dedication, {
+      requestedBy: identity.badge,
+      requestedByUser: identity.user,
+    });
     if (!updated.ok) {
       return res.status(400).json({ error: updated.error });
     }
@@ -633,7 +641,7 @@ export function registerQueueRoutes(app, ctx) {
     setRequestDedication(id, forWho);
 
     if (forWho && isDjVoiceReady() && name) {
-      const by = requestedByUserOf(id) || requestedByOf(id);
+      const by = identity.user || requestedByUserOf(id) || requestedByOf(id);
       try {
         const { findUpcomingTrackPosition } = await import("../sonos.js");
         const pos = await findUpcomingTrackPosition({ name, artist });

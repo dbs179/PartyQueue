@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import {
   primaryArtist,
   mixPlaylistAndDiscovery,
+  enforceUniqueArtistsInBatch,
+  ensurePlaylistLead,
   sampleSongs,
 } from "../src/sampler.js";
 import {
@@ -112,4 +114,79 @@ test("mixPlaylistAndDiscovery: empty sides", () => {
     { id: "d", discovered: true },
   ]);
   assert.deepEqual(mixPlaylistAndDiscovery([{ id: "p" }], []), [{ id: "p" }]);
+});
+
+function noAdjacentDiscoveries(out) {
+  for (let i = 1; i < out.length; i++) {
+    if (out[i].discovered && out[i - 1].discovered) return false;
+  }
+  return true;
+}
+
+test("mixPlaylistAndDiscovery: artist swap must not clump Songs Like", () => {
+  // Gap fill yields P D P D …; D0 and P1 share artist X so the old swap
+  // turned this into P D D P. Spacing must win.
+  const base = [
+    { id: "p0", artist: "A", discovered: false },
+    { id: "p1", artist: "X", discovered: false },
+    { id: "p2", artist: "B", discovered: false },
+    { id: "p3", artist: "C", discovered: false },
+  ];
+  const extra = [
+    { id: "d0", artist: "X", discovered: true },
+    { id: "d1", artist: "Y", discovered: true },
+  ];
+  const out = mixPlaylistAndDiscovery(base, extra);
+  assert.equal(out.filter((x) => x.discovered).length, 2);
+  assert.equal(out[0].discovered, false);
+  assert.ok(
+    noAdjacentDiscoveries(out),
+    `adjacent discoveries: ${out.map((x) => (x.discovered ? "D" : "P")).join("")}`
+  );
+});
+
+test("ensurePlaylistLead moves a Discover off the front when a playlist exists", () => {
+  const led = ensurePlaylistLead([
+    { id: "d0", discovered: true },
+    { id: "p0", discovered: false },
+    { id: "d1", discovered: true },
+  ]);
+  assert.equal(led[0].id, "p0");
+  assert.equal(led[0].discovered, false);
+  assert.deepEqual(
+    ensurePlaylistLead([{ id: "d0", discovered: true }]).map((x) => x.id),
+    ["d0"]
+  );
+});
+
+test("unique-artist drop then re-mix restores discovery spacing", () => {
+  // Same primary artist on a playlist separator between two discoveries —
+  // unique filter clumps D D; re-mix (as sonos-random does) spaces them again.
+  const base = [
+    { id: "p0", artist: "A", discovered: false },
+    { id: "p1", artist: "A", discovered: false },
+    { id: "p2", artist: "B", discovered: false },
+    { id: "p3", artist: "C", discovered: false },
+  ];
+  const extra = [
+    { id: "d0", artist: "X", discovered: true },
+    { id: "d1", artist: "Y", discovered: true },
+  ];
+  let order = mixPlaylistAndDiscovery(base, extra);
+  order = enforceUniqueArtistsInBatch(order);
+  const afterUnique = order.map((x) => (x.discovered ? "D" : "P")).join("");
+  // Dropping the second A can leave discoveries adjacent depending on order.
+  const remixed = mixPlaylistAndDiscovery(
+    order.filter((t) => !t.discovered),
+    order.filter((t) => t.discovered)
+  );
+  assert.equal(remixed.filter((x) => x.discovered).length, 2);
+  assert.ok(
+    remixed.filter((x) => !x.discovered).length >= 2,
+    `need playlist gaps after unique; pattern was ${afterUnique}`
+  );
+  assert.ok(
+    noAdjacentDiscoveries(remixed),
+    `adjacent after re-mix: ${remixed.map((x) => (x.discovered ? "D" : "P")).join("")}`
+  );
 });

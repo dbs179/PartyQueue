@@ -128,9 +128,48 @@ describe("/api/queue* HTTP contracts", { concurrency: false }, () => {
     const res = await postJson("/api/queue/dedication", {
       uri: "not-a-spotify-uri",
       dedication: "for the crew",
+      requestedByUser: "Smoke Tester",
     });
     assert.equal(res.status, 400);
     assert.match((await res.json()).error, /uri/i);
+  });
+
+  test("POST /api/queue/dedication requires identity and ownership", async () => {
+    const { markOrigin } = await import("../src/queue-origin.js");
+    const trackId = "4uLU6hMCjMI75M1A2tKUQC";
+    markOrigin([trackId], "searched", {
+      requestedBy: "Owner",
+      requestedByUser: "Owner",
+    });
+
+    const noName = await postJson("/api/queue/dedication", {
+      uri: TRACK.uri,
+      dedication: "for Jen",
+    });
+    assert.equal(noName.status, 400);
+    assert.match((await noName.json()).error, /name/i);
+
+    const wrong = await postJson("/api/queue/dedication", {
+      uri: TRACK.uri,
+      dedication: "for Jen",
+      requestedBy: "Other",
+      requestedByUser: "Other",
+    });
+    assert.equal(wrong.status, 400);
+    assert.match((await wrong.json()).error, /only the person/i);
+
+    const ok = await postJson("/api/queue/dedication", {
+      uri: TRACK.uri,
+      name: TRACK.name,
+      artist: TRACK.artist,
+      dedication: "for Jen",
+      requestedBy: "Owner",
+      requestedByUser: "Owner",
+    });
+    assert.equal(ok.status, 200);
+    const body = await ok.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.dedication, "for Jen");
   });
 
   test("destructive queue routes validate input and share one rate limit", async () => {

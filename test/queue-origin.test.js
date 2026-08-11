@@ -253,29 +253,78 @@ test("advanceHeardTrack clears when leaving the queue or going idle", () => {
   );
 });
 
-test("setDedication updates or clears the newest searched instance", () => {
-  origin.markOrigin(["d2"], "searched", { requestedBy: "Mark" });
-  const set = origin.setDedication("d2", "  Sarah  ");
+test("setDedication updates or clears the newest searched instance for owner", () => {
+  origin.markOrigin(["d2"], "searched", {
+    requestedBy: "Mark",
+    requestedByUser: "Mark",
+  });
+  const set = origin.setDedication("d2", "  Sarah  ", {
+    requestedByUser: "Mark",
+  });
   assert.equal(set.ok, true);
   assert.equal(set.dedication, "Sarah");
   assert.equal(origin.dedicationOf("d2"), "Sarah");
   origin.markOrigin(["d2"], "searched", {
     requestedBy: "Mark",
+    requestedByUser: "Mark",
     dedication: "Owen",
     appendInstance: true,
   });
-  // Toast dedicate targets the newest copy.
-  origin.setDedication("d2", "Updated Owen");
+  // Toast dedicate targets the newest copy owned by Mark.
+  origin.setDedication("d2", "Updated Owen", { requestedByUser: "Mark" });
   assert.equal(origin.originMetaForOccurrence("d2", 0).dedication, "Sarah");
   assert.equal(
     origin.originMetaForOccurrence("d2", 1).dedication,
     "Updated Owen"
   );
-  const cleared = origin.setDedication("d2", "   ");
+  const cleared = origin.setDedication("d2", "   ", { requestedByUser: "Mark" });
   assert.equal(cleared.ok, true);
   assert.equal(origin.originMetaForOccurrence("d2", 1).dedication, null);
-  const bad = origin.setDedication("missing", "Jen");
+  const bad = origin.setDedication("missing", "Jen", {
+    requestedByUser: "Mark",
+  });
   assert.equal(bad.ok, false);
+  const noName = origin.setDedication("d2", "Jen");
+  assert.equal(noName.ok, false);
+});
+
+test("setDedication rejects wrong owner and targets the correct guest copy", () => {
+  origin.markOrigin(["nine"], "searched", {
+    requestedBy: "Maria",
+    requestedByUser: "Maria",
+    dedication: null,
+  });
+  origin.markOrigin(["nine"], "searched", {
+    requestedBy: "Dave",
+    requestedByUser: "Dave",
+    dedication: null,
+    appendInstance: true,
+  });
+  const denied = origin.setDedication("nine", "For Jen", {
+    requestedByUser: "Owen",
+  });
+  assert.equal(denied.ok, false);
+  assert.match(denied.error, /only the person/i);
+
+  const dave = origin.setDedication("nine", "For the crew", {
+    requestedByUser: "dave",
+  });
+  assert.equal(dave.ok, true);
+  assert.equal(origin.originMetaForOccurrence("nine", 0).dedication, null);
+  assert.equal(
+    origin.originMetaForOccurrence("nine", 1).dedication,
+    "For the crew"
+  );
+
+  const maria = origin.setDedication("nine", "For Sam", {
+    requestedByUser: "Maria",
+  });
+  assert.equal(maria.ok, true);
+  assert.equal(origin.originMetaForOccurrence("nine", 0).dedication, "For Sam");
+  assert.equal(
+    origin.originMetaForOccurrence("nine", 1).dedication,
+    "For the crew"
+  );
 });
 
 test("sanitizes blank / oversized requestedBy", () => {

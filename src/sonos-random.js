@@ -23,6 +23,7 @@ import {
   mixPlaylistAndDiscovery,
   cloneArtistCountMap,
   enforceUniqueArtistsInBatch,
+  ensurePlaylistLead,
   allowSameArtistBatch,
 } from "./sampler.js";
 import {
@@ -622,6 +623,15 @@ async function buildRandomPlan(
       `[random] dropped ${beforeUnique - order.length} same-artist duplicate(s) from batch`
     );
   }
+  // Unique filter can drop playlist separators and clump Songs Like — re-space.
+  {
+    const base = order.filter((t) => !t.discovered);
+    const extra = order.filter((t) => t.discovered);
+    if (base.length && extra.length) {
+      order = mixPlaylistAndDiscovery(base, extra);
+    }
+  }
+  order = ensurePlaylistLead(order);
   // Re-sync claimed artists from the final order (unique filter may have dropped).
   batchArtists.clear();
   for (const item of order) claimBatchArtist(item.artist);
@@ -730,6 +740,8 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
 
   // 4) Enqueue in that order. `added` = total enqueued (playlist + discovery);
   // `similarAdded` is the discovery subset so the UI can badge the mix.
+  // Defer Songs Like until a non-Discover track lands so a failed playlist
+  // lead cannot leave Discover as Sonos queue #1.
   let added = 0;
   let similarAdded = 0;
   let moodAdded = 0;
@@ -737,35 +749,65 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
   const discoveredIds = [];
   const moodIds = [];
   const fillerIds = [];
+  const pendingDiscover = [];
+  const hasNonDiscover = order.some((t) => t && !t.discovered);
+
+  async function enqueueOne(item) {
+    const meta = MetaDataHelper.GuessMetaDataAndTrackUri(item.uri, resolveRegion());
+    await enqueueMeta(m, meta);
+    added++;
+    if (item.moodPick) {
+      moodAdded++;
+      if (item.id) moodIds.push(item.id);
+    } else if (item.discovered) {
+      similarAdded++;
+      if (item.id) discoveredIds.push(item.id);
+    } else if (item.id) {
+      fillerIds.push(item.id);
+    }
+    if (item.id) recentIds.add(item.id);
+    recorded.push({
+      id: item.id,
+      artist: item.artist,
+      name: item.name,
+      source: item.moodPick
+        ? "mood"
+        : item.discovered
+          ? "discovered"
+          : "filler",
+      mood: item.moodPick ? activeMoodPack?.id || null : null,
+    });
+  }
+
   for (const item of order) {
     if (wasPreempted()) break;
+    if (hasNonDiscover && added === 0 && item.discovered) {
+      pendingDiscover.push(item);
+      continue;
+    }
     try {
-      const meta = MetaDataHelper.GuessMetaDataAndTrackUri(item.uri, resolveRegion());
-      await enqueueMeta(m, meta);
-      added++;
-      if (item.moodPick) {
-        moodAdded++;
-        if (item.id) moodIds.push(item.id);
-      } else if (item.discovered) {
-        similarAdded++;
-        if (item.id) discoveredIds.push(item.id);
-      } else if (item.id) {
-        fillerIds.push(item.id);
-      }
-      if (item.id) recentIds.add(item.id);
-      recorded.push({
-        id: item.id,
-        artist: item.artist,
-        name: item.name,
-        source: item.moodPick
-          ? "mood"
-          : item.discovered
-            ? "discovered"
-            : "filler",
-        mood: item.moodPick ? activeMoodPack?.id || null : null,
-      });
+      await enqueueOne(item);
     } catch (err) {
       console.error(`[random] failed to add ${item.uri}:`, err.message);
+    }
+    if (added > 0 && pendingDiscover.length) {
+      while (pendingDiscover.length && !wasPreempted()) {
+        const d = pendingDiscover.shift();
+        try {
+          await enqueueOne(d);
+        } catch (err) {
+          console.error(`[random] failed to add ${d.uri}:`, err.message);
+        }
+      }
+    }
+  }
+  // All playlist/mood leads failed — still enqueue deferred Discoveries.
+  while (pendingDiscover.length && !wasPreempted()) {
+    const d = pendingDiscover.shift();
+    try {
+      await enqueueOne(d);
+    } catch (err) {
+      console.error(`[random] failed to add ${d.uri}:`, err.message);
     }
   }
   if (recorded.length) recordPlayed(recorded);

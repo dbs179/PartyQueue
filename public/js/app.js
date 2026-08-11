@@ -2276,6 +2276,8 @@ const queueUi = createQueueUi(
     getLastQueueTracks: () => lastQueueTracks,
     applyQueueTracks: (tracks) => applyQueueTracks(tracks),
     loadQueue: (force) => loadQueue(force),
+    getGuestUser: () => guestIdentityPayload()?.requestedByUser || "",
+    onDedicate: (track) => searchUi.openDedicationModal(track),
   }
 );
 

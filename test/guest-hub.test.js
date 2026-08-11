@@ -5,11 +5,38 @@ import {
   guestNoteCount,
   guestHubStat,
   guestHubDesc,
+  guestOwnsQueueTrack,
 } from "../public/js/guest.js";
 import {
   guestBirthdayFormValues,
   guestNotesList,
 } from "../public/js/guest-hub-ui.js";
+
+test("guestOwnsQueueTrack matches canonical User case-insensitively", () => {
+  assert.equal(
+    guestOwnsQueueTrack(
+      { requestedByUser: "Dave", requestedBy: "DJ Dave" },
+      "dave"
+    ),
+    true
+  );
+  assert.equal(
+    guestOwnsQueueTrack({ requestedBy: "Legacy Guest" }, "legacy guest"),
+    true
+  );
+  assert.equal(
+    guestOwnsQueueTrack(
+      { requestedByUser: "Maria", requestedBy: "Maria" },
+      "Owen"
+    ),
+    false
+  );
+  assert.equal(guestOwnsQueueTrack({ searched: true }, "Dave"), false);
+  assert.equal(
+    guestOwnsQueueTrack({ requestedByUser: "Dave" }, ""),
+    false
+  );
+});
 
 test("formatGuestBirthday formats month day and role", () => {
   assert.equal(

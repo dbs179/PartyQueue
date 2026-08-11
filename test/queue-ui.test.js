@@ -45,6 +45,25 @@ test("queueTrackSig changes with genre flag and badges inputs", () => {
   assert.equal(queueTrackSig(track, { showQueueGenre: false }), a);
 });
 
+test("queueTrackSig includes dedication and requestedByUser for row refresh", () => {
+  const base = {
+    uri: "spotify:track:1",
+    title: "A",
+    artist: "B",
+    searched: true,
+    requestedBy: "Dave",
+    requestedByUser: "Dave",
+  };
+  assert.notEqual(
+    queueTrackSig(base),
+    queueTrackSig({ ...base, dedication: "For Sam" })
+  );
+  assert.notEqual(
+    queueTrackSig(base),
+    queueTrackSig({ ...base, requestedByUser: "Maria" })
+  );
+});
+
 test("queueOriginBadgeHtml covers dedication, request, discover, era, random", () => {
   assert.match(
     queueOriginBadgeHtml({ moodPick: true }, { eraLabel: "80s" }),

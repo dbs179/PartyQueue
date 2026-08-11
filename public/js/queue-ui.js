@@ -5,6 +5,7 @@ import {
   sanitizeDisplayName,
   sanitizeDedication,
   dedicationDisplayLabel,
+  guestOwnsQueueTrack,
 } from "./guest.js";
 import { trackEraDisplayLabel } from "./genre-presets.js";
 import { displayOriginLabel } from "./now-playing-origin.js";
@@ -39,6 +40,7 @@ export function queueTrackSig(track, { showQueueGenre = false } = {}) {
     track.moodPick ? 1 : 0,
     track.mood || "",
     track.requestedBy || "",
+    track.requestedByUser || "",
     track.dedication || "",
     track.title || "",
     track.artist || "",
@@ -155,6 +157,8 @@ export function queueBadgeHtml(track, opts = {}) {
  *   applyQueueTracks: (tracks: object[]) => void,
  *   loadQueue: (force?: boolean) => void|Promise<void>,
  *   Sortable?: { create: (el: HTMLElement, opts: object) => { destroy: () => void } },
+ *   getGuestUser?: () => string,
+ *   onDedicate?: (track: object) => void|Promise<void>,
  * }} deps
  */
 export function createQueueUi(els, deps) {
@@ -176,6 +180,8 @@ export function createQueueUi(els, deps) {
   const getLastQueueTracks = deps.getLastQueueTracks;
   const applyQueueTracks = deps.applyQueueTracks;
   const loadQueue = deps.loadQueue;
+  const getGuestUser = deps.getGuestUser || (() => "");
+  const onDedicate = deps.onDedicate || null;
   const SortableCtor = deps.Sortable || (typeof window !== "undefined" ? window.Sortable : null);
 
   let editMode = false;
@@ -356,13 +362,30 @@ export function createQueueUi(els, deps) {
     }
   }
 
+  function queueRowSig(track) {
+    const owns = guestOwnsQueueTrack(track, getGuestUser()) ? "1" : "0";
+    return `${queueTrackSig(track, badgeOpts(track))}|${owns}`;
+  }
+
   function fillQueueRow(li, track, index) {
     li.className = "track track-noart" + (editMode ? " editing" : "");
     li.dataset.uri = track.uri || "";
     li.dataset.position = String(track.position || index + 1);
-    li.dataset.sig = queueTrackSig(track, badgeOpts(track));
+    li.dataset.sig = queueRowSig(track);
     const del = editMode
       ? `<button class="track-delete" type="button" aria-label="Remove from queue" title="Remove from queue">&times;</button>`
+      : "";
+    const canDedicate =
+      !editMode &&
+      onDedicate &&
+      track.searched &&
+      !track.djVoice &&
+      guestOwnsQueueTrack(track, getGuestUser());
+    const hasDedication = !!sanitizeDedication(track.dedication || "");
+    const dedicate = canDedicate
+      ? `<button class="track-dedicate" type="button">${
+          hasDedication ? "Edit" : "Dedicate"
+        }</button>`
       : "";
     const badge = queueBadgeHtml(track, badgeOpts(track));
     li.innerHTML = `
@@ -372,12 +395,18 @@ export function createQueueUi(els, deps) {
         <div class="artist">${escapeHtml(track.artist)}</div>
         ${badge ? `<div class="queue-tag">${badge}</div>` : ""}
       </div>
+      ${dedicate}
       ${del}
     `;
     if (editMode) {
       li.querySelector(".track-delete").addEventListener("click", () =>
         removeQueueItem(li)
       );
+    } else if (canDedicate) {
+      li.querySelector(".track-dedicate")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        void onDedicate(track);
+      });
     }
   }
 
@@ -406,7 +435,7 @@ export function createQueueUi(els, deps) {
       let changed = false;
       list.forEach((track, i) => {
         const li = kids[i];
-        const sig = queueTrackSig(track, badgeOpts(track));
+        const sig = queueRowSig(track);
         if (li.dataset.sig !== sig) {
           fillQueueRow(li, track, i);
           changed = true;

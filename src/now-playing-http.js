@@ -18,7 +18,6 @@ import {
 } from "./sonos.js";
 
 const GENRE_LABEL_BY_ID = new Map(GENRE_BUCKETS.map((b) => [b.id, b.label]));
-const SET_ORIGINS = new Set(["filler", "discovered", "mood"]);
 
 function labelForLane(lane) {
   if (!lane) return null;
@@ -72,8 +71,10 @@ export async function upcomingTrackForGenreDisplay() {
 
 /**
  * What the Now Playing "Genre:" header should show for this track.
- * - Random / Never-Ending / Discover / era picks → that track's set lane
- *   (stored at enqueue; falls back to the latest recorded lane for older rows)
+ * - Playlist filler / era mood → that track's set lane (enqueue lane, else latest)
+ * - Songs Like (discovered) → artist's strongest mapped genre when known, so an
+ *   off-lane Discover (Bieber in a metal set) does not inherit the set label;
+ *   falls back to set lane only when the artist has no buckets
  * - Guest requests → that artist's mapped genre
  * - DJ announce / silence → upcoming song's genre (what the DJ is introducing)
  * - Idle / unknown → hidden (do not keep a stale set lane)
@@ -111,9 +112,31 @@ export function resolveDisplayGenre(
   }
 
   const origin = typeof np.origin === "string" ? np.origin : null;
-  if (SET_ORIGINS.has(origin)) {
-    const trackLane =
-      typeof np.genreLane === "string" && np.genreLane ? np.genreLane : null;
+  const trackLane =
+    typeof np.genreLane === "string" && np.genreLane ? np.genreLane : null;
+
+  // Discover: prefer the artist's strongest tag-mapped bucket (array order from
+  // tagsToBuckets), not set-lane inheritance or dominantBucket's metal-first bias.
+  if (origin === "discovered") {
+    const buckets =
+      typeof bucketsFor === "function" ? bucketsFor(np.artist) || [] : [];
+    const artistLane = buckets.find((b) => b && b !== "other") || null;
+    if (artistLane) {
+      const label = labelForLane(artistLane);
+      return {
+        mixGenreLane: label ? artistLane : null,
+        mixGenreLabel: label,
+      };
+    }
+    const lane = trackLane || setLane;
+    const label = labelForLane(lane);
+    return {
+      mixGenreLane: label ? lane : null,
+      mixGenreLabel: label,
+    };
+  }
+
+  if (origin === "filler" || origin === "mood") {
     const lane = trackLane || setLane;
     const label = labelForLane(lane);
     return {
@@ -132,7 +155,6 @@ export function resolveDisplayGenre(
   }
   return { mixGenreLane: null, mixGenreLabel: null };
 }
-
 export async function enrichNowPlaying(np) {
   const trackId = spotifyTrackId(np?.uri);
   const setLane = getGenreFlowState().lastLane;

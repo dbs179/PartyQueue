@@ -386,13 +386,15 @@ export function createSearchUi(els, deps) {
     }
   }
 
-  function openDedicationModal(track) {
-    if (!dedicationOverlay || !dedicationInput) return;
+  async function openDedicationModal(track) {
+    if (!dedicationOverlay || !dedicationInput || !track) return;
+    const displayName = await ensureDisplayName({ required: true });
+    if (!displayName) return;
     if (dedicationError) {
       dedicationError.hidden = true;
       dedicationError.textContent = "";
     }
-    dedicationInput.value = "";
+    dedicationInput.value = sanitizeDedication(track.dedication || "");
 
     let session = null;
     const cleanup = () => {
@@ -426,9 +428,10 @@ export function createSearchUi(els, deps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             uri: track.uri,
-            name: track.name,
-            artist: track.artists,
+            name: track.name || track.title,
+            artist: track.artists || track.artist,
             dedication: note,
+            ...guestIdentityPayload(),
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -483,5 +486,6 @@ export function createSearchUi(els, deps) {
     setNowPlaying,
     getNowPlayingId,
     updateResultsQueuedState,
+    openDedicationModal,
   };
 }

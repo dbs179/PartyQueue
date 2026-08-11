@@ -2340,6 +2340,31 @@ button.guest-name:focus-visible {
   display: none;
 }
 
+/* Owner Dedicate / Edit on Up Next (hidden in edit mode). */
+.track-dedicate {
+  flex-shrink: 0;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.track-dedicate:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
 /* Delete (x) button on a queue row, only shown in edit mode. */
 .track-delete {
   flex-shrink: 0;

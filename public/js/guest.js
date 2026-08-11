@@ -75,6 +75,17 @@ export function guestIdentityPayload(sessionDisplayName, sessionDisplayAlias) {
   };
 }
 
+/** True when this guest is the requester of a searched Up Next row. */
+export function guestOwnsQueueTrack(track, user) {
+  const me = sanitizeDisplayName(user || "");
+  if (!me || !track) return false;
+  const owner =
+    sanitizeDisplayName(track.requestedByUser || "") ||
+    sanitizeDisplayName(track.requestedBy || "");
+  if (!owner) return false;
+  return owner.toLowerCase() === me.toLowerCase();
+}
+
 const BIRTHDAY_MONTHS = [
   "",
   "Jan",
