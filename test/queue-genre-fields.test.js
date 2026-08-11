@@ -64,10 +64,24 @@ test("queueTrackGenreFields keeps set lane when two tags expand to three buckets
 });
 
 test("queueTrackGenreFields maps searched artists from genre cache", () => {
-  const out = queueTrackGenreFields("Ariana Grande", { source: "searched" });
-  assert.ok(out.genreLanes.length === 1);
-  assert.ok(out.genreLabels.length === 1);
-  assert.ok(!out.genreLanes.includes("other"));
+  // Inject buckets — CI has no Last.fm genre cache on disk.
+  const out = queueTrackGenreFields(
+    "Ariana Grande",
+    { source: "searched" },
+    { bucketsFor: () => ["pop", "other"] }
+  );
+  assert.deepEqual(out.genreLanes, ["pop"]);
+  assert.deepEqual(out.genreLabels, ["Pop"]);
+});
+
+test("queueTrackGenreFields searched with empty cache has no pills", () => {
+  const out = queueTrackGenreFields(
+    "Anyone Unknown ZzZz",
+    { source: "searched" },
+    { bucketsFor: () => [] }
+  );
+  assert.deepEqual(out.genreLanes, []);
+  assert.deepEqual(out.genreLabels, []);
 });
 
 test("queueTrackFromPlaylist: filler yes, discover/mood no", () => {

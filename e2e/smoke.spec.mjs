@@ -334,11 +334,16 @@ test.describe("PartyQueue browser smoke", () => {
           `data: ${JSON.stringify(pending)}\n\n`,
       })
     );
-    // Initial HTTP fetch must also be confirmed so lastConfirmed is seeded
-    // before the pending SSE event arrives.
-    await page.route("**/api/nowplaying", (route) =>
-      route.fulfill({ status: 200, json: confirmed })
-    );
+    // Seed lastConfirmed from the first HTTP fetch, then stay on pending so a
+    // later poll cannot wipe the grey "Updating" state back to Playing.
+    let npHttpCalls = 0;
+    await page.route("**/api/nowplaying", (route) => {
+      npHttpCalls += 1;
+      return route.fulfill({
+        status: 200,
+        json: npHttpCalls === 1 ? confirmed : pending,
+      });
+    });
     await page.route("**/api/queue/stream", (route) =>
       route.fulfill({
         status: 200,
@@ -490,7 +495,8 @@ test.describe("PartyQueue browser smoke", () => {
     await expect(page.locator("#np-title")).toHaveText("Queued Next");
     await expect(page.locator("#np-title")).not.toHaveText("Changing track…");
     await expect(page.locator("#np-art")).toHaveAttribute("src", /queued-cover/);
-    await expect(page.locator("#np-state")).toHaveText("Updating");
+    // Optimistic next-track already knows the song — Playing, not grey Updating.
+    await expect(page.locator("#np-state")).toHaveText("Playing");
   });
 
   test("js modules are served as ES modules", async ({ request }) => {
