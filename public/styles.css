@@ -2417,31 +2417,46 @@ button.guest-name:focus-visible {
   color: var(--muted);
 }
 
-/* Ranked request lists — stacked on phone; 3 columns on desktop. */
+/* Ranked request lists — stacked on phone; 4 columns on desktop (match cards). */
 .stats-sections {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 10px;
+}
+
+.stats-section {
+  min-width: 0;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--surface), var(--surface-2));
+  box-sizing: border-box;
 }
 
 .stats-section .setting-group-label {
-  margin-top: 8px;
+  margin-top: 0;
+  margin-bottom: 6px;
 }
 
-.stats-section:first-child .setting-group-label {
+.stats-section .settings-intro {
   margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.stats-section .stats-list {
+  margin-bottom: 0;
 }
 
 @media (min-width: 960px) {
   #view-stats .stats-sections {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
     align-items: start;
   }
 
-  #view-stats .stats-section .setting-group-label {
-    margin-top: 0;
+  #view-stats .stats-section {
+    padding: 12px;
   }
 }
 
