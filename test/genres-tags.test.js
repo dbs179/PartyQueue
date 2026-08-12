@@ -33,6 +33,26 @@ test("tagsToBuckets ignores tags below the popularity floor", () => {
   assert.deepEqual(buckets, ["rock"]);
 });
 
+test("tagsToBuckets drops weak secondary tags (Passenger-shaped Last.fm noise)", () => {
+  // folk dominates; "alternative metal" is a noisy mid-strength tag and must
+  // not put this artist into Metal Random / exact-lane pools.
+  const buckets = tagsToBuckets([
+    { name: "folk", count: 100 },
+    { name: "alternative metal", count: 64 },
+    { name: "singer-songwriter", count: 40 },
+  ]);
+  assert.deepEqual(buckets, ["folk"]);
+  assert.ok(!buckets.includes("metal"));
+});
+
+test("tagsToBuckets keeps a strong secondary tag near the top count", () => {
+  const buckets = tagsToBuckets([
+    { name: "metal", count: 100 },
+    { name: "rock", count: 80 },
+  ]);
+  assert.deepEqual(buckets, ["metal", "rock"]);
+});
+
 test("tagsToBuckets treats pop punk as Punk only and caps at two genres", () => {
   // Yellowcard-shaped: pop punk must not also become Pop via \\bpop\\b.
   const buckets = tagsToBuckets([

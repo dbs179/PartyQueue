@@ -915,44 +915,43 @@
       </div>
 
       <div id="view-settings-look" class="view" hidden>
-        <div class="subpage-head">
+        <div class="subpage-head look-subpage-head">
           <h2 class="section-label subpage-title">Look</h2>
+          <button id="look-text-save" type="button" class="subpage-head-link">Save</button>
           <button id="settings-look-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <div class="settings-box settings-panel">
-          <p class="settings-intro">Party branding — banners and header text. Desktop uses the wide hero overlay; phones stack the banner above centered title text. The version-tag switch lives on the Booth page.</p>
-          <p class="section-label settings-banner-label">Desktop banner</p>
-          <p class="settings-intro">Wide header image for PC (PNG, JPG, WEBP or GIF, 8&nbsp;MB max).</p>
-          <div class="banner-actions">
-            <button id="banner-upload-btn" type="button" class="pill-btn success">Upload desktop banner</button>
+        <div class="look-sections">
+          <div class="look-section">
+            <div class="look-section-head">
+              <p class="section-label">Desktop banner</p>
+              <button id="banner-upload-btn" type="button" class="subpage-head-link">Upload</button>
+            </div>
+            <p class="settings-intro">Wide header image for PC (PNG, JPG, WEBP or GIF, 8&nbsp;MB max).</p>
             <input id="banner-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+            <div id="banner-gallery" class="banner-gallery"></div>
           </div>
-          <div id="banner-gallery" class="banner-gallery"></div>
 
-          <div class="controls-divider" aria-hidden="true"></div>
-
-          <p class="section-label settings-banner-label">Phone banner</p>
-          <p class="settings-intro">Taller header for phones. Default follows the desktop banner.</p>
-          <div class="banner-actions">
-            <button id="banner-mobile-upload-btn" type="button" class="pill-btn success">Upload phone banner</button>
+          <div class="look-section">
+            <div class="look-section-head">
+              <p class="section-label">Phone banner</p>
+              <button id="banner-mobile-upload-btn" type="button" class="subpage-head-link">Upload</button>
+            </div>
+            <p class="settings-intro">Taller header for phones. Default follows the desktop banner.</p>
             <input id="banner-mobile-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+            <div id="banner-mobile-gallery" class="banner-gallery"></div>
           </div>
-          <div id="banner-mobile-gallery" class="banner-gallery"></div>
 
-          <div class="controls-divider" aria-hidden="true"></div>
-
-          <p class="section-label settings-banner-label">Text</p>
-          <p class="settings-intro">Name shown in the header and the tagline beneath it.</p>
-          <div class="setting-row-text">
-            <label class="setting-label" for="set-event-name">Header</label>
-            <input type="text" id="set-event-name" class="setting-input" maxlength="60" placeholder="PartyQueue" />
-          </div>
-          <div class="setting-row-text">
-            <label class="setting-label" for="set-subtitle">Subtitle</label>
-            <input type="text" id="set-subtitle" class="setting-input" maxlength="120" placeholder="Tagline (optional)" />
-          </div>
-          <div class="settings-actions">
-            <button id="look-text-save" type="button" class="pill-btn success">Save</button>
+          <div class="look-section">
+            <p class="section-label">Text</p>
+            <p class="settings-intro">Name shown in the header and the tagline beneath it.</p>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-event-name">Header</label>
+              <input type="text" id="set-event-name" class="setting-input" maxlength="60" placeholder="PartyQueue" />
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-subtitle">Subtitle</label>
+              <input type="text" id="set-subtitle" class="setting-input" maxlength="120" placeholder="Tagline (optional)" />
+            </div>
           </div>
         </div>
       </div>

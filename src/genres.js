@@ -49,7 +49,7 @@ export const GENRE_BUCKETS = [
 // their raw tags are re-mapped locally (free); artists stuck in "Other" under an
 // older mapping are re-fetched once to try the new buckets. Also bump when
 // needsFetch rules change so legacy bucket-only rows get a Last.fm refresh.
-const MAPPING_VERSION = 5;
+const MAPPING_VERSION = 6;
 
 const BUCKET_IDS = new Set(GENRE_BUCKETS.map((b) => b.id));
 
@@ -58,9 +58,15 @@ const BUCKET_IDS = new Set(GENRE_BUCKETS.map((b) => b.id));
 // TOP_TAGS buckets (insertion order from strongest tag first) so a compound
 // tag can't inflate an artist past two genres. We still *store* more raw tags
 // so future mapping bumps remapping without another network round-trip.
+//
+// Secondary tags must also be close to the #1 tag's count. Last.fm often
+// attaches a noisy mid-strength genre (e.g. Passenger: folk 100 +
+// "alternative metal" 64) that would otherwise let folk artists into Metal
+// Random sets via fitsExactLane.
 const TOP_TAGS = 2;
 const RAW_TAG_STORE = 12;
 const MIN_TAG_COUNT = 10;
+const MIN_RELATIVE_TAG = 0.75;
 
 // Throttle Last.fm calls. Their terms ask for <= ~5 req/sec; we stay well under.
 const REQ_GAP_MS = 250;
@@ -155,6 +161,7 @@ export const GENRE_TAG_GUIDE = [
 export const GENRE_TAG_RULES = {
   topTags: TOP_TAGS,
   minTagCount: MIN_TAG_COUNT,
+  minRelativeTag: MIN_RELATIVE_TAG,
 };
 
 // Map a single Last.fm tag string to zero or more buckets. A tag can land in
@@ -191,8 +198,8 @@ function tagToBuckets(tag) {
 }
 
 // Reduce an artist's top tags to at most TOP_TAGS genre buckets.
-// Only the strongest TOP_TAGS Last.fm tags (by count) are considered, then
-// the mapped buckets are capped at TOP_TAGS (strongest-tag insertion order).
+// Rank by Last.fm count, drop tags below the popularity floor or far weaker
+// than #1, then map into at most TOP_TAGS buckets (strongest-tag order).
 export function tagsToBuckets(tags) {
   const ranked = (Array.isArray(tags) ? tags : [])
     .map((t) => ({
@@ -205,11 +212,21 @@ export function tagsToBuckets(tags) {
       const bc = Number.isFinite(b.count) ? b.count : -1;
       return bc - ac;
     })
-    .slice(0, TOP_TAGS);
+    .slice(0, RAW_TAG_STORE);
+  const topCount = ranked.find(
+    (t) => Number.isFinite(t.count) && t.count >= MIN_TAG_COUNT
+  )?.count;
   const buckets = [];
   const seen = new Set();
   for (const { name, count } of ranked) {
     if (Number.isFinite(count) && count < MIN_TAG_COUNT) continue;
+    if (
+      Number.isFinite(topCount) &&
+      Number.isFinite(count) &&
+      count < topCount * MIN_RELATIVE_TAG
+    ) {
+      continue;
+    }
     for (const b of tagToBuckets(name)) {
       if (seen.has(b)) continue;
       seen.add(b);
