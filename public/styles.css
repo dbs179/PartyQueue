@@ -1752,25 +1752,149 @@ button.guest-name:focus-visible {
 }
 
 @media (min-width: 960px) {
+  /* Fit Booth root to one viewport like the main page. */
+  body:has(#view-booth:not([hidden])) {
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  body:has(#view-booth:not([hidden])) > .header {
+    flex: 0 0 auto;
+  }
+
+  body:has(#view-booth:not([hidden])) > .container {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  body:has(#view-booth:not([hidden])) #view-booth {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  #view-booth .booth-subpage-head {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+  }
+
   #view-booth .booth-toggle-board {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 16px;
+    gap: 12px;
     align-items: stretch;
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
   #view-booth .booth-toggle-col {
     height: 100%;
     display: flex;
     flex-direction: column;
+    padding: 10px 12px;
+    overflow: auto;
   }
 
   #view-booth .booth-toggle-col .options-list {
     flex: 1 1 auto;
+    gap: 6px;
+  }
+
+  #view-booth .booth-toggle-col .booth-toggle-group {
+    margin-top: 10px;
+    margin-bottom: 0;
+    font-size: 0.82rem;
+  }
+
+  #view-booth .booth-toggle-col .options-list > .booth-toggle-group:first-child {
+    margin-top: 0;
+  }
+
+  #view-booth .booth-toggle-col .autofill {
+    gap: 8px;
+    padding: 6px 10px;
+  }
+
+  #view-booth .booth-toggle-col .autofill-switch {
+    width: 36px;
+    height: 20px;
+  }
+
+  #view-booth .booth-toggle-col .autofill-switch::after {
+    top: 1px;
+    left: 1px;
+    width: 16px;
+    height: 16px;
+  }
+
+  #view-booth .booth-toggle-col .autofill-input:checked + .autofill-switch::after {
+    transform: translateX(16px);
+  }
+
+  #view-booth .booth-toggle-col .autofill-label {
+    font-size: 0.82rem;
+  }
+
+  #view-booth .booth-toggle-col .autofill-hint {
+    font-size: 0.7rem;
+    line-height: 1.2;
+  }
+
+  #view-booth .booth-tv-preview-hint {
+    margin: 0 0 6px;
+    font-size: 0.72rem;
+  }
+
+  #view-booth .booth-tv-preview-actions {
+    gap: 6px;
+    margin: 0 0 6px;
+  }
+
+  #view-booth .booth-tv-preview-actions .pill-btn {
+    height: 34px;
+    min-height: 34px;
+    max-height: 34px;
+    font-size: 0.78rem;
+  }
+
+  #view-booth .settings-hub {
+    flex: 0 0 auto;
+    margin-top: 0;
+    padding: 0;
+    background: none;
+    border: none;
   }
 
   #view-booth .settings-hub-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  #view-booth .settings-hub-card {
+    padding: 8px 10px;
+    gap: 2px;
+  }
+
+  #view-booth .settings-hub-title {
+    font-size: 0.88rem;
+  }
+
+  #view-booth .settings-hub-desc {
+    font-size: 0.7rem;
+    line-height: 1.2;
+  }
+
+  #view-booth .settings-hub-stat {
+    font-size: 0.78rem;
   }
 }
 
