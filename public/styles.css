@@ -547,15 +547,14 @@ button.subpage-head-link:active {
     align-items: flex-start;
     justify-content: flex-start;
     gap: 6px;
-    /* Wide enough for "PARTY QUEUE" at display size; 22ch was wrapping it. */
-    max-width: min(70%, 36ch);
+    max-width: min(70%, 22ch);
     width: auto;
   }
 
   .header h1 {
     grid-column: auto;
     width: max-content;
-    max-width: none;
+    max-width: 100%;
     margin: 0;
     text-align: left;
     color: var(--accent);
@@ -702,15 +701,11 @@ button.subpage-head-link:active {
     padding: 8px 16px 4px;
   }
 
-  /* Full-width thin strip: cap height so Controls/Up Next stay on screen.
-     Tall source art is cropped (cover), not letterboxed. */
+  /* Full-width banner, natural aspect (no crop / no letterbox). */
   body:has(#view-main:not([hidden])) > .header .hero {
     width: 100%;
     max-width: none;
     height: auto;
-    max-height: min(18vh, 160px);
-    object-fit: cover;
-    object-position: center;
     margin: 0;
   }
 
