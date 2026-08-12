@@ -65,13 +65,15 @@ export async function buildPartyStatsPayload(deps = {}) {
 
   const events = getRequests();
   const sinceTonight = nowFn() - STATS_WINDOW_HOURS * 60 * 60_000;
-  const tonight = summarizeRequests(events, sinceTonight);
-  const allTime = summarizeRequests(events, 0);
-  const karaoke = listKaraokeTracks(50);
-  const reacted = listReactedTracks(50);
-  const topLiked = listTopLikedTracks(50);
-  const partyMusic = listPartyMusicTracks(50);
-  const mostHated = listMostHatedTracks(50);
+  // UI boxes show 5 rows with scroll; keep a deeper leaderboard behind that.
+  const LIST_LIMIT = 25;
+  const tonight = summarizeRequests(events, sinceTonight, LIST_LIMIT);
+  const allTime = summarizeRequests(events, 0, LIST_LIMIT);
+  const karaoke = listKaraokeTracks(LIST_LIMIT);
+  const reacted = listReactedTracks(LIST_LIMIT);
+  const topLiked = listTopLikedTracks(LIST_LIMIT);
+  const partyMusic = listPartyMusicTracks(LIST_LIMIT);
+  const mostHated = listMostHatedTracks(LIST_LIMIT);
   const reactionLists = [karaoke, reacted, topLiked, partyMusic, mostHated];
 
   const needIds = [
@@ -102,15 +104,15 @@ export async function buildPartyStatsPayload(deps = {}) {
     mostHated,
     tonight: {
       ...tonight,
-      topSets: topSets(events, sinceTonight),
-      topRequesters: topRequesters(events, sinceTonight),
-      dedications: listDedications(sinceTonight, 40),
+      topSets: topSets(events, sinceTonight, LIST_LIMIT),
+      topRequesters: topRequesters(events, sinceTonight, LIST_LIMIT),
+      dedications: listDedications(sinceTonight, LIST_LIMIT),
     },
     allTime: {
       ...allTime,
-      topSets: topSets(events, 0),
-      topRequesters: topRequesters(events, 0),
-      dedications: listDedications(0, 40),
+      topSets: topSets(events, 0, LIST_LIMIT),
+      topRequesters: topRequesters(events, 0, LIST_LIMIT),
+      dedications: listDedications(0, LIST_LIMIT),
     },
   };
 }

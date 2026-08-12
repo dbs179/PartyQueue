@@ -2433,9 +2433,8 @@ button.guest-name:focus-visible {
   box-sizing: border-box;
 }
 
-.stats-section .setting-group-label {
-  margin-top: 0;
-  margin-bottom: 6px;
+.stats-section .section-label {
+  margin: 0 0 6px;
 }
 
 .stats-section .settings-intro {
@@ -2444,7 +2443,14 @@ button.guest-name:focus-visible {
 }
 
 .stats-section .stats-list {
+  /* Viewport for ~5 rows; longer lists scroll inside the box. */
+  --stats-row-h: 2.7rem;
   margin-bottom: 0;
+  max-height: calc(5 * var(--stats-row-h));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 @media (min-width: 960px) {
