@@ -546,15 +546,15 @@ button.subpage-head-link:active {
     flex-wrap: nowrap;
     align-items: flex-start;
     justify-content: flex-start;
-    gap: 6px;
-    max-width: min(70%, 22ch);
-    width: auto;
+    gap: 2px;
+    max-width: 70%;
+    width: max-content;
   }
 
   .header h1 {
     grid-column: auto;
     width: max-content;
-    max-width: 100%;
+    max-width: none;
     margin: 0;
     text-align: left;
     color: var(--accent);
