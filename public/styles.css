@@ -497,10 +497,15 @@ button.subpage-head-link:active {
   padding: 16px;
 }
 
-/* Desktop / 1440p host: wide shell, header brand | hero, Up Next | Controls. */
+/* Desktop / 1440p host: wide shell, header brand | hero, Up Next | Controls.
+   Shared header/container chrome keeps banner, title, subtitle, and version
+   pill aligned across Main, Booth, and every other subpage that uses them. */
 @media (min-width: 960px) {
   .container {
+    box-sizing: border-box;
+    width: 100%;
     max-width: min(2000px, 96vw);
+    padding: 6px 16px 10px;
   }
 
   .header {
@@ -508,7 +513,7 @@ button.subpage-head-link:active {
     width: 100%;
     max-width: min(2000px, 96vw);
     margin: 0 auto;
-    padding: 16px 16px 8px;
+    padding: 8px 16px 4px;
   }
 
   .header-banner {
@@ -516,7 +521,9 @@ button.subpage-head-link:active {
   }
 
   .hero {
+    width: 100%;
     max-width: none;
+    height: auto;
     margin: 0;
   }
 
@@ -698,26 +705,14 @@ button.subpage-head-link:active {
 
   body:has(#view-main:not([hidden])) > .header {
     flex: 0 0 auto;
-    padding: 8px 16px 4px;
-  }
-
-  /* Full-width banner, natural aspect (no crop / no letterbox). */
-  body:has(#view-main:not([hidden])) > .header .hero {
-    width: 100%;
-    max-width: none;
-    height: auto;
-    margin: 0;
   }
 
   body:has(#view-main:not([hidden])) > .container {
     flex: 1 1 auto;
     min-height: 0;
-    width: 100%;
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    padding: 6px 16px 10px;
-    box-sizing: border-box;
   }
 
   body:has(#view-main:not([hidden])) #view-main {
@@ -1787,10 +1782,11 @@ button.guest-name:focus-visible {
     margin-bottom: 0;
   }
 
+  /* Match Main ops/tools column tracks: equal 1fr + 16px gap. */
   #view-booth .booth-toggle-board {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 12px;
+    gap: 16px;
     align-items: stretch;
     flex: 1 1 auto;
     min-height: 0;
