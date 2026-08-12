@@ -274,6 +274,7 @@ const queuePanel = wirePanelCollapse(
 // loadGroups bound after createSonosGroups (below)
 let loadGroups = async () => {};
 let invalidateGroups = () => {};
+let reloadGroupsAfterTopology = async () => {};
 const controlsPanel = wirePanelCollapse(
   "controls-section",
   "controls-toggle",
@@ -403,6 +404,7 @@ syncToolbarMoodVisibility();
 const {
   loadGroups: loadGroupsImpl,
   invalidate: invalidateGroupsImpl,
+  reloadAfterTopologyChange: reloadGroupsAfterTopologyImpl,
 } = createSonosGroups(
   {
     groupChips: document.getElementById("group-chips"),
@@ -429,6 +431,7 @@ const {
 );
 loadGroups = loadGroupsImpl;
 invalidateGroups = invalidateGroupsImpl;
+reloadGroupsAfterTopology = reloadGroupsAfterTopologyImpl;
 
 // Randomness settings (song memory + per-artist budget), persisted server-side.
 const songMemoryInput = document.getElementById("set-song-memory");
@@ -2990,8 +2993,7 @@ volUp10Btn.addEventListener("click", () => {
 
 groupAllBtn.addEventListener("click", () => {
   postControl(groupAllBtn, "/api/group-all", (d) => {
-    invalidateGroups();
-    loadGroups(true);
+    reloadGroupsAfterTopology();
     showToast(`Grouped ${d.players} speakers · Volume ${d.volume}`);
   });
 });

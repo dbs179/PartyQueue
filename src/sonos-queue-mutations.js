@@ -30,7 +30,9 @@ import {
   originSnapshot,
   isFiller,
   clearSearchedOccurrence,
+  requestedByUserOf,
 } from "./queue-origin.js";
+import { sanitizeDisplayName } from "./display-name.js";
 import { parseSonosTime } from "./sonos-snapshots.js";
 import { queueWorkWasPreempted } from "./queue-preempt.js";
 
@@ -158,29 +160,41 @@ const SET_REQUEST_SIZE = 5;
 
 /**
  * Pure: pick Set Request tracks to enqueue — drop invalid URIs, songs already
- * upcoming, and duplicate Spotify ids inside the same payload (Spotify top
- * tracks can repeat). Preserves first-seen order up to `limit`.
+ * upcoming, and duplicates inside the same payload. Spotify top-tracks often
+ * list the same song under different ids (e.g. Country Roads + Original
+ * Version); match by Spotify id and songMatchKey. Preserves first-seen order
+ * up to `limit`.
  * @param {Array<{ uri: string, name?: string, artist?: string }>} tracks
  * @param {Iterable<string>|Set<string>} [upcomingIds]
  * @param {number} [limit]
+ * @param {Iterable<string>|Set<string>} [upcomingSongKeys]
  */
 export function filterSetRequestTracks(
   tracks,
   upcomingIds = [],
-  limit = SET_REQUEST_SIZE
+  limit = SET_REQUEST_SIZE,
+  upcomingSongKeys = []
 ) {
-  const blocked =
+  const blockedIds =
     upcomingIds instanceof Set ? upcomingIds : new Set(upcomingIds || []);
+  const blockedKeys =
+    upcomingSongKeys instanceof Set
+      ? upcomingSongKeys
+      : new Set(upcomingSongKeys || []);
   const max = Math.max(1, Math.floor(Number(limit) || SET_REQUEST_SIZE));
-  const seen = new Set();
+  const seenIds = new Set();
+  const seenKeys = new Set();
   const out = [];
   for (const t of Array.isArray(tracks) ? tracks : []) {
     if (!t || typeof t.uri !== "string" || !t.uri.startsWith("spotify:track:")) {
       continue;
     }
     const id = spotifyTrackId(t.uri);
-    if (!id || blocked.has(id) || seen.has(id)) continue;
-    seen.add(id);
+    if (!id || blockedIds.has(id) || seenIds.has(id)) continue;
+    const key = songMatchKey(t.name, t.artist);
+    if (key && (blockedKeys.has(key) || seenKeys.has(key))) continue;
+    seenIds.add(id);
+    if (key) seenKeys.add(key);
     out.push(t);
     if (out.length >= max) break;
   }
@@ -230,15 +244,24 @@ async function addSetRequestToQueueUnlocked(
 
   const start = playingFromQueue && currentTrack >= 1 ? currentTrack : 0;
   const upcomingIds = new Set();
+  const upcomingKeys = new Set();
   for (let i = start; i < items.length; i++) {
-    const itId = spotifyTrackId(items[i]?.TrackUri ?? items[i]?.uri);
+    const it = items[i];
+    const itId = spotifyTrackId(it?.TrackUri ?? it?.uri);
     if (itId) upcomingIds.add(itId);
+    const key = songMatchKey(it?.Title ?? it?.title, it?.Artist ?? it?.artist);
+    if (key) upcomingKeys.add(key);
   }
 
   if (!filterSetRequestTracks(tracks, [], SET_REQUEST_SIZE).length) {
     throw new Error("No tracks to add for this Set Request.");
   }
-  const toAdd = filterSetRequestTracks(tracks, upcomingIds, SET_REQUEST_SIZE);
+  const toAdd = filterSetRequestTracks(
+    tracks,
+    upcomingIds,
+    SET_REQUEST_SIZE,
+    upcomingKeys
+  );
   if (!toAdd.length) {
     throw new Error(
       "Those songs are already coming up — try another artist."
@@ -422,14 +445,24 @@ async function addTrackToQueueUnlocked(
       existing = null;
     }
   } else if (existing && existingWasRequested) {
-    // Already a guest request — allow another copy so Maria / Dave / Owen can
-    // each dedicate the same song with its own live note + stats row.
-    await enqueueMeta(m, meta, insertPos);
-    if (id) {
-      markOrigin([id], "searched", { ...byOpts, appendInstance: true });
+    // Same guest re-adding an upcoming request is idempotent. A different guest
+    // may still enqueue another copy for their own dedication / stats row.
+    const existingUser = existing.id ? requestedByUserOf(existing.id) : null;
+    const sameUser =
+      !!sanitizeDisplayName(requestedByUser) &&
+      !!sanitizeDisplayName(existingUser) &&
+      String(sanitizeDisplayName(requestedByUser)).toLowerCase() ===
+        String(sanitizeDisplayName(existingUser)).toLowerCase();
+    if (sameUser) {
+      // Leave `existing` set so queuePosition resolves to the waiting copy.
+    } else {
+      await enqueueMeta(m, meta, insertPos);
+      if (id) {
+        markOrigin([id], "searched", { ...byOpts, appendInstance: true });
+      }
+      duplicated = true;
+      existing = null;
     }
-    duplicated = true;
-    existing = null;
   } else {
     // Not already waiting in the queue -> insert a fresh copy ahead of filler.
     await enqueueMeta(m, meta, insertPos);
@@ -464,6 +497,9 @@ async function addTrackToQueueUnlocked(
   }
   const queuePosition = Math.max(1, (Number(absPos) || 1) - offset);
 
+  const alreadyRequested =
+    !!existing && existingWasRequested && !promoted && !duplicated;
+
   return {
     room: coordinator.Name,
     group: coordinator.GroupName,
@@ -471,7 +507,7 @@ async function addTrackToQueueUnlocked(
     promoted,
     duplicated,
     requestCreated: !existing || promoted || duplicated,
-    alreadyRequested: false,
+    alreadyRequested,
     queueWasEmpty,
     deferredStart: deferStartForShout,
     queuePosition,

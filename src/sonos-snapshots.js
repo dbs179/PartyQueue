@@ -84,7 +84,9 @@ async function listGroupsRaw() {
 
   let groups = [];
   try {
-    groups = await getZoneGroups(m);
+    // Always hit live topology for the group picker — snapshot TTL already
+    // coalesces /api/groups; the zone cache must not serve pre-ungroup state.
+    groups = await getZoneGroups(m, { fresh: true });
   } catch (err) {
     throw new Error(err.message || "Could not read Sonos groups.");
   }

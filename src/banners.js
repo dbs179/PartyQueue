@@ -354,16 +354,14 @@ export function migrateBannerFilenames() {
 }
 
 /**
- * Copy bundled starter banners into data/ on a fresh (empty) gallery only.
- * Never overwrites, and never re-seeds after the host deletes banners — otherwise
- * starters could not stay deleted.
+ * Copy any missing bundled starter banners into data/. Never overwrites.
+ * Matches DJ-icon seeding so Unraid upgrades that already have desktop files
+ * still pick up new phone (md-banner-*) starters from the image.
  */
 export function seedStarterBanners() {
   try {
     if (!fs.existsSync(STARTER_DIR)) return 0;
     ensureDir();
-    const existing = fs.readdirSync(BANNERS_DIR).filter(isSafeName);
-    if (existing.length) return 0;
     let copied = 0;
     for (const { src, dest } of STARTER_BANNERS) {
       const from = path.join(STARTER_DIR, src);

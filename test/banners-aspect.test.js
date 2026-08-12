@@ -10,6 +10,7 @@ import {
   isSafeBannerName,
   bannerThemeSlug,
   compareBannerGalleryOrder,
+  seedStarterBanners,
   DESKTOP_BANNER_MIN_RATIO,
   PHONE_BANNER_MAX_RATIO,
 } from "../src/banners.js";
@@ -84,5 +85,37 @@ test("readImageSize reads JPEG and PNG headers", () => {
     }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("seedStarterBanners fills missing phone starters when desktop files exist", () => {
+  const dataDir = path.resolve("data/banners");
+  const publicDir = path.resolve("public/banners");
+  const phoneName = "md-banner-vinyl.jpg";
+  const phoneData = path.join(dataDir, phoneName);
+  const phonePublic = path.join(publicDir, phoneName);
+  const desktopData = path.join(dataDir, "pc-banner-vinyl.jpg");
+  assert.ok(fs.existsSync(phonePublic), "bundled phone starter required");
+  assert.ok(
+    fs.existsSync(desktopData) || seedStarterBanners() >= 0,
+    "desktop gallery should be seedable"
+  );
+
+  const hadPhone = fs.existsSync(phoneData);
+  let backup = null;
+  if (hadPhone) {
+    backup = fs.readFileSync(phoneData);
+    fs.unlinkSync(phoneData);
+  }
+  try {
+    assert.equal(fs.existsSync(phoneData), false);
+    const copied = seedStarterBanners();
+    assert.ok(copied >= 1, `expected to copy at least ${phoneName}`);
+    assert.ok(fs.existsSync(phoneData), "phone starter restored");
+    // Second seed must not overwrite / re-count existing files.
+    assert.equal(seedStarterBanners(), 0);
+  } finally {
+    if (backup) fs.writeFileSync(phoneData, backup);
+    else seedStarterBanners();
   }
 });

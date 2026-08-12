@@ -88,6 +88,7 @@ import {
   enqueueRandomBatch,
   addTrackToQueue,
   addSetRequestToQueue,
+  filterSetRequestTracks,
   SET_REQUEST_SIZE,
   getQueueList,
   invalidateSonosSnapshots,
@@ -175,6 +176,17 @@ export function registerQueueRoutes(app, ctx) {
           fairnessResetAt: getFairnessResetAt(),
         });
         if (!decision.allowed) return { decision };
+        // Fairness marks same upcoming searched song as idempotent — do not
+        // call Sonos again (addTrackToQueue also no-ops for the same guest).
+        if (decision.alreadyRequested) {
+          return {
+            result: {
+              alreadyRequested: true,
+              requestCreated: false,
+              queuePosition: decision.queuePosition || 1,
+            },
+          };
+        }
 
         const added = await sonos.addTrackToQueue(uri, {
           name,
@@ -461,8 +473,13 @@ export function registerQueueRoutes(app, ctx) {
         }
 
         const filterExplicit = !!getContentSettings().filterExplicit;
-        let top = await getArtistTopTracks(id, { filterExplicit });
-        top = top.slice(0, SET_REQUEST_SIZE);
+        // Spotify often returns the same hit under multiple track ids; take a
+        // unique-by-song set of size SET_REQUEST_SIZE from the full top list.
+        const top = filterSetRequestTracks(
+          await getArtistTopTracks(id, { filterExplicit }),
+          [],
+          SET_REQUEST_SIZE
+        );
         if (!top.length) {
           return res.status(404).json({
             error: `No playable tracks found for ${artistName}.`,

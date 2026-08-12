@@ -109,6 +109,7 @@ export async function getManager() {
 
 let zoneCache = { at: 0, groups: null };
 let zoneInFlight = null;
+let zoneGeneration = 0;
 const ZONE_TTL_MS = 2000;
 
 export async function getZoneGroups(m, { fresh = false } = {}) {
@@ -117,17 +118,24 @@ export async function getZoneGroups(m, { fresh = false } = {}) {
     return zoneCache.groups;
   }
   // Collapse concurrent topology reads (many phones + DJ watch + autofill).
-  if (zoneInFlight) return zoneInFlight;
-  zoneInFlight = (async () => {
+  // Do not join an in-flight read when the caller asked for fresh — join/leave
+  // may have just cleared the cache, and a pre-mutation request must not win.
+  if (zoneInFlight && !fresh) return zoneInFlight;
+  const readGeneration = zoneGeneration;
+  const request = (async () => {
     try {
       const groups = await m.Devices[0].GetZoneGroupState();
-      zoneCache = { at: Date.now(), groups };
+      // clearZoneCache() bumps generation; never let a superseded read refill.
+      if (readGeneration === zoneGeneration) {
+        zoneCache = { at: Date.now(), groups };
+      }
       return groups;
     } finally {
-      zoneInFlight = null;
+      if (zoneInFlight === request) zoneInFlight = null;
     }
   })();
-  return zoneInFlight;
+  zoneInFlight = request;
+  return request;
 }
 
 // Map a topology member (uuid/host) back to a managed SonosDevice instance.
@@ -217,5 +225,18 @@ export function isNotCoordinatorError(err) {
 }
 
 export function clearZoneCache() {
+  zoneGeneration += 1;
   zoneCache = { at: 0, groups: null };
+  // Drop coalescing so the next reader starts a post-mutation SOAP query
+  // instead of awaiting a topology snapshot taken before join/leave/ungroup.
+  zoneInFlight = null;
+}
+
+/** Test helper — zone cache bookkeeping after clearZoneCache. */
+export function zoneCacheInfoForTests() {
+  return {
+    generation: zoneGeneration,
+    hasCache: !!zoneCache.groups,
+    hasInFlight: !!zoneInFlight,
+  };
 }

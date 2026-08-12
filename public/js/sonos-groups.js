@@ -101,9 +101,11 @@ export function createSonosGroups(els, deps) {
   let speakersCache = [];
   let groupsTargetLabel = null;
   let groupsLoading = false;
+  let pendingForceLoad = false;
   let lastGroupsAt = 0;
   let groupEditMode = false;
   let pickerRoom = null;
+  let topologyReloadTimer = null;
 
   function invalidate() {
     lastGroupsAt = 0;
@@ -377,26 +379,50 @@ export function createSonosGroups(els, deps) {
   }
 
   async function loadGroups(force = false) {
-    if (groupsLoading) return;
+    if (groupsLoading) {
+      if (force) pendingForceLoad = true;
+      return;
+    }
     if (!force && now() - lastGroupsAt < GROUPS_MS) return;
     groupsLoading = true;
     try {
-      const res = await fetchFn("/api/groups");
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not load groups.");
-      const normalized = normalizeGroupsPayload(data);
-      groupsCache = normalized.groups;
-      speakersCache = normalized.speakers;
-      groupsTargetLabel = normalized.targetLabel;
-      lastGroupsAt = now();
-      renderGroups();
+      do {
+        pendingForceLoad = false;
+        const res = await fetchFn("/api/groups", { cache: "no-store" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Could not load groups.");
+        const normalized = normalizeGroupsPayload(data);
+        groupsCache = normalized.groups;
+        speakersCache = normalized.speakers;
+        groupsTargetLabel = normalized.targetLabel;
+        lastGroupsAt = now();
+        renderGroups();
+      } while (pendingForceLoad);
     } catch (err) {
       if (force || !groupsCache.length) {
         showToast(err.message || "Could not load Sonos groups.", true);
       }
     } finally {
       groupsLoading = false;
+      if (pendingForceLoad) {
+        pendingForceLoad = false;
+        loadGroups(true);
+      }
     }
+  }
+
+  /** Immediate refresh + one follow-up — Sonos topology often lags SETTLE_MS. */
+  async function reloadAfterTopologyChange() {
+    invalidate();
+    await loadGroups(true);
+    refreshSonos();
+    if (topologyReloadTimer) clearTimeout(topologyReloadTimer);
+    topologyReloadTimer = setTimeout(() => {
+      topologyReloadTimer = null;
+      invalidate();
+      loadGroups(true);
+      refreshSonos();
+    }, 900);
   }
 
   async function pickGroup(room) {
@@ -408,9 +434,7 @@ export function createSonosGroups(els, deps) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not select group.");
-      invalidate();
-      await loadGroups(true);
-      refreshSonos();
+      await reloadAfterTopologyChange();
       showToast(`Targeting ${data.label}`);
     } catch (err) {
       showToast(err.message, true);
@@ -426,9 +450,7 @@ export function createSonosGroups(els, deps) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not join speaker.");
-      invalidate();
-      await loadGroups(true);
-      refreshSonos();
+      await reloadAfterTopologyChange();
       if (data.alreadyInGroup) showToast(`${room} is already in the group`);
       else showToast(`Joined ${room}`);
     } catch (err) {
@@ -445,9 +467,7 @@ export function createSonosGroups(els, deps) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not ungroup speaker.");
-      invalidate();
-      await loadGroups(true);
-      refreshSonos();
+      await reloadAfterTopologyChange();
       if (data.alreadyStandalone) showToast(`${room} is already alone`);
       else showToast(`Ungrouped ${room}`);
     } catch (err) {
@@ -466,9 +486,7 @@ export function createSonosGroups(els, deps) {
       const res = await hostFetch("/api/groups/ungroup-all", { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not ungroup speakers.");
-      invalidate();
-      await loadGroups(true);
-      refreshSonos();
+      await reloadAfterTopologyChange();
       showToast(ungroupAllToastMessage(data.ungrouped));
     } catch (err) {
       showToast(err.message, true);
@@ -486,5 +504,6 @@ export function createSonosGroups(els, deps) {
     loadGroups,
     setGroupEditMode,
     invalidate,
+    reloadAfterTopologyChange,
   };
 }
