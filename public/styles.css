@@ -586,11 +586,11 @@ button.subpage-head-link:active {
 
   .version-tag {
     margin: 0;
-    padding: 3px 9px;
+    padding: 2px 7px;
     border: 1px solid var(--accent);
     background: rgba(0, 0, 0, 0.45);
     color: var(--accent);
-    font-size: 0.82rem;
+    font-size: 0.74rem;
   }
 
   .header .subtitle {
