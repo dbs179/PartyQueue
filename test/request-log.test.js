@@ -100,6 +100,22 @@ test("summarizeRequests honors the limit", () => {
   assert.equal(out.topArtists.length, 3);
 });
 
+test("topSets ranks setRequest rows by artist/set id", () => {
+  const events = [
+    { id: "set:a1", name: "Set Request", artist: "Alpha", kind: "setRequest", ts: 1 },
+    { id: "set:a1", name: "Set Request", artist: "Alpha", kind: "setRequest", ts: 2 },
+    { id: "set:b1", name: "Set Request", artist: "Beta", kind: "setRequest", ts: 3 },
+    { id: "t1", name: "Song", artist: "Alpha", kind: "setTrack", ts: 2 },
+    { id: "s1", name: "Hit", artist: "Gamma", ts: 4 },
+  ];
+  const top = reqlog.topSets(events, 0, 5);
+  assert.deepEqual(top, [
+    { id: "set:a1", name: "Alpha", count: 2 },
+    { id: "set:b1", name: "Beta", count: 1 },
+  ]);
+  assert.equal(reqlog.topSets(events, 3, 5).length, 1);
+});
+
 test("topRequesters ranks by count and skips blank names", () => {
   const events = [
     { id: "1", ts: 1, requestedBy: "Alex" },

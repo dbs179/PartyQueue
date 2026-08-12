@@ -1490,6 +1490,7 @@ document.getElementById("suggestions-clear-all")?.addEventListener("click", (e) 
 const statsBody = document.getElementById("stats-body");
 const statsCards = document.getElementById("stats-cards");
 const statsSongs = document.getElementById("stats-songs");
+const statsSets = document.getElementById("stats-sets");
 const statsArtists = document.getElementById("stats-artists");
 const statsRequesters = document.getElementById("stats-requesters");
 const statsDedicationsWrap = document.getElementById("stats-dedications-wrap");
@@ -1508,13 +1509,14 @@ const statsReacted = document.getElementById("stats-reacted");
 const statsEmpty = document.getElementById("stats-empty");
 const statsWinBtns = document.querySelectorAll("#stats-box .stats-win-btn");
 let statsData = null;
-let statsWindow = "tonight";
+let statsWindow = "allTime";
 
 function renderStats() {
   if (!statsData) return;
   const s = statsData[statsWindow] || {
     total: 0,
     topSongs: [],
+    topSets: [],
     topArtists: [],
     topRequesters: [],
   };
@@ -1527,8 +1529,10 @@ function renderStats() {
   const mostHated = Array.isArray(statsData.mostHated)
     ? statsData.mostHated
     : [];
+  const sets = Array.isArray(s.topSets) ? s.topSets : [];
   const empty =
     !s.total &&
+    !sets.length &&
     !karaoke.length &&
     !reacted.length &&
     !topLiked.length &&
@@ -1543,6 +1547,11 @@ function renderStats() {
   statsSongs.innerHTML = s.total
     ? statRows(s.topSongs, "song")
     : `<li class="stats-row stats-row-empty"><span class="stats-name">No requests yet</span></li>`;
+  if (statsSets) {
+    statsSets.innerHTML = sets.length
+      ? statRows(sets, "set")
+      : `<li class="stats-row stats-row-empty"><span class="stats-name">No set requests yet</span></li>`;
+  }
   statsArtists.innerHTML = s.total
     ? statRows(s.topArtists, "artist")
     : `<li class="stats-row stats-row-empty"><span class="stats-name">No requests yet</span></li>`;

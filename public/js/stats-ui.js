@@ -27,14 +27,14 @@ export function formatNameList(names) {
 
 /**
  * @param {Array<object>|null|undefined} items
- * @param {"song"|"artist"|"requester"} primaryKey
+ * @param {"song"|"artist"|"requester"|"set"} primaryKey
  */
 export function statRows(items, primaryKey) {
   return (Array.isArray(items) ? items : [])
     .map((it, i) => {
       const main =
-        primaryKey === "song"
-          ? escapeHtml(it.name || "Unknown")
+        primaryKey === "song" || primaryKey === "set"
+          ? escapeHtml(it.name || (primaryKey === "set" ? "Unknown set" : "Unknown"))
           : primaryKey === "requester"
             ? escapeHtml(it.name || "Guest")
             : escapeHtml(it.artist);

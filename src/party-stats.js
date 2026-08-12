@@ -7,6 +7,7 @@ import {
   getRequests,
   summarizeRequests,
   topRequesters,
+  topSets,
   listDedications,
 } from "./request-log.js";
 import {
@@ -101,11 +102,13 @@ export async function buildPartyStatsPayload(deps = {}) {
     mostHated,
     tonight: {
       ...tonight,
+      topSets: topSets(events, sinceTonight),
       topRequesters: topRequesters(events, sinceTonight),
       dedications: listDedications(sinceTonight, 40),
     },
     allTime: {
       ...allTime,
+      topSets: topSets(events, 0),
       topRequesters: topRequesters(events, 0),
       dedications: listDedications(0, 40),
     },

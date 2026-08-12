@@ -310,6 +310,32 @@ export function topRequesters(events, sinceTs = 0, limit = 5) {
     .slice(0, limit);
 }
 
+/**
+ * Top Set Requests by artist/set id (ledger `setRequest` rows only).
+ * @param {Array} events
+ * @param {number} [sinceTs]
+ * @param {number} [limit]
+ */
+export function topSets(events, sinceTs = 0, limit = 5) {
+  const list = (Array.isArray(events) ? events : []).filter(
+    (e) =>
+      e &&
+      e.kind === "setRequest" &&
+      (Number(e.ts) || 0) >= sinceTs
+  );
+  const map = new Map(); // id -> { id, name, count }
+  for (const e of list) {
+    const id = typeof e.id === "string" && e.id ? e.id : `set:${normArtist(e.artist)}`;
+    const name = (e.artist || "").trim() || "Unknown set";
+    const row = map.get(id);
+    if (row) row.count++;
+    else map.set(id, { id, name, count: 1 });
+  }
+  return [...map.values()]
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+    .slice(0, Math.max(1, Math.min(50, Math.floor(Number(limit) || 5))));
+}
+
 /** Most recent guest requests, newest first (for the live ticker). */
 export function recentRequests(limit = 8) {
   const list = load();
