@@ -104,7 +104,6 @@ export function createSonosGroups(els, deps) {
   let pendingForceLoad = false;
   let lastGroupsAt = 0;
   let groupEditMode = false;
-  let pickerRoom = null;
   let topologyReloadTimer = null;
 
   function invalidate() {
@@ -112,7 +111,6 @@ export function createSonosGroups(els, deps) {
   }
 
   function closeTypePicker() {
-    pickerRoom = null;
     if (!typePicker) return;
     typePicker.hidden = true;
     typePicker.setAttribute("hidden", "");
@@ -125,7 +123,6 @@ export function createSonosGroups(els, deps) {
     }
     const roomName = String(room || "").trim();
     if (!roomName) return;
-    pickerRoom = roomName;
     // Escape any transformed/overflow ancestors so the modal always covers the viewport.
     if (typePicker.parentElement !== document.body) {
       document.body.appendChild(typePicker);

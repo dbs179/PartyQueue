@@ -272,7 +272,6 @@ const queuePanel = wirePanelCollapse(
 );
 // loadGroups bound after createSonosGroups (below)
 let loadGroups = async () => {};
-let invalidateGroups = () => {};
 let reloadGroupsAfterTopology = async () => {};
 const controlsPanel = wirePanelCollapse(
   "controls-section",
@@ -402,7 +401,6 @@ syncToolbarMoodVisibility();
 // ---- Sonos group picker + Edit groups ----
 const {
   loadGroups: loadGroupsImpl,
-  invalidate: invalidateGroupsImpl,
   reloadAfterTopologyChange: reloadGroupsAfterTopologyImpl,
 } = createSonosGroups(
   {
@@ -429,7 +427,6 @@ const {
   }
 );
 loadGroups = loadGroupsImpl;
-invalidateGroups = invalidateGroupsImpl;
 reloadGroupsAfterTopology = reloadGroupsAfterTopologyImpl;
 
 // Randomness settings (song memory + per-artist budget), persisted server-side.
