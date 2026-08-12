@@ -2417,7 +2417,34 @@ button.guest-name:focus-visible {
   color: var(--muted);
 }
 
-/* Ranked request lists. */
+/* Ranked request lists — stacked on phone; 3 columns on desktop. */
+.stats-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stats-section .setting-group-label {
+  margin-top: 8px;
+}
+
+.stats-section:first-child .setting-group-label {
+  margin-top: 0;
+}
+
+@media (min-width: 960px) {
+  #view-stats .stats-sections {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+
+  #view-stats .stats-section .setting-group-label {
+    margin-top: 0;
+  }
+}
+
 .stats-list {
   list-style: none;
   margin: 0 0 6px;
