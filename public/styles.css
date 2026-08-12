@@ -92,7 +92,28 @@ body {
 }
 
 .music-mix-toggles {
-  margin-bottom: 4px;
+  margin-bottom: 0;
+}
+
+.vibe-section.settings-hub {
+  margin-top: 0;
+  padding-top: 12px;
+  border-top: none;
+}
+
+.hub-section.settings-hub {
+  margin-top: 0;
+  padding-top: 12px;
+  border-top: none;
+}
+
+.settings-hub > .hub-section-heading.settings-intro {
+  margin: 0 0 10px;
+  color: inherit;
+}
+
+.settings-hub > .hub-section-heading .section-label {
+  margin: 0;
 }
 
 .toolbar-grid {
@@ -1134,7 +1155,6 @@ button.guest-name:focus-visible {
 
 .genre-head-intro {
   margin: 0;
-  flex: 1;
   min-width: 0;
 }
 
@@ -1481,8 +1501,10 @@ button.guest-name:focus-visible {
 }
 
 #queue-empty {
+  flex: 0 0 auto;
   margin: 0;
   padding: 12px 0;
+  text-align: left;
 }
 
 .random-bar {
@@ -1752,17 +1774,66 @@ button.guest-name:focus-visible {
   letter-spacing: normal;
 }
 
-.settings-actions-sticky {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
-  margin-top: 14px;
-  padding: 10px 0 4px;
-  background: linear-gradient(
-    to top,
-    var(--bg) 55%,
-    transparent
-  );
+/* Users editor: form scrolls; pill actions stay pinned to the bottom of the page. */
+body:has(#view-settings-user-edit:not([hidden])) {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+body:has(#view-settings-user-edit:not([hidden])) > .header {
+  flex: 0 0 auto;
+}
+
+body:has(#view-settings-user-edit:not([hidden])) > .container {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+#view-settings-user-edit:not([hidden]) {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+#view-settings-user-edit .subpage-head {
+  flex: 0 0 auto;
+}
+
+#view-settings-user-edit .settings-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin-bottom: 0;
+}
+
+#view-settings-user-edit .user-edit-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px 1.25rem;
+  margin-top: 0;
+  padding: 12px 0 4px;
+  border-top: 1px solid var(--border, #2a2a32);
+  background: var(--bg, #0e0e12);
+}
+
+#view-settings-user-edit .user-edit-actions .subpage-head-link {
+  flex: 1 1 auto;
+  text-align: center;
+  margin: 0;
+}
+
+#view-settings-user-edit .user-edit-actions .subpage-head-link[hidden] {
+  display: none;
 }
 
 .settings-intro {
@@ -1921,15 +1992,8 @@ button.guest-name:focus-visible {
   }
 
   #view-booth .booth-tv-preview-actions {
-    gap: 6px;
+    gap: 12px;
     margin: 0 0 6px;
-  }
-
-  #view-booth .booth-tv-preview-actions .pill-btn {
-    height: 34px;
-    min-height: 34px;
-    max-height: 34px;
-    font-size: 0.78rem;
   }
 
   #view-booth .settings-hub {
@@ -1995,34 +2059,87 @@ button.guest-name:focus-visible {
   text-align: right;
 }
 
-/* Sonos Group header: evenly spaced across the row. */
-.sonos-subpage-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.sonos-subpage-head #sonos-back {
-  margin-left: 0;
-  text-align: right;
-}
-
-/* Look / Queue / DJ subpages: Title · actions · Back + section boxes.
+/* Look / Queue / DJ / Sonos subpages: title left, action links even, Back right.
    Do not reuse .booth-subpage-head here — that class is the Booth root
    3-column grid (title | New party | Back). */
 .look-subpage-head,
 .queue-subpage-head,
-.dj-subpage-head {
+.dj-subpage-head,
+.sonos-subpage-head,
+.connections-subpage-head,
+.suggestions-subpage-head,
+.join-subpage-head,
+.vibe-subpage-head,
+.mood-subpage-head,
+.genres-subpage-head,
+.playlists-subpage-head,
+.stats-subpage-head,
+.memory-subpage-head,
+.hub-subpage-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: 1.25rem;
 }
 
+.look-subpage-head .subpage-title,
+.queue-subpage-head .subpage-title,
+.dj-subpage-head .subpage-title,
+.sonos-subpage-head .subpage-title,
+.connections-subpage-head .subpage-title,
+.suggestions-subpage-head .subpage-title,
+.join-subpage-head .subpage-title,
+.vibe-subpage-head .subpage-title,
+.mood-subpage-head .subpage-title,
+.genres-subpage-head .subpage-title,
+.playlists-subpage-head .subpage-title,
+.stats-subpage-head .subpage-title,
+.memory-subpage-head .subpage-title,
+.hub-subpage-head .subpage-title {
+  flex: 0 0 auto;
+}
+
+.look-subpage-head .subpage-head-link,
+.queue-subpage-head .subpage-head-link,
+.dj-subpage-head .subpage-head-link,
+.sonos-subpage-head .subpage-head-link,
+.connections-subpage-head .subpage-head-link,
+.suggestions-subpage-head .subpage-head-link,
+.join-subpage-head .subpage-head-link,
+.vibe-subpage-head .subpage-head-link,
+.mood-subpage-head .subpage-head-link,
+.genres-subpage-head .subpage-head-link,
+.playlists-subpage-head .subpage-head-link,
+.stats-subpage-head .subpage-head-link,
+.memory-subpage-head .subpage-head-link,
+.hub-subpage-head .subpage-head-link {
+  flex: 1 1 0;
+  text-align: center;
+}
+
+.look-subpage-head .subpage-back,
 .look-subpage-head #settings-look-back,
+.queue-subpage-head .subpage-back,
 .queue-subpage-head #settings-queue-back,
-.dj-subpage-head .subpage-back {
+.dj-subpage-head .subpage-back,
+.sonos-subpage-head .subpage-back,
+.sonos-subpage-head #sonos-back,
+.connections-subpage-head .subpage-back,
+.connections-subpage-head #settings-connections-back,
+.suggestions-subpage-head .subpage-back,
+.suggestions-subpage-head #suggestions-back,
+.join-subpage-head .subpage-back,
+.join-subpage-head #join-back,
+.vibe-subpage-head .subpage-back,
+.mood-subpage-head .subpage-back,
+.genres-subpage-head .subpage-back,
+.genres-subpage-head #genres-back,
+.playlists-subpage-head .subpage-back,
+.playlists-subpage-head #playlists-back,
+.stats-subpage-head .subpage-back,
+.memory-subpage-head .subpage-back,
+.hub-subpage-head .subpage-back {
+  flex: 0 0 auto;
   margin-left: 0;
   text-align: right;
 }
@@ -2037,41 +2154,35 @@ button.guest-name:focus-visible {
 
 #view-settings-dj-lastcall .dj-subpage-head .subpage-title {
   justify-self: start;
+  flex: initial;
 }
 
 #view-settings-dj-lastcall .dj-subpage-head #end-of-night-reset {
   justify-self: center;
+  flex: initial;
   text-align: center;
 }
 
 #view-settings-dj-lastcall .dj-subpage-head .subpage-back {
   justify-self: end;
+  flex: initial;
   margin-left: 0;
-  text-align: right;
-}
-
-/* Advanced DJ: spread title + actions evenly across the header row. */
-#view-settings-dj-advanced .dj-subpage-head {
-  gap: 1.25rem;
-}
-
-#view-settings-dj-advanced .dj-subpage-head .subpage-title {
-  flex: 0 0 auto;
-}
-
-#view-settings-dj-advanced .dj-subpage-head .subpage-head-link {
-  flex: 1 1 0;
-  text-align: center;
-}
-
-#view-settings-dj-advanced .dj-subpage-head .subpage-back {
-  flex: 0 0 auto;
   text-align: right;
 }
 
 .look-sections,
 .queue-sections,
-.booth-sections {
+.booth-sections,
+.connections-sections,
+.suggestions-sections,
+.join-sections,
+.vibe-sections,
+.mood-sections,
+.genres-sections,
+.playlists-sections,
+.memory-sections,
+.sonos-sections,
+.hub-sections {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -2079,8 +2190,18 @@ button.guest-name:focus-visible {
 }
 
 .look-section,
-.queue-section,
-.booth-section {
+.queue-sections .queue-section,
+.booth-section,
+.connections-section,
+.suggestions-section,
+.join-section,
+.vibe-section,
+.mood-section,
+.genres-section,
+.playlists-section,
+.memory-section,
+.sonos-section,
+.hub-section {
   min-width: 0;
   margin: 0;
   padding: 12px 14px;
@@ -2091,7 +2212,17 @@ button.guest-name:focus-visible {
 
 .look-section-head,
 .queue-section-head,
-.booth-section-head {
+.booth-section-head,
+.connections-section-head,
+.suggestions-section-head,
+.join-section-head,
+.vibe-section-head,
+.mood-section-head,
+.genres-section-head,
+.playlists-section-head,
+.memory-section-head,
+.sonos-section-head,
+.hub-section-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -2101,7 +2232,17 @@ button.guest-name:focus-visible {
 
 .look-section-heading,
 .queue-section-heading,
-.booth-section-heading {
+.booth-section-heading,
+.connections-section-heading,
+.suggestions-section-heading,
+.join-section-heading,
+.vibe-section-heading,
+.mood-section-heading,
+.genres-section-heading,
+.playlists-section-heading,
+.memory-section-heading,
+.sonos-section-heading,
+.hub-section-heading {
   margin: 0;
   min-width: 0;
   flex: 1 1 auto;
@@ -2114,20 +2255,62 @@ button.guest-name:focus-visible {
 
 .look-section-heading .section-label,
 .queue-section-heading .section-label,
-.booth-section-heading .section-label {
+.booth-section-heading .section-label,
+.connections-section-heading .section-label,
+.suggestions-section-heading .section-label,
+.join-section-heading .section-label,
+.vibe-section-heading .section-label,
+.mood-section-heading .section-label,
+.genres-section-heading .section-label,
+.playlists-section-heading .section-label,
+.memory-section-heading .section-label,
+.sonos-section-heading .section-label,
+.hub-section-heading .section-label {
   margin: 0;
   flex: 0 0 auto;
 }
 
 .look-section-sub,
 .queue-section-sub,
-.booth-section-sub {
+.booth-section-sub,
+.connections-section-sub,
+.suggestions-section-sub,
+.join-section-sub,
+.vibe-section-sub,
+.mood-section-sub,
+.genres-section-sub,
+.playlists-section-sub,
+.memory-section-sub,
+.sonos-section-sub,
+.hub-section-sub {
   color: var(--muted);
   font-size: 0.85rem;
   font-weight: 400;
   text-transform: none;
   letter-spacing: normal;
   line-height: 1.35;
+}
+
+.connections-section-sub a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.connections-section-head {
+  flex-wrap: wrap;
+}
+
+.connections-section-head .subpage-head-link {
+  flex: 0 0 auto;
+}
+
+.connections-section-head .subpage-head-link[hidden] {
+  display: none;
+}
+
+.connections-status-line {
+  margin: 0 0 8px;
 }
 
 .booth-field-note {
@@ -2141,9 +2324,97 @@ button.guest-name:focus-visible {
 
 @media (min-width: 960px) {
   .look-section,
-  .queue-section,
-  .booth-section {
+  .queue-sections .queue-section,
+  .booth-section,
+  .connections-section,
+  .join-section,
+  .vibe-section,
+  .mood-section,
+  .genres-section,
+  .playlists-section,
+  .memory-section,
+  .sonos-section,
+  .hub-section {
     padding: 12px;
+  }
+
+  /* Connections PC: fit one viewport in three columns. */
+  body:has(#view-settings-connections:not([hidden])) {
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  body:has(#view-settings-connections:not([hidden])) > .header {
+    flex: 0 0 auto;
+  }
+
+  body:has(#view-settings-connections:not([hidden])) > .container {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #view-settings-connections:not([hidden]) {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  #view-settings-connections .connections-subpage-head {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+  }
+
+  #view-settings-connections .connections-sections {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: auto auto;
+    gap: 10px;
+    align-content: start;
+    overflow-x: hidden;
+    overflow-y: auto;
+    margin-top: 0;
+  }
+
+  #view-settings-connections .connections-section {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+  }
+
+  #view-settings-connections .connections-section-head {
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+
+  #view-settings-connections .connections-section-sub {
+    font-size: 0.78rem;
+  }
+
+  #view-settings-connections .setting-row-text {
+    padding: 4px 0;
+  }
+
+  #view-settings-connections .setting-hint-under-field,
+  #view-settings-connections .cache-status-line,
+  #view-settings-connections .connections-status-line {
+    margin: 0 0 2px;
+    font-size: 0.75rem;
+  }
+
+  #view-settings-connections .spotify-status-row {
+    margin: 0 0 4px;
   }
 
   /* Queue PC: two setting columns; hints become hover/focus tooltips. */
@@ -2242,7 +2513,8 @@ button.guest-name:focus-visible {
 .booth-tv-preview-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  align-items: baseline;
+  gap: 14px;
   margin: 0 0 10px;
 }
 
@@ -2250,14 +2522,7 @@ button.guest-name:focus-visible {
   align-items: start;
 }
 
-.booth-tv-fully-copy {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-  min-width: 0;
-}
-
-.booth-tv-fully-copy .setting-input {
+.booth-tv-fully-row .setting-input {
   min-width: 0;
 }
 
@@ -2474,21 +2739,6 @@ button.guest-name:focus-visible {
   margin: 0;
 }
 
-.genre-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.genre-allbtn {
-  height: 28px;
-  padding: 0 10px;
-  font-size: 0.75rem;
-  line-height: 1;
-}
-
 .pool-size-hint {
   margin: 8px 0 0;
   font-size: 0.8rem;
@@ -2502,14 +2752,25 @@ button.guest-name:focus-visible {
 
 /* Collapsed Last.fm → bucket chart under the genre chips. */
 .genre-map-section {
-  margin-top: 14px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 0;
+  padding-top: 12px;
+  border-top: none;
 }
 
 .genre-map-section .section-toggle {
   margin: 0;
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.mood-section.genre-map-section .mood-section-sub,
+.genres-section.genre-map-section .genres-section-sub {
+  margin: 0 0 8px;
 }
 
 .genre-map-section.collapsed .chevron {
@@ -2903,9 +3164,8 @@ button.guest-name:focus-visible {
 .stats-section {
   min-width: 0;
   margin: 0;
-  padding: 12px 14px;
-  border-radius: var(--radius);
-  background: linear-gradient(135deg, var(--surface), var(--surface-2));
+  padding: 0;
+  background: none;
   box-sizing: border-box;
 }
 
@@ -2916,6 +3176,15 @@ button.guest-name:focus-visible {
 .stats-section .settings-intro {
   margin-top: 0;
   margin-bottom: 8px;
+}
+
+.stats-section-card {
+  min-width: 0;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--surface), var(--surface-2));
+  box-sizing: border-box;
 }
 
 .stats-section .stats-list {
@@ -2940,7 +3209,7 @@ button.guest-name:focus-visible {
     align-items: start;
   }
 
-  #view-stats .stats-section {
+  #view-stats .stats-section-card {
     padding: 12px;
   }
 }
@@ -2996,11 +3265,20 @@ button.guest-name:focus-visible {
 #memory-list {
   max-height: 360px;
   overflow-y: auto;
+  margin: 0;
 }
 
-#suggestions-list {
-  max-height: 420px;
+.memory-section-sub[hidden] {
+  display: none;
+}
+
+#suggestions-list,
+.suggestions-list {
+  flex: 1 1 auto;
+  min-height: 12rem;
+  max-height: min(60vh, 28rem);
   overflow-y: auto;
+  margin: 0;
 }
 
 /* Suggestion Box title | char count | Submit — one header row. */
@@ -3034,24 +3312,12 @@ button.guest-name:focus-visible {
 .suggestion-submit-link {
   flex: 0 0 auto;
   margin: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
-  line-height: 1;
-  cursor: pointer;
   white-space: nowrap;
+  line-height: 1;
 }
 
 .suggestion-submit-link:hover,
 .suggestion-submit-link:focus-visible {
-  color: var(--text, #e8e8ef);
-  outline: none;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -3101,16 +3367,218 @@ button.guest-name:focus-visible {
 }
 
 .suggestions-filter {
+  flex: 0 0 auto;
   margin: 0;
 }
 
-.suggestions-toolbar {
+.suggestions-section {
   display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.suggestions-section-head {
+  flex: 0 0 auto;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin: 10px 0 12px;
+}
+
+#view-suggestions .suggestions-sections {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#view-suggestions .suggestions-section {
+  flex: 1 1 auto;
+}
+
+#view-suggestions #suggestions-empty {
+  flex: 0 0 auto;
+  margin: 12px 0 0;
+}
+
+/* Suggestions PC: one-viewport inbox; list scrolls inside the card. */
+@media (min-width: 960px) {
+  body:has(#view-suggestions:not([hidden])) {
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  body:has(#view-suggestions:not([hidden])) > .header {
+    flex: 0 0 auto;
+  }
+
+  body:has(#view-suggestions:not([hidden])) > .container {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #view-suggestions:not([hidden]) {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  #view-suggestions .suggestions-subpage-head {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+  }
+
+  #view-suggestions .suggestions-sections {
+    margin-top: 0;
+  }
+
+  #view-suggestions .suggestions-section {
+    padding: 12px;
+  }
+
+  #view-suggestions .suggestions-section-sub {
+    font-size: 0.8rem;
+  }
+
+  #view-suggestions #suggestions-list,
+  #view-suggestions .suggestions-list {
+    min-height: 0;
+    max-height: none;
+  }
+
+  /* Remaining long subpages: one PC viewport; scroll inside the page body. */
+  body:has(#view-join:not([hidden])),
+  body:has(#view-sonos:not([hidden])),
+  body:has(#view-mood:not([hidden])),
+  body:has(#view-mood-presets:not([hidden])),
+  body:has(#view-genres:not([hidden])),
+  body:has(#view-playlists:not([hidden])),
+  body:has(#view-stats:not([hidden])),
+  body:has(#view-memory:not([hidden])),
+  body:has(#view-settings-dj:not([hidden])),
+  body:has(#view-settings-users:not([hidden])),
+  body:has(#view-settings-reset:not([hidden])) {
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  body:has(#view-join:not([hidden])) > .header,
+  body:has(#view-sonos:not([hidden])) > .header,
+  body:has(#view-mood:not([hidden])) > .header,
+  body:has(#view-mood-presets:not([hidden])) > .header,
+  body:has(#view-genres:not([hidden])) > .header,
+  body:has(#view-playlists:not([hidden])) > .header,
+  body:has(#view-stats:not([hidden])) > .header,
+  body:has(#view-memory:not([hidden])) > .header,
+  body:has(#view-settings-dj:not([hidden])) > .header,
+  body:has(#view-settings-users:not([hidden])) > .header,
+  body:has(#view-settings-reset:not([hidden])) > .header {
+    flex: 0 0 auto;
+  }
+
+  body:has(#view-join:not([hidden])) > .container,
+  body:has(#view-sonos:not([hidden])) > .container,
+  body:has(#view-mood:not([hidden])) > .container,
+  body:has(#view-mood-presets:not([hidden])) > .container,
+  body:has(#view-genres:not([hidden])) > .container,
+  body:has(#view-playlists:not([hidden])) > .container,
+  body:has(#view-stats:not([hidden])) > .container,
+  body:has(#view-memory:not([hidden])) > .container,
+  body:has(#view-settings-dj:not([hidden])) > .container,
+  body:has(#view-settings-users:not([hidden])) > .container,
+  body:has(#view-settings-reset:not([hidden])) > .container {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #view-join:not([hidden]),
+  #view-sonos:not([hidden]),
+  #view-mood:not([hidden]),
+  #view-mood-presets:not([hidden]),
+  #view-genres:not([hidden]),
+  #view-playlists:not([hidden]),
+  #view-stats:not([hidden]),
+  #view-memory:not([hidden]),
+  #view-settings-dj:not([hidden]),
+  #view-settings-users:not([hidden]),
+  #view-settings-reset:not([hidden]) {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  #view-join .join-subpage-head,
+  #view-sonos .sonos-subpage-head,
+  #view-mood .vibe-subpage-head,
+  #view-mood-presets .mood-subpage-head,
+  #view-genres .genres-subpage-head,
+  #view-playlists .playlists-subpage-head,
+  #view-stats .stats-subpage-head,
+  #view-memory .memory-subpage-head,
+  #view-settings-dj .hub-subpage-head,
+  #view-settings-users .hub-subpage-head,
+  #view-settings-reset .hub-subpage-head {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+  }
+
+  #view-join .join-sections,
+  #view-sonos .sonos-sections,
+  #view-mood .vibe-sections,
+  #view-mood-presets .mood-sections,
+  #view-genres .genres-sections,
+  #view-playlists .playlists-sections,
+  #view-memory .memory-sections,
+  #view-settings-dj .hub-sections,
+  #view-settings-users .hub-sections,
+  #view-settings-reset .hub-sections,
+  #view-stats .stats-box {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin-top: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  #view-memory #memory-list {
+    max-height: none;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  #view-memory .memory-section {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #view-playlists .playlist-box {
+    max-height: none;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  #view-playlists .playlists-section {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
 }
 
 .suggestion-row {
@@ -3230,29 +3698,6 @@ html.pq-header-all-caps .header h1 {
 html.pq-subtitle-all-caps .header .subtitle,
 html.pq-subtitle-all-caps .subtitle {
   text-transform: uppercase;
-}
-
-/* Cache warmed value + Re-warm button on one row. */
-.setting-row-cache {
-  display: grid;
-  grid-template-columns: 90px 1fr auto;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 0;
-}
-
-.setting-row-cache .pill-btn {
-  white-space: nowrap;
-}
-
-@media (max-width: 480px) {
-  .setting-row-cache {
-    grid-template-columns: 90px 1fr;
-  }
-  .setting-row-cache .pill-btn {
-    grid-column: 2;
-    justify-self: start;
-  }
 }
 
 /* Hero-banner picker on the Settings page. */
@@ -3611,6 +4056,12 @@ html.pq-subtitle-all-caps .subtitle {
   text-align: center;
 }
 
+.playlists-section .connect-box {
+  background: transparent;
+  border-radius: 0;
+  padding: 4px 0 0;
+}
+
 .connect-box[hidden] {
   display: none;
 }
@@ -3620,9 +4071,9 @@ html.pq-subtitle-all-caps .subtitle {
 }
 
 .playlist-box {
-  background: linear-gradient(135deg, var(--surface), var(--surface-2));
-  border-radius: var(--radius);
-  padding: 4px 14px;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
   max-height: 50vh;
   overflow-y: auto;
 }
@@ -3631,21 +4082,19 @@ html.pq-subtitle-all-caps .subtitle {
   display: none;
 }
 
-.playlist-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 0 8px;
-  background: var(--surface);
+.playlists-section-head .playlist-selcount {
+  flex: 0 0 auto;
+  margin: 0;
 }
 
 .playlist-selcount {
   color: var(--muted);
   font-size: 0.82rem;
+}
+
+#view-playlists:has(#playlist-box[hidden]) #toggle-all-playlists {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .pl-check {
@@ -3695,24 +4144,8 @@ html.pq-subtitle-all-caps .subtitle {
   align-items: center;
   min-height: 0;
   margin: 0 0 0 auto;
-  padding: 0 2px;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-#queue-edit-toggle:hover,
-#queue-edit-toggle:focus-visible {
-  color: var(--text, #e8e8ef);
-  outline: none;
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  flex: 0 0 auto;
+  text-align: right;
 }
 
 #queue-edit-toggle[hidden] {
@@ -3725,7 +4158,8 @@ html.pq-subtitle-all-caps .subtitle {
   text-underline-offset: 3px;
 }
 
-#queue-edit-toggle.active:hover {
+#queue-edit-toggle.active:hover,
+#queue-edit-toggle.active:focus-visible {
   color: var(--accent-press);
 }
 
@@ -4183,6 +4617,9 @@ body.modal-open {
 .join-panel {
   text-align: center;
 }
+.join-panel .join-section-head {
+  text-align: left;
+}
 .join-qr {
   display: flex;
   justify-content: center;
@@ -4199,7 +4636,7 @@ body.modal-open {
   height: auto;
 }
 .join-url {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 0.95rem;
   word-break: break-all;
   color: var(--muted, #a8a8b8);
@@ -4518,6 +4955,14 @@ body.party-display-active.party-display-preview .party-display-view {
   flex-direction: column;
   justify-content: stretch;
   align-self: stretch;
+  gap: calc(8 * var(--pd));
+}
+
+/* Title sits above the queue card (same pattern as main Controls). */
+.party-display-side > .party-display-section-head {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
 }
 
 /* Art | meta | (queue in side): shared top/bottom of the Now row. */
@@ -4911,6 +5356,7 @@ body.party-display-active.party-display-preview .party-display-view {
 }
 
 /* Up Next type (PC + TV shared) — ~1.5× prior TV sizes; list count fits height. */
+.party-display-side > .party-display-section-head .party-display-label,
 .party-display-queue .party-display-label {
   font-size: calc(30 * var(--pd));
 }

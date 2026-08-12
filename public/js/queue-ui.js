@@ -215,12 +215,22 @@ export function createQueueUi(els, deps) {
   function measureDisplayQueueFit() {
     const section = displayQueueSection();
     if (!displayQueue || !section) return 4;
-    const head = section.querySelector(".party-display-section-head");
+    // Head may live inside the card (legacy) or above it (title outside box).
+    const head =
+      section.querySelector(".party-display-section-head") ||
+      (section.previousElementSibling?.classList?.contains(
+        "party-display-section-head"
+      )
+        ? section.previousElementSibling
+        : null);
     const sectionStyle = getComputedStyle(section);
     const padY =
       (parseFloat(sectionStyle.paddingTop) || 0) +
       (parseFloat(sectionStyle.paddingBottom) || 0);
-    const headH = head ? head.getBoundingClientRect().height : 0;
+    // Only subtract head height when it still consumes space inside the card.
+    const headInside = !!section.querySelector(".party-display-section-head");
+    const headH =
+      headInside && head ? head.getBoundingClientRect().height : 0;
     const listStyle = getComputedStyle(displayQueue);
     const listMarginTop = parseFloat(listStyle.marginTop) || 0;
     const available = section.clientHeight - padY - headH - listMarginTop;

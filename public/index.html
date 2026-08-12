@@ -282,7 +282,7 @@
           <h2 class="section-label section-toggle" id="queue-toggle" role="button" tabindex="0" aria-expanded="true">
             <span>Up next <span id="queue-count" class="queue-count"></span></span>
             <span class="chevron" aria-hidden="true">&#9662;</span>
-            <button id="queue-edit-toggle" type="button" aria-pressed="false" title="Turn on to delete or drag-reorder songs" hidden>Edit</button>
+            <button id="queue-edit-toggle" type="button" class="subpage-head-link" aria-pressed="false" title="Turn on to delete or drag-reorder songs" hidden>Edit</button>
           </h2>
           <p
             id="queue-connection-status"
@@ -295,8 +295,8 @@
           </p>
           <div class="queue-box">
             <span id="queue-edit-hint" class="queue-edit-hint" hidden>Drag to reorder &middot; tap &times; to remove</span>
-            <ul id="queue" class="results"></ul>
             <p id="queue-empty" class="np-empty" hidden>The queue is empty.</p>
+            <ul id="queue" class="results"></ul>
           </div>
         </section>
 
@@ -363,7 +363,7 @@
           <h2 class="section-label section-toggle suggestion-head" id="suggestion-toggle" role="button" tabindex="0" aria-expanded="true">
             <span class="suggestion-head-title">Suggestion Box</span>
             <span id="suggestion-count" class="suggestion-count" aria-live="polite">0 / 280</span>
-            <button id="suggestion-submit" type="button" class="suggestion-submit-link" title="Send suggestion">
+            <button id="suggestion-submit" type="button" class="subpage-head-link suggestion-submit-link" title="Send suggestion">
               Submit
             </button>
             <span class="chevron" aria-hidden="true">&#9662;</span>
@@ -452,11 +452,11 @@
             </section>
 
             <aside class="party-display-side" aria-label="Upcoming songs">
+              <div class="party-display-section-head">
+                <p class="party-display-label">Up Next</p>
+                <span id="display-queue-count" class="party-display-queue-count"></span>
+              </div>
               <section id="display-queue-section" class="party-display-queue">
-                <div class="party-display-section-head">
-                  <p class="party-display-label">Up Next</p>
-                  <span id="display-queue-count" class="party-display-queue-count"></span>
-                </div>
                 <p
                   id="display-queue-status"
                   class="party-display-queue-status"
@@ -493,18 +493,23 @@
 
       <!-- JOIN CODE VIEW — QR anyone in the app can open for others to scan -->
       <div id="view-join" class="view" hidden>
-        <div class="subpage-head">
+        <div class="subpage-head join-subpage-head">
           <h2 class="section-label subpage-title">Join Code</h2>
+          <button id="join-refresh" type="button" class="subpage-head-link">Refresh</button>
+          <button id="join-copy" type="button" class="subpage-head-link">Copy link</button>
           <button id="join-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <div class="controls join-panel" aria-label="Join Code">
-          <p class="settings-intro">Scan this QR on the same Wi‑Fi to open PartyQueue and join the queue.</p>
-          <div id="join-qr" class="join-qr" aria-hidden="true"></div>
-          <p id="join-url" class="join-url"></p>
-          <p id="join-error" class="np-empty" hidden></p>
-          <div class="settings-actions">
-            <button id="join-refresh" type="button" class="pill-btn">Refresh</button>
-            <button id="join-copy" type="button" class="pill-btn success">Copy link</button>
+        <div class="join-sections">
+          <div class="join-section join-panel" aria-label="Join Code">
+            <div class="join-section-head">
+              <p class="join-section-heading">
+                <span class="section-label">QR:</span>
+                <span class="join-section-sub">Scan on the same Wi‑Fi to open PartyQueue and join the queue.</span>
+              </p>
+            </div>
+            <div id="join-qr" class="join-qr" aria-hidden="true"></div>
+            <p id="join-url" class="join-url"></p>
+            <p id="join-error" class="np-empty" hidden></p>
           </div>
         </div>
       </div>
@@ -533,19 +538,26 @@
           </button>
           <button id="sonos-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <div class="controls" aria-label="Sonos group">
-          <p id="group-intro" class="settings-intro">Songs go to this group&apos;s queue. Pick a group below. Use Edit groups to join/leave speakers or tap a speaker icon to set Arc / Play 1 / Amp / Roam / Move / Connect.</p>
-          <div id="group-picker" class="group-picker">
-            <div id="group-chips" class="genre-chips group-chips" role="radiogroup" aria-label="Target Sonos group"></div>
-            <p id="group-empty" class="np-empty group-note" hidden>No Sonos groups found.</p>
-          </div>
-          <div id="group-edit" class="group-edit" hidden>
-            <p id="group-edit-anchor" class="settings-intro group-edit-anchor"></p>
-            <p class="settings-intro">In this group — tap name to leave; tap icon to set player type</p>
-            <div id="group-members" class="genre-chips group-chips" role="group" aria-label="Speakers in target group"></div>
-            <p class="settings-intro">Available — tap name to join; tap icon to set player type</p>
-            <div id="group-available" class="genre-chips group-chips" role="group" aria-label="Speakers available to join"></div>
-            <p id="group-edit-empty" class="np-empty group-note" hidden>No Sonos speakers found.</p>
+        <div class="sonos-sections" aria-label="Sonos group">
+          <div class="sonos-section">
+            <div class="sonos-section-head">
+              <p class="sonos-section-heading">
+                <span class="section-label">Target group:</span>
+                <span class="sonos-section-sub" id="group-intro">Songs go to this group&apos;s queue. Pick a group below. Use Edit groups to join/leave speakers or tap a speaker icon to set Arc / Play 1 / Amp / Roam / Move / Connect.</span>
+              </p>
+            </div>
+            <div id="group-picker" class="group-picker">
+              <div id="group-chips" class="genre-chips group-chips" role="radiogroup" aria-label="Target Sonos group"></div>
+              <p id="group-empty" class="np-empty group-note" hidden>No Sonos groups found.</p>
+            </div>
+            <div id="group-edit" class="group-edit" hidden>
+              <p id="group-edit-anchor" class="settings-intro group-edit-anchor"></p>
+              <p class="settings-intro">In this group — tap name to leave; tap icon to set player type</p>
+              <div id="group-members" class="genre-chips group-chips" role="group" aria-label="Speakers in target group"></div>
+              <p class="settings-intro">Available — tap name to join; tap icon to set player type</p>
+              <div id="group-available" class="genre-chips group-chips" role="group" aria-label="Speakers available to join"></div>
+              <p id="group-edit-empty" class="np-empty group-note" hidden>No Sonos speakers found.</p>
+            </div>
           </div>
           <div
             id="sonos-type-picker"
@@ -567,139 +579,163 @@
 
       <!-- VIBE HUB (formerly "Music Mix") — Mood / Genres / Playlists (Spotify-gated via #random-bar) -->
       <div id="view-mood" class="view" hidden>
-        <div class="subpage-head">
+        <div class="subpage-head vibe-subpage-head">
           <h2 class="section-label subpage-title">Vibe</h2>
           <button id="mood-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <!-- Queue behavior toggles — always available; playlist hub is Spotify-gated. -->
-        <div class="controls music-mix-toggles" aria-label="Queue behavior">
-          <p class="settings-intro">How Random and Never-Ending behave tonight</p>
-          <div class="options-list">
-            <label class="autofill" title="Automatically add random songs when the queue runs low">
-              <input type="checkbox" id="autofill-toggle" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Never-Ending Queue</span>
-                <span class="autofill-hint" id="autofill-hint">Auto-adds songs when the queue runs low</span>
-              </span>
-            </label>
-            <label class="autofill" title="Mix similar songs from outside your playlists into each Random batch">
-              <input type="checkbox" id="set-discover-enabled" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Discover</span>
-                <span class="autofill-hint">Mixes Last.fm-similar songs into each Random batch</span>
-              </span>
-            </label>
-            <label class="autofill" title="Pick a new mood preset between Never-Ending sets (tune it under DJ Booth &gt; Queue)">
-              <input type="checkbox" id="random-mood-toggle" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Random Mood</span>
-                <span class="autofill-hint">Rotates the mood preset between Never-Ending sets</span>
-              </span>
-            </label>
-            <label class="autofill" title="Pick a new decade between Never-Ending sets (tune it under DJ Booth &gt; Queue)">
-              <input type="checkbox" id="random-decade-toggle" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Random Decade</span>
-                <span class="autofill-hint">Rotates the decade between Never-Ending sets</span>
-              </span>
-            </label>
-            <label class="autofill" title="Hide explicit tracks from search, Random, Never-Ending, and Discover">
-              <input type="checkbox" id="filter-explicit-toggle" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Filter explicit songs</span>
-                <span class="autofill-hint">Hides explicit tracks from search, Random &amp; Discover</span>
-              </span>
-            </label>
-            <label class="autofill" title="Kids mood, filter explicit, and subtle DJ — restores when unlocked">
-              <input type="checkbox" id="kids-lock-toggle" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Kids lock</span>
-                <span class="autofill-hint">Kids mood + calmer DJ; unlock restores your previous mix</span>
-              </span>
-            </label>
-          </div>
-        </div>
-        <div class="controls-divider" aria-hidden="true"></div>
         <!-- #random-bar is only a Spotify-connected flag for JS. -->
         <div id="random-bar" hidden></div>
-        <div id="music-mix-hub" class="settings-box settings-hub" hidden>
-          <p class="settings-intro">What feeds the pool — moods, genres, and playlists.</p>
-          <div class="settings-hub-grid" role="navigation" aria-label="Vibe sections">
-            <button type="button" class="settings-hub-card" data-mix-panel="mood-presets">
-              <p class="settings-hub-heading">
-                <span class="settings-hub-title">Mood:</span>
-                <span class="settings-hub-desc">Presets that pick a genre mix.</span>
+        <div class="vibe-sections">
+          <!-- Queue behavior toggles — always available; playlist hub is Spotify-gated. -->
+          <div class="vibe-section music-mix-toggles" aria-label="Queue behavior">
+            <div class="vibe-section-head">
+              <p class="vibe-section-heading">
+                <span class="section-label">Queue behavior:</span>
+                <span class="vibe-section-sub">How Random and Never-Ending behave tonight.</span>
               </p>
-              <span class="settings-hub-stat" id="mix-stat-mood">—</span>
-            </button>
-            <button type="button" class="settings-hub-card" data-mix-panel="genres">
-              <p class="settings-hub-heading">
-                <span class="settings-hub-title">Genres:</span>
-                <span class="settings-hub-desc">Fine-tune which genres are eligible.</span>
-              </p>
-              <span class="settings-hub-stat" id="mix-stat-genres">—</span>
-            </button>
-            <button type="button" class="settings-hub-card settings-hub-card-full" data-mix-panel="playlists">
-              <p class="settings-hub-heading">
-                <span class="settings-hub-title">Playlists:</span>
-                <span class="settings-hub-desc">Which Spotify playlists feed the pool.</span>
-              </p>
-              <span class="settings-hub-stat" id="mix-stat-playlists">—</span>
-            </button>
+            </div>
+            <div class="options-list">
+              <label class="autofill" title="Automatically add random songs when the queue runs low">
+                <input type="checkbox" id="autofill-toggle" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Never-Ending Queue</span>
+                  <span class="autofill-hint" id="autofill-hint">Auto-adds songs when the queue runs low</span>
+                </span>
+              </label>
+              <label class="autofill" title="Mix similar songs from outside your playlists into each Random batch">
+                <input type="checkbox" id="set-discover-enabled" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Discover</span>
+                  <span class="autofill-hint">Mixes Last.fm-similar songs into each Random batch</span>
+                </span>
+              </label>
+              <label class="autofill" title="Pick a new mood preset between Never-Ending sets (tune it under DJ Booth &gt; Queue)">
+                <input type="checkbox" id="random-mood-toggle" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Random Mood</span>
+                  <span class="autofill-hint">Rotates the mood preset between Never-Ending sets</span>
+                </span>
+              </label>
+              <label class="autofill" title="Pick a new decade between Never-Ending sets (tune it under DJ Booth &gt; Queue)">
+                <input type="checkbox" id="random-decade-toggle" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Random Decade</span>
+                  <span class="autofill-hint">Rotates the decade between Never-Ending sets</span>
+                </span>
+              </label>
+              <label class="autofill" title="Hide explicit tracks from search, Random, Never-Ending, and Discover">
+                <input type="checkbox" id="filter-explicit-toggle" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Filter explicit songs</span>
+                  <span class="autofill-hint">Hides explicit tracks from search, Random &amp; Discover</span>
+                </span>
+              </label>
+              <label class="autofill" title="Kids mood, filter explicit, and subtle DJ — restores when unlocked">
+                <input type="checkbox" id="kids-lock-toggle" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Kids lock</span>
+                  <span class="autofill-hint">Kids mood + calmer DJ; unlock restores your previous mix</span>
+                </span>
+              </label>
+            </div>
           </div>
+          <div id="music-mix-hub" class="vibe-section settings-hub" hidden>
+            <div class="vibe-section-head">
+              <p class="vibe-section-heading">
+                <span class="section-label">Pool:</span>
+                <span class="vibe-section-sub">What feeds Random and Never-Ending — moods, genres, and playlists.</span>
+              </p>
+            </div>
+            <div class="settings-hub-grid" role="navigation" aria-label="Vibe sections">
+              <button type="button" class="settings-hub-card" data-mix-panel="mood-presets">
+                <p class="settings-hub-heading">
+                  <span class="settings-hub-title">Mood:</span>
+                  <span class="settings-hub-desc">Presets that pick a genre mix.</span>
+                </p>
+                <span class="settings-hub-stat" id="mix-stat-mood">—</span>
+              </button>
+              <button type="button" class="settings-hub-card" data-mix-panel="genres">
+                <p class="settings-hub-heading">
+                  <span class="settings-hub-title">Genres:</span>
+                  <span class="settings-hub-desc">Fine-tune which genres are eligible.</span>
+                </p>
+                <span class="settings-hub-stat" id="mix-stat-genres">—</span>
+              </button>
+              <button type="button" class="settings-hub-card settings-hub-card-full" data-mix-panel="playlists">
+                <p class="settings-hub-heading">
+                  <span class="settings-hub-title">Playlists:</span>
+                  <span class="settings-hub-desc">Which Spotify playlists feed the pool.</span>
+                </p>
+                <span class="settings-hub-stat" id="mix-stat-playlists">—</span>
+              </button>
+            </div>
+          </div>
+          <p id="mood-need-spotify" class="np-empty">Connect Spotify in Settings to pick moods, genres, and playlists.</p>
         </div>
-        <p id="mood-need-spotify" class="np-empty">Connect Spotify in Settings to pick moods, genres, and playlists.</p>
       </div>
 
       <div id="view-mood-presets" class="view" hidden>
-        <div class="subpage-head">
+        <div class="subpage-head mood-subpage-head">
           <h2 class="section-label subpage-title">Mood</h2>
           <button id="mood-presets-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <div class="controls" aria-label="Mood and Decades">
-          <p class="settings-intro">Select a mood to include specific genres</p>
-          <div id="genre-presets" class="genre-chips genre-presets" role="group" aria-label="Mood">
-            <button type="button" class="genre-chip genre-preset" data-preset="all" title="All genres">All</button>
-            <button type="button" class="genre-chip genre-preset" data-preset="party" title="Party mix (no kids, classical, soundtrack, oldies, or other)">Party</button>
-            <button type="button" class="genre-chip genre-preset" data-preset="chill" title="Laid-back mix">Chill</button>
-            <button type="button" class="genre-chip genre-preset" data-preset="country" title="Country and Folk">Country</button>
-            <button type="button" class="genre-chip genre-preset" data-preset="heavy" title="Rock and Metal">Heavy</button>
-            <button type="button" class="genre-chip genre-preset" data-preset="rap" title="Hip-Hop / Rap">Rap</button>
-            <button type="button" class="genre-chip genre-preset" data-preset="kids" title="Kids and Soundtrack / Score">Kids</button>
-          </div>
-          <div class="controls-divider" aria-hidden="true"></div>
-          <p class="settings-intro">Add a decade — playlist picks stay in the era, and shortfalls fill with era hits from outside your playlists. Tap again to turn off.</p>
-          <div id="decade-chips" class="genre-chips genre-presets" role="group" aria-label="Decades">
-            <button type="button" class="genre-chip decade-chip" data-mood="60s" title="Songs from 1960–1969">60's</button>
-            <button type="button" class="genre-chip decade-chip" data-mood="70s" title="Songs from 1970–1979">70's</button>
-            <button type="button" class="genre-chip decade-chip" data-mood="80s" title="Songs from 1980–1989">80's</button>
-            <button type="button" class="genre-chip decade-chip" data-mood="90s" title="Songs from 1990–1999">90's</button>
-            <button type="button" class="genre-chip decade-chip" data-mood="2000s" title="Songs from 2000–2009">2000's</button>
-            <button type="button" class="genre-chip decade-chip" data-mood="2010s" title="Songs from 2010–2019">2010's</button>
-            <button type="button" class="genre-chip decade-chip" data-mood="2020s" title="Songs from 2020 onward">2020's</button>
-          </div>
-          <section id="mood-map-section" class="genre-map-section collapsed">
-            <h3
-              class="section-label section-toggle"
-              id="mood-map-toggle"
-              role="button"
-              tabindex="0"
-              aria-expanded="false"
-              title="Collapse / expand"
-            >
-              <span>Mood → genre mapping</span>
-              <span class="chevron" aria-hidden="true">&#9662;</span>
-            </h3>
-            <div class="genre-map-box" id="mood-map-box">
-              <p class="settings-intro" id="mood-map-intro">
-                Which genre buckets each Mood chip enables for Random and Never-Ending.
+        <div class="mood-sections" aria-label="Mood and Decades">
+          <div class="mood-section">
+            <div class="mood-section-head">
+              <p class="mood-section-heading">
+                <span class="section-label">Mood:</span>
+                <span class="mood-section-sub">Select a mood to include specific genres.</span>
               </p>
+            </div>
+            <div id="genre-presets" class="genre-chips genre-presets" role="group" aria-label="Mood">
+              <button type="button" class="genre-chip genre-preset" data-preset="all" title="All genres">All</button>
+              <button type="button" class="genre-chip genre-preset" data-preset="party" title="Party mix (no kids, classical, soundtrack, oldies, or other)">Party</button>
+              <button type="button" class="genre-chip genre-preset" data-preset="chill" title="Laid-back mix">Chill</button>
+              <button type="button" class="genre-chip genre-preset" data-preset="country" title="Country and Folk">Country</button>
+              <button type="button" class="genre-chip genre-preset" data-preset="heavy" title="Rock and Metal">Heavy</button>
+              <button type="button" class="genre-chip genre-preset" data-preset="rap" title="Hip-Hop / Rap">Rap</button>
+              <button type="button" class="genre-chip genre-preset" data-preset="kids" title="Kids and Soundtrack / Score">Kids</button>
+            </div>
+          </div>
+          <div class="mood-section">
+            <div class="mood-section-head">
+              <p class="mood-section-heading">
+                <span class="section-label">Decades:</span>
+                <span class="mood-section-sub">Playlist picks stay in the era; shortfalls fill with era hits. Tap again to turn off.</span>
+              </p>
+            </div>
+            <div id="decade-chips" class="genre-chips genre-presets" role="group" aria-label="Decades">
+              <button type="button" class="genre-chip decade-chip" data-mood="60s" title="Songs from 1960–1969">60's</button>
+              <button type="button" class="genre-chip decade-chip" data-mood="70s" title="Songs from 1970–1979">70's</button>
+              <button type="button" class="genre-chip decade-chip" data-mood="80s" title="Songs from 1980–1989">80's</button>
+              <button type="button" class="genre-chip decade-chip" data-mood="90s" title="Songs from 1990–1999">90's</button>
+              <button type="button" class="genre-chip decade-chip" data-mood="2000s" title="Songs from 2000–2009">2000's</button>
+              <button type="button" class="genre-chip decade-chip" data-mood="2010s" title="Songs from 2010–2019">2010's</button>
+              <button type="button" class="genre-chip decade-chip" data-mood="2020s" title="Songs from 2020 onward">2020's</button>
+            </div>
+          </div>
+          <section id="mood-map-section" class="mood-section genre-map-section collapsed">
+            <div class="mood-section-head">
+              <h3
+                class="section-label section-toggle"
+                id="mood-map-toggle"
+                role="button"
+                tabindex="0"
+                aria-expanded="false"
+                title="Collapse / expand"
+              >
+                <span>Mood → genre mapping</span>
+                <span class="chevron" aria-hidden="true">&#9662;</span>
+              </h3>
+            </div>
+            <p class="mood-section-sub" id="mood-map-intro">Which genre buckets each Mood chip enables for Random and Never-Ending.</p>
+            <div class="genre-map-box" id="mood-map-box">
               <ul class="genre-map-list" id="mood-map-list"></ul>
             </div>
           </section>
@@ -707,34 +743,41 @@
       </div>
 
       <div id="view-genres" class="view" hidden>
-        <div class="subpage-head">
+        <div class="subpage-head genres-subpage-head">
           <h2 class="section-label subpage-title">Genres</h2>
+          <button id="genre-toggle-all" type="button" class="subpage-head-link" title="Check or uncheck all genres">Uncheck All</button>
           <button id="genres-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <div class="controls" aria-label="Genres">
-          <div class="genre-head">
-            <p class="settings-intro genre-head-intro">Pick which genres feed Random and the Never-Ending Queue</p>
-            <button id="genre-toggle-all" type="button" class="pill-btn genre-allbtn" title="Check or uncheck all genres">Uncheck All</button>
-          </div>
-          <div id="genre-chips" class="genre-chips"></div>
-          <p id="pool-size-hint" class="pool-size-hint" hidden></p>
-          <section id="genre-map-section" class="genre-map-section collapsed">
-            <h3
-              class="section-label section-toggle"
-              id="genre-map-toggle"
-              role="button"
-              tabindex="0"
-              aria-expanded="false"
-              title="Collapse / expand"
-            >
-              <span>Last.fm tag mapping</span>
-              <span class="chevron" aria-hidden="true">&#9662;</span>
-            </h3>
-            <div class="genre-map-box" id="genre-map-box">
-              <p class="settings-intro" id="genre-map-intro">
-                How Last.fm artist tags map into PartyQueue genres. Only each
-                artist&apos;s top 2 tags (count &ge; 10) are used.
+        <div class="genres-sections" aria-label="Genres">
+          <div class="genres-section">
+            <div class="genres-section-head">
+              <p class="genres-section-heading">
+                <span class="section-label">Genres:</span>
+                <span class="genres-section-sub genre-head-intro">Pick which genres feed Random and the Never-Ending Queue.</span>
               </p>
+            </div>
+            <div id="genre-chips" class="genre-chips"></div>
+            <p id="pool-size-hint" class="pool-size-hint" hidden></p>
+          </div>
+          <section id="genre-map-section" class="genres-section genre-map-section collapsed">
+            <div class="genres-section-head">
+              <h3
+                class="section-label section-toggle"
+                id="genre-map-toggle"
+                role="button"
+                tabindex="0"
+                aria-expanded="false"
+                title="Collapse / expand"
+              >
+                <span>Last.fm tag mapping</span>
+                <span class="chevron" aria-hidden="true">&#9662;</span>
+              </h3>
+            </div>
+            <p class="genres-section-sub" id="genre-map-intro">
+              How Last.fm artist tags map into PartyQueue genres. Only each
+              artist&apos;s top 2 tags (count &ge; 10) are used.
+            </p>
+            <div class="genre-map-box" id="genre-map-box">
               <ul class="genre-map-list" id="genre-map-list"></ul>
             </div>
           </section>
@@ -753,7 +796,7 @@
           >
             New party
           </button>
-          <button id="booth-back" type="button" class="subpage-head-link">Back</button>
+          <button id="booth-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <!-- Every host switch lives here at the Booth root, grouped by area.
              Fine-tuning (counts, windows, voices) stays in the section pages.
@@ -810,29 +853,27 @@
                 <code>#/display?kiosk=1</code>.
               </p>
               <div class="booth-tv-preview-actions">
-                <button id="booth-tv-preview" type="button" class="pill-btn">
+                <button id="booth-tv-preview" type="button" class="subpage-head-link">
                   Preview as TV
                 </button>
-                <button id="booth-tv-kiosk" type="button" class="pill-btn">
-                  Open kiosk
+                <button id="booth-tv-kiosk" type="button" class="subpage-head-link">
+                  Open Kiosk
+                </button>
+                <button id="booth-tv-fully-copy" type="button" class="subpage-head-link">
+                  Copy
                 </button>
               </div>
               <div class="setting-row-text booth-tv-fully-row">
                 <label class="setting-label" for="booth-tv-fully-url">Fully start URL</label>
-                <div class="booth-tv-fully-copy">
-                  <input
-                    type="text"
-                    id="booth-tv-fully-url"
-                    class="setting-input"
-                    readonly
-                    spellcheck="false"
-                    autocomplete="off"
-                    placeholder="Loading…"
-                  />
-                  <button id="booth-tv-fully-copy" type="button" class="pill-btn">
-                    Copy
-                  </button>
-                </div>
+                <input
+                  type="text"
+                  id="booth-tv-fully-url"
+                  class="setting-input"
+                  readonly
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder="Loading…"
+                />
               </div>
             </div>
           </div>
@@ -1168,11 +1209,12 @@
       </div>
 
       <div id="view-settings-dj" class="view" hidden>
-        <div class="subpage-head">
+        <div class="subpage-head hub-subpage-head">
           <h2 class="section-label subpage-title">DJ</h2>
           <button id="settings-dj-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <div class="settings-box settings-hub">
+        <div class="hub-sections">
+          <div class="settings-hub">
           <div class="settings-hub-grid" role="navigation" aria-label="DJ sections">
             <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-banner">
               <p class="settings-hub-heading">
@@ -1237,6 +1279,7 @@
               </div>
               <span class="settings-hub-stat booth-media-url" id="booth-stat-media-url">—</span>
             </div>
+          </div>
           </div>
         </div>
       </div>
@@ -1542,18 +1585,23 @@
       </div>
 
       <div id="view-settings-users" class="view" hidden>
-        <div class="subpage-head">
+        <div class="subpage-head hub-subpage-head">
           <h2 class="section-label subpage-title">Users</h2>
           <button id="settings-users-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <div class="settings-box settings-hub">
-          <p class="settings-intro">Guest notes and birthdays for DJ shout-outs. Tap a person to edit.</p>
-          <div id="guest-hub-grid" class="settings-hub-grid" role="navigation" aria-label="Users"></div>
+        <div class="hub-sections">
+          <div class="settings-hub">
+            <p class="hub-section-heading settings-intro">
+              <span class="section-label">Users:</span>
+              <span class="hub-section-sub">Guest notes and birthdays for DJ shout-outs. Tap a person to edit.</span>
+            </p>
+            <div id="guest-hub-grid" class="settings-hub-grid" role="navigation" aria-label="Users"></div>
+          </div>
         </div>
       </div>
 
       <div id="view-settings-user-edit" class="view" hidden>
-        <div class="subpage-head">
+        <div class="subpage-head hub-subpage-head">
           <h2 class="section-label subpage-title" id="settings-user-edit-title">User</h2>
           <button id="settings-user-edit-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
@@ -1603,211 +1651,235 @@
             </select>
             <span class="setting-hint">used on their birthday</span>
           </div>
-          <div class="settings-actions settings-actions-sticky">
-            <button id="guest-save" type="button" class="pill-btn success">Add note</button>
-            <button id="guest-rename" type="button" class="pill-btn" title="Save a new name for this user" hidden>Rename</button>
-            <button id="guest-bday-save" type="button" class="pill-btn">Save birthday</button>
-            <button id="guest-bday-forget" type="button" class="pill-btn warning" title="Forget tonight&apos;s birthday and first-request shout for this guest so you can test again">Reset birthday shout</button>
-            <button id="guest-remove" type="button" class="pill-btn warning" title="Delete this user and all their notes">Remove user</button>
-          </div>
+        </div>
+        <div class="settings-actions user-edit-actions">
+          <button id="guest-save" type="button" class="subpage-head-link">Add note</button>
+          <button id="guest-rename" type="button" class="subpage-head-link" title="Save a new name for this user" hidden>Rename</button>
+          <button id="guest-bday-save" type="button" class="subpage-head-link">Save birthday</button>
+          <button id="guest-bday-forget" type="button" class="subpage-head-link" title="Forget tonight&apos;s birthday and first-request shout for this guest so you can test again">Reset birthday shout</button>
+          <button id="guest-remove" type="button" class="subpage-head-link" title="Delete this user and all their notes">Remove user</button>
         </div>
       </div>
 
       <div id="view-settings-connections" class="view" hidden>
-        <div class="subpage-head">
+        <div class="subpage-head connections-subpage-head">
           <h2 class="section-label subpage-title">Connections</h2>
           <button id="settings-connections-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <div class="settings-box settings-panel">
-          <p class="settings-intro">API credentials and cache. Set once; rarely touched on party night.</p>
-
-          <p class="section-label settings-banner-label">Host PIN</p>
-          <p class="settings-intro">Locks DJ Booth and host APIs. Stored hashed on this server — not in the share zip.</p>
-          <p id="host-pin-status" class="setting-hint">Checking&hellip;</p>
-          <div class="setting-row-text" id="host-pin-current-row" hidden>
-            <label class="setting-label" for="host-pin-current">Current PIN</label>
-            <input type="password" id="host-pin-current" class="setting-input" maxlength="32" inputmode="numeric" autocomplete="current-password" placeholder="Current PIN" />
-          </div>
-          <div class="setting-row-text" id="host-pin-bootstrap-row" hidden>
-            <label class="setting-label" for="host-pin-bootstrap">Setup code</label>
-            <input type="text" id="host-pin-bootstrap" class="setting-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="Code from data file" />
-          </div>
-          <div class="setting-row-text">
-            <label class="setting-label" for="host-pin-new">New PIN</label>
-            <input type="password" id="host-pin-new" class="setting-input" maxlength="32" inputmode="numeric" autocomplete="new-password" placeholder="4–32 characters" />
-          </div>
-          <div class="setting-row-text">
-            <label class="setting-label" for="host-pin-confirm">Confirm PIN</label>
-            <input type="password" id="host-pin-confirm" class="setting-input" maxlength="32" inputmode="numeric" autocomplete="new-password" placeholder="Confirm new PIN" />
-          </div>
-          <div class="settings-actions">
-            <button id="host-pin-save" type="button" class="pill-btn success">Save PIN</button>
-            <button id="host-pin-clear" type="button" class="pill-btn warning" hidden>Remove PIN</button>
-          </div>
-
-          <div class="controls-divider" aria-hidden="true"></div>
-
-          <p class="section-label settings-banner-label">Sonos</p>
-          <p class="settings-intro">Pin a speaker IP when auto-discovery fails (common across VLANs or with a VPN). Room name picks which group&apos;s queue to use.</p>
-          <div class="spotify-status-row">
-            <span id="sonos-conn-status" class="status-pill status-unknown">Checking&hellip;</span>
-          </div>
-          <div class="setting-row-text">
-            <label class="setting-label" for="set-sonos-host">Speaker IP</label>
-            <input type="text" id="set-sonos-host" class="setting-input" maxlength="64" placeholder="e.g. 192.168.1.50" autocomplete="off" spellcheck="false" />
-          </div>
-          <p class="setting-hint setting-hint-under-field">Leave blank to use network discovery. Prefer a DHCP reservation for that speaker.</p>
-          <div class="setting-row-text">
-            <label class="setting-label" for="set-sonos-room">Room name</label>
-            <input type="text" id="set-sonos-room" class="setting-input" maxlength="80" placeholder="e.g. Kitchen" autocomplete="off" spellcheck="false" />
-          </div>
-          <p class="setting-hint setting-hint-under-field">Optional. Must match a Sonos room name. Blank = first group coordinator.</p>
-          <div class="settings-actions">
-            <button id="sonos-conn-save" type="button" class="pill-btn success">Save</button>
-            <button id="sonos-conn-test" type="button" class="pill-btn">Test connection</button>
-            <button id="sonos-conn-clear" type="button" class="pill-btn warning">Clear</button>
+        <div class="connections-sections">
+          <div class="connections-section">
+            <div class="connections-section-head">
+              <p class="connections-section-heading">
+                <span class="section-label">Host PIN:</span>
+                <span class="connections-section-sub">Locks DJ Booth and host APIs.</span>
+              </p>
+              <button id="host-pin-save" type="button" class="subpage-head-link">Save</button>
+              <button id="host-pin-clear" type="button" class="subpage-head-link" hidden>Remove</button>
+            </div>
+            <p id="host-pin-status" class="setting-hint connections-status-line">Checking&hellip;</p>
+            <div class="setting-row-text" id="host-pin-current-row" hidden>
+              <label class="setting-label" for="host-pin-current">Current PIN</label>
+              <input type="password" id="host-pin-current" class="setting-input" maxlength="32" inputmode="numeric" autocomplete="current-password" placeholder="Current PIN" />
+            </div>
+            <div class="setting-row-text" id="host-pin-bootstrap-row" hidden>
+              <label class="setting-label" for="host-pin-bootstrap">Setup code</label>
+              <input type="text" id="host-pin-bootstrap" class="setting-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="Code from data file" />
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="host-pin-new">New PIN</label>
+              <input type="password" id="host-pin-new" class="setting-input" maxlength="32" inputmode="numeric" autocomplete="new-password" placeholder="4–32 characters" />
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="host-pin-confirm">Confirm</label>
+              <input type="password" id="host-pin-confirm" class="setting-input" maxlength="32" inputmode="numeric" autocomplete="new-password" placeholder="Confirm new PIN" />
+            </div>
           </div>
 
-          <div class="controls-divider" aria-hidden="true"></div>
-
-          <p class="section-label settings-banner-label">Spotify Credentials</p>
-          <p class="settings-intro">Developer app credentials for search and playlists. Spotify <strong>Premium</strong> required; guests never log in.</p>
-          <ol class="settings-help-list">
-            <li>Open the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">Spotify Developer Dashboard</a> and sign in.</li>
-            <li><strong>Create app</strong> (name can be anything). Under <strong>Redirect URIs</strong>, add the exact URI below (e.g. <code>http://127.0.0.1:8080/auth/callback</code>), then Save.</li>
-            <li>Copy <strong>Client ID</strong> and <strong>Client Secret</strong> into the fields here → Save → Test.</li>
-          </ol>
-          <p class="setting-hint settings-help-more">Need the secret again? Dashboard → your app → <strong>Settings</strong>. Docs: <a href="https://developer.spotify.com/documentation/web-api/concepts/apps" target="_blank" rel="noopener noreferrer">Spotify apps</a>.</p>
-          <div class="spotify-status-row">
-            <span id="spotify-app-status" class="status-pill status-unknown">Checking&hellip;</span>
-            <span id="spotify-status" class="status-pill status-unknown">Checking&hellip;</span>
-          </div>
-          <div class="setting-row-text">
-            <label class="setting-label" for="set-spotify-client-id">Client ID</label>
-            <input type="text" id="set-spotify-client-id" class="setting-input" maxlength="128" placeholder="Spotify Client ID" autocomplete="off" spellcheck="false" />
-          </div>
-          <div class="setting-row-text">
-            <label class="setting-label" for="set-spotify-client-secret">Client Secret</label>
-            <input type="password" id="set-spotify-client-secret" class="setting-input" maxlength="128" placeholder="Paste Client Secret" autocomplete="off" spellcheck="false" />
-          </div>
-          <p id="spotify-secret-hint" class="setting-hint setting-hint-under-field">Dots mean a client secret is already saved.</p>
-          <div class="setting-row-text">
-            <label class="setting-label" for="set-spotify-redirect">Redirect URI</label>
-            <input type="url" id="set-spotify-redirect" class="setting-input" maxlength="300" placeholder="http://127.0.0.1:8080/auth/callback" autocomplete="off" spellcheck="false" />
-          </div>
-          <p class="setting-hint setting-hint-under-field">Must match a Redirect URI registered on your Spotify app <em>exactly</em> (used for Connect Spotify / playlists).</p>
-          <div class="setting-row-text">
-            <label class="setting-label" for="set-spotify-market">Market</label>
-            <input type="text" id="set-spotify-market" class="setting-input" maxlength="2" placeholder="US" autocomplete="off" spellcheck="false" />
-          </div>
-          <div class="settings-actions">
-            <button id="spotify-app-save" type="button" class="pill-btn success">Save</button>
-            <button id="spotify-app-test" type="button" class="pill-btn">Test connection</button>
-            <button id="spotify-app-clear" type="button" class="pill-btn warning">Clear</button>
+          <div class="connections-section">
+            <div class="connections-section-head">
+              <p class="connections-section-heading">
+                <span class="section-label">Sonos:</span>
+                <span class="connections-section-sub">Speaker IP when discovery fails; room picks the queue.</span>
+              </p>
+              <button id="sonos-conn-save" type="button" class="subpage-head-link">Save</button>
+              <button id="sonos-conn-test" type="button" class="subpage-head-link">Test</button>
+              <button id="sonos-conn-clear" type="button" class="subpage-head-link">Clear</button>
+            </div>
+            <div class="spotify-status-row">
+              <span id="sonos-conn-status" class="status-pill status-unknown">Checking&hellip;</span>
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-sonos-host">Speaker IP</label>
+              <input type="text" id="set-sonos-host" class="setting-input" maxlength="64" placeholder="e.g. 192.168.1.50" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-sonos-room">Room name</label>
+              <input type="text" id="set-sonos-room" class="setting-input" maxlength="80" placeholder="e.g. Kitchen" autocomplete="off" spellcheck="false" />
+            </div>
           </div>
 
-          <div class="controls-divider" aria-hidden="true"></div>
+          <div class="connections-section">
+            <div class="connections-section-head">
+              <p class="connections-section-heading">
+                <span class="section-label">Spotify:</span>
+                <span class="connections-section-sub">Premium app credentials. <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">Dashboard</a></span>
+              </p>
+              <button id="spotify-app-save" type="button" class="subpage-head-link">Save</button>
+              <button id="spotify-app-test" type="button" class="subpage-head-link">Test</button>
+              <button id="spotify-app-clear" type="button" class="subpage-head-link">Clear</button>
+            </div>
+            <div class="spotify-status-row">
+              <span id="spotify-app-status" class="status-pill status-unknown">Checking&hellip;</span>
+              <span id="spotify-status" class="status-pill status-unknown">Checking&hellip;</span>
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-spotify-client-id">Client ID</label>
+              <input type="text" id="set-spotify-client-id" class="setting-input" maxlength="128" placeholder="Spotify Client ID" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-spotify-client-secret">Secret</label>
+              <input type="password" id="set-spotify-client-secret" class="setting-input" maxlength="128" placeholder="Client Secret" autocomplete="off" spellcheck="false" />
+            </div>
+            <p id="spotify-secret-hint" class="setting-hint setting-hint-under-field">Dots mean a secret is already saved.</p>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-spotify-redirect">Redirect</label>
+              <input type="url" id="set-spotify-redirect" class="setting-input" maxlength="300" placeholder="http://127.0.0.1:8080/auth/callback" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-spotify-market">Market</label>
+              <input type="text" id="set-spotify-market" class="setting-input" maxlength="2" placeholder="US" autocomplete="off" spellcheck="false" />
+            </div>
+          </div>
 
-          <p class="section-label settings-banner-label">Spotify Cache</p>
-          <p class="settings-intro">Re-warm after changing playlists.</p>
-          <div class="setting-row-cache">
-            <label class="setting-label" for="cache-warmed">Cache warmed</label>
-            <input type="text" id="cache-warmed" class="setting-input setting-input-readonly" readonly tabindex="-1" value="Never" />
-            <button id="cache-refresh-btn" type="button" class="pill-btn warning">Re-warm cache</button>
-          </div>
-          <p id="cache-status" class="setting-hint cache-status-line"></p>
-
-          <div class="controls-divider" aria-hidden="true"></div>
-
-          <p class="section-label settings-banner-label">Last.fm</p>
-          <p class="settings-intro">API key for genre tagging and Discover. Get a free key at <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener noreferrer">last.fm/api/account/create</a>.</p>
-          <div class="spotify-status-row">
-            <span id="lastfm-status" class="status-pill status-unknown">Checking&hellip;</span>
-            <span id="tagging-pill" class="status-pill status-unknown tagging-pill" title="Genre tagging needs a Last.fm API key">Tagging</span>
-          </div>
-          <div class="setting-row-text">
-            <label class="setting-label" for="set-lastfm-key">API key</label>
-            <input type="password" id="set-lastfm-key" class="setting-input" maxlength="128" placeholder="Paste Last.fm API key" autocomplete="off" spellcheck="false" />
-          </div>
-          <p id="lastfm-key-hint" class="setting-hint setting-hint-under-field">Dots mean an API key is already saved.</p>
-          <div class="settings-actions">
-            <button id="lastfm-save" type="button" class="pill-btn success">Save</button>
-            <button id="lastfm-test" type="button" class="pill-btn">Test connection</button>
-            <button id="lastfm-clear" type="button" class="pill-btn warning">Clear</button>
+          <div class="connections-section">
+            <div class="connections-section-head">
+              <p class="connections-section-heading">
+                <span class="section-label">Last.fm:</span>
+                <span class="connections-section-sub">Genre tags &amp; Discover. <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener noreferrer">Get a key</a></span>
+              </p>
+              <button id="lastfm-save" type="button" class="subpage-head-link">Save</button>
+              <button id="lastfm-test" type="button" class="subpage-head-link">Test</button>
+              <button id="lastfm-clear" type="button" class="subpage-head-link">Clear</button>
+            </div>
+            <div class="spotify-status-row">
+              <span id="lastfm-status" class="status-pill status-unknown">Checking&hellip;</span>
+              <span id="tagging-pill" class="status-pill status-unknown tagging-pill" title="Genre tagging needs a Last.fm API key">Tagging</span>
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-lastfm-key">API key</label>
+              <input type="password" id="set-lastfm-key" class="setting-input" maxlength="128" placeholder="Paste Last.fm API key" autocomplete="off" spellcheck="false" />
+            </div>
+            <p id="lastfm-key-hint" class="setting-hint setting-hint-under-field">Dots mean an API key is already saved.</p>
           </div>
 
-          <div class="controls-divider" aria-hidden="true"></div>
+          <div class="connections-section">
+            <div class="connections-section-head">
+              <p class="connections-section-heading">
+                <span class="section-label">Home Assistant:</span>
+                <span class="connections-section-sub">Token for DJ Voice on Sonos.</span>
+              </p>
+              <button id="ha-save" type="button" class="subpage-head-link">Save</button>
+              <button id="ha-test" type="button" class="subpage-head-link">Test</button>
+              <button id="ha-clear" type="button" class="subpage-head-link">Clear</button>
+            </div>
+            <div class="spotify-status-row">
+              <span id="ha-status" class="status-pill status-unknown">Checking&hellip;</span>
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-ha-url">URL</label>
+              <input type="url" id="set-ha-url" class="setting-input" maxlength="300" placeholder="http://homeassistant.local:8123" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-ha-token">Token</label>
+              <input type="password" id="set-ha-token" class="setting-input" maxlength="500" placeholder="Long-lived token" autocomplete="off" spellcheck="false" />
+            </div>
+            <p id="ha-token-hint" class="setting-hint setting-hint-under-field">Dots mean a token is already saved.</p>
+          </div>
 
-          <p class="section-label settings-banner-label">Home Assistant</p>
-          <p class="settings-intro">Long-lived access token for DJ Voice announcements on Sonos.</p>
-          <div class="spotify-status-row">
-            <span id="ha-status" class="status-pill status-unknown">Checking&hellip;</span>
-          </div>
-          <div class="setting-row-text">
-            <label class="setting-label" for="set-ha-url">URL</label>
-            <input type="url" id="set-ha-url" class="setting-input" maxlength="300" placeholder="http://homeassistant.local:8123" autocomplete="off" spellcheck="false" />
-          </div>
-          <div class="setting-row-text">
-            <label class="setting-label" for="set-ha-token">Token</label>
-            <input type="password" id="set-ha-token" class="setting-input" maxlength="500" placeholder="Paste long-lived token" autocomplete="off" spellcheck="false" />
-          </div>
-          <p id="ha-token-hint" class="setting-hint setting-hint-under-field">Dots mean a token is already saved.</p>
-          <div class="settings-actions">
-            <button id="ha-save" type="button" class="pill-btn success">Save</button>
-            <button id="ha-test" type="button" class="pill-btn">Test connection</button>
-            <button id="ha-clear" type="button" class="pill-btn warning">Clear</button>
+          <div class="connections-section">
+            <div class="connections-section-head">
+              <p class="connections-section-heading">
+                <span class="section-label">Spotify cache:</span>
+                <span class="connections-section-sub">Re-warm after playlist changes.</span>
+              </p>
+              <button id="cache-refresh-btn" type="button" class="subpage-head-link">Re-warm</button>
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="cache-warmed">Warmed</label>
+              <input type="text" id="cache-warmed" class="setting-input setting-input-readonly" readonly tabindex="-1" value="Never" />
+            </div>
+            <p id="cache-status" class="setting-hint cache-status-line"></p>
           </div>
         </div>
       </div>
 
       <div id="view-settings-reset" class="view" hidden>
-        <div class="subpage-head">
+        <div class="subpage-head hub-subpage-head">
           <h2 class="section-label subpage-title">Reset</h2>
           <button id="settings-reset-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <div class="settings-box settings-hub">
-          <p class="settings-intro">Destructive clears — each one asks for confirmation first.</p>
-          <div class="settings-hub-grid" role="group" aria-label="Reset actions">
-            <button type="button" class="settings-hub-card" id="settings-clear-stats" title="Clear Stats top lists and the dedication wall">
-              <span class="settings-hub-title">Reset stats</span>
-              <span class="settings-hub-desc">Top songs, artists, requesters, and dedications</span>
-            </button>
-            <button type="button" class="settings-hub-card" id="settings-clear-dj-memory" title="Clear recent DJ phrases, scripts, and guest shout memory">
-              <span class="settings-hub-title">Reset DJ memory</span>
-              <span class="settings-hub-desc">Set phrases, recent scripts, birthdays, and guest blurbs</span>
-            </button>
-            <button type="button" class="settings-hub-card" id="settings-clear-history" title="Clear played/skipped song memory and artist skip cooldowns">
-              <span class="settings-hub-title">Reset song memory</span>
-              <span class="settings-hub-desc">Played and skipped songs Random uses to avoid repeats</span>
-            </button>
-            <button type="button" class="settings-hub-card" id="settings-clear-suggestions" title="Clear the guest suggestion inbox">
-              <span class="settings-hub-title">Reset suggestions</span>
-              <span class="settings-hub-desc">Guest idea inbox (open and done)</span>
-            </button>
-            <button type="button" class="settings-hub-card" id="settings-clear-reactions" title="Clear Now Playing mood reactions">
-              <span class="settings-hub-title">Reset reactions</span>
-              <span class="settings-hub-desc">Now Playing mood reactions</span>
-            </button>
-            <button type="button" class="settings-hub-card" id="settings-clear-karaoke" title="Clear Karaoke mic tags">
-              <span class="settings-hub-title">Reset Karaoke list</span>
-              <span class="settings-hub-desc">Songs tagged with the mic</span>
-            </button>
-            <button
-              type="button"
-              class="settings-hub-card settings-hub-card-full"
-              id="settings-clear-fairness"
-              title="Clear rolling song-request and Set Request fairness limits"
-            >
-              <span class="settings-hub-title">Reset fairness</span>
-              <span class="settings-hub-desc">Clears request and Set Request quotas so guests can request again — does not remove queued songs or Stats</span>
-            </button>
+        <div class="hub-sections">
+          <div class="settings-hub">
+            <p class="hub-section-heading settings-intro">
+              <span class="section-label">Reset:</span>
+              <span class="hub-section-sub">Destructive clears — each one asks for confirmation first.</span>
+            </p>
+            <div class="settings-hub-grid" role="group" aria-label="Reset actions">
+              <button type="button" class="settings-hub-card" id="settings-clear-stats" title="Clear Stats top lists and the dedication wall">
+                <p class="settings-hub-heading">
+                  <span class="settings-hub-title">Reset stats:</span>
+                  <span class="settings-hub-desc">Top songs, artists, requesters, and dedications.</span>
+                </p>
+              </button>
+              <button type="button" class="settings-hub-card" id="settings-clear-dj-memory" title="Clear recent DJ phrases, scripts, and guest shout memory">
+                <p class="settings-hub-heading">
+                  <span class="settings-hub-title">Reset DJ memory:</span>
+                  <span class="settings-hub-desc">Set phrases, recent scripts, birthdays, and guest blurbs.</span>
+                </p>
+              </button>
+              <button type="button" class="settings-hub-card" id="settings-clear-history" title="Clear played/skipped song memory and artist skip cooldowns">
+                <p class="settings-hub-heading">
+                  <span class="settings-hub-title">Reset song memory:</span>
+                  <span class="settings-hub-desc">Played and skipped songs Random uses to avoid repeats.</span>
+                </p>
+              </button>
+              <button type="button" class="settings-hub-card" id="settings-clear-suggestions" title="Clear the guest suggestion inbox">
+                <p class="settings-hub-heading">
+                  <span class="settings-hub-title">Reset suggestions:</span>
+                  <span class="settings-hub-desc">Guest idea inbox (open and done).</span>
+                </p>
+              </button>
+              <button type="button" class="settings-hub-card" id="settings-clear-reactions" title="Clear Now Playing mood reactions">
+                <p class="settings-hub-heading">
+                  <span class="settings-hub-title">Reset reactions:</span>
+                  <span class="settings-hub-desc">Now Playing mood reactions.</span>
+                </p>
+              </button>
+              <button type="button" class="settings-hub-card" id="settings-clear-karaoke" title="Clear Karaoke mic tags">
+                <p class="settings-hub-heading">
+                  <span class="settings-hub-title">Reset Karaoke list:</span>
+                  <span class="settings-hub-desc">Songs tagged with the mic.</span>
+                </p>
+              </button>
+              <button
+                type="button"
+                class="settings-hub-card settings-hub-card-full"
+                id="settings-clear-fairness"
+                title="Clear rolling song-request and Set Request fairness limits"
+              >
+                <p class="settings-hub-heading">
+                  <span class="settings-hub-title">Reset fairness:</span>
+                  <span class="settings-hub-desc">Clears request and Set Request quotas so guests can request again — does not remove queued songs or Stats.</span>
+                </p>
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- STATS VIEW — from the main toolbar -->
       <div id="view-stats" class="view" hidden>
-        <div class="subpage-head">
+        <div class="subpage-head stats-subpage-head">
           <h2 class="section-label subpage-title">Stats</h2>
           <button id="stats-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
@@ -1821,45 +1893,65 @@
             <div class="stats-sections">
               <div class="stats-section">
                 <p class="section-label">Top requested songs</p>
-                <ul id="stats-songs" class="stats-list"></ul>
+                <div class="stats-section-card">
+                  <ul id="stats-songs" class="stats-list"></ul>
+                </div>
               </div>
               <div class="stats-section">
                 <p class="section-label">Top requested sets</p>
-                <ul id="stats-sets" class="stats-list"></ul>
+                <div class="stats-section-card">
+                  <ul id="stats-sets" class="stats-list"></ul>
+                </div>
               </div>
               <div class="stats-section">
                 <p class="section-label">Top requested artists</p>
-                <ul id="stats-artists" class="stats-list"></ul>
+                <div class="stats-section-card">
+                  <ul id="stats-artists" class="stats-list"></ul>
+                </div>
               </div>
               <div class="stats-section">
                 <p class="section-label">Top requesters</p>
-                <ul id="stats-requesters" class="stats-list"></ul>
+                <div class="stats-section-card">
+                  <ul id="stats-requesters" class="stats-list"></ul>
+                </div>
               </div>
               <div id="stats-reacted-wrap" class="stats-section">
                 <p class="section-label">Song reactions</p>
-                <ul id="stats-reacted" class="stats-list"></ul>
+                <div class="stats-section-card">
+                  <ul id="stats-reacted" class="stats-list"></ul>
+                </div>
               </div>
               <div id="stats-top-liked-wrap" class="stats-section">
                 <p class="section-label">Most Liked: &#128077; &#10084;&#65039; &#128293;</p>
-                <ul id="stats-top-liked" class="stats-list"></ul>
+                <div class="stats-section-card">
+                  <ul id="stats-top-liked" class="stats-list"></ul>
+                </div>
               </div>
               <div id="stats-most-hated-wrap" class="stats-section">
                 <p class="section-label">Most Hated: &#128078; &#129326;</p>
-                <ul id="stats-most-hated" class="stats-list"></ul>
+                <div class="stats-section-card">
+                  <ul id="stats-most-hated" class="stats-list"></ul>
+                </div>
               </div>
               <div id="stats-dedications-wrap" class="stats-section">
                 <p class="section-label" id="stats-dedications-label">Tonight's dedications</p>
-                <ul id="stats-dedications" class="stats-list"></ul>
+                <div class="stats-section-card">
+                  <ul id="stats-dedications" class="stats-list"></ul>
+                </div>
               </div>
               <div id="stats-party-music-wrap" class="stats-section" hidden>
                 <p class="section-label">Party Music</p>
                 <p class="settings-intro">&#127881; — songs that got the party reaction.</p>
-                <ul id="stats-party-music" class="stats-list"></ul>
+                <div class="stats-section-card">
+                  <ul id="stats-party-music" class="stats-list"></ul>
+                </div>
               </div>
               <div id="stats-karaoke-wrap" class="stats-section" hidden>
                 <p class="section-label">Karaoke List</p>
                 <p class="settings-intro">Songs tagged with &#127908; on Now Playing — your sing list (kept until you reset the Karaoke list).</p>
-                <ul id="stats-karaoke" class="stats-list"></ul>
+                <div class="stats-section-card">
+                  <ul id="stats-karaoke" class="stats-list"></ul>
+                </div>
               </div>
             </div>
           </div>
@@ -1869,61 +1961,82 @@
 
       <!-- PLAYLISTS VIEW - under Vibe; which playlists feed Random / Never-Ending. -->
       <div id="view-playlists" class="view" hidden>
-        <div class="subpage-head">
+        <div class="subpage-head playlists-subpage-head">
           <h2 class="section-label subpage-title">Playlists</h2>
+          <button id="toggle-all-playlists" type="button" class="subpage-head-link">Uncheck All</button>
           <button id="playlists-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <p class="settings-intro">Choose which Spotify playlists feed Random and Never-Ending.</p>
-
-        <section id="playlists-section" class="playlists-section">
-          <div id="playlist-connect" class="connect-box" hidden>
-            <p class="np-empty">Connect your Spotify account to add your playlists to the queue.</p>
-            <button id="connect-spotify" type="button" class="pill-btn success">Connect Spotify</button>
-          </div>
-          <div class="playlist-box" id="playlist-box" hidden>
-            <div class="playlist-toolbar">
-              <button id="toggle-all-playlists" type="button" class="pill-btn">Uncheck All</button>
+        <div class="playlists-sections">
+          <section id="playlists-section" class="playlists-section">
+            <div class="playlists-section-head">
+              <p class="playlists-section-heading">
+                <span class="section-label">Playlists:</span>
+                <span class="playlists-section-sub">Choose which Spotify playlists feed Random and Never-Ending.</span>
+              </p>
               <span id="selected-count" class="playlist-selcount"></span>
             </div>
-            <ul id="playlists" class="results"></ul>
-            <p id="playlists-empty" class="np-empty" hidden>No playlists found.</p>
-          </div>
-        </section>
+            <div id="playlist-connect" class="connect-box" hidden>
+              <p class="np-empty">Connect your Spotify account to add your playlists to the queue.</p>
+              <button id="connect-spotify" type="button" class="pill-btn success">Connect Spotify</button>
+            </div>
+            <div class="playlist-box" id="playlist-box" hidden>
+              <ul id="playlists" class="results"></ul>
+              <p id="playlists-empty" class="np-empty" hidden>No playlists found.</p>
+            </div>
+          </section>
+        </div>
       </div>
 
       <!-- MEMORY VIEW - songs the DJ remembers and skips until they age out. -->
       <div id="view-memory" class="view" hidden>
-        <div class="subpage-head">
+        <div class="subpage-head memory-subpage-head">
           <h2 class="section-label subpage-title">Memory <span id="memory-count" class="queue-count"></span></h2>
           <button id="memory-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-
-        <div class="memory-box" id="memory-box">
-          <p class="settings-intro" id="memory-intro" hidden>Songs the DJ remembers &mdash; newest first. Badges show Requested, Random, Discover, and/or Skipped when known. Random only avoids the newest Song memory window.</p>
-          <ul id="memory-list" class="results"></ul>
-          <p id="memory-empty" class="np-empty" hidden>Nothing remembered yet.</p>
+        <div class="memory-sections">
+          <div class="memory-section memory-box" id="memory-box">
+            <div class="memory-section-head">
+              <p class="memory-section-heading">
+                <span class="section-label">Memory:</span>
+                <span class="memory-section-sub" id="memory-intro" hidden>Songs the DJ remembers &mdash; newest first. Badges show Requested, Random, Discover, and/or Skipped when known. Random only avoids the newest Song memory window.</span>
+              </p>
+            </div>
+            <ul id="memory-list" class="results"></ul>
+            <p id="memory-empty" class="np-empty" hidden>Nothing remembered yet.</p>
+          </div>
         </div>
       </div>
 
       <!-- SUGGESTIONS VIEW - guest idea inbox for the host. -->
       <div id="view-suggestions" class="view" hidden>
-        <div class="subpage-head">
+        <div class="subpage-head suggestions-subpage-head">
           <h2 class="section-label subpage-title">Suggestions <span id="suggestions-count" class="queue-count"></span></h2>
+          <button
+            id="suggestions-clear-all"
+            type="button"
+            class="subpage-head-link"
+            title="Delete all guest suggestions"
+          >
+            Clear all
+          </button>
           <button id="suggestions-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-
-        <div class="memory-box" id="suggestions-box">
-          <p class="settings-intro" id="suggestions-intro">Guest ideas for PartyQueue. Check one off when you&apos;ve implemented it.</p>
-          <div class="suggestions-toolbar">
-            <div class="stats-window suggestions-filter" role="group" aria-label="Suggestion filter">
-              <button type="button" class="stats-win-btn active" data-sug-filter="open">Open</button>
-              <button type="button" class="stats-win-btn" data-sug-filter="done">Done</button>
-              <button type="button" class="stats-win-btn" data-sug-filter="all">All</button>
+        <div class="suggestions-sections" id="suggestions-box">
+          <div class="suggestions-section">
+            <div class="suggestions-section-head">
+              <p class="suggestions-section-heading">
+                <span class="section-label">Inbox:</span>
+                <span class="suggestions-section-sub" id="suggestions-intro">Guest ideas for PartyQueue. Check one off when you&apos;ve implemented it.</span>
+              </p>
+              <div class="stats-window suggestions-filter" role="group" aria-label="Suggestion filter">
+                <button type="button" class="stats-win-btn active" data-sug-filter="open">Open</button>
+                <button type="button" class="stats-win-btn" data-sug-filter="done">Done</button>
+                <button type="button" class="stats-win-btn" data-sug-filter="all">All</button>
+              </div>
             </div>
-            <button id="suggestions-clear-all" type="button" class="pill-btn warning" title="Delete all guest suggestions">Clear all</button>
+            <ul id="suggestions-list" class="results suggestions-list"></ul>
+            <p id="suggestions-empty" class="np-empty" hidden>No suggestions yet.</p>
           </div>
-          <ul id="suggestions-list" class="results"></ul>
-          <p id="suggestions-empty" class="np-empty" hidden>No suggestions yet.</p>
         </div>
       </div>
     </main>
