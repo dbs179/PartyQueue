@@ -1738,9 +1738,17 @@ button.guest-name:focus-visible {
   margin: 0;
 }
 
-/* Group captions inside Booth toggle columns. */
-.booth-toggle-group {
-  margin: 2px 0 0;
+/* Group captions inside Booth toggle columns (no dividers — titles separate sections). */
+.booth-toggle-col .booth-toggle-group {
+  margin: 16px 0 0;
+}
+
+.booth-toggle-col .options-list > .booth-toggle-group:first-child {
+  margin-top: 0;
+}
+
+#view-booth .settings-hub {
+  margin-top: 14px;
 }
 
 @media (min-width: 960px) {
