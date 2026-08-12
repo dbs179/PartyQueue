@@ -109,11 +109,18 @@ export function statsSummaryCardsHtml(s) {
   const topSong = s?.topSongs?.[0];
   const topArtist = s?.topArtists?.[0];
   const topRequester = s?.topRequesters?.[0];
+  const song = topSong ? escapeHtml(topSong.name || "Unknown") : "\u2014";
+  const artist = topArtist ? escapeHtml(topArtist.artist || "Unknown") : "\u2014";
+  const requester = topRequester
+    ? `${escapeHtml(topRequester.name || "Guest")}${
+        topRequester.count != null ? ` \u00b7 ${topRequester.count}\u00d7` : ""
+      }`
+    : "\u2014";
   return `
-    <div class="stat-card"><div class="stat-num">${s?.total || 0}</div><div class="stat-cap">requests</div></div>
-    <div class="stat-card"><div class="stat-lead">${topSong ? escapeHtml(topSong.name || "Unknown") : "\u2014"}</div><div class="stat-cap">top song</div></div>
-    <div class="stat-card"><div class="stat-lead">${topArtist ? escapeHtml(topArtist.artist) : "\u2014"}</div><div class="stat-cap">top artist</div></div>
-    <div class="stat-card"><div class="stat-lead">${topRequester ? escapeHtml(topRequester.name) : "\u2014"}</div><div class="stat-cap">top requestor${topRequester ? ` \u00b7 ${topRequester.count}\u00d7` : ""}</div></div>
+    <div class="stat-card"><div class="stat-line">Requests: ${s?.total || 0}</div></div>
+    <div class="stat-card"><div class="stat-line">Top song: ${song}</div></div>
+    <div class="stat-card"><div class="stat-line">Top artist: ${artist}</div></div>
+    <div class="stat-card"><div class="stat-line">Top requestor: ${requester}</div></div>
   `;
 }
 

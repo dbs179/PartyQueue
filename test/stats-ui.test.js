@@ -61,7 +61,10 @@ test("statsSummaryCardsHtml and dedicationsHtml escape content", () => {
     topArtists: [{ artist: "Y" }],
     topRequesters: [{ name: "Z", count: 2 }],
   });
-  assert.match(cards, /5/);
+  assert.match(cards, /Requests: 5/);
+  assert.match(cards, /Top song:/);
+  assert.match(cards, /Top artist: Y/);
+  assert.match(cards, /Top requestor: Z/);
   assert.doesNotMatch(cards, /<b>X<\/b>/);
   assert.match(cards, /&lt;b&gt;/);
 
