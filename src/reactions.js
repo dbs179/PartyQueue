@@ -63,15 +63,19 @@ function labelBy(value) {
   return cleanBy(value) || GUEST_LABEL;
 }
 
-/** Normalize mood vote: legacy string kind → { kind, by }. */
+/** Normalize mood vote: legacy string kind → { kind, by, at }. */
 function readMoodVote(raw) {
   if (typeof raw === "string" && MOOD_KINDS.has(raw)) {
-    return { kind: raw, by: "" };
+    return { kind: raw, by: "", at: 0 };
   }
   if (raw && typeof raw === "object") {
     const kind = String(raw.kind || "").toLowerCase();
     if (!MOOD_KINDS.has(kind)) return null;
-    return { kind, by: cleanBy(raw.by) };
+    return {
+      kind,
+      by: cleanBy(raw.by),
+      at: Number(raw.at) || 0,
+    };
   }
   return null;
 }
@@ -272,8 +276,9 @@ export function setReaction(trackId, kind, guestId, meta = {}) {
     if (prev?.kind === k) {
       delete row.votes[guest];
     } else {
-      row.votes[guest] = { kind: k, by };
-      row.moodAt = Date.now();
+      const now = Date.now();
+      row.votes[guest] = { kind: k, by, at: now };
+      row.moodAt = now;
     }
   }
 
@@ -336,14 +341,17 @@ export const HATED_REACTION_KINDS = ["down", "vomit"];
 
 /**
  * Rank tracks by a set of mood reaction kinds.
+ * Optional `sinceTs` keeps only votes at/after that time (Tonight window).
+ * Legacy votes without `at` fall back to the track's `moodAt`.
  * Each entry: { id, name, artist, count, by, reactions: [{ kind, by }], ts }
  */
-export function listTracksByMoodKinds(kinds, limit = 50) {
+export function listTracksByMoodKinds(kinds, limit = 50, sinceTs = 0) {
   const want = (Array.isArray(kinds) ? kinds : [])
     .map((k) => String(k || "").toLowerCase())
     .filter((k) => MOOD_KINDS.has(k));
   if (!want.length) return [];
   const wantSet = new Set(want);
+  const since = Number(sinceTs) || 0;
 
   load();
   const n = Math.max(1, Math.min(100, Math.floor(Number(limit) || 50)));
@@ -351,17 +359,22 @@ export function listTracksByMoodKinds(kinds, limit = 50) {
     .map(([id, raw]) => {
       const votes =
         raw?.votes && typeof raw.votes === "object" ? raw.votes : {};
+      const trackMoodAt = Number(raw?.moodAt) || 0;
       /** @type {Record<string, string[]>} */
       const byKind = {};
       for (const k of want) byKind[k] = [];
       const names = [];
       let total = 0;
+      let latest = 0;
       for (const voteRaw of Object.values(votes)) {
         const vote = readMoodVote(voteRaw);
         if (!vote || !wantSet.has(vote.kind)) continue;
+        const at = vote.at || trackMoodAt;
+        if (at < since) continue;
         byKind[vote.kind].push(vote.by);
         names.push(vote.by);
         total += 1;
+        if (at > latest) latest = at;
       }
       if (!total) return null;
       const reactions = want
@@ -377,7 +390,7 @@ export function listTracksByMoodKinds(kinds, limit = 50) {
         count: total,
         by: uniqueLabels(names),
         reactions,
-        ts: Number(raw?.moodAt) || 0,
+        ts: latest || trackMoodAt,
       };
     })
     .filter(Boolean)
@@ -385,24 +398,24 @@ export function listTracksByMoodKinds(kinds, limit = 50) {
     .slice(0, n);
 }
 
-export function listTopLikedTracks(limit = 50) {
-  return listTracksByMoodKinds(LIKED_REACTION_KINDS, limit);
+export function listTopLikedTracks(limit = 50, sinceTs = 0) {
+  return listTracksByMoodKinds(LIKED_REACTION_KINDS, limit, sinceTs);
 }
 
-export function listPartyMusicTracks(limit = 50) {
-  return listTracksByMoodKinds(PARTY_REACTION_KINDS, limit);
+export function listPartyMusicTracks(limit = 50, sinceTs = 0) {
+  return listTracksByMoodKinds(PARTY_REACTION_KINDS, limit, sinceTs);
 }
 
-export function listMostHatedTracks(limit = 50) {
-  return listTracksByMoodKinds(HATED_REACTION_KINDS, limit);
+export function listMostHatedTracks(limit = 50, sinceTs = 0) {
+  return listTracksByMoodKinds(HATED_REACTION_KINDS, limit, sinceTs);
 }
 
 /**
  * Tracks with mood reactions, for Stats attribution.
  * Each entry: { id, name, artist, count, reactions: [{ kind, by }], ts }
  */
-export function listReactedTracks(limit = 50) {
-  return listTracksByMoodKinds(MOOD_REACTION_KINDS, limit);
+export function listReactedTracks(limit = 50, sinceTs = 0) {
+  return listTracksByMoodKinds(MOOD_REACTION_KINDS, limit, sinceTs);
 }
 
 function trackHasAny(row) {

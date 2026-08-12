@@ -1521,18 +1521,19 @@ function renderStats() {
     topRequesters: [],
   };
   const karaoke = Array.isArray(statsData.karaoke) ? statsData.karaoke : [];
-  const reacted = Array.isArray(statsData.reacted) ? statsData.reacted : [];
-  const topLiked = Array.isArray(statsData.topLiked) ? statsData.topLiked : [];
   const partyMusic = Array.isArray(statsData.partyMusic)
     ? statsData.partyMusic
     : [];
-  const mostHated = Array.isArray(statsData.mostHated)
-    ? statsData.mostHated
-    : [];
+  // Window-scoped reaction lists (Tonight vs All time).
+  const reacted = Array.isArray(s.reacted) ? s.reacted : [];
+  const topLiked = Array.isArray(s.topLiked) ? s.topLiked : [];
+  const mostHated = Array.isArray(s.mostHated) ? s.mostHated : [];
   const sets = Array.isArray(s.topSets) ? s.topSets : [];
+  const dedications = Array.isArray(s.dedications) ? s.dedications : [];
   const empty =
     !s.total &&
     !sets.length &&
+    !dedications.length &&
     !karaoke.length &&
     !reacted.length &&
     !topLiked.length &&
@@ -1562,24 +1563,30 @@ function renderStats() {
       : `<li class="stats-row stats-row-empty"><span class="stats-name">No named requesters yet</span></li>`;
   }
   if (statsDedicationsWrap && statsDedications) {
-    const wall = Array.isArray(s.dedications) ? s.dedications : [];
     if (statsDedicationsLabel) {
       statsDedicationsLabel.textContent =
         statsWindow === "tonight"
           ? "Tonight's dedications"
           : "Dedications";
     }
-    if (!wall.length) {
-      statsDedicationsWrap.hidden = true;
-      statsDedications.innerHTML = "";
-    } else {
-      statsDedicationsWrap.hidden = false;
-      statsDedications.innerHTML = dedicationsHtml(wall);
-    }
+    statsDedicationsWrap.hidden = false;
+    statsDedications.innerHTML = dedications.length
+      ? dedicationsHtml(dedications)
+      : `<li class="stats-row stats-row-empty"><span class="stats-name">No dedications yet</span></li>`;
   }
-  paintStatsReactionList(statsTopLikedWrap, statsTopLiked, topLiked);
+  paintStatsReactionList(statsReactedWrap, statsReacted, reacted, {
+    alwaysShow: true,
+    emptyLabel: "No reactions yet",
+  });
+  paintStatsReactionList(statsTopLikedWrap, statsTopLiked, topLiked, {
+    alwaysShow: true,
+    emptyLabel: "No liked songs yet",
+  });
+  paintStatsReactionList(statsMostHatedWrap, statsMostHated, mostHated, {
+    alwaysShow: true,
+    emptyLabel: "No hated songs yet",
+  });
   paintStatsReactionList(statsPartyMusicWrap, statsPartyMusic, partyMusic);
-  paintStatsReactionList(statsMostHatedWrap, statsMostHated, mostHated);
 
   if (statsKaraokeWrap && statsKaraoke) {
     if (!karaoke.length) {
@@ -1590,7 +1597,6 @@ function renderStats() {
       statsKaraoke.innerHTML = karaokeRowsHtml(karaoke);
     }
   }
-  paintStatsReactionList(statsReactedWrap, statsReacted, reacted);
 }
 
 async function loadStats() {

@@ -51,19 +51,24 @@ export function statRows(items, primaryKey) {
  * @param {HTMLElement|null|undefined} wrap
  * @param {HTMLElement|null|undefined} listEl
  * @param {Array<object>|null|undefined} items
- * @param {{ byPrefix?: string }} [opts]
+ * @param {{ byPrefix?: string, alwaysShow?: boolean, emptyLabel?: string }} [opts]
  */
 export function paintStatsReactionList(
   wrap,
   listEl,
   items,
-  { byPrefix = "" } = {}
+  { byPrefix = "", alwaysShow = false, emptyLabel = "None yet" } = {}
 ) {
   if (!wrap || !listEl) return;
   const rows = Array.isArray(items) ? items : [];
   if (!rows.length) {
-    wrap.hidden = true;
-    listEl.innerHTML = "";
+    if (alwaysShow) {
+      wrap.hidden = false;
+      listEl.innerHTML = `<li class="stats-row stats-row-empty"><span class="stats-name">${escapeHtml(emptyLabel)}</span></li>`;
+    } else {
+      wrap.hidden = true;
+      listEl.innerHTML = "";
+    }
     return;
   }
   wrap.hidden = false;

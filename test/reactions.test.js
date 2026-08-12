@@ -226,6 +226,41 @@ test("top liked, party music, and most hated rank by kind groups", () => {
   assert.ok(!hated.some((r) => r.id === "funny1"));
 });
 
+test("listTopLikedTracks filters by sinceTs for Tonight window", () => {
+  const old = Date.now() - 24 * 60 * 60_000;
+  const recent = Date.now();
+  reactions.setReaction("old-liked", "up", "guest1111", {
+    name: "Old",
+    artist: "A",
+    by: "Alex",
+  });
+  reactions.flushReactionsPersist();
+  // Backdate the stored vote so it falls outside tonight.
+  const store = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
+  store.byTrack["old-liked"].votes.guest1111.at = old;
+  store.byTrack["old-liked"].moodAt = old;
+  fs.writeFileSync(TMP_FILE, JSON.stringify(store));
+  reactions.resetCacheForTests();
+
+  reactions.setReaction("new-liked", "fire", "guest2222", {
+    name: "New",
+    artist: "B",
+    by: "Sam",
+  });
+  reactions.flushReactionsPersist();
+  const store2 = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
+  store2.byTrack["new-liked"].votes.guest2222.at = recent;
+  store2.byTrack["new-liked"].moodAt = recent;
+  fs.writeFileSync(TMP_FILE, JSON.stringify(store2));
+  reactions.resetCacheForTests();
+
+  const all = reactions.listTopLikedTracks(10, 0);
+  assert.equal(all.length, 2);
+  const tonight = reactions.listTopLikedTracks(10, recent - 1000);
+  assert.equal(tonight.length, 1);
+  assert.equal(tonight[0].id, "new-liked");
+});
+
 test("legacy string and boolean vote shapes still count as Guest", () => {
   fs.writeFileSync(
     TMP_FILE,

@@ -70,11 +70,23 @@ export async function buildPartyStatsPayload(deps = {}) {
   const tonight = summarizeRequests(events, sinceTonight, LIST_LIMIT);
   const allTime = summarizeRequests(events, 0, LIST_LIMIT);
   const karaoke = listKaraokeTracks(LIST_LIMIT);
-  const reacted = listReactedTracks(LIST_LIMIT);
-  const topLiked = listTopLikedTracks(LIST_LIMIT);
   const partyMusic = listPartyMusicTracks(LIST_LIMIT);
-  const mostHated = listMostHatedTracks(LIST_LIMIT);
-  const reactionLists = [karaoke, reacted, topLiked, partyMusic, mostHated];
+  const reactedTonight = listReactedTracks(LIST_LIMIT, sinceTonight);
+  const reactedAll = listReactedTracks(LIST_LIMIT, 0);
+  const topLikedTonight = listTopLikedTracks(LIST_LIMIT, sinceTonight);
+  const topLikedAll = listTopLikedTracks(LIST_LIMIT, 0);
+  const mostHatedTonight = listMostHatedTracks(LIST_LIMIT, sinceTonight);
+  const mostHatedAll = listMostHatedTracks(LIST_LIMIT, 0);
+  const reactionLists = [
+    karaoke,
+    partyMusic,
+    reactedTonight,
+    reactedAll,
+    topLikedTonight,
+    topLikedAll,
+    mostHatedTonight,
+    mostHatedAll,
+  ];
 
   const needIds = [
     ...new Set(reactionLists.flat().filter((k) => !k.name).map((k) => k.id)),
@@ -98,21 +110,28 @@ export async function buildPartyStatsPayload(deps = {}) {
   return {
     windowHours: STATS_WINDOW_HOURS,
     karaoke,
-    reacted,
-    topLiked,
     partyMusic,
-    mostHated,
+    // Legacy top-level aliases = all-time (older clients / tests).
+    reacted: reactedAll,
+    topLiked: topLikedAll,
+    mostHated: mostHatedAll,
     tonight: {
       ...tonight,
       topSets: topSets(events, sinceTonight, LIST_LIMIT),
       topRequesters: topRequesters(events, sinceTonight, LIST_LIMIT),
       dedications: listDedications(sinceTonight, LIST_LIMIT),
+      reacted: reactedTonight,
+      topLiked: topLikedTonight,
+      mostHated: mostHatedTonight,
     },
     allTime: {
       ...allTime,
       topSets: topSets(events, 0, LIST_LIMIT),
       topRequesters: topRequesters(events, 0, LIST_LIMIT),
       dedications: listDedications(0, LIST_LIMIT),
+      reacted: reactedAll,
+      topLiked: topLikedAll,
+      mostHated: mostHatedAll,
     },
   };
 }
