@@ -2350,20 +2350,19 @@ button.guest-name:focus-visible {
   border-top: none;
 }
 
-/* Segmented All time / Tonight (and Suggestions filters) — match .section-label. */
+/* Segmented All time / Tonight — pill chrome with section-label type. */
 .stats-window {
   display: flex;
-  gap: 16px;
+  gap: 6px;
   margin: 10px 0;
 }
 .stats-win-btn {
-  appearance: none;
   flex: 1;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border, #2a2a32);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--muted);
   font-family: inherit;
   font-size: 0.8rem;
@@ -2373,14 +2372,10 @@ button.guest-name:focus-visible {
   line-height: 1.2;
   cursor: pointer;
 }
-.stats-win-btn:hover,
-.stats-win-btn:focus-visible {
-  color: var(--text, #fff);
-}
 .stats-win-btn.active {
-  background: transparent;
-  border: 0;
-  color: var(--text, #fff);
+  background: linear-gradient(135deg, #1db954, #18a64a);
+  border-color: transparent;
+  color: #fff;
 }
 
 /* Headline stat tiles — one line, same type as Stats / section labels. */
