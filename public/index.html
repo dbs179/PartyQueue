@@ -688,9 +688,9 @@
         <div class="controls-divider" aria-hidden="true"></div>
         <!-- Every host switch lives here at the Booth root, grouped by area.
              Fine-tuning (counts, windows, voices) stays in the section pages.
-             Desktop (≥960px): DJ | Guest, then Look+TV | Queue. -->
+             Desktop (≥960px): two equal-height columns with section dividers. -->
         <div class="booth-toggle-board" aria-label="Host switches">
-          <section class="booth-toggle-panel" data-booth-group="dj">
+          <div class="booth-toggle-col">
             <div class="options-list">
               <p class="section-label settings-banner-label booth-toggle-group">DJ</p>
               <label class="autofill" title="Announce a short DJ intro before each new set via Home Assistant">
@@ -717,9 +717,59 @@
                   <span class="autofill-hint">DJ speaks a short recap before the last song (needs DJ Voice)</span>
                 </span>
               </label>
+              <div class="controls-divider" aria-hidden="true"></div>
+              <p class="section-label settings-banner-label booth-toggle-group">Look</p>
+              <label class="autofill" title="Show or hide the build tag next to the title">
+                <input type="checkbox" id="set-show-version" class="autofill-input" checked />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Show version number</span>
+                  <span class="autofill-hint">Displays the build tag (e.g. v3.10.0) next to the title</span>
+                </span>
+              </label>
+              <label class="autofill" title="Show each Up Next song's matched genre and From Playlists on the main queue and Party Display">
+                <input type="checkbox" id="set-show-queue-genre" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Show song genre</span>
+                  <span class="autofill-hint">Adds matched genre + From Playlists next to Requested / Discover / Random in Up Next (main + Party Display)</span>
+                </span>
+              </label>
+              <div class="controls-divider" aria-hidden="true"></div>
+              <p class="section-label settings-banner-label booth-toggle-group">Party Display TV</p>
+              <p class="setting-hint booth-tv-preview-hint">
+                Preview 16:9 TV scale on this device before Fully Kiosk. Fully needs
+                JavaScript interface enabled and start URL
+                <code>#/display?kiosk=1</code>.
+              </p>
+              <div class="booth-tv-preview-actions">
+                <button id="booth-tv-preview" type="button" class="pill-btn">
+                  Preview as TV
+                </button>
+                <button id="booth-tv-kiosk" type="button" class="pill-btn">
+                  Open kiosk
+                </button>
+              </div>
+              <div class="setting-row-text booth-tv-fully-row">
+                <label class="setting-label" for="booth-tv-fully-url">Fully start URL</label>
+                <div class="booth-tv-fully-copy">
+                  <input
+                    type="text"
+                    id="booth-tv-fully-url"
+                    class="setting-input"
+                    readonly
+                    spellcheck="false"
+                    autocomplete="off"
+                    placeholder="Loading…"
+                  />
+                  <button id="booth-tv-fully-copy" type="button" class="pill-btn">
+                    Copy
+                  </button>
+                </div>
+              </div>
             </div>
-          </section>
-          <section class="booth-toggle-panel" data-booth-group="guest">
+          </div>
+          <div class="booth-toggle-col">
             <div class="options-list">
               <p class="section-label settings-banner-label booth-toggle-group">Guest access</p>
               <label class="autofill" title="Block guests from adding songs until you turn this off">
@@ -746,68 +796,7 @@
                   <span class="autofill-hint">Guests can still search, request songs, react, and view the queue</span>
                 </span>
               </label>
-            </div>
-          </section>
-          <div class="booth-toggle-stack">
-            <section class="booth-toggle-panel" data-booth-group="look">
-              <div class="options-list">
-                <p class="section-label settings-banner-label booth-toggle-group">Look</p>
-                <label class="autofill" title="Show or hide the build tag next to the title">
-                  <input type="checkbox" id="set-show-version" class="autofill-input" checked />
-                  <span class="autofill-switch" aria-hidden="true"></span>
-                  <span class="autofill-text">
-                    <span class="autofill-label">Show version number</span>
-                    <span class="autofill-hint">Displays the build tag (e.g. v3.10.0) next to the title</span>
-                  </span>
-                </label>
-                <label class="autofill" title="Show each Up Next song's matched genre and From Playlists on the main queue and Party Display">
-                  <input type="checkbox" id="set-show-queue-genre" class="autofill-input" />
-                  <span class="autofill-switch" aria-hidden="true"></span>
-                  <span class="autofill-text">
-                    <span class="autofill-label">Show song genre</span>
-                    <span class="autofill-hint">Adds matched genre + From Playlists next to Requested / Discover / Random in Up Next (main + Party Display)</span>
-                  </span>
-                </label>
-              </div>
-            </section>
-            <section class="booth-toggle-panel" data-booth-group="tv">
-              <div class="options-list">
-                <p class="section-label settings-banner-label booth-toggle-group">Party Display TV</p>
-                <p class="setting-hint booth-tv-preview-hint">
-                  Preview 16:9 TV scale on this device before Fully Kiosk. Fully needs
-                  JavaScript interface enabled and start URL
-                  <code>#/display?kiosk=1</code>.
-                </p>
-                <div class="booth-tv-preview-actions">
-                  <button id="booth-tv-preview" type="button" class="pill-btn">
-                    Preview as TV
-                  </button>
-                  <button id="booth-tv-kiosk" type="button" class="pill-btn">
-                    Open kiosk
-                  </button>
-                </div>
-                <div class="setting-row-text booth-tv-fully-row">
-                  <label class="setting-label" for="booth-tv-fully-url">Fully start URL</label>
-                  <div class="booth-tv-fully-copy">
-                    <input
-                      type="text"
-                      id="booth-tv-fully-url"
-                      class="setting-input"
-                      readonly
-                      spellcheck="false"
-                      autocomplete="off"
-                      placeholder="Loading…"
-                    />
-                    <button id="booth-tv-fully-copy" type="button" class="pill-btn">
-                      Copy
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </section>
-          </div>
-          <section class="booth-toggle-panel" data-booth-group="queue">
-            <div class="options-list">
+              <div class="controls-divider" aria-hidden="true"></div>
               <p class="section-label settings-banner-label booth-toggle-group">Queue</p>
               <label class="autofill" title="Prefer a short batch over re-adding songs already in memory">
                 <input type="checkbox" id="set-strict-fill" class="autofill-input" />
@@ -866,7 +855,7 @@
                 </span>
               </label>
             </div>
-          </section>
+          </div>
         </div>
         <div class="controls-divider" aria-hidden="true"></div>
         <!-- Everything is one click deep: setup sections first, then the

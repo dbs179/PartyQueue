@@ -1717,7 +1717,7 @@ button.guest-name:focus-visible {
   margin: 0 0 10px;
 }
 
-/* Booth root toggles: stacked on phone; 2×2 board on desktop. */
+/* Booth root toggles: stacked on phone; two equal-height columns on desktop. */
 .booth-toggle-board {
   display: flex;
   flex-direction: column;
@@ -1725,14 +1725,7 @@ button.guest-name:focus-visible {
   margin-bottom: 0;
 }
 
-.booth-toggle-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
-}
-
-.booth-toggle-panel {
+.booth-toggle-col {
   min-width: 0;
   margin: 0;
   padding: 14px 16px;
@@ -1741,11 +1734,11 @@ button.guest-name:focus-visible {
   box-sizing: border-box;
 }
 
-.booth-toggle-panel .options-list {
+.booth-toggle-col .options-list {
   margin: 0;
 }
 
-/* Group captions inside Booth toggle panels. */
+/* Group captions inside Booth toggle columns. */
 .booth-toggle-group {
   margin: 2px 0 0;
 }
@@ -1755,11 +1748,17 @@ button.guest-name:focus-visible {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 16px;
-    align-items: start;
+    align-items: stretch;
   }
 
-  #view-booth .booth-toggle-stack {
-    gap: 16px;
+  #view-booth .booth-toggle-col {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #view-booth .booth-toggle-col .options-list {
+    flex: 1 1 auto;
   }
 
   #view-booth .settings-hub-grid {
