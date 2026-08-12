@@ -1302,12 +1302,19 @@ export const BRANDING_DEFAULTS = {
   showVersion: true,
   // Up Next pills: matched genre + From Playlists next to origin badge.
   showQueueGenre: false,
+  // Desktop (≥960px) type. Phone keys below fall back to these when unset.
   headerFontSize: BRAND_FONT_PX.header.default,
   subtitleFontSize: BRAND_FONT_PX.subtitle.default,
   versionFontSize: BRAND_FONT_PX.version.default,
   // Match the long-standing desktop brand look (ALL CAPS title + tagline).
   headerAllCaps: true,
   subtitleAllCaps: true,
+  // Phone (<960px) type — same defaults; hosts can tune independently.
+  headerFontSizeMobile: BRAND_FONT_PX.header.default,
+  subtitleFontSizeMobile: BRAND_FONT_PX.subtitle.default,
+  versionFontSizeMobile: BRAND_FONT_PX.version.default,
+  headerAllCapsMobile: true,
+  subtitleAllCapsMobile: true,
   heroBanner: null, // null = built-in public/hero.jpg; otherwise a data/banners file
   // Phone header banner; null falls back to heroBanner (then built-in hero.jpg).
   heroBannerMobile: null,
@@ -1385,6 +1392,37 @@ export function getBrandingSettings() {
       typeof s.subtitleAllCaps === "boolean"
         ? s.subtitleAllCaps
         : BRANDING_DEFAULTS.subtitleAllCaps,
+    // Missing mobile keys inherit the desktop values so upgrades keep one look.
+    headerFontSizeMobile: normalizeBrandFontSize(
+      s.headerFontSizeMobile ??
+        s.headerFontSize ??
+        BRANDING_DEFAULTS.headerFontSizeMobile,
+      "header"
+    ),
+    subtitleFontSizeMobile: normalizeBrandFontSize(
+      s.subtitleFontSizeMobile ??
+        s.subtitleFontSize ??
+        BRANDING_DEFAULTS.subtitleFontSizeMobile,
+      "subtitle"
+    ),
+    versionFontSizeMobile: normalizeBrandFontSize(
+      s.versionFontSizeMobile ??
+        s.versionFontSize ??
+        BRANDING_DEFAULTS.versionFontSizeMobile,
+      "version"
+    ),
+    headerAllCapsMobile:
+      typeof s.headerAllCapsMobile === "boolean"
+        ? s.headerAllCapsMobile
+        : typeof s.headerAllCaps === "boolean"
+          ? s.headerAllCaps
+          : BRANDING_DEFAULTS.headerAllCapsMobile,
+    subtitleAllCapsMobile:
+      typeof s.subtitleAllCapsMobile === "boolean"
+        ? s.subtitleAllCapsMobile
+        : typeof s.subtitleAllCaps === "boolean"
+          ? s.subtitleAllCaps
+          : BRANDING_DEFAULTS.subtitleAllCapsMobile,
     heroBanner,
     heroBannerMobile,
   };
@@ -1439,6 +1477,30 @@ export function setBrandingSettings(partial = {}) {
   }
   if (partial.subtitleAllCaps != null) {
     next.subtitleAllCaps = !!partial.subtitleAllCaps;
+  }
+  if (partial.headerFontSizeMobile != null) {
+    next.headerFontSizeMobile = normalizeBrandFontSize(
+      partial.headerFontSizeMobile,
+      "header"
+    );
+  }
+  if (partial.subtitleFontSizeMobile != null) {
+    next.subtitleFontSizeMobile = normalizeBrandFontSize(
+      partial.subtitleFontSizeMobile,
+      "subtitle"
+    );
+  }
+  if (partial.versionFontSizeMobile != null) {
+    next.versionFontSizeMobile = normalizeBrandFontSize(
+      partial.versionFontSizeMobile,
+      "version"
+    );
+  }
+  if (partial.headerAllCapsMobile != null) {
+    next.headerAllCapsMobile = !!partial.headerAllCapsMobile;
+  }
+  if (partial.subtitleAllCapsMobile != null) {
+    next.subtitleAllCapsMobile = !!partial.subtitleAllCapsMobile;
   }
   if (partial.heroBanner !== undefined) {
     next.heroBanner =

@@ -275,6 +275,11 @@ async function sendBrandedIndex(_req, res) {
       versionFontSize,
       headerAllCaps,
       subtitleAllCaps,
+      headerFontSizeMobile,
+      subtitleFontSizeMobile,
+      versionFontSizeMobile,
+      headerAllCapsMobile,
+      subtitleAllCapsMobile,
     } = getBrandingSettings();
     const brandJson = JSON.stringify({
       eventName,
@@ -289,6 +294,11 @@ async function sendBrandedIndex(_req, res) {
       versionFontSize: versionFontSize ?? 11,
       headerAllCaps: headerAllCaps !== false,
       subtitleAllCaps: subtitleAllCaps !== false,
+      headerFontSizeMobile: headerFontSizeMobile ?? headerFontSize ?? 36,
+      subtitleFontSizeMobile: subtitleFontSizeMobile ?? subtitleFontSize ?? 18,
+      versionFontSizeMobile: versionFontSizeMobile ?? versionFontSize ?? 11,
+      headerAllCapsMobile: headerAllCapsMobile !== false,
+      subtitleAllCapsMobile: subtitleAllCapsMobile !== false,
     }).replace(/</g, "\\u003c");
     const { html, nonce } = await renderIndexHtml(brandJson);
     res.setHeader("Cache-Control", "no-store");

@@ -83,31 +83,53 @@
           var n = Number(String(value == null ? "" : value).replace(/px$/i, ""));
           return Number.isFinite(n) ? Math.round(n) : fallback;
         }
+        var desktop = true;
+        try {
+          desktop = window.matchMedia("(min-width: 960px)").matches;
+        } catch (e) {}
         try {
           var root = document.documentElement;
-          root.style.setProperty(
-            "--pq-header-font-size",
-            brandFontPx(b.headerFontSize, "header") + "px"
+          var headerPx = brandFontPx(
+            desktop
+              ? b.headerFontSize
+              : b.headerFontSizeMobile != null
+                ? b.headerFontSizeMobile
+                : b.headerFontSize,
+            "header"
           );
-          root.style.setProperty(
-            "--pq-subtitle-font-size",
-            brandFontPx(b.subtitleFontSize, "subtitle") + "px"
+          var subtitlePx = brandFontPx(
+            desktop
+              ? b.subtitleFontSize
+              : b.subtitleFontSizeMobile != null
+                ? b.subtitleFontSizeMobile
+                : b.subtitleFontSize,
+            "subtitle"
           );
-          root.style.setProperty(
-            "--pq-version-font-size",
-            brandFontPx(b.versionFontSize, "version") + "px"
+          var versionPx = brandFontPx(
+            desktop
+              ? b.versionFontSize
+              : b.versionFontSizeMobile != null
+                ? b.versionFontSizeMobile
+                : b.versionFontSize,
+            "version"
           );
-          root.classList.toggle("pq-header-all-caps", b.headerAllCaps !== false);
-          root.classList.toggle(
-            "pq-subtitle-all-caps",
-            b.subtitleAllCaps !== false
-          );
+          var headerCaps = desktop
+            ? b.headerAllCaps !== false
+            : b.headerAllCapsMobile != null
+              ? !!b.headerAllCapsMobile
+              : b.headerAllCaps !== false;
+          var subtitleCaps = desktop
+            ? b.subtitleAllCaps !== false
+            : b.subtitleAllCapsMobile != null
+              ? !!b.subtitleAllCapsMobile
+              : b.subtitleAllCaps !== false;
+          root.style.setProperty("--pq-header-font-size", headerPx + "px");
+          root.style.setProperty("--pq-subtitle-font-size", subtitlePx + "px");
+          root.style.setProperty("--pq-version-font-size", versionPx + "px");
+          root.classList.toggle("pq-header-all-caps", headerCaps);
+          root.classList.toggle("pq-subtitle-all-caps", subtitleCaps);
         } catch (e) {}
         if (heroEl) {
-          var desktop = true;
-          try {
-            desktop = window.matchMedia("(min-width: 960px)").matches;
-          } catch (e) {}
           var desktopKey = b.heroBanner || null;
           var mobileKey = b.heroBannerMobile || null;
           var name = desktop ? desktopKey : mobileKey || desktopKey;
@@ -137,6 +159,32 @@
               versionFontSize: brandFontPx(b.versionFontSize, "version"),
               headerAllCaps: b.headerAllCaps !== false,
               subtitleAllCaps: b.subtitleAllCaps !== false,
+              headerFontSizeMobile: brandFontPx(
+                b.headerFontSizeMobile != null
+                  ? b.headerFontSizeMobile
+                  : b.headerFontSize,
+                "header"
+              ),
+              subtitleFontSizeMobile: brandFontPx(
+                b.subtitleFontSizeMobile != null
+                  ? b.subtitleFontSizeMobile
+                  : b.subtitleFontSize,
+                "subtitle"
+              ),
+              versionFontSizeMobile: brandFontPx(
+                b.versionFontSizeMobile != null
+                  ? b.versionFontSizeMobile
+                  : b.versionFontSize,
+                "version"
+              ),
+              headerAllCapsMobile:
+                b.headerAllCapsMobile != null
+                  ? !!b.headerAllCapsMobile
+                  : b.headerAllCaps !== false,
+              subtitleAllCapsMobile:
+                b.subtitleAllCapsMobile != null
+                  ? !!b.subtitleAllCapsMobile
+                  : b.subtitleAllCaps !== false,
             })
           );
         } catch (e) {}
@@ -1049,27 +1097,71 @@
                 <span class="look-section-sub">Name shown in the header and the tagline beneath it.</span>
               </p>
             </div>
-            <div class="setting-row-text look-text-row">
+            <div class="setting-row-text">
               <label class="setting-label" for="set-event-name">Header</label>
               <input type="text" id="set-event-name" class="setting-input" maxlength="60" placeholder="PartyQueue" />
-              <select id="set-header-font-size" class="setting-input look-font-size" aria-label="Header font size"></select>
-              <select id="set-header-all-caps" class="setting-input look-caps-select" aria-label="Header capitalization">
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-subtitle">Subtitle</label>
+              <input type="text" id="set-subtitle" class="setting-input" maxlength="120" placeholder="Tagline (optional)" />
+            </div>
+          </div>
+
+          <div class="look-section">
+            <div class="look-section-head">
+              <p class="look-section-heading">
+                <span class="section-label">PC type:</span>
+                <span class="look-section-sub">Size and capitalization on desktop (≥960px).</span>
+              </p>
+            </div>
+            <div class="setting-row-text look-text-row look-text-row-type">
+              <label class="setting-label" for="set-header-font-size">Header</label>
+              <select id="set-header-font-size" class="setting-input look-font-size" aria-label="PC header font size"></select>
+              <select id="set-header-all-caps" class="setting-input look-caps-select" aria-label="PC header capitalization">
                 <option value="1" selected>All caps</option>
                 <option value="0">As typed</option>
               </select>
             </div>
-            <div class="setting-row-text look-text-row">
-              <label class="setting-label" for="set-subtitle">Subtitle</label>
-              <input type="text" id="set-subtitle" class="setting-input" maxlength="120" placeholder="Tagline (optional)" />
-              <select id="set-subtitle-font-size" class="setting-input look-font-size" aria-label="Subtitle font size"></select>
-              <select id="set-subtitle-all-caps" class="setting-input look-caps-select" aria-label="Subtitle capitalization">
+            <div class="setting-row-text look-text-row look-text-row-type">
+              <label class="setting-label" for="set-subtitle-font-size">Subtitle</label>
+              <select id="set-subtitle-font-size" class="setting-input look-font-size" aria-label="PC subtitle font size"></select>
+              <select id="set-subtitle-all-caps" class="setting-input look-caps-select" aria-label="PC subtitle capitalization">
                 <option value="1" selected>All caps</option>
                 <option value="0">As typed</option>
               </select>
             </div>
             <div class="setting-row-text look-text-row look-text-row-version">
               <label class="setting-label" for="set-version-font-size">Version pill</label>
-              <select id="set-version-font-size" class="setting-input look-font-size" aria-label="Version pill font size"></select>
+              <select id="set-version-font-size" class="setting-input look-font-size" aria-label="PC version pill font size"></select>
+            </div>
+          </div>
+
+          <div class="look-section">
+            <div class="look-section-head">
+              <p class="look-section-heading">
+                <span class="section-label">Phone type:</span>
+                <span class="look-section-sub">Size and capitalization on phones (&lt;960px).</span>
+              </p>
+            </div>
+            <div class="setting-row-text look-text-row look-text-row-type">
+              <label class="setting-label" for="set-header-font-size-mobile">Header</label>
+              <select id="set-header-font-size-mobile" class="setting-input look-font-size" aria-label="Phone header font size"></select>
+              <select id="set-header-all-caps-mobile" class="setting-input look-caps-select" aria-label="Phone header capitalization">
+                <option value="1" selected>All caps</option>
+                <option value="0">As typed</option>
+              </select>
+            </div>
+            <div class="setting-row-text look-text-row look-text-row-type">
+              <label class="setting-label" for="set-subtitle-font-size-mobile">Subtitle</label>
+              <select id="set-subtitle-font-size-mobile" class="setting-input look-font-size" aria-label="Phone subtitle font size"></select>
+              <select id="set-subtitle-all-caps-mobile" class="setting-input look-caps-select" aria-label="Phone subtitle capitalization">
+                <option value="1" selected>All caps</option>
+                <option value="0">As typed</option>
+              </select>
+            </div>
+            <div class="setting-row-text look-text-row look-text-row-version">
+              <label class="setting-label" for="set-version-font-size-mobile">Version pill</label>
+              <select id="set-version-font-size-mobile" class="setting-input look-font-size" aria-label="Phone version pill font size"></select>
             </div>
           </div>
         </div>

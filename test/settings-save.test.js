@@ -61,6 +61,32 @@ test("brand all-caps toggles default on and persist", () => {
   assert.equal(brand.subtitleAllCaps, true);
 });
 
+test("phone brand type falls back to desktop then persists independently", () => {
+  settings.setBrandingSettings({
+    headerFontSize: 40,
+    headerAllCaps: false,
+  });
+  let brand = settings.getBrandingSettings();
+  assert.equal(brand.headerFontSizeMobile, 40);
+  assert.equal(brand.headerAllCapsMobile, false);
+
+  settings.setBrandingSettings({
+    headerFontSizeMobile: 28,
+    headerAllCapsMobile: true,
+    subtitleFontSizeMobile: 14,
+    subtitleAllCapsMobile: false,
+    versionFontSizeMobile: 10,
+  });
+  brand = settings.getBrandingSettings();
+  assert.equal(brand.headerFontSize, 40);
+  assert.equal(brand.headerAllCaps, false);
+  assert.equal(brand.headerFontSizeMobile, 28);
+  assert.equal(brand.headerAllCapsMobile, true);
+  assert.equal(brand.subtitleFontSizeMobile, 14);
+  assert.equal(brand.subtitleAllCapsMobile, false);
+  assert.equal(brand.versionFontSizeMobile, 10);
+});
+
 test("heroBannerMobile falls back to desktop in resolveBannerForSlot", async () => {
   const banners = await import("../src/banners.js");
   banners.seedStarterBanners();

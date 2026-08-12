@@ -19,8 +19,7 @@ import { createConnectionsUi } from "./connections-ui.js";
 import {
   createBrandingUi,
   persistBrandingCache,
-  applyBrandFontSizes,
-  applyBrandCaps,
+  applyBrandTypeForViewport,
   normalizeBrandFontSize,
 } from "./branding-ui.js";
 import {
@@ -520,6 +519,21 @@ const subtitleFontSizeInput = document.getElementById("set-subtitle-font-size");
 const versionFontSizeInput = document.getElementById("set-version-font-size");
 const headerAllCapsInput = document.getElementById("set-header-all-caps");
 const subtitleAllCapsInput = document.getElementById("set-subtitle-all-caps");
+const headerFontSizeMobileInput = document.getElementById(
+  "set-header-font-size-mobile"
+);
+const subtitleFontSizeMobileInput = document.getElementById(
+  "set-subtitle-font-size-mobile"
+);
+const versionFontSizeMobileInput = document.getElementById(
+  "set-version-font-size-mobile"
+);
+const headerAllCapsMobileInput = document.getElementById(
+  "set-header-all-caps-mobile"
+);
+const subtitleAllCapsMobileInput = document.getElementById(
+  "set-subtitle-all-caps-mobile"
+);
 const showVersionInput = document.getElementById("set-show-version");
 const showQueueGenreInput = document.getElementById("set-show-queue-genre");
 const headerEventName = document.getElementById("event-name");
@@ -593,6 +607,11 @@ const {
     versionFontSizeInput,
     headerAllCapsInput,
     subtitleAllCapsInput,
+    headerFontSizeMobileInput,
+    subtitleFontSizeMobileInput,
+    versionFontSizeMobileInput,
+    headerAllCapsMobileInput,
+    subtitleAllCapsMobileInput,
     showVersionInput,
     showQueueGenreInput,
     lookTextSaveBtn,
@@ -799,40 +818,86 @@ function fillSettings(s) {
   if (
     s.headerFontSize != null ||
     s.subtitleFontSize != null ||
-    s.versionFontSize != null
+    s.versionFontSize != null ||
+    s.headerFontSizeMobile != null ||
+    s.subtitleFontSizeMobile != null ||
+    s.versionFontSizeMobile != null ||
+    s.headerAllCaps != null ||
+    s.subtitleAllCaps != null ||
+    s.headerAllCapsMobile != null ||
+    s.subtitleAllCapsMobile != null
   ) {
-    const fontSizes = {
+    const typeState = {
       headerFontSize: normalizeBrandFontSize(s.headerFontSize, "header"),
       subtitleFontSize: normalizeBrandFontSize(s.subtitleFontSize, "subtitle"),
       versionFontSize: normalizeBrandFontSize(s.versionFontSize, "version"),
+      headerAllCaps: s.headerAllCaps != null ? !!s.headerAllCaps : true,
+      subtitleAllCaps: s.subtitleAllCaps != null ? !!s.subtitleAllCaps : true,
+      headerFontSizeMobile: normalizeBrandFontSize(
+        s.headerFontSizeMobile ?? s.headerFontSize,
+        "header"
+      ),
+      subtitleFontSizeMobile: normalizeBrandFontSize(
+        s.subtitleFontSizeMobile ?? s.subtitleFontSize,
+        "subtitle"
+      ),
+      versionFontSizeMobile: normalizeBrandFontSize(
+        s.versionFontSizeMobile ?? s.versionFontSize,
+        "version"
+      ),
+      headerAllCapsMobile:
+        s.headerAllCapsMobile != null
+          ? !!s.headerAllCapsMobile
+          : s.headerAllCaps != null
+            ? !!s.headerAllCaps
+            : true,
+      subtitleAllCapsMobile:
+        s.subtitleAllCapsMobile != null
+          ? !!s.subtitleAllCapsMobile
+          : s.subtitleAllCaps != null
+            ? !!s.subtitleAllCaps
+            : true,
     };
     if (headerFontSizeInput) {
-      headerFontSizeInput.value = String(fontSizes.headerFontSize);
+      headerFontSizeInput.value = String(typeState.headerFontSize);
     }
     if (subtitleFontSizeInput) {
-      subtitleFontSizeInput.value = String(fontSizes.subtitleFontSize);
+      subtitleFontSizeInput.value = String(typeState.subtitleFontSize);
     }
     if (versionFontSizeInput) {
-      versionFontSizeInput.value = String(fontSizes.versionFontSize);
+      versionFontSizeInput.value = String(typeState.versionFontSize);
     }
-    applyBrandFontSizes(fontSizes);
-    persistBrandingCache(fontSizes);
-  }
-  if (s.headerAllCaps != null || s.subtitleAllCaps != null) {
-    const caps = {
-      headerAllCaps:
-        s.headerAllCaps != null ? !!s.headerAllCaps : true,
-      subtitleAllCaps:
-        s.subtitleAllCaps != null ? !!s.subtitleAllCaps : true,
-    };
-    if (headerAllCapsInput && s.headerAllCaps != null) {
-      headerAllCapsInput.value = caps.headerAllCaps ? "1" : "0";
+    if (headerAllCapsInput) {
+      headerAllCapsInput.value = typeState.headerAllCaps ? "1" : "0";
     }
-    if (subtitleAllCapsInput && s.subtitleAllCaps != null) {
-      subtitleAllCapsInput.value = caps.subtitleAllCaps ? "1" : "0";
+    if (subtitleAllCapsInput) {
+      subtitleAllCapsInput.value = typeState.subtitleAllCaps ? "1" : "0";
     }
-    applyBrandCaps(caps);
-    persistBrandingCache(caps);
+    if (headerFontSizeMobileInput) {
+      headerFontSizeMobileInput.value = String(typeState.headerFontSizeMobile);
+    }
+    if (subtitleFontSizeMobileInput) {
+      subtitleFontSizeMobileInput.value = String(
+        typeState.subtitleFontSizeMobile
+      );
+    }
+    if (versionFontSizeMobileInput) {
+      versionFontSizeMobileInput.value = String(
+        typeState.versionFontSizeMobile
+      );
+    }
+    if (headerAllCapsMobileInput) {
+      headerAllCapsMobileInput.value = typeState.headerAllCapsMobile
+        ? "1"
+        : "0";
+    }
+    if (subtitleAllCapsMobileInput) {
+      subtitleAllCapsMobileInput.value = typeState.subtitleAllCapsMobile
+        ? "1"
+        : "0";
+    }
+    applyBrandTypeForViewport(typeState);
+    persistBrandingCache(typeState);
   }
   if (s.showVersion != null) {
     showVersionInput.checked = !!s.showVersion;
@@ -1280,6 +1345,11 @@ settingsResetBtn?.addEventListener("click", () => {
   delete rest.versionFontSize;
   delete rest.headerAllCaps;
   delete rest.subtitleAllCaps;
+  delete rest.headerFontSizeMobile;
+  delete rest.subtitleFontSizeMobile;
+  delete rest.versionFontSizeMobile;
+  delete rest.headerAllCapsMobile;
+  delete rest.subtitleAllCapsMobile;
   delete rest.showVersion;
   delete rest.showQueueGenre;
   delete rest.heroBanner;

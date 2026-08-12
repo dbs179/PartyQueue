@@ -140,8 +140,11 @@ describe("HTTP server harness", { concurrency: false }, () => {
     assert.equal(page.status, 200);
     const html = await page.text();
     assert.match(html, /heroBannerMobile/);
+    assert.match(html, /headerFontSizeMobile/);
     assert.match(html, /id="banner-mobile-gallery"/);
     assert.match(html, /id="banner-mobile-upload-btn"/);
+    assert.match(html, /id="set-header-font-size-mobile"/);
+    assert.match(html, /id="set-header-all-caps-mobile"/);
     assert.match(html, /slot=.*mobile|matchMedia\("\(min-width: 960px\)"\)/);
 
     const desktopBanner = await fetch(`${baseUrl}/banner?slot=desktop&b=default`);

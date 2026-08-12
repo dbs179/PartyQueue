@@ -65,6 +65,48 @@ export function fillBrandFontSizeSelect(select, role, selected) {
 }
 
 /**
+ * Pick PC or Phone type settings for the current viewport.
+ * @param {object} brand
+ * @param {boolean} [desktop]
+ */
+export function brandTypeForViewport(brand = {}, desktop = true) {
+  if (desktop) {
+    return {
+      headerFontSize: normalizeBrandFontSize(brand.headerFontSize, "header"),
+      subtitleFontSize: normalizeBrandFontSize(
+        brand.subtitleFontSize,
+        "subtitle"
+      ),
+      versionFontSize: normalizeBrandFontSize(brand.versionFontSize, "version"),
+      headerAllCaps: brand.headerAllCaps !== false,
+      subtitleAllCaps: brand.subtitleAllCaps !== false,
+    };
+  }
+  return {
+    headerFontSize: normalizeBrandFontSize(
+      brand.headerFontSizeMobile ?? brand.headerFontSize,
+      "header"
+    ),
+    subtitleFontSize: normalizeBrandFontSize(
+      brand.subtitleFontSizeMobile ?? brand.subtitleFontSize,
+      "subtitle"
+    ),
+    versionFontSize: normalizeBrandFontSize(
+      brand.versionFontSizeMobile ?? brand.versionFontSize,
+      "version"
+    ),
+    headerAllCaps:
+      brand.headerAllCapsMobile != null
+        ? !!brand.headerAllCapsMobile
+        : brand.headerAllCaps !== false,
+    subtitleAllCaps:
+      brand.subtitleAllCapsMobile != null
+        ? !!brand.subtitleAllCapsMobile
+        : brand.subtitleAllCaps !== false,
+  };
+}
+
+/**
  * Apply Look-page brand type sizes (px) to CSS variables on :root.
  * @param {{
  *   headerFontSize?: unknown,
@@ -100,6 +142,26 @@ export function applyBrandCaps(caps = {}, opts = {}) {
   if (caps.subtitleAllCaps != null) {
     root.classList.toggle("pq-subtitle-all-caps", !!caps.subtitleAllCaps);
   }
+}
+
+/**
+ * Apply the PC or Phone type pack that matches the viewport.
+ * @param {object} brand
+ * @param {{ document?: Document, desktop?: boolean }} [opts]
+ */
+export function applyBrandTypeForViewport(brand = {}, opts = {}) {
+  let desktop = opts.desktop;
+  if (desktop == null) {
+    try {
+      desktop = globalThis.matchMedia?.(DESKTOP_BANNER_MQ)?.matches ?? true;
+    } catch {
+      desktop = true;
+    }
+  }
+  const type = brandTypeForViewport(brand, !!desktop);
+  applyBrandFontSizes(type, opts);
+  applyBrandCaps(type, opts);
+  return type;
 }
 
 /**
@@ -169,6 +231,36 @@ export function persistBrandingCache(partial = {}, opts = {}) {
         partial.subtitleAllCaps != null
           ? !!partial.subtitleAllCaps
           : prev.subtitleAllCaps !== false,
+      headerFontSizeMobile: normalizeBrandFontSize(
+        partial.headerFontSizeMobile != null
+          ? partial.headerFontSizeMobile
+          : prev.headerFontSizeMobile ?? prev.headerFontSize,
+        "header"
+      ),
+      subtitleFontSizeMobile: normalizeBrandFontSize(
+        partial.subtitleFontSizeMobile != null
+          ? partial.subtitleFontSizeMobile
+          : prev.subtitleFontSizeMobile ?? prev.subtitleFontSize,
+        "subtitle"
+      ),
+      versionFontSizeMobile: normalizeBrandFontSize(
+        partial.versionFontSizeMobile != null
+          ? partial.versionFontSizeMobile
+          : prev.versionFontSizeMobile ?? prev.versionFontSize,
+        "version"
+      ),
+      headerAllCapsMobile:
+        partial.headerAllCapsMobile != null
+          ? !!partial.headerAllCapsMobile
+          : prev.headerAllCapsMobile != null
+            ? !!prev.headerAllCapsMobile
+            : prev.headerAllCaps !== false,
+      subtitleAllCapsMobile:
+        partial.subtitleAllCapsMobile != null
+          ? !!partial.subtitleAllCapsMobile
+          : prev.subtitleAllCapsMobile != null
+            ? !!prev.subtitleAllCapsMobile
+            : prev.subtitleAllCaps !== false,
     };
     storage.setItem(BRANDING_STORAGE_KEY, JSON.stringify(next));
   } catch {
@@ -189,6 +281,11 @@ export function persistBrandingCache(partial = {}, opts = {}) {
  *   versionFontSizeInput?: HTMLSelectElement|null,
  *   headerAllCapsInput?: HTMLSelectElement|null,
  *   subtitleAllCapsInput?: HTMLSelectElement|null,
+ *   headerFontSizeMobileInput?: HTMLSelectElement|null,
+ *   subtitleFontSizeMobileInput?: HTMLSelectElement|null,
+ *   versionFontSizeMobileInput?: HTMLSelectElement|null,
+ *   headerAllCapsMobileInput?: HTMLSelectElement|null,
+ *   subtitleAllCapsMobileInput?: HTMLSelectElement|null,
  *   showVersionInput?: HTMLInputElement|null,
  *   showQueueGenreInput?: HTMLInputElement|null,
  *   lookTextSaveBtn?: HTMLElement|null,
@@ -225,6 +322,11 @@ export function createBrandingUi(els, deps) {
     versionFontSizeInput,
     headerAllCapsInput,
     subtitleAllCapsInput,
+    headerFontSizeMobileInput,
+    subtitleFontSizeMobileInput,
+    versionFontSizeMobileInput,
+    headerAllCapsMobileInput,
+    subtitleAllCapsMobileInput,
     showVersionInput,
     showQueueGenreInput,
     lookTextSaveBtn,
@@ -554,20 +656,19 @@ export function createBrandingUi(els, deps) {
   wireBannerUpload(bannerUploadBtn, bannerFileInput, "desktop");
   wireBannerUpload(bannerMobileUploadBtn, bannerMobileFileInput, "mobile");
 
-  try {
-    const mq = globalThis.matchMedia?.(DESKTOP_BANNER_MQ);
-    const onViewportChange = () => syncHeroSrc();
-    if (mq?.addEventListener) mq.addEventListener("change", onViewportChange);
-    else if (mq?.addListener) mq.addListener(onViewportChange);
-  } catch {
-    /* matchMedia unavailable */
-  }
-
   fillBrandFontSizeSelect(headerFontSizeInput, "header");
   fillBrandFontSizeSelect(subtitleFontSizeInput, "subtitle");
   fillBrandFontSizeSelect(versionFontSizeInput, "version");
+  fillBrandFontSizeSelect(headerFontSizeMobileInput, "header");
+  fillBrandFontSizeSelect(subtitleFontSizeMobileInput, "subtitle");
+  fillBrandFontSizeSelect(versionFontSizeMobileInput, "version");
 
-  function currentFontSizes() {
+  function capsFromSelect(select, fallback = true) {
+    if (!select) return fallback;
+    return select.value !== "0";
+  }
+
+  function currentDesktopType() {
     return {
       headerFontSize: normalizeBrandFontSize(
         headerFontSizeInput?.value,
@@ -581,48 +682,76 @@ export function createBrandingUi(els, deps) {
         versionFontSizeInput?.value,
         "version"
       ),
-    };
-  }
-
-  function capsFromSelect(select, fallback = true) {
-    if (!select) return fallback;
-    return select.value !== "0";
-  }
-
-  function currentCaps() {
-    return {
       headerAllCaps: capsFromSelect(headerAllCapsInput, true),
       subtitleAllCaps: capsFromSelect(subtitleAllCapsInput, true),
     };
   }
 
-  function previewFontSizes() {
-    const sizes = currentFontSizes();
-    applyBrandFontSizes(sizes);
-    persistBrandingCache(sizes);
+  function currentMobileType() {
+    return {
+      headerFontSizeMobile: normalizeBrandFontSize(
+        headerFontSizeMobileInput?.value ?? headerFontSizeInput?.value,
+        "header"
+      ),
+      subtitleFontSizeMobile: normalizeBrandFontSize(
+        subtitleFontSizeMobileInput?.value ?? subtitleFontSizeInput?.value,
+        "subtitle"
+      ),
+      versionFontSizeMobile: normalizeBrandFontSize(
+        versionFontSizeMobileInput?.value ?? versionFontSizeInput?.value,
+        "version"
+      ),
+      headerAllCapsMobile: capsFromSelect(
+        headerAllCapsMobileInput,
+        capsFromSelect(headerAllCapsInput, true)
+      ),
+      subtitleAllCapsMobile: capsFromSelect(
+        subtitleAllCapsMobileInput,
+        capsFromSelect(subtitleAllCapsInput, true)
+      ),
+    };
   }
 
-  function previewCaps() {
-    const caps = currentCaps();
-    applyBrandCaps(caps);
-    persistBrandingCache(caps);
+  function currentBrandTypeState() {
+    return { ...currentDesktopType(), ...currentMobileType() };
+  }
+
+  function syncBrandTypeToViewport() {
+    applyBrandTypeForViewport(currentBrandTypeState(), {
+      desktop: isDesktopViewport(),
+    });
+  }
+
+  function previewBrandType() {
+    const state = currentBrandTypeState();
+    persistBrandingCache(state);
+    syncBrandTypeToViewport();
   }
 
   function saveLookText() {
-    const sizes = currentFontSizes();
-    const caps = currentCaps();
-    applyBrandFontSizes(sizes);
-    applyBrandCaps(caps);
-    persistBrandingCache({ ...sizes, ...caps });
+    const state = currentBrandTypeState();
+    applyBrandTypeForViewport(state, { desktop: isDesktopViewport() });
+    persistBrandingCache(state);
     saveSettings(
       {
         eventName: eventNameInput?.value,
         subtitle: subtitleInput?.value,
-        ...sizes,
-        ...caps,
+        ...state,
       },
       { toastMessage: "Saved" }
     );
+  }
+
+  try {
+    const mq = globalThis.matchMedia?.(DESKTOP_BANNER_MQ);
+    const onViewportChange = () => {
+      syncHeroSrc();
+      syncBrandTypeToViewport();
+    };
+    if (mq?.addEventListener) mq.addEventListener("change", onViewportChange);
+    else if (mq?.addListener) mq.addListener(onViewportChange);
+  } catch {
+    /* matchMedia unavailable */
   }
 
   lookTextSaveBtn?.addEventListener("click", saveLookText);
@@ -638,11 +767,15 @@ export function createBrandingUi(els, deps) {
     headerFontSizeInput,
     subtitleFontSizeInput,
     versionFontSizeInput,
+    headerFontSizeMobileInput,
+    subtitleFontSizeMobileInput,
+    versionFontSizeMobileInput,
+    headerAllCapsInput,
+    subtitleAllCapsInput,
+    headerAllCapsMobileInput,
+    subtitleAllCapsMobileInput,
   ]) {
-    input?.addEventListener("change", previewFontSizes);
-  }
-  for (const input of [headerAllCapsInput, subtitleAllCapsInput]) {
-    input?.addEventListener("change", previewCaps);
+    input?.addEventListener("change", previewBrandType);
   }
 
   showVersionInput?.addEventListener("change", () => {
@@ -666,6 +799,8 @@ export function createBrandingUi(els, deps) {
     applyBranding,
     applyBrandFontSizes,
     applyBrandCaps,
+    applyBrandTypeForViewport,
+    syncBrandTypeToViewport,
     syncHeroSrc,
     loadBanners,
     loadDjIcons,
