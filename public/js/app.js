@@ -19,6 +19,9 @@ import { createConnectionsUi } from "./connections-ui.js";
 import {
   createBrandingUi,
   persistBrandingCache,
+  applyBrandFontSizes,
+  applyBrandCaps,
+  normalizeBrandFontSize,
 } from "./branding-ui.js";
 import {
   nowPlayingOriginLabel,
@@ -505,6 +508,11 @@ const djIconGallery = document.getElementById("dj-icon-gallery");
 const recapHintEl = document.getElementById("recap-hint");
 const eventNameInput = document.getElementById("set-event-name");
 const subtitleInput = document.getElementById("set-subtitle");
+const headerFontSizeInput = document.getElementById("set-header-font-size");
+const subtitleFontSizeInput = document.getElementById("set-subtitle-font-size");
+const versionFontSizeInput = document.getElementById("set-version-font-size");
+const headerAllCapsInput = document.getElementById("set-header-all-caps");
+const subtitleAllCapsInput = document.getElementById("set-subtitle-all-caps");
 const showVersionInput = document.getElementById("set-show-version");
 const showQueueGenreInput = document.getElementById("set-show-queue-genre");
 const headerEventName = document.getElementById("event-name");
@@ -573,6 +581,11 @@ const {
     headerVersion,
     eventNameInput,
     subtitleInput,
+    headerFontSizeInput,
+    subtitleFontSizeInput,
+    versionFontSizeInput,
+    headerAllCapsInput,
+    subtitleAllCapsInput,
     showVersionInput,
     showQueueGenreInput,
     lookTextSaveBtn,
@@ -776,6 +789,44 @@ function fillSettings(s) {
   applyDjFromSettings(s);
   if (s.eventName != null) eventNameInput.value = s.eventName;
   if (s.subtitle != null) subtitleInput.value = s.subtitle;
+  if (
+    s.headerFontSize != null ||
+    s.subtitleFontSize != null ||
+    s.versionFontSize != null
+  ) {
+    const fontSizes = {
+      headerFontSize: normalizeBrandFontSize(s.headerFontSize, "header"),
+      subtitleFontSize: normalizeBrandFontSize(s.subtitleFontSize, "subtitle"),
+      versionFontSize: normalizeBrandFontSize(s.versionFontSize, "version"),
+    };
+    if (headerFontSizeInput) {
+      headerFontSizeInput.value = String(fontSizes.headerFontSize);
+    }
+    if (subtitleFontSizeInput) {
+      subtitleFontSizeInput.value = String(fontSizes.subtitleFontSize);
+    }
+    if (versionFontSizeInput) {
+      versionFontSizeInput.value = String(fontSizes.versionFontSize);
+    }
+    applyBrandFontSizes(fontSizes);
+    persistBrandingCache(fontSizes);
+  }
+  if (s.headerAllCaps != null || s.subtitleAllCaps != null) {
+    const caps = {
+      headerAllCaps:
+        s.headerAllCaps != null ? !!s.headerAllCaps : true,
+      subtitleAllCaps:
+        s.subtitleAllCaps != null ? !!s.subtitleAllCaps : true,
+    };
+    if (headerAllCapsInput && s.headerAllCaps != null) {
+      headerAllCapsInput.value = caps.headerAllCaps ? "1" : "0";
+    }
+    if (subtitleAllCapsInput && s.subtitleAllCaps != null) {
+      subtitleAllCapsInput.value = caps.subtitleAllCaps ? "1" : "0";
+    }
+    applyBrandCaps(caps);
+    persistBrandingCache(caps);
+  }
   if (s.showVersion != null) {
     showVersionInput.checked = !!s.showVersion;
     if (headerVersion) headerVersion.hidden = !s.showVersion;
@@ -1217,6 +1268,11 @@ settingsResetBtn?.addEventListener("click", () => {
   delete rest.djBanList;
   delete rest.eventName;
   delete rest.subtitle;
+  delete rest.headerFontSize;
+  delete rest.subtitleFontSize;
+  delete rest.versionFontSize;
+  delete rest.headerAllCaps;
+  delete rest.subtitleAllCaps;
   delete rest.showVersion;
   delete rest.showQueueGenre;
   delete rest.heroBanner;

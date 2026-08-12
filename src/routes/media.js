@@ -16,6 +16,7 @@ import {
 } from "../settings.js";
 import {
   listBanners,
+  listBannersForSlot,
   saveBanner,
   deleteBanner,
   bannerExists,
@@ -37,11 +38,14 @@ function bannerSlot(raw) {
 
 function bannersResponse() {
   const branding = getBrandingSettings();
+  const all = listBanners();
   return {
     active: branding.heroBanner,
     activeMobile: branding.heroBannerMobile,
     defaultUrl: "/hero.jpg",
-    banners: listBanners(),
+    banners: all,
+    bannersDesktop: listBannersForSlot("desktop"),
+    bannersMobile: listBannersForSlot("mobile"),
   };
 }
 

@@ -74,6 +74,35 @@
           subEl.hidden = !sub.trim();
           subEl.setAttribute("data-ready", "1");
         }
+        var fontDefaults = { header: 36, subtitle: 18, version: 11 };
+        var fontLegacy = { sm: 0.85, md: 1, lg: 1.2, xl: 1.4 };
+        function brandFontPx(value, role) {
+          var fallback = fontDefaults[role] || 36;
+          var legacy = fontLegacy[String(value || "").toLowerCase()];
+          if (legacy != null) return Math.round(fallback * legacy);
+          var n = Number(String(value == null ? "" : value).replace(/px$/i, ""));
+          return Number.isFinite(n) ? Math.round(n) : fallback;
+        }
+        try {
+          var root = document.documentElement;
+          root.style.setProperty(
+            "--pq-header-font-size",
+            brandFontPx(b.headerFontSize, "header") + "px"
+          );
+          root.style.setProperty(
+            "--pq-subtitle-font-size",
+            brandFontPx(b.subtitleFontSize, "subtitle") + "px"
+          );
+          root.style.setProperty(
+            "--pq-version-font-size",
+            brandFontPx(b.versionFontSize, "version") + "px"
+          );
+          root.classList.toggle("pq-header-all-caps", b.headerAllCaps !== false);
+          root.classList.toggle(
+            "pq-subtitle-all-caps",
+            b.subtitleAllCaps !== false
+          );
+        } catch (e) {}
         if (heroEl) {
           var desktop = true;
           try {
@@ -103,6 +132,11 @@
               version: b.version || "",
               showVersion: !!b.showVersion,
               showQueueGenre: !!b.showQueueGenre,
+              headerFontSize: brandFontPx(b.headerFontSize, "header"),
+              subtitleFontSize: brandFontPx(b.subtitleFontSize, "subtitle"),
+              versionFontSize: brandFontPx(b.versionFontSize, "version"),
+              headerAllCaps: b.headerAllCaps !== false,
+              subtitleAllCaps: b.subtitleAllCaps !== false,
             })
           );
         } catch (e) {}
@@ -923,34 +957,56 @@
         <div class="look-sections">
           <div class="look-section">
             <div class="look-section-head">
-              <p class="section-label">Desktop banner</p>
+              <p class="look-section-heading">
+                <span class="section-label">Desktop Banner:</span>
+                <span class="look-section-sub">Long thin header for PC (~7:1). PNG, JPG, WEBP or GIF, 8&nbsp;MB max.</span>
+              </p>
               <button id="banner-upload-btn" type="button" class="subpage-head-link">Upload</button>
             </div>
-            <p class="settings-intro">Wide header image for PC (PNG, JPG, WEBP or GIF, 8&nbsp;MB max).</p>
             <input id="banner-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
             <div id="banner-gallery" class="banner-gallery"></div>
           </div>
 
           <div class="look-section">
             <div class="look-section-head">
-              <p class="section-label">Phone banner</p>
+              <p class="look-section-heading">
+                <span class="section-label">Phone Banner:</span>
+                <span class="look-section-sub">Taller phone header (~16:9). Default follows the desktop banner.</span>
+              </p>
               <button id="banner-mobile-upload-btn" type="button" class="subpage-head-link">Upload</button>
             </div>
-            <p class="settings-intro">Taller header for phones. Default follows the desktop banner.</p>
             <input id="banner-mobile-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
             <div id="banner-mobile-gallery" class="banner-gallery"></div>
           </div>
 
           <div class="look-section">
-            <p class="section-label">Text</p>
-            <p class="settings-intro">Name shown in the header and the tagline beneath it.</p>
-            <div class="setting-row-text">
+            <div class="look-section-head">
+              <p class="look-section-heading">
+                <span class="section-label">Text:</span>
+                <span class="look-section-sub">Name shown in the header and the tagline beneath it.</span>
+              </p>
+            </div>
+            <div class="setting-row-text look-text-row">
               <label class="setting-label" for="set-event-name">Header</label>
               <input type="text" id="set-event-name" class="setting-input" maxlength="60" placeholder="PartyQueue" />
+              <select id="set-header-font-size" class="setting-input look-font-size" aria-label="Header font size"></select>
+              <select id="set-header-all-caps" class="setting-input look-caps-select" aria-label="Header capitalization">
+                <option value="1" selected>All caps</option>
+                <option value="0">As typed</option>
+              </select>
             </div>
-            <div class="setting-row-text">
+            <div class="setting-row-text look-text-row">
               <label class="setting-label" for="set-subtitle">Subtitle</label>
               <input type="text" id="set-subtitle" class="setting-input" maxlength="120" placeholder="Tagline (optional)" />
+              <select id="set-subtitle-font-size" class="setting-input look-font-size" aria-label="Subtitle font size"></select>
+              <select id="set-subtitle-all-caps" class="setting-input look-caps-select" aria-label="Subtitle capitalization">
+                <option value="1" selected>All caps</option>
+                <option value="0">As typed</option>
+              </select>
+            </div>
+            <div class="setting-row-text look-text-row look-text-row-version">
+              <label class="setting-label" for="set-version-font-size">Version pill</label>
+              <select id="set-version-font-size" class="setting-input look-font-size" aria-label="Version pill font size"></select>
             </div>
           </div>
         </div>

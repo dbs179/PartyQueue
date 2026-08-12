@@ -1255,12 +1255,55 @@ export function setContentSettings(partial = {}) {
 // Event branding: the header title and tagline, so the app can be reused for
 // other events without editing code. `eventName` falls back to the default if
 // blank (a header needs a title); `subtitle` may be empty to hide the tagline.
+// Font sizes are Look-page pixel picks applied as CSS variables.
+export const BRAND_FONT_PX = {
+  header: { min: 16, max: 80, default: 36 },
+  subtitle: { min: 10, max: 48, default: 18 },
+  version: { min: 8, max: 32, default: 11 },
+};
+
+/** Legacy sm/md/lg/xl presets → scale against each role's default. */
+const BRAND_FONT_LEGACY_SCALE = {
+  sm: 0.85,
+  md: 1,
+  lg: 1.2,
+  xl: 1.4,
+};
+
+/**
+ * @param {unknown} value
+ * @param {"header"|"subtitle"|"version"} [role]
+ */
+export function normalizeBrandFontSize(value, role = "header") {
+  const cfg = BRAND_FONT_PX[role] || BRAND_FONT_PX.header;
+  const legacy =
+    BRAND_FONT_LEGACY_SCALE[String(value ?? "").trim().toLowerCase()];
+  if (legacy != null) {
+    return Math.min(
+      cfg.max,
+      Math.max(cfg.min, Math.round(cfg.default * legacy))
+    );
+  }
+  const raw =
+    typeof value === "number"
+      ? value
+      : Number(String(value ?? "").replace(/px$/i, "").trim());
+  if (!Number.isFinite(raw)) return cfg.default;
+  return Math.min(cfg.max, Math.max(cfg.min, Math.round(raw)));
+}
+
 export const BRANDING_DEFAULTS = {
   eventName: "PartyQueue",
   subtitle: "",
   showVersion: true,
   // Up Next pills: matched genre + From Playlists next to origin badge.
   showQueueGenre: false,
+  headerFontSize: BRAND_FONT_PX.header.default,
+  subtitleFontSize: BRAND_FONT_PX.subtitle.default,
+  versionFontSize: BRAND_FONT_PX.version.default,
+  // Match the long-standing desktop brand look (ALL CAPS title + tagline).
+  headerAllCaps: true,
+  subtitleAllCaps: true,
   heroBanner: null, // null = built-in public/hero.jpg; otherwise a data/banners file
   // Phone header banner; null falls back to heroBanner (then built-in hero.jpg).
   heroBannerMobile: null,
@@ -1318,6 +1361,26 @@ export function getBrandingSettings() {
       typeof s.showQueueGenre === "boolean"
         ? s.showQueueGenre
         : BRANDING_DEFAULTS.showQueueGenre,
+    headerFontSize: normalizeBrandFontSize(
+      s.headerFontSize ?? BRANDING_DEFAULTS.headerFontSize,
+      "header"
+    ),
+    subtitleFontSize: normalizeBrandFontSize(
+      s.subtitleFontSize ?? BRANDING_DEFAULTS.subtitleFontSize,
+      "subtitle"
+    ),
+    versionFontSize: normalizeBrandFontSize(
+      s.versionFontSize ?? BRANDING_DEFAULTS.versionFontSize,
+      "version"
+    ),
+    headerAllCaps:
+      typeof s.headerAllCaps === "boolean"
+        ? s.headerAllCaps
+        : BRANDING_DEFAULTS.headerAllCaps,
+    subtitleAllCaps:
+      typeof s.subtitleAllCaps === "boolean"
+        ? s.subtitleAllCaps
+        : BRANDING_DEFAULTS.subtitleAllCaps,
     heroBanner,
     heroBannerMobile,
   };
@@ -1348,6 +1411,30 @@ export function setBrandingSettings(partial = {}) {
   if (partial.showVersion != null) next.showVersion = !!partial.showVersion;
   if (partial.showQueueGenre != null) {
     next.showQueueGenre = !!partial.showQueueGenre;
+  }
+  if (partial.headerFontSize != null) {
+    next.headerFontSize = normalizeBrandFontSize(
+      partial.headerFontSize,
+      "header"
+    );
+  }
+  if (partial.subtitleFontSize != null) {
+    next.subtitleFontSize = normalizeBrandFontSize(
+      partial.subtitleFontSize,
+      "subtitle"
+    );
+  }
+  if (partial.versionFontSize != null) {
+    next.versionFontSize = normalizeBrandFontSize(
+      partial.versionFontSize,
+      "version"
+    );
+  }
+  if (partial.headerAllCaps != null) {
+    next.headerAllCaps = !!partial.headerAllCaps;
+  }
+  if (partial.subtitleAllCaps != null) {
+    next.subtitleAllCaps = !!partial.subtitleAllCaps;
   }
   if (partial.heroBanner !== undefined) {
     next.heroBanner =

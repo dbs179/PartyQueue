@@ -15,14 +15,22 @@
  *   active?: string|null,
  *   defaultUrl?: string,
  *   banners?: Array<{ name: string, url: string, starter?: boolean }>,
+ *   bannersDesktop?: Array<{ name: string, url: string, starter?: boolean }>,
+ *   bannersMobile?: Array<{ name: string, url: string, starter?: boolean }>,
  * }} data
+ * @param {{ slot?: "desktop"|"mobile" }} [opts]
  * @returns {GalleryItem[]}
  */
-export function buildBannerGalleryItems(data) {
+export function buildBannerGalleryItems(data, opts = {}) {
   const active = data?.active ?? null;
   const defaultUrl = data?.defaultUrl || "hero.jpg";
+  const slot = opts.slot === "mobile" ? "mobile" : "desktop";
+  const pool =
+    slot === "mobile"
+      ? data?.bannersMobile || data?.banners || []
+      : data?.bannersDesktop || data?.banners || [];
   const tiles = [{ name: null, url: defaultUrl, starter: true }];
-  for (const b of data?.banners || []) {
+  for (const b of pool) {
     tiles.push({ name: b.name, url: b.url, starter: !!b.starter });
   }
   return tiles.map((t) => toGalleryItem(t, active === t.name));
@@ -68,7 +76,8 @@ function toGalleryItem(tile, isActive) {
     name: tile.name,
     url: tile.url,
     active: isActive,
-    canDelete: !!(tile.name && !tile.starter),
+    // Any stored banner is deletable; only the synthetic Default tile is locked.
+    canDelete: !!tile.name,
     tag: isActive ? "Active" : tile.name === null ? "Default" : "",
   };
 }

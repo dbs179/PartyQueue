@@ -11,6 +11,97 @@ export const MAX_DJ_ICON_BYTES = 2 * 1024 * 1024;
 export const MAX_BANNER_BYTES = 8 * 1024 * 1024;
 export const DESKTOP_BANNER_MQ = "(min-width: 960px)";
 
+export const BRAND_FONT_PX = {
+  header: { min: 16, max: 80, default: 36 },
+  subtitle: { min: 10, max: 48, default: 18 },
+  version: { min: 8, max: 32, default: 11 },
+};
+
+const BRAND_FONT_LEGACY_SCALE = {
+  sm: 0.85,
+  md: 1,
+  lg: 1.2,
+  xl: 1.4,
+};
+
+/**
+ * @param {unknown} value
+ * @param {"header"|"subtitle"|"version"} [role]
+ */
+export function normalizeBrandFontSize(value, role = "header") {
+  const cfg = BRAND_FONT_PX[role] || BRAND_FONT_PX.header;
+  const legacy =
+    BRAND_FONT_LEGACY_SCALE[String(value ?? "").trim().toLowerCase()];
+  if (legacy != null) {
+    return Math.min(
+      cfg.max,
+      Math.max(cfg.min, Math.round(cfg.default * legacy))
+    );
+  }
+  const raw =
+    typeof value === "number"
+      ? value
+      : Number(String(value ?? "").replace(/px$/i, "").trim());
+  if (!Number.isFinite(raw)) return cfg.default;
+  return Math.min(cfg.max, Math.max(cfg.min, Math.round(raw)));
+}
+
+/**
+ * Fill a <select> with 1px steps labeled "24px", "25px", …
+ * @param {HTMLSelectElement|null|undefined} select
+ * @param {"header"|"subtitle"|"version"} role
+ * @param {unknown} [selected]
+ */
+export function fillBrandFontSizeSelect(select, role, selected) {
+  if (!select) return;
+  const cfg = BRAND_FONT_PX[role] || BRAND_FONT_PX.header;
+  const value = normalizeBrandFontSize(selected ?? cfg.default, role);
+  const opts = [];
+  for (let n = cfg.min; n <= cfg.max; n += 1) {
+    opts.push(`<option value="${n}">${n}px</option>`);
+  }
+  select.innerHTML = opts.join("");
+  select.value = String(value);
+}
+
+/**
+ * Apply Look-page brand type sizes (px) to CSS variables on :root.
+ * @param {{
+ *   headerFontSize?: unknown,
+ *   subtitleFontSize?: unknown,
+ *   versionFontSize?: unknown,
+ * }} sizes
+ * @param {{ document?: Document }} [opts]
+ */
+export function applyBrandFontSizes(sizes = {}, opts = {}) {
+  const doc = opts.document || (typeof document !== "undefined" ? document : null);
+  const root = doc?.documentElement;
+  if (!root?.style?.setProperty) return;
+  const header = normalizeBrandFontSize(sizes.headerFontSize, "header");
+  const subtitle = normalizeBrandFontSize(sizes.subtitleFontSize, "subtitle");
+  const version = normalizeBrandFontSize(sizes.versionFontSize, "version");
+  root.style.setProperty("--pq-header-font-size", `${header}px`);
+  root.style.setProperty("--pq-subtitle-font-size", `${subtitle}px`);
+  root.style.setProperty("--pq-version-font-size", `${version}px`);
+}
+
+/**
+ * Apply Look-page ALL CAPS toggles via classes on :root.
+ * @param {{ headerAllCaps?: unknown, subtitleAllCaps?: unknown }} caps
+ * @param {{ document?: Document }} [opts]
+ */
+export function applyBrandCaps(caps = {}, opts = {}) {
+  const doc = opts.document || (typeof document !== "undefined" ? document : null);
+  const root = doc?.documentElement;
+  if (!root?.classList?.toggle) return;
+  if (caps.headerAllCaps != null) {
+    root.classList.toggle("pq-header-all-caps", !!caps.headerAllCaps);
+  }
+  if (caps.subtitleAllCaps != null) {
+    root.classList.toggle("pq-subtitle-all-caps", !!caps.subtitleAllCaps);
+  }
+}
+
 /**
  * @param {object} [partial]
  * @param {{ storage?: Storage|null }} [opts]
@@ -52,6 +143,32 @@ export function persistBrandingCache(partial = {}, opts = {}) {
         partial.showQueueGenre != null
           ? !!partial.showQueueGenre
           : !!prev.showQueueGenre,
+      headerFontSize: normalizeBrandFontSize(
+        partial.headerFontSize != null
+          ? partial.headerFontSize
+          : prev.headerFontSize,
+        "header"
+      ),
+      subtitleFontSize: normalizeBrandFontSize(
+        partial.subtitleFontSize != null
+          ? partial.subtitleFontSize
+          : prev.subtitleFontSize,
+        "subtitle"
+      ),
+      versionFontSize: normalizeBrandFontSize(
+        partial.versionFontSize != null
+          ? partial.versionFontSize
+          : prev.versionFontSize,
+        "version"
+      ),
+      headerAllCaps:
+        partial.headerAllCaps != null
+          ? !!partial.headerAllCaps
+          : prev.headerAllCaps !== false,
+      subtitleAllCaps:
+        partial.subtitleAllCaps != null
+          ? !!partial.subtitleAllCaps
+          : prev.subtitleAllCaps !== false,
     };
     storage.setItem(BRANDING_STORAGE_KEY, JSON.stringify(next));
   } catch {
@@ -67,6 +184,11 @@ export function persistBrandingCache(partial = {}, opts = {}) {
  *   headerVersion?: HTMLElement|null,
  *   eventNameInput?: HTMLInputElement|null,
  *   subtitleInput?: HTMLInputElement|null,
+ *   headerFontSizeInput?: HTMLSelectElement|null,
+ *   subtitleFontSizeInput?: HTMLSelectElement|null,
+ *   versionFontSizeInput?: HTMLSelectElement|null,
+ *   headerAllCapsInput?: HTMLSelectElement|null,
+ *   subtitleAllCapsInput?: HTMLSelectElement|null,
  *   showVersionInput?: HTMLInputElement|null,
  *   showQueueGenreInput?: HTMLInputElement|null,
  *   lookTextSaveBtn?: HTMLElement|null,
@@ -98,6 +220,11 @@ export function createBrandingUi(els, deps) {
     headerVersion,
     eventNameInput,
     subtitleInput,
+    headerFontSizeInput,
+    subtitleFontSizeInput,
+    versionFontSizeInput,
+    headerAllCapsInput,
+    subtitleAllCapsInput,
     showVersionInput,
     showQueueGenreInput,
     lookTextSaveBtn,
@@ -270,19 +397,26 @@ export function createBrandingUi(els, deps) {
 
   function renderBanners(data) {
     if (bannerGallery) {
-      mountThumbGallery(bannerGallery, buildBannerGalleryItems(data), {
-        deleteAriaLabel: "Delete banner",
-        onSelect: (name) => selectBanner(name, "desktop"),
-        onDelete: deleteBanner,
-      });
+      mountThumbGallery(
+        bannerGallery,
+        buildBannerGalleryItems(data, { slot: "desktop" }),
+        {
+          deleteAriaLabel: "Delete banner",
+          onSelect: (name) => selectBanner(name, "desktop"),
+          onDelete: deleteBanner,
+        }
+      );
     }
     if (bannerMobileGallery) {
       mountThumbGallery(
         bannerMobileGallery,
-        buildBannerGalleryItems({
-          ...data,
-          active: data.activeMobile ?? null,
-        }),
+        buildBannerGalleryItems(
+          {
+            ...data,
+            active: data.activeMobile ?? null,
+          },
+          { slot: "mobile" }
+        ),
         {
           deleteAriaLabel: "Delete banner",
           onSelect: (name) => selectBanner(name, "mobile"),
@@ -429,11 +563,63 @@ export function createBrandingUi(els, deps) {
     /* matchMedia unavailable */
   }
 
+  fillBrandFontSizeSelect(headerFontSizeInput, "header");
+  fillBrandFontSizeSelect(subtitleFontSizeInput, "subtitle");
+  fillBrandFontSizeSelect(versionFontSizeInput, "version");
+
+  function currentFontSizes() {
+    return {
+      headerFontSize: normalizeBrandFontSize(
+        headerFontSizeInput?.value,
+        "header"
+      ),
+      subtitleFontSize: normalizeBrandFontSize(
+        subtitleFontSizeInput?.value,
+        "subtitle"
+      ),
+      versionFontSize: normalizeBrandFontSize(
+        versionFontSizeInput?.value,
+        "version"
+      ),
+    };
+  }
+
+  function capsFromSelect(select, fallback = true) {
+    if (!select) return fallback;
+    return select.value !== "0";
+  }
+
+  function currentCaps() {
+    return {
+      headerAllCaps: capsFromSelect(headerAllCapsInput, true),
+      subtitleAllCaps: capsFromSelect(subtitleAllCapsInput, true),
+    };
+  }
+
+  function previewFontSizes() {
+    const sizes = currentFontSizes();
+    applyBrandFontSizes(sizes);
+    persistBrandingCache(sizes);
+  }
+
+  function previewCaps() {
+    const caps = currentCaps();
+    applyBrandCaps(caps);
+    persistBrandingCache(caps);
+  }
+
   function saveLookText() {
+    const sizes = currentFontSizes();
+    const caps = currentCaps();
+    applyBrandFontSizes(sizes);
+    applyBrandCaps(caps);
+    persistBrandingCache({ ...sizes, ...caps });
     saveSettings(
       {
         eventName: eventNameInput?.value,
         subtitle: subtitleInput?.value,
+        ...sizes,
+        ...caps,
       },
       { toastMessage: "Saved" }
     );
@@ -447,6 +633,16 @@ export function createBrandingUi(els, deps) {
         saveLookText();
       }
     });
+  }
+  for (const input of [
+    headerFontSizeInput,
+    subtitleFontSizeInput,
+    versionFontSizeInput,
+  ]) {
+    input?.addEventListener("change", previewFontSizes);
+  }
+  for (const input of [headerAllCapsInput, subtitleAllCapsInput]) {
+    input?.addEventListener("change", previewCaps);
   }
 
   showVersionInput?.addEventListener("change", () => {
@@ -468,6 +664,8 @@ export function createBrandingUi(els, deps) {
     applyHero,
     applyHeroMobile,
     applyBranding,
+    applyBrandFontSizes,
+    applyBrandCaps,
     syncHeroSrc,
     loadBanners,
     loadDjIcons,

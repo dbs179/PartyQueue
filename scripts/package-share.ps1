@@ -63,6 +63,27 @@ try {
     }
   }
 
+  # Only ship shared default banners (match .gitignore whitelist). Keep local
+  # event art / uploads / retouch files out of share zips.
+  $bannerAllow = @(
+    "pc-banner-vinyl.jpg",
+    "pc-banner-speakers.jpg",
+    "pc-banner-backyard.jpg",
+    "pc-banner-karaoke.jpg",
+    "pc-banner-records.jpg",
+    "md-banner-vinyl.jpg",
+    "md-banner-speakers.jpg",
+    "md-banner-backyard.jpg",
+    "md-banner-karaoke.jpg",
+    "md-banner-records.jpg"
+  )
+  $bannerDir = Join-Path $staging "public\banners"
+  if (Test-Path $bannerDir) {
+    Get-ChildItem -Path $bannerDir -File -Force | Where-Object {
+      $bannerAllow -notcontains $_.Name
+    } | Remove-Item -Force
+  }
+
   # Fail closed if a future allow-listed directory contains a credential store
   # or generated diagnostic artifact.
   $forbiddenNames = @(

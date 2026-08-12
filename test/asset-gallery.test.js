@@ -26,7 +26,37 @@ test("buildBannerGalleryItems includes default + banners", () => {
   assert.equal(items[1].active, true);
   assert.equal(items[1].tag, "Active");
   assert.equal(items[1].canDelete, true);
-  assert.equal(items[2].canDelete, false);
+  assert.equal(items[2].canDelete, true, "stored banners are deletable");
+});
+
+test("buildBannerGalleryItems filters by desktop/mobile slot pools", () => {
+  const data = {
+    active: "wide.png",
+    defaultUrl: "hero.jpg",
+    bannersDesktop: [
+      { name: "wide.png", url: "/banners/wide.png", starter: true },
+    ],
+    bannersMobile: [
+      { name: "phone.jpg", url: "/banners/phone.jpg", starter: true },
+    ],
+    banners: [
+      { name: "wide.png", url: "/banners/wide.png", starter: true },
+      { name: "phone.jpg", url: "/banners/phone.jpg", starter: true },
+    ],
+  };
+  const desktop = buildBannerGalleryItems(data, { slot: "desktop" });
+  const mobile = buildBannerGalleryItems(
+    { ...data, active: "phone.jpg" },
+    { slot: "mobile" }
+  );
+  assert.deepEqual(
+    desktop.map((i) => i.name),
+    [null, "wide.png"]
+  );
+  assert.deepEqual(
+    mobile.map((i) => i.name),
+    [null, "phone.jpg"]
+  );
 });
 
 test("buildDjIconGalleryItems skips seeded default name and marks default active", () => {

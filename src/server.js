@@ -229,6 +229,11 @@ async function sendBrandedIndex(_req, res) {
       heroBannerMobile,
       showVersion,
       showQueueGenre,
+      headerFontSize,
+      subtitleFontSize,
+      versionFontSize,
+      headerAllCaps,
+      subtitleAllCaps,
     } = getBrandingSettings();
     const brandJson = JSON.stringify({
       eventName,
@@ -238,6 +243,11 @@ async function sendBrandedIndex(_req, res) {
       version: VERSION || "",
       showVersion: !!showVersion,
       showQueueGenre: !!showQueueGenre,
+      headerFontSize: headerFontSize ?? 36,
+      subtitleFontSize: subtitleFontSize ?? 18,
+      versionFontSize: versionFontSize ?? 11,
+      headerAllCaps: headerAllCaps !== false,
+      subtitleAllCaps: subtitleAllCaps !== false,
     }).replace(/</g, "\\u003c");
     const { html, nonce } = await renderIndexHtml(brandJson);
     res.setHeader("Cache-Control", "no-cache");

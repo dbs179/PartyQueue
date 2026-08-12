@@ -18,3 +18,17 @@ test-results/
 playwright-report/
 .audit-tmp/
 .cursor/
+
+# Hero banners: only ship the shared pc-banner-/md-banner- defaults (not event
+# uploads, Swinefeld/church-crew art, or local retouch work files).
+public/banners/*
+!public/banners/pc-banner-vinyl.jpg
+!public/banners/pc-banner-speakers.jpg
+!public/banners/pc-banner-backyard.jpg
+!public/banners/pc-banner-karaoke.jpg
+!public/banners/pc-banner-records.jpg
+!public/banners/md-banner-vinyl.jpg
+!public/banners/md-banner-speakers.jpg
+!public/banners/md-banner-backyard.jpg
+!public/banners/md-banner-karaoke.jpg
+!public/banners/md-banner-records.jpg

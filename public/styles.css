@@ -7,6 +7,10 @@
   --accent: #1db954;
   --accent-press: #169c46;
   --radius: 14px;
+  /* Look-page brand type sizes in px (set from branding-ui / boot script). */
+  --pq-header-font-size: 36px;
+  --pq-subtitle-font-size: 18px;
+  --pq-version-font-size: 11px;
 }
 
 * {
@@ -369,10 +373,10 @@ body {
   margin: 0;
   text-align: center;
   color: var(--text);
-  font-size: clamp(2rem, 9vw, 3.2rem);
+  font-size: var(--pq-header-font-size);
   font-weight: 700;
   line-height: 1.1;
-  letter-spacing: -0.02em;
+  letter-spacing: normal;
   text-transform: none;
   white-space: normal;
   text-wrap: balance;
@@ -394,7 +398,7 @@ body {
   border: 1px solid var(--border, #2a2a32);
   background: rgba(255, 255, 255, 0.06);
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: var(--pq-version-font-size);
   font-weight: 700;
   letter-spacing: 0.02em;
   vertical-align: baseline;
@@ -482,9 +486,10 @@ button.subpage-head-link:active {
   max-width: 600px;
   margin: 6px auto 0;
   color: var(--muted);
-  font-size: clamp(1rem, 4.6vw, 1.6rem);
+  font-size: var(--pq-subtitle-font-size);
   font-weight: 400;
   line-height: 1.3;
+  /* Keep letter-spacing identical to .header h1 so matched px sizes read evenly. */
   letter-spacing: normal;
   text-align: center;
   text-transform: none;
@@ -535,6 +540,7 @@ button.subpage-head-link:active {
     bottom: 0;
     left: 0;
     z-index: 1;
+    display: flex;
     flex-direction: row;
     align-items: flex-start;
     justify-content: space-between;
@@ -547,13 +553,15 @@ button.subpage-head-link:active {
     pointer-events: auto;
   }
 
+  /* Title on top; version pill under it, left-justified with the title.
+     Subtitle stays top-aligned with the title via .header-copy. */
   .header-brand {
     display: flex;
     flex-direction: column;
     flex-wrap: nowrap;
     align-items: flex-start;
     justify-content: flex-start;
-    gap: 2px;
+    gap: 4px;
     max-width: 70%;
     width: max-content;
   }
@@ -563,13 +571,14 @@ button.subpage-head-link:active {
     width: max-content;
     max-width: none;
     margin: 0;
+    padding: 0;
     text-align: left;
     color: var(--accent);
-    font-size: clamp(1.8rem, 2.6vw, 2.8rem);
+    font-size: var(--pq-header-font-size);
     font-weight: 800;
-    line-height: 1.05;
+    line-height: 1.1;
     letter-spacing: normal;
-    text-transform: uppercase;
+    text-transform: none;
     white-space: nowrap;
     text-wrap: unset;
     text-shadow:
@@ -580,7 +589,7 @@ button.subpage-head-link:active {
   .header-brand > .version-tag {
     grid-column: auto;
     justify-self: auto;
-    align-self: auto;
+    align-self: flex-start;
     margin: 0;
   }
 
@@ -590,19 +599,21 @@ button.subpage-head-link:active {
     border: 1px solid var(--accent);
     background: rgba(0, 0, 0, 0.45);
     color: var(--accent);
-    font-size: 0.68rem;
+    font-size: var(--pq-version-font-size);
   }
 
   .header .subtitle {
     max-width: min(40%, 32ch);
     margin: 0;
+    padding: 0;
+    align-self: flex-start;
     color: var(--accent);
-    font-size: clamp(1rem, 1.5vw, 1.35rem);
+    font-size: var(--pq-subtitle-font-size);
     font-weight: 800;
-    line-height: 1.25;
-    letter-spacing: 0.06em;
+    line-height: 1.1;
+    letter-spacing: normal;
     text-align: right;
-    text-transform: uppercase;
+    text-transform: none;
     text-shadow:
       0 1px 2px rgba(0, 0, 0, 0.9),
       0 0 16px rgba(0, 0, 0, 0.5);
@@ -1972,25 +1983,36 @@ button.guest-name:focus-visible {
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 6px;
-}
-
-.look-section-head .section-label,
-.look-section > .section-label {
-  margin: 0;
-}
-
-.look-section > .section-label {
-  margin-bottom: 6px;
-}
-
-.look-section .settings-intro {
-  margin-top: 0;
   margin-bottom: 8px;
 }
 
+.look-section-heading {
+  margin: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35em;
+  line-height: 1.35;
+}
+
+.look-section-heading .section-label {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.look-section-sub {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1.35;
+}
+
 .look-section .banner-gallery {
-  margin-top: 4px;
+  margin-top: 0;
 }
 
 @media (min-width: 960px) {
@@ -2779,6 +2801,34 @@ button.guest-name:focus-visible {
   align-items: center;
   gap: 10px;
   padding: 6px 0;
+}
+
+/* Look Text: label | value | Size | Caps */
+.setting-row-text.look-text-row {
+  grid-template-columns: 90px minmax(0, 1fr) auto auto;
+}
+
+.setting-row-text.look-text-row-version {
+  grid-template-columns: 90px auto;
+}
+
+.look-font-size,
+.look-caps-select {
+  width: auto;
+  min-width: 5.25rem;
+}
+
+.look-caps-select {
+  min-width: 6.5rem;
+}
+
+/* Look-page Caps — every viewport (not only desktop overlay). */
+html.pq-header-all-caps .header h1 {
+  text-transform: uppercase;
+}
+html.pq-subtitle-all-caps .header .subtitle,
+html.pq-subtitle-all-caps .subtitle {
+  text-transform: uppercase;
 }
 
 /* Cache warmed value + Re-warm button on one row. */
@@ -3838,11 +3888,11 @@ body.modal-open {
   }
 
   .header h1 {
-    font-size: clamp(1.55rem, 7.5vw, 2.4rem);
+    font-size: var(--pq-header-font-size);
   }
 
   .header .subtitle {
-    font-size: 0.9rem;
+    font-size: var(--pq-subtitle-font-size);
     margin-bottom: 4px;
   }
 

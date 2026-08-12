@@ -36,31 +36,61 @@ test("saveSettings persists to disk and updates the cache", () => {
   assert.equal(disk.eventName, "P2 Test");
 });
 
+test("brand font sizes normalize and persist as pixels", () => {
+  assert.equal(settings.getBrandingSettings().headerFontSize, 36);
+  settings.setBrandingSettings({
+    headerFontSize: "40px",
+    subtitleFontSize: "nope",
+    versionFontSize: "xl",
+  });
+  const brand = settings.getBrandingSettings();
+  assert.equal(brand.headerFontSize, 40);
+  assert.equal(brand.subtitleFontSize, 18);
+  assert.equal(brand.versionFontSize, Math.round(11 * 1.4));
+});
+
+test("brand all-caps toggles default on and persist", () => {
+  assert.equal(settings.getBrandingSettings().headerAllCaps, true);
+  assert.equal(settings.getBrandingSettings().subtitleAllCaps, true);
+  settings.setBrandingSettings({
+    headerAllCaps: false,
+    subtitleAllCaps: true,
+  });
+  const brand = settings.getBrandingSettings();
+  assert.equal(brand.headerAllCaps, false);
+  assert.equal(brand.subtitleAllCaps, true);
+});
+
 test("heroBannerMobile falls back to desktop in resolveBannerForSlot", async () => {
   const banners = await import("../src/banners.js");
   banners.seedStarterBanners();
-  assert.equal(banners.bannerExists("banner-vinyl.jpg"), true);
+  assert.equal(banners.bannerExists("pc-banner-vinyl.jpg"), true);
 
   settings.setBrandingSettings({
-    heroBanner: "banner-vinyl.jpg",
+    heroBanner: "pc-banner-vinyl.jpg",
     heroBannerMobile: null,
   });
-  assert.equal(settings.getBrandingSettings().heroBanner, "banner-vinyl.jpg");
+  assert.equal(settings.getBrandingSettings().heroBanner, "pc-banner-vinyl.jpg");
   assert.equal(settings.getBrandingSettings().heroBannerMobile, null);
-  assert.equal(settings.resolveBannerForSlot("desktop"), "banner-vinyl.jpg");
-  assert.equal(settings.resolveBannerForSlot("mobile"), "banner-vinyl.jpg");
+  assert.equal(settings.resolveBannerForSlot("desktop"), "pc-banner-vinyl.jpg");
+  assert.equal(settings.resolveBannerForSlot("mobile"), "pc-banner-vinyl.jpg");
 
-  if (banners.bannerExists("banner-speakers.jpg")) {
-    settings.setBrandingSettings({ heroBannerMobile: "banner-speakers.jpg" });
+  if (banners.bannerExists("md-banner-speakers.jpg")) {
+    settings.setBrandingSettings({
+      heroBannerMobile: "md-banner-speakers.jpg",
+    });
     assert.equal(
       settings.resolveBannerForSlot("mobile"),
-      "banner-speakers.jpg"
+      "md-banner-speakers.jpg"
     );
-    assert.equal(settings.resolveBannerForSlot("desktop"), "banner-vinyl.jpg");
+    assert.equal(
+      settings.resolveBannerForSlot("desktop"),
+      "pc-banner-vinyl.jpg"
+    );
   }
 
   settings.setBrandingSettings({ heroBannerMobile: null });
-  assert.equal(settings.resolveBannerForSlot("mobile"), "banner-vinyl.jpg");
+  assert.equal(settings.resolveBannerForSlot("mobile"), "pc-banner-vinyl.jpg");
 });
 
 test("saveSettings throws when the path is not writable", () => {
