@@ -25,18 +25,19 @@ export const PHONE_BANNER_MAX_RATIO = 2.5;
 // Bundled defaults shipped on GitHub (public/banners → data/banners).
 // Naming: pc-banner-* = desktop strip, md-banner-* = phone (type-first so
 // listings group by slot). hero.jpg remains the true app Default (null).
-// Event-specific art (e.g. Swinefeld) stays local-only.
 const STARTER_BANNERS = [
   { src: "pc-banner-vinyl.jpg", dest: "pc-banner-vinyl.jpg" },
   { src: "pc-banner-speakers.jpg", dest: "pc-banner-speakers.jpg" },
   { src: "pc-banner-backyard.jpg", dest: "pc-banner-backyard.jpg" },
   { src: "pc-banner-karaoke.jpg", dest: "pc-banner-karaoke.jpg" },
   { src: "pc-banner-records.jpg", dest: "pc-banner-records.jpg" },
+  { src: "pc-banner-swinefeld.png", dest: "pc-banner-swinefeld.png" },
   { src: "md-banner-vinyl.jpg", dest: "md-banner-vinyl.jpg" },
   { src: "md-banner-speakers.jpg", dest: "md-banner-speakers.jpg" },
   { src: "md-banner-backyard.jpg", dest: "md-banner-backyard.jpg" },
   { src: "md-banner-karaoke.jpg", dest: "md-banner-karaoke.jpg" },
   { src: "md-banner-records.jpg", dest: "md-banner-records.jpg" },
+  { src: "md-banner-swinefeld.jpg", dest: "md-banner-swinefeld.jpg" },
 ];
 const STARTER_DEST = new Set(STARTER_BANNERS.map((s) => s.dest));
 
