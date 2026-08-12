@@ -374,8 +374,7 @@ body {
   line-height: 1.1;
   letter-spacing: -0.02em;
   text-transform: none;
-  white-space: normal;
-  text-wrap: balance;
+  white-space: nowrap;
 }
 
 /* Small muted version pill to the right of the centered title on phones. */
