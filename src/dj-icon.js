@@ -1,6 +1,9 @@
 // DJ Voice icon store: host-uploaded icons under data/dj-icons/ (Docker-
 // persisted). Keeps the newest few for quick reuse. null in settings means
-// the seeded starter default (dj-icon-flat.png / public/dj-icons/flat.png).
+// the seeded starter default (dj-icon-headphones.png / public/dj-icons/headphones.png).
+//
+// Bundled starters in public/dj-icons/ are generic (safe to share). Event-
+// specific art such as DJ Holy Roller lives only under data/dj-icons/ locally.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -14,17 +17,47 @@ const STARTER_DIR = path.join(__dirname, "..", "public", "dj-icons");
 // Legacy single-file location from the first DJ-icon pass.
 const LEGACY_DATA_DIR = path.join(__dirname, "..", "data");
 
-export const MAX_DJ_ICONS = 20;
+// Gallery cap: all bundled starters stay, plus a few host uploads.
+export const MAX_DJ_ICONS = 30;
 
 // Stable gallery names for bundled styles (copied from public/dj-icons).
 const STARTER_ICONS = [
-  { src: "flat.png", dest: "dj-icon-flat.png" },
+  { src: "headphones.png", dest: "dj-icon-headphones.png" },
+  { src: "cartoon.png", dest: "dj-icon-cartoon.png" },
   { src: "retro.png", dest: "dj-icon-retro.png" },
   { src: "neon.png", dest: "dj-icon-neon.png" },
-  { src: "cartoon.png", dest: "dj-icon-cartoon.png" },
-  { src: "headphones.png", dest: "dj-icon-headphones.png" },
+  { src: "boombox.png", dest: "dj-icon-boombox.png" },
+  { src: "cassette.png", dest: "dj-icon-cassette.png" },
+  { src: "disco.png", dest: "dj-icon-disco.png" },
+  { src: "mixer.png", dest: "dj-icon-mixer.png" },
+  { src: "turntable.png", dest: "dj-icon-turntable.png" },
+  { src: "vinyl.png", dest: "dj-icon-vinyl.png" },
+  { src: "mic.png", dest: "dj-icon-mic.png" },
+  { src: "speaker.png", dest: "dj-icon-speaker.png" },
+  { src: "waveform.png", dest: "dj-icon-waveform.png" },
+  { src: "equalizer.png", dest: "dj-icon-equalizer.png" },
+  { src: "laser.png", dest: "dj-icon-laser.png" },
+  { src: "deck.png", dest: "dj-icon-deck.png" },
+  { src: "controller.png", dest: "dj-icon-controller.png" },
+  { src: "radio.png", dest: "dj-icon-radio.png" },
+  { src: "amp.png", dest: "dj-icon-amp.png" },
+  { src: "party.png", dest: "dj-icon-party.png" },
+  { src: "notes.png", dest: "dj-icon-notes.png" },
+  { src: "spotlight.png", dest: "dj-icon-spotlight.png" },
 ];
 const STARTER_DEST = new Set(STARTER_ICONS.map((s) => s.dest));
+const STARTER_ORDER = new Map(
+  STARTER_ICONS.map((s, i) => [s.dest, i])
+);
+// Event-specific locals: keep in data/, show last in the gallery.
+const LOCAL_TRAILER_ICONS = [
+  "dj-icon-holyroller.png",
+  "dj-icon-flat.png",
+];
+const LOCAL_TRAILER_SET = new Set(LOCAL_TRAILER_ICONS);
+const LOCAL_TRAILER_ORDER = new Map(
+  LOCAL_TRAILER_ICONS.map((name, i) => [name, i])
+);
 const MAX_BYTES = 2 * 1024 * 1024; // 2 MB decoded image cap
 
 // Raster only — SVG uploads are rejected (scriptable if opened as a document).
@@ -38,7 +71,7 @@ const EXT_BY_MIME = {
 };
 
 const DJ_ICON_EXT = "png|jpg|webp|svg|gif";
-// Preferred: dj-icon-flat.png. Still accept older dj-icon-1-flat.png forms.
+// Preferred: dj-icon-headphones.png. Still accept older dj-icon-1-flat.png forms.
 const DJ_ICON_NAME_RE = new RegExp(
   `^dj-icon-(?:\\d+-)?[a-z][a-z0-9]*\\.(${DJ_ICON_EXT})$`,
   "i"
@@ -59,6 +92,13 @@ function isLegacyDjIconName(name) {
 
 function isStarterDjIconName(name) {
   return STARTER_DEST.has(name);
+}
+
+/** Host uploads use an 8-char base36 id: dj-icon-1d0ti9t4.png */
+function isRandomUploadName(name) {
+  const m = /^dj-icon-([a-z0-9]+)\.(png|jpg|webp|gif)$/i.exec(String(name || ""));
+  if (!m) return false;
+  return m[1].length === 8 && !STARTER_DEST.has(name);
 }
 
 // Move any leftover single-file icons into the gallery once.
@@ -147,7 +187,7 @@ export function seedStarterDjIcons() {
   }
 }
 
-// Icon files newest-first, each as { name, url }.
+// Icon files: starters, then local named art (e.g. Holy Roller), then uploads.
 export function listDjIcons() {
   try {
     seedStarterDjIcons();
@@ -155,11 +195,36 @@ export function listDjIcons() {
     return fs
       .readdirSync(ICONS_DIR)
       .filter(isSafeDjIconName)
-      .map((name) => ({
-        name,
-        mtime: fs.statSync(path.join(ICONS_DIR, name)).mtimeMs,
-      }))
-      .sort((a, b) => b.mtime - a.mtime)
+      .map((name) => {
+        const st = fs.statSync(path.join(ICONS_DIR, name));
+        return { name, mtime: st.mtimeMs, size: st.size };
+      })
+      // Drop corrupt/empty upload stubs so they don't clutter the gallery.
+      .filter((e) => e.size > 1024)
+      .sort((a, b) => {
+        // Shared starters (pack order) → other named → uploads → Holy Roller locals.
+        const rank = (name) => {
+          if (LOCAL_TRAILER_SET.has(name)) return 3;
+          if (isStarterDjIconName(name)) return 0;
+          if (isRandomUploadName(name)) return 2;
+          return 1;
+        };
+        const d = rank(a.name) - rank(b.name);
+        if (d !== 0) return d;
+        if (rank(a.name) === 0) {
+          return (
+            (STARTER_ORDER.get(a.name) ?? 999) -
+            (STARTER_ORDER.get(b.name) ?? 999)
+          );
+        }
+        if (rank(a.name) === 3) {
+          return (
+            (LOCAL_TRAILER_ORDER.get(a.name) ?? 999) -
+            (LOCAL_TRAILER_ORDER.get(b.name) ?? 999)
+          );
+        }
+        return b.mtime - a.mtime;
+      })
       .map(({ name }) => ({
         name,
         url: `/dj-icon/${name}`,
@@ -171,23 +236,37 @@ export function listDjIcons() {
   }
 }
 
-// Delete everything except the newest MAX_DJ_ICONS, always protecting keepName
-// and bundled starters.
+// Only prune random uploads past MAX_DJ_ICONS. Named locals (Holy Roller,
+// flat, etc.) and bundled starters are never auto-deleted.
 function prune(keepName) {
   const all = listDjIcons().map((b) => b.name);
-  const keep = new Set(all.slice(0, MAX_DJ_ICONS));
-  if (keepName && djIconExists(keepName)) keep.add(keepName);
-  for (const name of STARTER_DEST) {
-    if (djIconExists(name)) keep.add(name);
+  const uploads = all.filter(isRandomUploadName);
+  const keepUploads = new Set(uploads.slice(0, Math.max(0, MAX_DJ_ICONS)));
+  if (keepName && isRandomUploadName(keepName) && djIconExists(keepName)) {
+    keepUploads.add(keepName);
   }
-  for (const name of all) {
-    if (!keep.has(name)) {
+  for (const name of uploads) {
+    if (keepUploads.has(name)) continue;
+    try {
+      fs.unlinkSync(path.join(ICONS_DIR, name));
+    } catch (err) {
+      console.error("[dj-icon] prune failed:", err.message);
+    }
+  }
+  // Also sweep tiny corrupt stubs that listDjIcons hides.
+  try {
+    for (const name of fs.readdirSync(ICONS_DIR)) {
+      if (!isRandomUploadName(name)) continue;
+      const p = path.join(ICONS_DIR, name);
+      if (fs.statSync(p).size > 1024) continue;
       try {
-        fs.unlinkSync(path.join(ICONS_DIR, name));
+        fs.unlinkSync(p);
       } catch (err) {
-        console.error("[dj-icon] prune failed:", err.message);
+        console.error("[dj-icon] stub prune failed:", err.message);
       }
     }
+  } catch (err) {
+    console.error("[dj-icon] stub scan failed:", err.message);
   }
 }
 

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+  <!-- Sonos Connect: compact rectangular streamer / component box -->
+  <rect x="8" y="22" width="48" height="20" rx="2.5" stroke="#e8ecea" stroke-width="2.5"/>
+  <!-- Front status -->
+  <circle cx="16" cy="32" r="2" fill="#e8ecea"/>
+  <path d="M22 32h10" stroke="#e8ecea" stroke-width="1.5" stroke-linecap="round" opacity="0.7"/>
+  <!-- Rear I/O suggestion (side notches) -->
+  <path d="M56 28v8M8 28v8" stroke="#e8ecea" stroke-width="2" stroke-linecap="round"/>
+  <!-- RCA / line outs -->
+  <circle cx="40" cy="32" r="2.4" stroke="#e8ecea" stroke-width="1.4"/>
+  <circle cx="48" cy="32" r="2.4" stroke="#e8ecea" stroke-width="1.4"/>
+</svg>

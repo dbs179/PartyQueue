@@ -24,7 +24,9 @@ import {
   volumeDown,
   volumeUp,
   getGroupVolume,
+  invalidateSonosSnapshots,
 } from "../sonos.js";
+import { setSonosPlayerType } from "../settings.js";
 import {
   nudgeNowPlayingTransition,
   nowPlayingMonitor,
@@ -65,6 +67,25 @@ export function registerTransportRoutes(app, ctx) {
       res.status(400).json({ error: err.message || "Could not select group." });
     }
   }));
+
+  app.post(
+    "/api/groups/player-type",
+    requireHostControls,
+    asyncHandler(async (req, res) => {
+      const room = req.body?.room;
+      const type = req.body?.type;
+      try {
+        const result = setSonosPlayerType(String(room ?? ""), String(type ?? ""));
+        invalidateSonosSnapshots();
+        res.json({ ok: true, ...result });
+      } catch (err) {
+        console.error("[groups/player-type]", err.message);
+        res
+          .status(400)
+          .json({ error: err.message || "Could not save player type." });
+      }
+    })
+  );
 
   // Transport / volume / queue editing and grouping are open by default. Hosts
   // can optionally require their PIN for these controls; rate limits still blunt

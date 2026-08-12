@@ -281,6 +281,13 @@ export function createSearchUi(els, deps) {
       refreshSonos();
       onFairnessRefresh();
       if (getCurrentView() === "stats") loadStats();
+      // Close the search panel so the floating results can't trap the bar on PC.
+      clearTimeout(debounceTimer);
+      currentQuery = "";
+      if (searchInput) searchInput.value = "";
+      if (searchClear) searchClear.hidden = true;
+      if (resultsEl) resultsEl.innerHTML = "";
+      if (statusEl) statusEl.textContent = "";
     } catch (err) {
       showToast(err.message, true);
       onFairnessRefresh();
@@ -288,10 +295,6 @@ export function createSearchUi(els, deps) {
       btn.disabled = false;
       return;
     }
-    setTimeout(() => {
-      btn.textContent = prev;
-      btn.disabled = false;
-    }, 2000);
   }
 
   async function addToQueue(track, btn) {

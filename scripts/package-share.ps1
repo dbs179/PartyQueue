@@ -84,6 +84,39 @@ try {
     } | Remove-Item -Force
   }
 
+  # Only ship the 22 generic DJ icon starters (match .gitignore whitelist).
+  # Keep Holy Roller / event-specific icons out of share zips.
+  $djIconAllow = @(
+    "headphones.png",
+    "cartoon.png",
+    "retro.png",
+    "neon.png",
+    "boombox.png",
+    "cassette.png",
+    "disco.png",
+    "mixer.png",
+    "turntable.png",
+    "vinyl.png",
+    "mic.png",
+    "speaker.png",
+    "waveform.png",
+    "equalizer.png",
+    "laser.png",
+    "deck.png",
+    "controller.png",
+    "radio.png",
+    "amp.png",
+    "party.png",
+    "notes.png",
+    "spotlight.png"
+  )
+  $djIconDir = Join-Path $staging "public\dj-icons"
+  if (Test-Path $djIconDir) {
+    Get-ChildItem -Path $djIconDir -File -Force | Where-Object {
+      $djIconAllow -notcontains $_.Name
+    } | Remove-Item -Force
+  }
+
   # Fail closed if a future allow-listed directory contains a credential store
   # or generated diagnostic artifact.
   $forbiddenNames = @(

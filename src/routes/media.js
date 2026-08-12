@@ -116,7 +116,7 @@ export function registerMediaRoutes(app) {
       active: dj.djIcon,
       djIcon: dj.djIcon,
       djIconUrl: dj.djIconUrl,
-      defaultUrl: "/dj-icons/flat.png",
+      defaultUrl: "/dj-icons/headphones.png",
       icons: listDjIcons(),
     });
   });

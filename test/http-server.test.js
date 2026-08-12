@@ -111,12 +111,20 @@ describe("HTTP server harness", { concurrency: false }, () => {
     assert.equal(res.headers.get("x-request-id"), "phase2-test-id");
   });
 
-  test("static UI modules are served with Cache-Control: no-cache", async () => {
+  test("static UI modules are served with Cache-Control: no-store", async () => {
     const res = await fetch(`${baseUrl}/js/main.js`);
     assert.equal(res.status, 200);
-    assert.match(res.headers.get("cache-control") || "", /no-cache/i);
+    assert.match(res.headers.get("cache-control") || "", /no-store/i);
     const body = await res.text();
     assert.match(body, /import\s+["']\.\/app\.js["']/);
+  });
+
+  test("branded index does not leave the dev-reload placeholder", async () => {
+    const page = await fetch(`${baseUrl}/`);
+    assert.equal(page.status, 200);
+    const html = await page.text();
+    assert.doesNotMatch(html, /__PQ_DEV_RELOAD__/);
+    assert.match(page.headers.get("cache-control") || "", /no-store/i);
   });
 
   test("branded index loads the bundled client with a version query", async () => {

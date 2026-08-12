@@ -140,9 +140,10 @@ export function recordRequest(
 }
 
 /**
- * Ledger one Set Request (fairness) plus optional per-track stats rows.
- * The setRequest row is what set-request fairness counts; setTrack rows feed
- * Party Stats without consuming song-request rolling quota.
+ * Ledger one Set Request (fairness) plus optional per-track rows.
+ * setRequest counts for set fairness / Top Sets / top requesters.
+ * setTrack rows are kept for audit but do not feed Top Songs / Top Artists
+ * (and do not consume song-request rolling quota).
  */
 export function recordSetRequest(
   {
@@ -255,8 +256,9 @@ export function summarizeRequests(events, sinceTs = 0, limit = 5) {
     (e) =>
       e &&
       (Number(e.ts) || 0) >= sinceTs &&
-      // Ledger-only Set Request rows are not songs.
-      e.kind !== "setRequest"
+      // Sets count on Top Sets only — not as N song requests.
+      e.kind !== "setRequest" &&
+      e.kind !== "setTrack"
   );
 
   const songs = new Map(); // id -> { id, name, artist, count }

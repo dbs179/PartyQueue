@@ -243,7 +243,7 @@ export function createBrandingUi(els, deps) {
   const showToast = deps.showToast;
   const saveSettings = deps.saveSettings;
   const getDefaultDjIconName =
-    deps.getDefaultDjIconName || (() => "dj-icon-flat.png");
+    deps.getDefaultDjIconName || (() => "dj-icon-headphones.png");
   const onDjIconChange = deps.onDjIconChange || (() => {});
   const onShowQueueGenreChange = deps.onShowQueueGenreChange || (() => {});
 

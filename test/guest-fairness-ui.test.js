@@ -53,5 +53,5 @@ test("guestFairnessLabel prefers upcoming wait and retry copy", () => {
     },
     { now }
   );
-  assert.equal(label, "Songs: wait for one of yours · Sets: try again in ~12m");
+  assert.equal(label, "Songs: wait for one of yours · Sets: wait ~12m");
 });

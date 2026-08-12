@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+  <!-- Sonos Roam: small upright pebble / capsule portable -->
+  <path
+    d="M24 10h16c5 0 8 3.5 8 9v26c0 5.5-3 9-8 9H24c-5 0-8-3.5-8-9V19c0-5.5 3-9 8-9z"
+    stroke="#e8ecea"
+    stroke-width="2.5"
+  />
+  <!-- Grille field -->
+  <ellipse cx="32" cy="30" rx="9" ry="12" stroke="#e8ecea" stroke-width="1.75"/>
+  <path d="M27 22v16M32 20.5v19M37 22v16" stroke="#e8ecea" stroke-width="1.1" stroke-linecap="round" opacity="0.5"/>
+  <!-- Bottom control / LED -->
+  <circle cx="32" cy="48" r="2" fill="#e8ecea"/>
+</svg>

@@ -31,7 +31,7 @@ export function guestFairnessLabel(status, opts = {}) {
       parts.push("Songs: wait for one of yours");
     } else if (Number(song.rollingRemaining) <= 0) {
       const mins = retryMinutesLabel(song.retryAt, now);
-      parts.push(`Songs: try again in ~${mins}m`);
+      parts.push(`Songs: wait ~${mins}m`);
     } else {
       const left = Number(song.rollingRemaining);
       parts.push(`Songs: ${left} left`);
@@ -44,7 +44,7 @@ export function guestFairnessLabel(status, opts = {}) {
       parts.push("Sets: set your name");
     } else if (Number(set.rollingRemaining) <= 0) {
       const mins = retryMinutesLabel(set.retryAt, now);
-      parts.push(`Sets: try again in ~${mins}m`);
+      parts.push(`Sets: wait ~${mins}m`);
     } else {
       const left = Number(set.rollingRemaining);
       parts.push(`Sets: ${left} left`);

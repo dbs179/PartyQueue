@@ -1,14 +1,15 @@
 {
   "name": "partyqueue",
-  "version": "10.8.2",
+  "version": "10.8.3",
   "description": "A LAN party app for guests to search Spotify and add songs to your Sonos queue, with Random, Never-Ending, Vibe, and optional DJ Voice.",
   "license": "MIT",
   "type": "module",
   "main": "src/server.js",
   "scripts": {
     "start": "npm run build:client && node --env-file-if-exists=.env src/server.js",
-    "dev": "npm run build:client && node --watch --env-file-if-exists=.env src/server.js",
+    "dev": "node scripts/dev.mjs",
     "build:client": "node scripts/build-client.mjs",
+    "build:client:watch": "node scripts/build-client.mjs --watch",
     "test": "node scripts/run-tests.mjs",
     "lint": "eslint .",
     "test:browser": "playwright test --project=chromium",

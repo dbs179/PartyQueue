@@ -416,6 +416,10 @@ const {
     groupEditEmpty: document.getElementById("group-edit-empty"),
     groupEditToggle: document.getElementById("group-edit-toggle"),
     groupUngroupAllBtn: document.getElementById("group-ungroup-all"),
+    typePicker: document.getElementById("sonos-type-picker"),
+    typePickerRoom: document.getElementById("sonos-type-picker-room"),
+    typePickerOptions: document.getElementById("sonos-type-picker-options"),
+    typePickerCancel: document.getElementById("sonos-type-picker-cancel"),
   },
   {
     hostFetch,
@@ -603,7 +607,7 @@ const {
     hostFetch,
     showToast,
     saveSettings,
-    getDefaultDjIconName: () => settingsDefaults?.djIcon || "dj-icon-flat.png",
+    getDefaultDjIconName: () => settingsDefaults?.djIcon || "dj-icon-headphones.png",
     onDjIconChange: (name) => {
       setActiveDjIconName(name);
       updateDjHubSummaries();

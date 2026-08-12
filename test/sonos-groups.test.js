@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   normalizeGroupsPayload,
   ungroupAllToastMessage,
+  sonosIconImgHtml,
 } from "../public/js/sonos-groups.js";
+import { iconForGroupChip } from "../public/js/sonos-player-types.js";
 
 test("normalizeGroupsPayload uses speakers when provided", () => {
   const speakers = [{ name: "Kitchen", inTargetGroup: true }];
@@ -41,4 +43,24 @@ test("ungroupAllToastMessage pluralizes", () => {
   assert.equal(ungroupAllToastMessage(0), "All speakers were already alone");
   assert.equal(ungroupAllToastMessage(1), "Ungrouped 1 speaker");
   assert.equal(ungroupAllToastMessage(3), "Ungrouped 3 speakers");
+});
+
+test("sonosIconImgHtml escapes url and alt", () => {
+  const html = sonosIconImgHtml("arc", 'Arc "bar"');
+  assert.match(html, /src="\/sonos-icons\/arc\.svg\?v=/);
+  assert.match(html, /alt="Arc &quot;bar&quot;"/);
+});
+
+test("grouped chips prefer shared group icon over member types", () => {
+  const speakers = [
+    { name: "Kitchen", playerType: "arc" },
+    { name: "Den", playerType: "play1" },
+  ];
+  assert.equal(
+    iconForGroupChip(
+      { members: ["Kitchen", "Den"], memberCount: 2 },
+      speakers
+    ),
+    "group"
+  );
 });

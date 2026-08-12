@@ -25,10 +25,16 @@ import { spotifyTrackId } from "./sampler.js";
 import { recordPlayed } from "./play-history.js";
 import {
   getSonosTargetRoom,
+  getSonosPlayerTypes,
   getDjVoiceSettings,
   DJ_VOICE_DEFAULTS,
   DJ_ICON_DEFAULT_URL,
 } from "./settings.js";
+import {
+  iconForSonosGroup,
+  lookupSonosPlayerType,
+  DEFAULT_SONOS_PLAYER_TYPE,
+} from "./sonos-player-types.js";
 import { taglineForClip } from "./dj-taglines.js";
 import { scriptForClip } from "./dj-night-memory.js";
 import {
@@ -84,11 +90,12 @@ async function listGroupsRaw() {
   }
 
   const playing = await Promise.all(groups.map((g) => isGroupPlaying(m, g)));
+  const playerTypes = getSonosPlayerTypes();
 
   const out = groups.map((group, i) => {
     const members = (group.members ?? []).map((mem) => mem.name).filter(Boolean);
     const coordinator = group.coordinator?.name ?? members[0] ?? "";
-    return {
+    const row = {
       groupId: group.groupId,
       label: groupLabel(group),
       coordinator,
@@ -96,7 +103,12 @@ async function listGroupsRaw() {
       memberCount: members.length,
       isPlaying: playing[i],
       isTarget: groupMatchesTarget(group, targetRoom),
+      icon: iconForSonosGroup(
+        { members, memberCount: members.length, coordinator },
+        playerTypes
+      ),
     };
+    return row;
   });
 
   // When nothing is explicitly targeted yet, mark the default (first group).
@@ -116,6 +128,8 @@ async function listGroupsRaw() {
       name,
       inTargetGroup: targetMembers.has(key),
       isTargetCoordinator: key === targetCoordinator,
+      playerType:
+        lookupSonosPlayerType(playerTypes, name) || DEFAULT_SONOS_PLAYER_TYPE,
     };
   }).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -124,6 +138,7 @@ async function listGroupsRaw() {
     targetLabel: target?.label || null,
     groups: out,
     speakers,
+    playerTypes,
   };
 }
 

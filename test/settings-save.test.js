@@ -181,3 +181,18 @@ test("rotation cadence clamps to 1-20 and pools are sanitized", () => {
   assert.deepEqual(next.randomMoodPool, ["party", "chill"]);
   assert.equal(next.randomDecadeEnabled, true);
 });
+
+test("setSonosPlayerType persists known types and rejects junk", () => {
+  assert.deepEqual(settings.getSonosPlayerTypes(), {});
+  const saved = settings.setSonosPlayerType("Kitchen", "Arc");
+  assert.equal(saved.room, "Kitchen");
+  assert.equal(saved.type, "arc");
+  assert.equal(settings.getSonosPlayerTypeForRoom("kitchen"), "arc");
+
+  // Case-insensitive room replace keeps a single key.
+  settings.setSonosPlayerType("KITCHEN", "move");
+  assert.deepEqual(settings.getSonosPlayerTypes(), { Kitchen: "move" });
+
+  assert.throws(() => settings.setSonosPlayerType("Den", "boombox"), /Unknown/);
+  assert.throws(() => settings.setSonosPlayerType("", "arc"), /Missing/);
+});

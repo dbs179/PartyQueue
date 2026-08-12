@@ -33,14 +33,15 @@ test("renderMemory fills list and toggles empty state", () => {
   try {
     renderMemory(
       { listEl, emptyEl, introEl, countEl },
-      [{ title: "One", artist: "A" }]
+      [{ title: "One", artist: "A" }],
+      3000
     );
     assert.equal(listEl.innerHTML, "");
     assert.equal(kids.length, 1);
     assert.equal(kids[0].className, "track");
     assert.equal(emptyEl.hidden, true);
     assert.equal(introEl.hidden, false);
-    assert.equal(countEl.textContent, "(1)");
+    assert.equal(countEl.textContent, "(1 / 3000)");
   } finally {
     delete globalThis.document;
   }

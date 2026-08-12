@@ -91,10 +91,25 @@ const CLIENT_BUNDLE_PATH = path.join(
   "dist",
   "main.js"
 );
+const STYLES_PATH = path.join(__dirname, "..", "public", "styles.css");
 if (!fs.existsSync(CLIENT_BUNDLE_PATH)) {
   console.warn(
     "[server] missing public/js/dist/main.js — run `npm run build:client` (Docker builds this in the image)."
   );
+}
+
+/** Cache-bust token for index CSS/JS: package version + newest asset mtime. */
+function clientAssetVersion() {
+  let newest = 0;
+  for (const filePath of [CLIENT_BUNDLE_PATH, STYLES_PATH]) {
+    try {
+      newest = Math.max(newest, fs.statSync(filePath).mtimeMs || 0);
+    } catch {
+      /* missing asset — still emit package version */
+    }
+  }
+  const stamp = newest ? String(Math.floor(newest)) : "0";
+  return `${VERSION || "0"}.${stamp}`;
 }
 
 const SHUTDOWN_TIMEOUT_MS = 5_000;
@@ -210,13 +225,39 @@ function indexCsp(nonce) {
   ].join("; ");
 }
 
+const DEV_MODE = process.env.PQ_DEV === "1";
+
+function devReloadSnippet(nonce, assetVersion) {
+  if (!DEV_MODE) return "";
+  // Soft reload when esbuild rewrites the bundle / CSS (local `npm run dev` only).
+  return `<script nonce="${nonce}">
+(function () {
+  var current = ${JSON.stringify(assetVersion)};
+  function check() {
+    fetch("/api/dev/asset-version", { cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (data && data.v && data.v !== current) location.reload();
+      })
+      .catch(function () {});
+  }
+  setInterval(check, 1000);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") check();
+  });
+})();
+</script>`;
+}
+
 async function renderIndexHtml(brandJson) {
   const nonce = crypto.randomBytes(16).toString("base64");
+  const assetVersion = clientAssetVersion();
   const html = (await indexTemplate())
     .replaceAll("__PQ_BRAND_JSON__", brandJson)
     .replaceAll("__PQ_NONCE__", nonce)
-    // Bust phone caches on deploy; matches package.json version.
-    .replaceAll("__PQ_VERSION__", VERSION || "0");
+    // Bust caches when the bundle or CSS changes (not only on package bumps).
+    .replaceAll("__PQ_VERSION__", assetVersion)
+    .replaceAll("__PQ_DEV_RELOAD__", devReloadSnippet(nonce, assetVersion));
   return { html, nonce };
 }
 
@@ -250,14 +291,14 @@ async function sendBrandedIndex(_req, res) {
       subtitleAllCaps: subtitleAllCaps !== false,
     }).replace(/</g, "\\u003c");
     const { html, nonce } = await renderIndexHtml(brandJson);
-    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Security-Policy", indexCsp(nonce));
     res.type("html").send(html);
   } catch (err) {
     console.error("[index] brand inject failed:", err.message);
     try {
       const { html, nonce } = await renderIndexHtml("null");
-      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Cache-Control", "no-store");
       res.setHeader("Content-Security-Policy", indexCsp(nonce));
       return res.type("html").send(html);
     } catch {
@@ -269,20 +310,34 @@ const brandedIndex = asyncHandler(sendBrandedIndex);
 brandedIndex.displayName = "sendBrandedIndex";
 app.get(["/", "/index.html"], brandedIndex);
 
-// App code (HTML/CSS/JS) stays "no-cache" so deploys reach guests immediately
-// (cheap 304 revalidations). Images and vendored libs rarely change and cost
-// each phone real transfer time on party Wi-Fi, so they get a day of cache.
+if (DEV_MODE) {
+  app.get("/api/dev/asset-version", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ v: clientAssetVersion() });
+  });
+}
+
+// App HTML/CSS/JS: no-store so soft refresh / phones never keep a stale module
+// graph. Photos + vendor stay long-lived for party Wi-Fi.
 const STATIC_IMAGE_RE = /\.(png|jpe?g|webp|gif|ico|svg)$/i;
+const APP_CODE_RE = /\.(html?|css|js|mjs|map)$/i;
 app.use(
   express.static(path.join(__dirname, "..", "public"), {
     index: false,
+    etag: false,
+    lastModified: false,
     setHeaders: (res, filePath) => {
+      const isSonosIcon = /[\\/]sonos-icons[\\/]/.test(filePath);
+      const isAppCode = APP_CODE_RE.test(filePath);
       const longLived =
-        STATIC_IMAGE_RE.test(filePath) || /[\\/]vendor[\\/]/.test(filePath);
-      res.setHeader(
-        "Cache-Control",
-        longLived ? "public, max-age=86400" : "no-cache"
-      );
+        !isSonosIcon &&
+        !isAppCode &&
+        (STATIC_IMAGE_RE.test(filePath) || /[\\/]vendor[\\/]/.test(filePath));
+      if (longLived) {
+        res.setHeader("Cache-Control", "public, max-age=86400");
+      } else {
+        res.setHeader("Cache-Control", "no-store");
+      }
     },
   })
 );

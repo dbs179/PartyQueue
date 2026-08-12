@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+  <!-- Unassigned: generic upright speaker -->
+  <rect x="18" y="10" width="28" height="44" rx="6" stroke="#e8ecea" stroke-width="2.5"/>
+  <circle cx="32" cy="28" r="9" stroke="#e8ecea" stroke-width="2"/>
+  <circle cx="32" cy="28" r="3" fill="#e8ecea"/>
+  <path d="M24 48h16" stroke="#e8ecea" stroke-width="2" stroke-linecap="round"/>
+</svg>

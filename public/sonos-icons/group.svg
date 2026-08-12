@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+  <!-- Grouped rooms: two speakers linked -->
+  <rect x="4" y="16" width="24" height="32" rx="5" stroke="#e8ecea" stroke-width="2.4"/>
+  <circle cx="16" cy="30" r="6.5" stroke="#e8ecea" stroke-width="1.8"/>
+  <rect x="36" y="16" width="24" height="32" rx="5" stroke="#e8ecea" stroke-width="2.4"/>
+  <circle cx="48" cy="30" r="6.5" stroke="#e8ecea" stroke-width="1.8"/>
+  <path d="M28 32h8" stroke="#e8ecea" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M31 28l4 4-4 4" stroke="#e8ecea" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

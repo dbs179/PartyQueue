@@ -36,14 +36,22 @@ export function memoryTrackRowHtml(track, index) {
  * }} els
  * @param {Array<object>} tracks
  */
-export function renderMemory(els, tracks) {
+export function renderMemory(els, tracks, cap) {
   const list = Array.isArray(tracks) ? tracks : [];
   const { countEl, introEl, listEl, emptyEl } = els || {};
   if (!listEl) return;
   listEl.innerHTML = "";
   if (emptyEl) emptyEl.hidden = list.length > 0;
   if (introEl) introEl.hidden = list.length === 0;
-  if (countEl) countEl.textContent = list.length ? `(${list.length})` : "";
+  if (countEl) {
+    if (!list.length) {
+      countEl.textContent = "";
+    } else if (Number.isFinite(cap) && cap > 0) {
+      countEl.textContent = `(${list.length} / ${Math.floor(cap)})`;
+    } else {
+      countEl.textContent = `(${list.length})`;
+    }
+  }
 
   list.forEach((track, i) => {
     const li = document.createElement("li");
@@ -73,7 +81,7 @@ export async function loadMemory(els, deps) {
     const res = await hostFetch("/api/history");
     if (!res.ok) throw new Error("Could not load memory.");
     const data = await res.json();
-    renderMemory(els, data.tracks || []);
+    renderMemory(els, data.tracks || [], data.cap);
   } catch {
     if (countEl) countEl.textContent = "";
     if (emptyEl) {

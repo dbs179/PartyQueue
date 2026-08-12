@@ -116,6 +116,22 @@ test("topSets ranks setRequest rows by artist/set id", () => {
   assert.equal(reqlog.topSets(events, 3, 5).length, 1);
 });
 
+test("summarizeRequests ignores setRequest and setTrack rows", () => {
+  const events = [
+    { id: "set:a1", name: "Set Request", artist: "Alpha", kind: "setRequest", ts: 1 },
+    { id: "t1", name: "Thunderstruck", artist: "AC/DC", kind: "setTrack", ts: 1 },
+    { id: "t2", name: "Back in Black", artist: "AC/DC", kind: "setTrack", ts: 1 },
+    { id: "s1", name: "Hit", artist: "Gamma", ts: 2 },
+    { id: "s1", name: "Hit", artist: "Gamma", ts: 3 },
+  ];
+  const out = reqlog.summarizeRequests(events, 0, 5);
+  assert.equal(out.total, 2);
+  assert.deepEqual(out.topSongs, [
+    { id: "s1", name: "Hit", artist: "Gamma", count: 2 },
+  ]);
+  assert.deepEqual(out.topArtists, [{ artist: "Gamma", count: 2 }]);
+});
+
 test("topRequesters ranks by count and skips blank names", () => {
   const events = [
     { id: "1", ts: 1, requestedBy: "Alex" },

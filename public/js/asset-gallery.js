@@ -48,11 +48,11 @@ export function buildBannerGalleryItems(data, opts = {}) {
  */
 export function buildDjIconGalleryItems(data, opts = {}) {
   const active = data?.active ?? data?.djIcon ?? null;
-  const defaultUrl = data?.defaultUrl || "/dj-icons/flat.png";
-  const defaultIconName = opts.defaultIconName || "dj-icon-flat.png";
+  const defaultUrl = data?.defaultUrl || "/dj-icons/headphones.png";
+  const defaultIconName = opts.defaultIconName || "dj-icon-headphones.png";
   const tiles = [{ name: null, url: defaultUrl, starter: true }];
   for (const b of data?.icons || []) {
-    // Default tile already represents the seeded flat starter.
+    // Default tile already represents the seeded starter.
     if (b.name === defaultIconName) continue;
     tiles.push({ name: b.name, url: b.url, starter: !!b.starter });
   }

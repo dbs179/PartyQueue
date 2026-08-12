@@ -21,7 +21,7 @@ import {
   resolveGuestIdentity,
   sanitizeDisplayName,
 } from "../display-name.js";
-import { getHistory } from "../play-history.js";
+import { getHistory, HISTORY_CAP } from "../play-history.js";
 import { getTracksByIds } from "../spotify.js";
 import { originOf, moodOf, requestedByOf } from "../queue-origin.js";
 import {
@@ -163,7 +163,7 @@ export function registerGuestRoutes(app) {
         };
       });
 
-      res.json({ count: tracks.length, tracks });
+      res.json({ count: tracks.length, cap: HISTORY_CAP, tracks });
     } catch (err) {
       console.error("[history]", err.message);
       res.status(500).json({ error: err.message || "Could not load memory." });

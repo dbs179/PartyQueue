@@ -16,6 +16,10 @@ import {
   migrateLegacyIcons,
   seedStarterDjIcons,
 } from "./dj-icon.js";
+import {
+  normalizeSonosPlayerType,
+  lookupSonosPlayerType,
+} from "./sonos-player-types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SETTINGS_FILE =
@@ -56,7 +60,7 @@ export function bustSettingsCache() {
 // Randomness knobs for the random / Never-Ending Queue picker. Defaults match
 // the Android app; each is a positive integer the host can tune from the UI.
 //   songMemory         - how many newest history entries Random won't replay
-//                        (history itself keeps up to HISTORY_CAP = 1500)
+//                        (history itself keeps up to HISTORY_CAP = 3000)
 //   artistWindow       - how many recent songs the per-artist budget looks back over
 //   artistCap          - max plays of any one artist within that window
 //   endlessQueueCount  - songs Never-Ending Queue adds on each refill
@@ -436,9 +440,9 @@ export function resetFairnessQuotas(now = Date.now()) {
 export const DJ_VOICE_DEFAULTS = {
   djVoiceEnabled: true,
   djName: "Party DJ",
-  // Seeded starter from public/dj-icons/flat.png → data/dj-icons/.
+  // Seeded starter from public/dj-icons/headphones.png → data/dj-icons/.
   // Fresh installs use this; hosts can upload/rename freely.
-  djIcon: "dj-icon-flat.png",
+  djIcon: "dj-icon-headphones.png",
   djNameIntroPercent: 25,
   djAnnounceMaxWords: 55,
   // DJ announce volume: boost = % of remaining room up to 100, by music tier.
@@ -657,7 +661,7 @@ export function normalizeDjTtsSpeed(
 }
 
 /** Public fallback art when the seeded gallery default is missing. */
-export const DJ_ICON_DEFAULT_URL = "/dj-icons/flat.png";
+export const DJ_ICON_DEFAULT_URL = "/dj-icons/headphones.png";
 const DJ_NAME_MAXLEN = 40;
 const DJ_NAME_INTRO_BOUNDS = { min: 0, max: 100 };
 const DJ_ANNOUNCE_WORDS_BOUNDS = { min: 28, max: 120 };
@@ -1473,6 +1477,52 @@ export function setSonosTargetRoom(room) {
   else delete next.sonosTargetRoom;
   saveSettings(next);
   return getSonosTargetRoom();
+}
+
+/** @returns {Record<string, string>} room name → player type id */
+export function getSonosPlayerTypes() {
+  const raw = loadSettings().sonosPlayerTypes;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [room, typeId] of Object.entries(raw)) {
+    const name = cleanRoomName(room);
+    const type = normalizeSonosPlayerType(typeId);
+    if (name && type) out[name] = type;
+  }
+  return out;
+}
+
+/**
+ * Assign a Sonos player-type icon to a room (persisted).
+ * @param {string} room
+ * @param {string} typeId
+ * @returns {{ room: string, type: string, types: Record<string, string> }}
+ */
+export function setSonosPlayerType(room, typeId) {
+  const name = cleanRoomName(room);
+  if (!name) throw new Error("Missing room name.");
+  const type = normalizeSonosPlayerType(typeId);
+  if (!type) throw new Error("Unknown Sonos player type.");
+
+  const next = { ...loadSettings() };
+  const map = { ...getSonosPlayerTypes() };
+  // Keep the first-seen room spelling; replace value case-insensitively.
+  let key = name;
+  for (const existing of Object.keys(map)) {
+    if (existing.toLowerCase() === name.toLowerCase()) {
+      key = existing;
+      break;
+    }
+  }
+  map[key] = type;
+  next.sonosPlayerTypes = map;
+  saveSettings(next);
+  return { room: key, type, types: getSonosPlayerTypes() };
+}
+
+/** @param {string} room */
+export function getSonosPlayerTypeForRoom(room) {
+  return lookupSonosPlayerType(getSonosPlayerTypes(), room);
 }
 
 // Persist a partial update (only the recognized keys), returning the effective

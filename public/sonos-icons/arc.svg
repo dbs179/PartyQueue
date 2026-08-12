@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+  <!-- Sonos Arc: long low soundbar, soft capsule ends (not a tall rounded tile) -->
+  <path
+    d="M6 34c0-5.5 3.2-8 8-8h36c4.8 0 8 2.5 8 8s-3.2 8-8 8H14c-4.8 0-8-2.5-8-8z"
+    stroke="#e8ecea"
+    stroke-width="2.5"
+  />
+  <!-- Wrap-around grille hint -->
+  <path d="M14 28.5v11M20 27.5v13M26 27v14M32 27v14M38 27v14M44 27.5v13M50 28.5v11" stroke="#e8ecea" stroke-width="1.2" stroke-linecap="round" opacity="0.55"/>
+  <!-- Top capacitive touch strip -->
+  <path d="M22 26.5h20" stroke="#e8ecea" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

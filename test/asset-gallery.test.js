@@ -62,16 +62,16 @@ test("buildBannerGalleryItems filters by desktop/mobile slot pools", () => {
 test("buildDjIconGalleryItems skips seeded default name and marks default active", () => {
   const { active, items } = buildDjIconGalleryItems(
     {
-      active: "dj-icon-flat.png",
-      defaultUrl: "/dj-icons/flat.png",
+      active: "dj-icon-headphones.png",
+      defaultUrl: "/dj-icons/headphones.png",
       icons: [
-        { name: "dj-icon-flat.png", url: "/dj-icons/flat.png", starter: true },
+        { name: "dj-icon-headphones.png", url: "/dj-icons/headphones.png", starter: true },
         { name: "custom.png", url: "/dj-icons/custom.png", starter: false },
       ],
     },
-    { defaultIconName: "dj-icon-flat.png" }
+    { defaultIconName: "dj-icon-headphones.png" }
   );
-  assert.equal(active, "dj-icon-flat.png");
+  assert.equal(active, "dj-icon-headphones.png");
   assert.equal(items.length, 2);
   assert.equal(items[0].name, null);
   assert.equal(items[0].active, true);

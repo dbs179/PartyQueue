@@ -1,7 +1,7 @@
 // Rolling memory of recently heard / queued songs.
 //
 // Two different concerns share this store:
-//   1) HISTORY_CAP (1500) — how many songs we keep on disk for the Memory UI
+//   1) HISTORY_CAP (3000) — how many songs we keep on disk for the Memory UI
 //      and long-term recall. Always remember up to this many.
 //   2) songMemory (Settings) — how many of the *newest* entries Random treats
 //      as "too recent to replay". Passed as recentTrackIds(songMemory).
@@ -34,7 +34,7 @@ const COOLDOWN_FILE =
 
 // How many songs we retain for Memory / history (independent of Random's
 // songMemory anti-repeat window).
-export const HISTORY_CAP = 1500;
+export const HISTORY_CAP = 3000;
 
 /** How a song entered memory — shown as badges in the Memory UI. */
 export const HISTORY_SOURCES = new Set([

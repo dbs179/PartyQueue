@@ -82,7 +82,7 @@ test("trims to the configured maximum, dropping the oldest", () => {
 });
 
 test("defaults to HISTORY_CAP and recentTrackIds(limit) windows Random separately", () => {
-  assert.equal(hist.HISTORY_CAP, 1500);
+  assert.equal(hist.HISTORY_CAP, 3000);
   for (let i = 0; i < 10; i++) {
     hist.recordPlayed([{ id: `id${i}`, artist: `Art${i}` }]);
   }

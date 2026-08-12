@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+  <!-- Sonos Play:1: compact near-cube with soft corners + front driver -->
+  <rect x="14" y="12" width="36" height="40" rx="7" stroke="#e8ecea" stroke-width="2.5"/>
+  <circle cx="32" cy="30" r="11" stroke="#e8ecea" stroke-width="2.25"/>
+  <circle cx="32" cy="30" r="4" stroke="#e8ecea" stroke-width="1.75"/>
+  <circle cx="32" cy="30" r="1.4" fill="#e8ecea"/>
+  <!-- Status LED / badge -->
+  <path d="M28 46.5h8" stroke="#e8ecea" stroke-width="1.75" stroke-linecap="round"/>
+</svg>
