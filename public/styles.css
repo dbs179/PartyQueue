@@ -1717,9 +1717,54 @@ button.guest-name:focus-visible {
   margin: 0 0 10px;
 }
 
-/* Group captions between the Booth-root toggles (Guest access / Queue / DJ / Look). */
+/* Booth root toggles: stacked on phone; 2×2 board on desktop. */
+.booth-toggle-board {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 0;
+}
+
+.booth-toggle-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.booth-toggle-panel {
+  min-width: 0;
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--surface), var(--surface-2));
+  box-sizing: border-box;
+}
+
+.booth-toggle-panel .options-list {
+  margin: 0;
+}
+
+/* Group captions inside Booth toggle panels. */
 .booth-toggle-group {
   margin: 2px 0 0;
+}
+
+@media (min-width: 960px) {
+  #view-booth .booth-toggle-board {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+
+  #view-booth .booth-toggle-stack {
+    gap: 16px;
+  }
+
+  #view-booth .settings-hub-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .booth-tv-preview-hint {

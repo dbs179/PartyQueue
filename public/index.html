@@ -687,169 +687,186 @@
         </div>
         <div class="controls-divider" aria-hidden="true"></div>
         <!-- Every host switch lives here at the Booth root, grouped by area.
-             Fine-tuning (counts, windows, voices) stays in the section pages. -->
-        <div class="controls music-mix-toggles" aria-label="Host switches">
-          <div class="options-list">
-            <p class="section-label settings-banner-label booth-toggle-group">DJ</p>
-            <label class="autofill" title="Announce a short DJ intro before each new set via Home Assistant">
-              <input type="checkbox" id="dj-voice-toggle" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">DJ Voice</span>
-                <span class="autofill-hint">Announces each new set on Sonos (needs Home Assistant)</span>
-              </span>
-            </label>
-            <label class="autofill" title="Announce searched songs and shout out the requestor">
-              <input type="checkbox" id="set-dj-shout-enabled" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Enable shout-outs</span>
-                <span class="autofill-hint">DJ announces the song + requestor on Sonos</span>
-              </span>
-            </label>
-            <label class="autofill" title="DJ speaks a short recap before the last song (needs DJ Voice)">
-              <input type="checkbox" id="set-dj-party-recap-enabled" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Party Summary</span>
-                <span class="autofill-hint">DJ speaks a short recap before the last song (needs DJ Voice)</span>
-              </span>
-            </label>
-            <div class="controls-divider" aria-hidden="true"></div>
-            <p class="section-label settings-banner-label booth-toggle-group">Guest access</p>
-            <label class="autofill" title="Block guests from adding songs until you turn this off">
-              <input type="checkbox" id="requests-paused-toggle" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Pause requests</span>
-                <span class="autofill-hint">Guests can’t add songs (Random &amp; Never-Ending still work)</span>
-              </span>
-            </label>
-            <label class="autofill" title="Hard end-of-night lock — Closing Time turns this on automatically">
-              <input type="checkbox" id="party-over-toggle" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">The Party&rsquo;s Over</span>
-                <span class="autofill-hint">Guests see &ldquo;go home&rdquo; instead of &ldquo;ask the host&rdquo;; auto-clears after 8 hours</span>
-              </span>
-            </label>
-            <label class="autofill" title="Require the host PIN for playback, queue editing, and Sonos group changes">
-              <input type="checkbox" id="host-controls-toggle" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Host-only controls</span>
-                <span class="autofill-hint">Guests can still search, request songs, react, and view the queue</span>
-              </span>
-            </label>
-            <div class="controls-divider" aria-hidden="true"></div>
-            <p class="section-label settings-banner-label booth-toggle-group">Look</p>
-            <label class="autofill" title="Show or hide the build tag next to the title">
-              <input type="checkbox" id="set-show-version" class="autofill-input" checked />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Show version number</span>
-                <span class="autofill-hint">Displays the build tag (e.g. v3.10.0) next to the title</span>
-              </span>
-            </label>
-            <label class="autofill" title="Show each Up Next song's matched genre and From Playlists on the main queue and Party Display">
-              <input type="checkbox" id="set-show-queue-genre" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Show song genre</span>
-                <span class="autofill-hint">Adds matched genre + From Playlists next to Requested / Discover / Random in Up Next (main + Party Display)</span>
-              </span>
-            </label>
-            <div class="controls-divider" aria-hidden="true"></div>
-            <p class="section-label settings-banner-label booth-toggle-group">Party Display TV</p>
-            <p class="setting-hint booth-tv-preview-hint">
-              Preview 16:9 TV scale on this device before Fully Kiosk. Fully needs
-              JavaScript interface enabled and start URL
-              <code>#/display?kiosk=1</code>.
-            </p>
-            <div class="booth-tv-preview-actions">
-              <button id="booth-tv-preview" type="button" class="pill-btn">
-                Preview as TV
-              </button>
-              <button id="booth-tv-kiosk" type="button" class="pill-btn">
-                Open kiosk
-              </button>
+             Fine-tuning (counts, windows, voices) stays in the section pages.
+             Desktop (≥960px): DJ | Guest, then Look+TV | Queue. -->
+        <div class="booth-toggle-board" aria-label="Host switches">
+          <section class="booth-toggle-panel" data-booth-group="dj">
+            <div class="options-list">
+              <p class="section-label settings-banner-label booth-toggle-group">DJ</p>
+              <label class="autofill" title="Announce a short DJ intro before each new set via Home Assistant">
+                <input type="checkbox" id="dj-voice-toggle" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">DJ Voice</span>
+                  <span class="autofill-hint">Announces each new set on Sonos (needs Home Assistant)</span>
+                </span>
+              </label>
+              <label class="autofill" title="Announce searched songs and shout out the requestor">
+                <input type="checkbox" id="set-dj-shout-enabled" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Enable shout-outs</span>
+                  <span class="autofill-hint">DJ announces the song + requestor on Sonos</span>
+                </span>
+              </label>
+              <label class="autofill" title="DJ speaks a short recap before the last song (needs DJ Voice)">
+                <input type="checkbox" id="set-dj-party-recap-enabled" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Party Summary</span>
+                  <span class="autofill-hint">DJ speaks a short recap before the last song (needs DJ Voice)</span>
+                </span>
+              </label>
             </div>
-            <div class="setting-row-text booth-tv-fully-row">
-              <label class="setting-label" for="booth-tv-fully-url">Fully start URL</label>
-              <div class="booth-tv-fully-copy">
-                <input
-                  type="text"
-                  id="booth-tv-fully-url"
-                  class="setting-input"
-                  readonly
-                  spellcheck="false"
-                  autocomplete="off"
-                  placeholder="Loading…"
-                />
-                <button id="booth-tv-fully-copy" type="button" class="pill-btn">
-                  Copy
-                </button>
+          </section>
+          <section class="booth-toggle-panel" data-booth-group="guest">
+            <div class="options-list">
+              <p class="section-label settings-banner-label booth-toggle-group">Guest access</p>
+              <label class="autofill" title="Block guests from adding songs until you turn this off">
+                <input type="checkbox" id="requests-paused-toggle" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Pause requests</span>
+                  <span class="autofill-hint">Guests can’t add songs (Random &amp; Never-Ending still work)</span>
+                </span>
+              </label>
+              <label class="autofill" title="Hard end-of-night lock — Closing Time turns this on automatically">
+                <input type="checkbox" id="party-over-toggle" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">The Party&rsquo;s Over</span>
+                  <span class="autofill-hint">Guests see &ldquo;go home&rdquo; instead of &ldquo;ask the host&rdquo;; auto-clears after 8 hours</span>
+                </span>
+              </label>
+              <label class="autofill" title="Require the host PIN for playback, queue editing, and Sonos group changes">
+                <input type="checkbox" id="host-controls-toggle" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Host-only controls</span>
+                  <span class="autofill-hint">Guests can still search, request songs, react, and view the queue</span>
+                </span>
+              </label>
+            </div>
+          </section>
+          <div class="booth-toggle-stack">
+            <section class="booth-toggle-panel" data-booth-group="look">
+              <div class="options-list">
+                <p class="section-label settings-banner-label booth-toggle-group">Look</p>
+                <label class="autofill" title="Show or hide the build tag next to the title">
+                  <input type="checkbox" id="set-show-version" class="autofill-input" checked />
+                  <span class="autofill-switch" aria-hidden="true"></span>
+                  <span class="autofill-text">
+                    <span class="autofill-label">Show version number</span>
+                    <span class="autofill-hint">Displays the build tag (e.g. v3.10.0) next to the title</span>
+                  </span>
+                </label>
+                <label class="autofill" title="Show each Up Next song's matched genre and From Playlists on the main queue and Party Display">
+                  <input type="checkbox" id="set-show-queue-genre" class="autofill-input" />
+                  <span class="autofill-switch" aria-hidden="true"></span>
+                  <span class="autofill-text">
+                    <span class="autofill-label">Show song genre</span>
+                    <span class="autofill-hint">Adds matched genre + From Playlists next to Requested / Discover / Random in Up Next (main + Party Display)</span>
+                  </span>
+                </label>
               </div>
-            </div>
-            <div class="controls-divider" aria-hidden="true"></div>
-            <p class="section-label settings-banner-label booth-toggle-group">Queue</p>
-            <label class="autofill" title="Prefer a short batch over re-adding songs already in memory">
-              <input type="checkbox" id="set-strict-fill" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Strict fill</span>
-                <span class="autofill-hint">Never re-add remembered songs just to fill a short batch</span>
-              </span>
-            </label>
-            <label class="autofill" title="Every so often, Random/Never-Ending plays a mini-set by one artist from the current Mood or Genre pool">
-              <input type="checkbox" id="set-same-artist-batch" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Same-artist sets</span>
-                <span class="autofill-hint">Automatic showcase batches — tune “every N” under Queue</span>
-              </span>
-            </label>
-            <label class="autofill" title="Every so often, play 5 guest Most Loved songs (10+ likes; ignore genre)">
-              <input type="checkbox" id="set-loved-reaction-set" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Most Loved sets</span>
-                <span class="autofill-hint">Crowd favorites from reactions — tune every N under Queue</span>
-              </span>
-            </label>
-            <label class="autofill" title="Every so often, play 5 guest Most Hated songs (10+ hates; ignore genre)">
-              <input type="checkbox" id="set-hated-reaction-set" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Most Hated sets</span>
-                <span class="autofill-hint">Crowd bombs from reactions — tune every N under Queue</span>
-              </span>
-            </label>
-            <label class="autofill" title="Prevent one guest from filling the searched queue">
-              <input type="checkbox" id="set-request-fairness-enabled" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Enable request fairness</span>
-                <span class="autofill-hint">Per-User request limits — tune them under Queue</span>
-              </span>
-            </label>
-            <label class="autofill" title="Let a signed-in host add songs without fairness limits">
-              <input type="checkbox" id="set-request-fairness-host-bypass" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Host bypass</span>
-                <span class="autofill-hint">Fairness limits skip the host (needs an active PIN session)</span>
-              </span>
-            </label>
-            <label class="autofill" title="Limit how often each guest can add a 5-song Set Request from search">
-              <input type="checkbox" id="set-set-request-fairness-enabled" class="autofill-input" />
-              <span class="autofill-switch" aria-hidden="true"></span>
-              <span class="autofill-text">
-                <span class="autofill-label">Enable Set Request fairness</span>
-                <span class="autofill-hint">Separate from song requests — tune the window under Queue</span>
-              </span>
-            </label>
+            </section>
+            <section class="booth-toggle-panel" data-booth-group="tv">
+              <div class="options-list">
+                <p class="section-label settings-banner-label booth-toggle-group">Party Display TV</p>
+                <p class="setting-hint booth-tv-preview-hint">
+                  Preview 16:9 TV scale on this device before Fully Kiosk. Fully needs
+                  JavaScript interface enabled and start URL
+                  <code>#/display?kiosk=1</code>.
+                </p>
+                <div class="booth-tv-preview-actions">
+                  <button id="booth-tv-preview" type="button" class="pill-btn">
+                    Preview as TV
+                  </button>
+                  <button id="booth-tv-kiosk" type="button" class="pill-btn">
+                    Open kiosk
+                  </button>
+                </div>
+                <div class="setting-row-text booth-tv-fully-row">
+                  <label class="setting-label" for="booth-tv-fully-url">Fully start URL</label>
+                  <div class="booth-tv-fully-copy">
+                    <input
+                      type="text"
+                      id="booth-tv-fully-url"
+                      class="setting-input"
+                      readonly
+                      spellcheck="false"
+                      autocomplete="off"
+                      placeholder="Loading…"
+                    />
+                    <button id="booth-tv-fully-copy" type="button" class="pill-btn">
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
+          <section class="booth-toggle-panel" data-booth-group="queue">
+            <div class="options-list">
+              <p class="section-label settings-banner-label booth-toggle-group">Queue</p>
+              <label class="autofill" title="Prefer a short batch over re-adding songs already in memory">
+                <input type="checkbox" id="set-strict-fill" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Strict fill</span>
+                  <span class="autofill-hint">Never re-add remembered songs just to fill a short batch</span>
+                </span>
+              </label>
+              <label class="autofill" title="Every so often, Random/Never-Ending plays a mini-set by one artist from the current Mood or Genre pool">
+                <input type="checkbox" id="set-same-artist-batch" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Same-artist sets</span>
+                  <span class="autofill-hint">Automatic showcase batches — tune “every N” under Queue</span>
+                </span>
+              </label>
+              <label class="autofill" title="Every so often, play 5 guest Most Loved songs (10+ likes; ignore genre)">
+                <input type="checkbox" id="set-loved-reaction-set" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Most Loved sets</span>
+                  <span class="autofill-hint">Crowd favorites from reactions — tune every N under Queue</span>
+                </span>
+              </label>
+              <label class="autofill" title="Every so often, play 5 guest Most Hated songs (10+ hates; ignore genre)">
+                <input type="checkbox" id="set-hated-reaction-set" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Most Hated sets</span>
+                  <span class="autofill-hint">Crowd bombs from reactions — tune every N under Queue</span>
+                </span>
+              </label>
+              <label class="autofill" title="Prevent one guest from filling the searched queue">
+                <input type="checkbox" id="set-request-fairness-enabled" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Enable request fairness</span>
+                  <span class="autofill-hint">Per-User request limits — tune them under Queue</span>
+                </span>
+              </label>
+              <label class="autofill" title="Let a signed-in host add songs without fairness limits">
+                <input type="checkbox" id="set-request-fairness-host-bypass" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Host bypass</span>
+                  <span class="autofill-hint">Fairness limits skip the host (needs an active PIN session)</span>
+                </span>
+              </label>
+              <label class="autofill" title="Limit how often each guest can add a 5-song Set Request from search">
+                <input type="checkbox" id="set-set-request-fairness-enabled" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Enable Set Request fairness</span>
+                  <span class="autofill-hint">Separate from song requests — tune the window under Queue</span>
+                </span>
+              </label>
+            </div>
+          </section>
         </div>
         <div class="controls-divider" aria-hidden="true"></div>
         <!-- Everything is one click deep: setup sections first, then the
