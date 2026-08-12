@@ -59,6 +59,7 @@
   "POST /api/group-all :: destructiveLimit > requireHostControls > blockVolumeDuringDj > <anonymous>",
   "POST /api/groups/join :: destructiveLimit > requireHostControls > <anonymous>",
   "POST /api/groups/leave :: destructiveLimit > requireHostControls > <anonymous>",
+  "POST /api/groups/player-type :: requireHostControls > <anonymous>",
   "POST /api/groups/select :: requireHostControls > <anonymous>",
   "POST /api/groups/ungroup-all :: destructiveLimit > requireHostControls > <anonymous>",
   "POST /api/guests :: requireHost > <anonymous>",

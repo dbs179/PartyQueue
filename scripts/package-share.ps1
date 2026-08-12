@@ -85,7 +85,7 @@ try {
   }
 
   # Only ship the 22 generic DJ icon starters (match .gitignore whitelist).
-  # Keep Holy Roller / event-specific icons out of share zips.
+  # Keep local named / event-specific icons out of share zips.
   $djIconAllow = @(
     "headphones.png",
     "cartoon.png",

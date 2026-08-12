@@ -35,7 +35,7 @@ public/banners/*
 !public/banners/md-banner-records.jpg
 !public/banners/md-banner-swinefeld.jpg
 
-# DJ icons: only ship the 22 generic starters (not Holy Roller / local art).
+# DJ icons: only ship the 22 generic starters (not local named / event art).
 public/dj-icons/*
 !public/dj-icons/headphones.png
 !public/dj-icons/cartoon.png

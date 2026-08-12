@@ -3,7 +3,7 @@
 // the seeded starter default (dj-icon-headphones.png / public/dj-icons/headphones.png).
 //
 // Bundled starters in public/dj-icons/ are generic (safe to share). Event-
-// specific art such as DJ Holy Roller lives only under data/dj-icons/ locally.
+// specific named art lives only under data/dj-icons/ locally.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -187,7 +187,7 @@ export function seedStarterDjIcons() {
   }
 }
 
-// Icon files: starters, then local named art (e.g. Holy Roller), then uploads.
+// Icon files: starters, then local named art, then uploads.
 export function listDjIcons() {
   try {
     seedStarterDjIcons();
@@ -202,7 +202,7 @@ export function listDjIcons() {
       // Drop corrupt/empty upload stubs so they don't clutter the gallery.
       .filter((e) => e.size > 1024)
       .sort((a, b) => {
-        // Shared starters (pack order) → other named → uploads → Holy Roller locals.
+        // Shared starters (pack order) → other named → uploads → trailer locals.
         const rank = (name) => {
           if (LOCAL_TRAILER_SET.has(name)) return 3;
           if (isStarterDjIconName(name)) return 0;
@@ -236,7 +236,7 @@ export function listDjIcons() {
   }
 }
 
-// Only prune random uploads past MAX_DJ_ICONS. Named locals (Holy Roller,
+// Only prune random uploads past MAX_DJ_ICONS. Named locals (trailer icons,
 // flat, etc.) and bundled starters are never auto-deleted.
 function prune(keepName) {
   const all = listDjIcons().map((b) => b.name);
