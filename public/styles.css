@@ -374,7 +374,8 @@ body {
   line-height: 1.1;
   letter-spacing: -0.02em;
   text-transform: none;
-  white-space: nowrap;
+  white-space: normal;
+  text-wrap: balance;
 }
 
 /* Small muted version pill to the right of the centered title on phones. */
@@ -546,14 +547,15 @@ button.subpage-head-link:active {
     align-items: flex-start;
     justify-content: flex-start;
     gap: 6px;
-    max-width: min(70%, 22ch);
+    /* Wide enough for "PARTY QUEUE" at display size; 22ch was wrapping it. */
+    max-width: min(70%, 36ch);
     width: auto;
   }
 
   .header h1 {
     grid-column: auto;
     width: max-content;
-    max-width: 100%;
+    max-width: none;
     margin: 0;
     text-align: left;
     color: var(--accent);
