@@ -123,14 +123,16 @@ export function ensurePlaylistLead(items) {
  * Automatic same-artist showcase gate (Booth: Same-artist sets + every N).
  * Guest Set Request (main search) is separate — this only gates Random auto sets.
  *
- * @param {{ sameArtistBatchEnabled?: boolean, sameArtistBatchEveryN?: number }} settings
+ * @param {{ sameArtistBatchEnabled?: boolean, specialSetEveryN?: number, sameArtistBatchEveryN?: number }} settings
  * @param {number} [setsSinceLastSameArtistBatch]
  */
 export function allowSameArtistBatch(settings = {}, setsSinceLastSameArtistBatch = 0) {
   if (!settings?.sameArtistBatchEnabled) return false;
   const every = Math.max(
     1,
-    Math.floor(Number(settings.sameArtistBatchEveryN) || 1)
+    Math.floor(
+      Number(settings.specialSetEveryN ?? settings.sameArtistBatchEveryN) || 1
+    )
   );
   return Math.max(0, Math.floor(Number(setsSinceLastSameArtistBatch) || 0)) >= every;
 }

@@ -16,15 +16,19 @@ import {
 
 const settingsAllOn = {
   endlessQueueCount: 5,
+  requestedReactionSetEnabled: true,
   lovedReactionSetEnabled: true,
-  lovedReactionSetEveryN: 6,
   hatedReactionSetEnabled: true,
-  hatedReactionSetEveryN: 6,
   sameArtistBatchEnabled: true,
-  sameArtistBatchEveryN: 8,
+  specialSetEveryN: 5,
 };
 
-const allReady = { loved: true, hated: true, sameArtist: true };
+const allReady = {
+  requested: true,
+  loved: true,
+  hated: true,
+  sameArtist: true,
+};
 
 beforeEach(() => {
   resetReactionSetCountersForTests();
@@ -37,12 +41,23 @@ test("hides Loved/Hated when the pool is too small", () => {
     settings: settingsAllOn,
     setSize: 5,
     playlists: [],
-    poolReady: { loved: false, hated: false, sameArtist: false },
+    poolReady: { requested: false, loved: false, hated: false, sameArtist: false },
   });
   const loved = rows.find((r) => r.kind === "loved");
   assert.equal(loved.enabled, true);
   assert.equal(loved.poolReady, false);
   assert.equal(loved.eligible, false);
+});
+
+test("hides Most Requested when its toggle is off", () => {
+  const rows = listSpecialSetCandidates({
+    settings: { ...settingsAllOn, requestedReactionSetEnabled: false },
+    setSize: 5,
+    playlists: [],
+    poolReady: allReady,
+  });
+  assert.equal(rows.find((r) => r.kind === "requested").eligible, false);
+  assert.equal(rows.find((r) => r.kind === "loved").eligible, true);
 });
 
 test("hides a flavor when its toggle is off", () => {
@@ -54,6 +69,7 @@ test("hides a flavor when its toggle is off", () => {
   });
   assert.equal(rows.find((r) => r.kind === "loved").eligible, false);
   assert.equal(rows.find((r) => r.kind === "hated").eligible, true);
+  assert.equal(rows.find((r) => r.kind === "requested").eligible, true);
 });
 
 test("picks the soonest eligible flavor", () => {
@@ -62,15 +78,15 @@ test("picks the soonest eligible flavor", () => {
     settings: settingsAllOn,
     setSize: 5,
     playlists: [],
-    poolReady: { loved: true, hated: true, sameArtist: false },
+    poolReady: { requested: false, loved: true, hated: true, sameArtist: false },
     random: () => 0,
   });
   assert.ok(next.kind === "loved" || next.kind === "hated");
   assert.equal(next.setsUntil, 0);
 });
 
-test("when all three are due and fillable, a random pick sticks", () => {
-  for (let i = 0; i < 8; i++) {
+test("when all four are due and fillable, a random pick sticks", () => {
+  for (let i = 0; i < 5; i++) {
     noteReactionSetBuilt({ kind: null });
     noteRandomSetBuilt({ wasShowcase: false });
   }
@@ -97,7 +113,7 @@ test("same-artist is ineligible without a ready pool", () => {
     settings: settingsAllOn,
     setSize: 5,
     playlists: [],
-    poolReady: { loved: false, hated: false, sameArtist: false },
+    poolReady: { requested: false, loved: false, hated: false, sameArtist: false },
   });
   assert.equal(rows.find((r) => r.kind === "sameArtist").eligible, false);
 });

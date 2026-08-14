@@ -4,6 +4,7 @@
 
 const TITLES = {
   sameArtist: "Same Artist Set",
+  requested: "Most Requested Set",
   loved: "Most Loved Set",
   hated: "Most Hated Set",
 };

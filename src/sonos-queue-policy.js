@@ -342,8 +342,12 @@ export function queueTrackGenreFields(
   ) {
     return emptyQueueGenreFields();
   }
-  // Most Loved / Most Hated sets are reaction-flavored, not genre-laned.
-  if (meta?.reactionSet === "loved" || meta?.reactionSet === "hated") {
+  // Crowd special sets are reaction/request-flavored, not genre-laned.
+  if (
+    meta?.reactionSet === "loved" ||
+    meta?.reactionSet === "hated" ||
+    meta?.reactionSet === "requested"
+  ) {
     return emptyQueueGenreFields();
   }
 

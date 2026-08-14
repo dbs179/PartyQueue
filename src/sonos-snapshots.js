@@ -414,7 +414,9 @@ async function getNowPlayingRaw() {
             : null,
         reactionSet:
           source === "filler" &&
-          (ometa?.reactionSet === "loved" || ometa?.reactionSet === "hated")
+          (ometa?.reactionSet === "loved" ||
+            ometa?.reactionSet === "hated" ||
+            ometa?.reactionSet === "requested")
             ? ometa.reactionSet
             : null,
         requestedBy: badge,
@@ -516,7 +518,9 @@ async function getQueueListRaw() {
       fromPlaylist: !djClip && queueTrackFromPlaylist(id, meta),
       reactionSet:
         source === "filler" &&
-        (meta?.reactionSet === "loved" || meta?.reactionSet === "hated")
+        (meta?.reactionSet === "loved" ||
+          meta?.reactionSet === "hated" ||
+          meta?.reactionSet === "requested")
           ? meta.reactionSet
           : null,
       genreLane: genre.genreLane,

@@ -1,6 +1,6 @@
 # PartyQueue
 
-**Version 10.8.9**
+**Version 10.9.0**
 
 PartyQueue lets everyone at your party help choose the music. Guests open a
 web page on their phones, search Spotify, and add songs to your Sonos queue.
@@ -191,15 +191,15 @@ example `http://YOUR_UNRAID_IP:8080`. PartyQueue uses it for:
    left.
 3. **Run the room** — Use play / pause / skip / volume on the main page. Random
    adds a fresh batch; Never-Ending tops up while music is playing from the
-   queue. Same-artist showcase batches and Most Loved / Most Hated reaction
-   sets are optional in the Booth.
+   queue. Same-artist showcase batches and Most Requested / Most Loved /
+   Most Hated sets are optional in the Booth.
 4. **Extras** — DJ Voice can announce requests and refills. Guests can dedicate
    songs from Up Next. Party Display (`#/display`) is meant for a TV or Fully
    Kiosk Browser. Stats stay on the main toolbar.
 5. **Last call** — When Closing Time (or your configured last song) is added,
    Never-Ending stops so the night can wind down. Clear the queue or use Party
    Over when you are finished. Use **New party** in the Booth header to clear
-   shout memory, fairness, and Loved/Hated set memory before the next gathering.
+   shout memory, fairness, and crowd-set memory before the next gathering.
 
 Useful music tools:
 
@@ -210,8 +210,9 @@ Useful music tools:
 - **Edit queue** lets you remove or rearrange songs. It is off by default.
 - **Request fairness** can limit how many songs or sets one person adds. It is
   off by default; guests see remaining quota when it is on.
-- **Most Loved / Most Hated sets** (optional) insert short reaction-driven
-  mini-sets every N fills when enough guest likes/hates have piled up.
+- **Most Requested / Most Loved / Most Hated sets** (optional) insert short
+  crowd mini-sets on a shared once-per-X cadence when 5 songs have 5+
+  requests or reactions. Each flavor has its own Booth toggle.
 - **Last call** stops Never-Ending when the configured final song is added.
   The default final song is “Closing Time” by Semisonic.
 

@@ -1,5 +1,6 @@
 /**
- * Next automatic special set (Same Artist / Most Loved / Most Hated).
+ * Next automatic special set (Same Artist / Most Requested / Most Loved /
+ * Most Hated).
  * Only flavors that are enabled and can fill a set are candidates. When more
  * than one is equally soon, one is reserved at random and shown until it
  * plays or it drops out of the tie.
@@ -18,6 +19,7 @@ import {
 import { peekCachedPlaylists } from "./spotify.js";
 
 const KIND_LABELS = {
+  requested: "Most Requested Set",
   loved: "Most Loved Set",
   hated: "Most Hated Set",
   sameArtist: "Same Artist Set",
@@ -63,15 +65,27 @@ export function listSpecialSetCandidates(opts = {}) {
   const readyOverride =
     opts.poolReady && typeof opts.poolReady === "object" ? opts.poolReady : null;
 
+  const requestedUntil = reactionSetSetsUntil("requested", cfg);
   const lovedUntil = reactionSetSetsUntil("loved", cfg);
   const hatedUntil = reactionSetSetsUntil("hated", cfg);
+  const sameEvery = cfg.specialSetEveryN ?? cfg.sameArtistBatchEveryN;
   const sameUntilLive = sameArtistSetsUntil({
     enabled: !!cfg.sameArtistBatchEnabled,
-    everyN: cfg.sameArtistBatchEveryN,
+    everyN: sameEvery,
     setsSince: getSetsSinceLastSameArtistBatch(),
   });
 
   return [
+    {
+      kind: "requested",
+      label: KIND_LABELS.requested,
+      enabled: !!cfg.requestedReactionSetEnabled,
+      poolReady:
+        readyOverride && "requested" in readyOverride
+          ? !!readyOverride.requested
+          : reactionSetPoolReady("requested", setSize),
+      setsUntil: requestedUntil,
+    },
     {
       kind: "loved",
       label: KIND_LABELS.loved,

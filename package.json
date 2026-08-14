@@ -1,6 +1,6 @@
 {
   "name": "partyqueue",
-  "version": "10.8.9",
+  "version": "10.9.0",
   "description": "A LAN party app for guests to search Spotify and add songs to your Sonos queue, with Random, Never-Ending, Vibe, and optional DJ Voice.",
   "license": "MIT",
   "type": "module",

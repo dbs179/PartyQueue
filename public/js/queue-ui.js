@@ -74,6 +74,9 @@ export function queueOriginBadgeHtml(track, { eraLabel = "" } = {}) {
   if (track.reactionSet === "hated") {
     return `<span class="reaction-set-badge reaction-set-hated" title="Most Hated set from guest reactions">\u{1F922} Most Hated</span>`;
   }
+  if (track.reactionSet === "requested") {
+    return `<span class="reaction-set-badge reaction-set-requested" title="Most Requested set from guest requests">\u{1F3B5} Most Requested</span>`;
+  }
   if (track.searched) {
     if (dedication) {
       const label = dedicationDisplayLabel(dedication, requester);

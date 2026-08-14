@@ -1919,9 +1919,12 @@ export async function writeSetScript(summary = {}) {
     summary.event === "session_refill" ? "session_refill" : "session_start";
   const reactionSetKind =
     summary.reactionSet?.kind === "loved" ||
-    summary.reactionSet?.kind === "hated"
+    summary.reactionSet?.kind === "hated" ||
+    summary.reactionSet?.kind === "requested"
       ? summary.reactionSet.kind
-      : summary.reactionSet === "loved" || summary.reactionSet === "hated"
+      : summary.reactionSet === "loved" ||
+          summary.reactionSet === "hated" ||
+          summary.reactionSet === "requested"
         ? summary.reactionSet
         : null;
   const sameArtist = reactionSetKind
@@ -1944,14 +1947,23 @@ export async function writeSetScript(summary = {}) {
   const highlights = summary.highlights ?? [];
   const moodContext = reactionSetKind
     ? {
-        mood: reactionSetKind === "loved" ? "party" : "wild",
+        mood:
+          reactionSetKind === "hated"
+            ? "wild"
+            : "party",
         moodLabel:
-          reactionSetKind === "loved" ? "Most Loved" : "Most Hated",
+          reactionSetKind === "loved"
+            ? "Most Loved"
+            : reactionSetKind === "hated"
+              ? "Most Hated"
+              : "Most Requested",
         genreLabels: [],
         energySignature:
           reactionSetKind === "loved"
             ? "crowd-favorite energy"
-            : "glorious trainwreck energy",
+            : reactionSetKind === "hated"
+              ? "glorious trainwreck energy"
+              : "most-requested energy",
         eraLabel: null,
       }
     : sameArtist
@@ -2006,6 +2018,23 @@ export async function writeSetScript(summary = {}) {
         characterKnobs.alwaysInstructions,
         "This is a MOST HATED set — songs the room piled on with thumbs-down and vomit.",
         'Open by calling it the party\'s "most hated" / infamous bombs set — playful, not mean. Do not name genres or lanes.',
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      neverInstructions: [
+        characterKnobs.neverInstructions,
+        "Do not frame this as a genre or mood lane set.",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    };
+  } else if (reactionSetKind === "requested") {
+    characterKnobs = {
+      ...characterKnobs,
+      alwaysInstructions: [
+        characterKnobs.alwaysInstructions,
+        "This is a MOST REQUESTED set — songs guests searched and added the most.",
+        'Open by calling it the party\'s "most requested" set. Do not name genres or lanes.',
       ]
         .filter(Boolean)
         .join("\n\n"),
@@ -2146,6 +2175,8 @@ export async function writeSetScript(summary = {}) {
       intro = "Up next: the room's most loved songs.";
     } else if (reactionSetKind === "hated") {
       intro = "Up next: the room's most hated songs.";
+    } else if (reactionSetKind === "requested") {
+      intro = "Up next: the room's most requested songs.";
     } else if (sameArtistLines?.intro) {
       intro = sameArtistLines.intro;
     } else if (rotationLines?.intro) {
@@ -2165,6 +2196,8 @@ export async function writeSetScript(summary = {}) {
         ? "most-loved"
         : reactionSetKind === "hated"
           ? "most-hated"
+          : reactionSetKind === "requested"
+            ? "most-requested"
           : sameArtistLines
             ? sameArtistLines.descriptor
             : rotationLines

@@ -973,23 +973,31 @@
                 <span class="autofill-switch" aria-hidden="true"></span>
                 <span class="autofill-text">
                   <span class="autofill-label">Same-artist sets</span>
-                  <span class="autofill-hint">Automatic showcase batches — tune “every N” under Queue</span>
+                  <span class="autofill-hint">Automatic showcase batches — tune “once per X sets” under Queue</span>
                 </span>
               </label>
-              <label class="autofill" title="Every so often, play 5 guest Most Loved songs (10+ likes; ignore genre)">
+              <label class="autofill" title="Every so often, play 5 guest Most Requested songs (5+ requests; ignore genre)">
+                <input type="checkbox" id="set-requested-reaction-set" class="autofill-input" />
+                <span class="autofill-switch" aria-hidden="true"></span>
+                <span class="autofill-text">
+                  <span class="autofill-label">Most Requested sets</span>
+                  <span class="autofill-hint">Crowd repeats from guest requests — tune once per X sets under Queue</span>
+                </span>
+              </label>
+              <label class="autofill" title="Every so often, play 5 guest Most Loved songs (5+ likes; ignore genre)">
                 <input type="checkbox" id="set-loved-reaction-set" class="autofill-input" />
                 <span class="autofill-switch" aria-hidden="true"></span>
                 <span class="autofill-text">
                   <span class="autofill-label">Most Loved sets</span>
-                  <span class="autofill-hint">Crowd favorites from reactions — tune every N under Queue</span>
+                  <span class="autofill-hint">Crowd favorites from reactions — tune once per X sets under Queue</span>
                 </span>
               </label>
-              <label class="autofill" title="Every so often, play 5 guest Most Hated songs (10+ hates; ignore genre)">
+              <label class="autofill" title="Every so often, play 5 guest Most Hated songs (5+ hates; ignore genre)">
                 <input type="checkbox" id="set-hated-reaction-set" class="autofill-input" />
                 <span class="autofill-switch" aria-hidden="true"></span>
                 <span class="autofill-text">
                   <span class="autofill-label">Most Hated sets</span>
-                  <span class="autofill-hint">Crowd bombs from reactions — tune every N under Queue</span>
+                  <span class="autofill-hint">Crowd bombs from reactions — tune once per X sets under Queue</span>
                 </span>
               </label>
               <label class="autofill" title="Prevent one guest from filling the searched queue">
@@ -1205,19 +1213,9 @@
               <span class="setting-hint">max plays per artist within that window</span>
             </div>
             <div class="setting-row">
-              <label class="setting-label" for="set-same-artist-every">Same-artist every</label>
-              <input type="number" id="set-same-artist-every" class="setting-input" min="1" max="100" step="1" inputmode="numeric" />
-              <span class="setting-hint">Random/Never-Ending sets between automatic same-artist showcases (default 8). Toggle lives on Booth.</span>
-            </div>
-            <div class="setting-row">
-              <label class="setting-label" for="set-loved-reaction-every">Most Loved every</label>
-              <input type="number" id="set-loved-reaction-every" class="setting-input" min="1" max="100" step="1" inputmode="numeric" />
-              <span class="setting-hint">Sets between Most Loved batches (default 6). Needs 5 songs with 10+ likes not yet played this party. Toggle on Booth.</span>
-            </div>
-            <div class="setting-row">
-              <label class="setting-label" for="set-hated-reaction-every">Most Hated every</label>
-              <input type="number" id="set-hated-reaction-every" class="setting-input" min="1" max="100" step="1" inputmode="numeric" />
-              <span class="setting-hint">Sets between Most Hated batches (default 6). Needs 5 songs with 10+ hates not yet played this party. Toggle on Booth.</span>
+              <label class="setting-label" for="set-special-set-every">Special sets every</label>
+              <input type="number" id="set-special-set-every" class="setting-input" min="1" max="100" step="1" inputmode="numeric" />
+              <span class="setting-hint">Once per this many Random/Never-Ending sets for Most Requested, Most Loved, Most Hated, and Same-artist (default 5). Each has its own Booth toggle. Each crowd set needs 5 songs with 5+ requests or reactions, not yet played this party.</span>
             </div>
             <div class="setting-row">
               <label class="setting-label" for="set-similar-count">Discover</label>

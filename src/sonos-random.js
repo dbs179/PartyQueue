@@ -237,8 +237,8 @@ async function buildRandomPlan(
   cfg.bucketsFor = bucketsForArtistSync;
   cfg.lastArtist = queueTailArtist;
 
-  // Most Loved / Most Hated / Same Artist: one reserved winner when several
-  // are equally due and fillable. Loved no longer always beats the others.
+  // Most Requested / Most Loved / Most Hated / Same Artist: one reserved
+  // winner when several are equally due and fillable.
   const reactionSetSize = Math.max(1, Math.floor(Number(count) || 5));
   const nextSpecial = pickNextSpecialSet({
     setSize: reactionSetSize,
@@ -252,7 +252,9 @@ async function buildRandomPlan(
   let reactionSetKind = null;
   if (
     nextSpecial?.setsUntil === 0 &&
-    (nextSpecial.kind === "loved" || nextSpecial.kind === "hated")
+    (nextSpecial.kind === "loved" ||
+      nextSpecial.kind === "hated" ||
+      nextSpecial.kind === "requested")
   ) {
     const picked = pickReactionSetTracks(nextSpecial.kind, reactionSetSize, {
       excludeIds: exclude,
@@ -814,7 +816,9 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
   const showcaseArtistKey = plan.showcaseArtistKey || null;
   const showcaseArtistName = plan.showcaseArtistName || null;
   const reactionSetKind =
-    plan.reactionSetKind === "loved" || plan.reactionSetKind === "hated"
+    plan.reactionSetKind === "loved" ||
+    plan.reactionSetKind === "hated" ||
+    plan.reactionSetKind === "requested"
       ? plan.reactionSetKind
       : null;
   const firstAppendPosition = Number(plan.firstAppendPosition) || 1;

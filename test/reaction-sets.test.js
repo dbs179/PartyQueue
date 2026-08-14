@@ -8,6 +8,7 @@ const tmpRoot = fs.mkdtempSync(
   path.join(os.tmpdir(), `pq-reaction-sets-${process.pid}-`)
 );
 process.env.PARTYQUEUE_REACTIONS_FILE = path.join(tmpRoot, "reactions.json");
+process.env.PARTYQUEUE_REQUESTS_FILE = path.join(tmpRoot, "requests.json");
 process.env.PARTYQUEUE_REACTION_SET_MEMORY_FILE = path.join(
   tmpRoot,
   "reaction-set-memory.json"
@@ -17,9 +18,12 @@ const {
   setReaction,
   clearReactions,
 } = await import("../src/reactions.js");
+const { recordRequest, clearRequests } = await import("../src/request-log.js");
 const {
   REACTION_SET_THRESHOLD,
+  REQUEST_SET_THRESHOLD,
   eligibleReactionSetTracks,
+  reactionSetPoolReady,
   pickReactionSetTracks,
   noteReactionSetPlayed,
   clearReactionSetMemory,
@@ -27,6 +31,7 @@ const {
   noteReactionSetBuilt,
   getSetsSinceLovedReactionSet,
   getSetsSinceHatedReactionSet,
+  getSetsSinceRequestedReactionSet,
   resetReactionSetCountersForTests,
   resetReactionSetMemoryForTests,
 } = await import("../src/reaction-sets.js");
@@ -49,26 +54,28 @@ function seedHated(id, count, name = "Bomb", artist = "Band") {
 
 beforeEach(() => {
   clearReactions();
+  clearRequests();
   resetReactionSetMemoryForTests();
   resetReactionSetCountersForTests();
 });
 
 afterEach(() => {
   clearReactions();
+  clearRequests();
   resetReactionSetMemoryForTests();
   resetReactionSetCountersForTests();
 });
 
-test("eligible requires threshold 10; night-played excluded", () => {
-  seedLiked("low", 9, "Low", "A");
-  seedLiked("ok", 10, "Ok", "B");
+test("eligible requires threshold 5; night-played excluded", () => {
+  seedLiked("low", 4, "Low", "A");
+  seedLiked("ok", 5, "Ok", "B");
   seedLiked("hot", 50, "Hot", "C");
   const elig = eligibleReactionSetTracks("loved");
   assert.deepEqual(
     elig.map((t) => t.id).sort(),
     ["hot", "ok"]
   );
-  assert.equal(REACTION_SET_THRESHOLD, 10);
+  assert.equal(REACTION_SET_THRESHOLD, 5);
 
   noteReactionSetPlayed("loved", ["ok"]);
   assert.deepEqual(
@@ -108,24 +115,26 @@ test("pick is uniform among eligible — not sorted by count", () => {
   );
 });
 
-test("loved and hated every-N counters are independent", () => {
+test("loved, hated, and requested share one every-N cadence", () => {
   const settings = {
     lovedReactionSetEnabled: true,
-    lovedReactionSetEveryN: 6,
     hatedReactionSetEnabled: true,
-    hatedReactionSetEveryN: 6,
+    requestedReactionSetEnabled: true,
+    specialSetEveryN: 5,
   };
-  assert.equal(reactionSetDue("loved", settings, 5), false);
-  assert.equal(reactionSetDue("loved", settings, 6), true);
-  assert.equal(reactionSetDue("hated", settings, 5), false);
+  assert.equal(reactionSetDue("loved", settings, 4), false);
+  assert.equal(reactionSetDue("loved", settings, 5), true);
+  assert.equal(reactionSetDue("hated", settings, 4), false);
+  assert.equal(reactionSetDue("requested", settings, 5), true);
 
-  // Playing loved resets loved and increments hated.
-  for (let i = 0; i < 6; i++) noteReactionSetBuilt({ kind: null });
-  assert.equal(getSetsSinceLovedReactionSet(), 6);
-  assert.equal(getSetsSinceHatedReactionSet(), 6);
+  for (let i = 0; i < 5; i++) noteReactionSetBuilt({ kind: null });
+  assert.equal(getSetsSinceLovedReactionSet(), 5);
+  assert.equal(getSetsSinceHatedReactionSet(), 5);
+  assert.equal(getSetsSinceRequestedReactionSet(), 5);
   noteReactionSetBuilt({ kind: "loved" });
   assert.equal(getSetsSinceLovedReactionSet(), 0);
-  assert.equal(getSetsSinceHatedReactionSet(), 7);
+  assert.equal(getSetsSinceHatedReactionSet(), 6);
+  assert.equal(getSetsSinceRequestedReactionSet(), 6);
   assert.equal(
     reactionSetDue("hated", settings, getSetsSinceHatedReactionSet()),
     true
@@ -136,10 +145,47 @@ test("loved and hated every-N counters are independent", () => {
   );
 });
 
+function seedRequested(id, count, name = "Req", artist = "Asker") {
+  for (let i = 0; i < count; i++) {
+    recordRequest({ id, name, artist, requestedBy: `Guest ${i}` }, i + 1);
+  }
+}
+
+test("requested needs 5 songs at 5+ requests; night-played excluded", () => {
+  seedRequested("low", 4, "Low", "A");
+  seedRequested("ok", 5, "Ok", "B");
+  seedRequested("hot", 12, "Hot", "C");
+  const elig = eligibleReactionSetTracks("requested");
+  assert.deepEqual(
+    elig.map((t) => t.id).sort(),
+    ["hot", "ok"]
+  );
+  assert.equal(REQUEST_SET_THRESHOLD, 5);
+
+  noteReactionSetPlayed("requested", ["ok"]);
+  assert.deepEqual(
+    eligibleReactionSetTracks("requested").map((t) => t.id),
+    ["hot"]
+  );
+  clearReactionSetMemory();
+  assert.equal(eligibleReactionSetTracks("requested").length, 2);
+});
+
+test("requested set arms only when 5 songs have 5+ requests", () => {
+  seedRequested("a", 5, "A", "A");
+  seedRequested("b", 5, "B", "B");
+  seedRequested("c", 5, "C", "C");
+  seedRequested("d", 5, "D", "D");
+  assert.equal(reactionSetPoolReady("requested", 5), false);
+  seedRequested("e", 5, "E", "E");
+  assert.equal(eligibleReactionSetTracks("requested").length, 5);
+  assert.equal(reactionSetPoolReady("requested", 5), true);
+});
+
 test("hated pool uses down/vomit kinds", () => {
-  seedHated("bomb1", 10, "Bomb1", "X");
-  seedHated("bomb2", 10, "Bomb2", "Y");
-  seedLiked("love1", 10, "Love1", "Z");
+  seedHated("bomb1", 5, "Bomb1", "X");
+  seedHated("bomb2", 5, "Bomb2", "Y");
+  seedLiked("love1", 5, "Love1", "Z");
   assert.equal(eligibleReactionSetTracks("hated").length, 2);
   assert.ok(
     !eligibleReactionSetTracks("hated").some((t) => t.id === "love1")

@@ -25,7 +25,7 @@ test("sameArtistCountdownLabel uses the PC bar copy", () => {
   );
 });
 
-test("specialSetCountdownLabel names Loved and Hated", () => {
+test("specialSetCountdownLabel names Loved, Hated, and Requested", () => {
   assert.equal(
     specialSetCountdownLabel({ kind: "loved", setsUntil: 3 }),
     "Most Loved Set In : 3 sets"
@@ -33,6 +33,10 @@ test("specialSetCountdownLabel names Loved and Hated", () => {
   assert.equal(
     specialSetCountdownLabel({ kind: "hated", setsUntil: 1 }),
     "Most Hated Set In : 1 set"
+  );
+  assert.equal(
+    specialSetCountdownLabel({ kind: "requested", setsUntil: 5 }),
+    "Most Requested Set In : 5 sets"
   );
   assert.equal(specialSetCountdownLabel({ kind: "loved" }), "");
 });

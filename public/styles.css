@@ -1386,6 +1386,11 @@ button.guest-name:focus-visible {
   background: linear-gradient(135deg, #64748b, #475569);
 }
 
+.np-origin.origin-requested {
+  color: #fff;
+  background: linear-gradient(135deg, #d97706, #f59e0b);
+}
+
 /* Reaction buttons share the full Now Playing width evenly (like the
    Display page progress bar) instead of packing left: one row of 8 when
    there's room, two even rows of 4 on phones. */
@@ -2601,7 +2606,7 @@ body:has(#view-settings-user-edit:not([hidden])) > .container {
   background: linear-gradient(135deg, #7c5cff, #b14cff);
 }
 
-/* Most Loved / Most Hated reaction-set badges. */
+/* Most Loved / Most Hated / Most Requested special-set badges. */
 .reaction-set-badge {
   display: inline-block;
   margin-left: 8px;
@@ -2621,6 +2626,10 @@ body:has(#view-settings-user-edit:not([hidden])) > .container {
 
 .reaction-set-hated {
   background: linear-gradient(135deg, #64748b, #475569);
+}
+
+.reaction-set-requested {
+  background: linear-gradient(135deg, #d97706, #f59e0b);
 }
 
 /* Era hit added by the Decades mood (outside the host's playlists). */
@@ -5130,6 +5139,18 @@ body.party-display-active.party-display-preview .party-display-view {
 }
 
 .party-display-origin.origin-mood {
+  color: #fbbf24;
+}
+
+.party-display-origin.origin-loved {
+  color: #fb7185;
+}
+
+.party-display-origin.origin-hated {
+  color: #94a3b8;
+}
+
+.party-display-origin.origin-requested {
   color: #fbbf24;
 }
 

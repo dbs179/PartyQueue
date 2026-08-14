@@ -3,7 +3,7 @@
  *
  * Automatic every-N sets already pick one artist. These banks make the DJ
  * say that out loud: scripted intro + LLM blurb, same three-part layout as
- * Most Loved / Most Hated (intro + middle + outro).
+ * Most Requested / Most Loved / Most Hated (intro + middle + outro).
  */
 
 /** @param {string} artist */

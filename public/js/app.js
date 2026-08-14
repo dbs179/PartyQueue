@@ -439,15 +439,12 @@ const songMemoryInput = document.getElementById("set-song-memory");
 const artistWindowInput = document.getElementById("set-artist-window");
 const artistCapInput = document.getElementById("set-artist-cap");
 const sameArtistBatchInput = document.getElementById("set-same-artist-batch");
-const sameArtistEveryInput = document.getElementById("set-same-artist-every");
+const specialSetEveryInput = document.getElementById("set-special-set-every");
+const requestedReactionSetInput = document.getElementById(
+  "set-requested-reaction-set"
+);
 const lovedReactionSetInput = document.getElementById("set-loved-reaction-set");
-const lovedReactionEveryInput = document.getElementById(
-  "set-loved-reaction-every"
-);
 const hatedReactionSetInput = document.getElementById("set-hated-reaction-set");
-const hatedReactionEveryInput = document.getElementById(
-  "set-hated-reaction-every"
-);
 const strictFillInput = document.getElementById("set-strict-fill");
 const settingsSaveBtn = document.getElementById("settings-save");
 const settingsResetBtn = document.getElementById("settings-reset");
@@ -723,20 +720,19 @@ function fillSettings(s) {
   if (s.sameArtistBatchEnabled != null && sameArtistBatchInput) {
     sameArtistBatchInput.checked = !!s.sameArtistBatchEnabled;
   }
-  if (s.sameArtistBatchEveryN != null && sameArtistEveryInput) {
-    sameArtistEveryInput.value = s.sameArtistBatchEveryN;
+  if (s.specialSetEveryN != null && specialSetEveryInput) {
+    specialSetEveryInput.value = s.specialSetEveryN;
+  } else if (s.sameArtistBatchEveryN != null && specialSetEveryInput) {
+    specialSetEveryInput.value = s.sameArtistBatchEveryN;
+  }
+  if (s.requestedReactionSetEnabled != null && requestedReactionSetInput) {
+    requestedReactionSetInput.checked = !!s.requestedReactionSetEnabled;
   }
   if (s.lovedReactionSetEnabled != null && lovedReactionSetInput) {
     lovedReactionSetInput.checked = !!s.lovedReactionSetEnabled;
   }
-  if (s.lovedReactionSetEveryN != null && lovedReactionEveryInput) {
-    lovedReactionEveryInput.value = s.lovedReactionSetEveryN;
-  }
   if (s.hatedReactionSetEnabled != null && hatedReactionSetInput) {
     hatedReactionSetInput.checked = !!s.hatedReactionSetEnabled;
-  }
-  if (s.hatedReactionSetEveryN != null && hatedReactionEveryInput) {
-    hatedReactionEveryInput.value = s.hatedReactionSetEveryN;
   }
   if (s.discoverEnabled != null) discoverEnabledInput.checked = !!s.discoverEnabled;
   if (s.randomMoodEnabled != null && randomMoodToggle) {
@@ -977,9 +973,7 @@ function currentSettingsPayload() {
     artistWindow: Number(artistWindowInput.value),
     artistCap: Number(artistCapInput.value),
     strictFill: strictFillInput.checked,
-    sameArtistBatchEveryN: Number(sameArtistEveryInput?.value),
-    lovedReactionSetEveryN: Number(lovedReactionEveryInput?.value),
-    hatedReactionSetEveryN: Number(hatedReactionEveryInput?.value),
+    specialSetEveryN: Number(specialSetEveryInput?.value),
     discoverEnabled: discoverEnabledInput.checked,
     similarCount: Number(similarCountInput.value),
     endlessQueueCount: Number(endlessCountInput?.value),
@@ -1102,6 +1096,12 @@ strictFillInput.addEventListener("change", () => {
 
 sameArtistBatchInput?.addEventListener("change", () => {
   saveSettings({ sameArtistBatchEnabled: !!sameArtistBatchInput.checked });
+});
+
+requestedReactionSetInput?.addEventListener("change", () => {
+  saveSettings({
+    requestedReactionSetEnabled: !!requestedReactionSetInput.checked,
+  });
 });
 
 lovedReactionSetInput?.addEventListener("change", () => {

@@ -116,6 +116,23 @@ test("topSets ranks setRequest rows by artist/set id", () => {
   assert.equal(reqlog.topSets(events, 3, 5).length, 1);
 });
 
+test("listMostRequestedTracks ranks guest song requests", () => {
+  reqlog.recordRequest({ id: "s1", name: "Hit", artist: "Alpha" }, 1);
+  reqlog.recordRequest({ id: "s1", name: "Hit", artist: "Alpha" }, 2);
+  reqlog.recordRequest({ id: "s1", name: "Hit", artist: "Alpha" }, 3);
+  reqlog.recordRequest({ id: "s2", name: "Bop", artist: "Beta" }, 4);
+  reqlog.recordSetRequest({
+    artistId: "a1",
+    artist: "Alpha",
+    tracks: [{ id: "s1", name: "Hit", artist: "Alpha" }],
+  }, 5);
+  const top = reqlog.listMostRequestedTracks(10);
+  assert.equal(top[0].id, "s1");
+  assert.equal(top[0].count, 3);
+  assert.equal(top[1].id, "s2");
+  assert.equal(top[1].count, 1);
+});
+
 test("summarizeRequests ignores setRequest and setTrack rows", () => {
   const events = [
     { id: "set:a1", name: "Set Request", artist: "Alpha", kind: "setRequest", ts: 1 },

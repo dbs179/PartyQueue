@@ -115,8 +115,12 @@ export function resolveDisplayGenre(
   const trackLane =
     typeof np.genreLane === "string" && np.genreLane ? np.genreLane : null;
 
-  // Most Loved / Most Hated sets are not genre-laned.
-  if (np.reactionSet === "loved" || np.reactionSet === "hated") {
+  // Crowd special sets are not genre-laned.
+  if (
+    np.reactionSet === "loved" ||
+    np.reactionSet === "hated" ||
+    np.reactionSet === "requested"
+  ) {
     return { mixGenreLane: null, mixGenreLabel: null };
   }
 

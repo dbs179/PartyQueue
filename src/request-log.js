@@ -287,6 +287,17 @@ export function summarizeRequests(events, sinceTs = 0, limit = 5) {
 }
 
 /**
+ * All-time (or since `sinceTs`) guest-requested songs, ranked by count.
+ * Set Request rows are excluded — same rules as Party Stats Top Songs.
+ * @param {number} [limit]
+ * @param {number} [sinceTs]
+ */
+export function listMostRequestedTracks(limit = 100, sinceTs = 0) {
+  const n = Math.max(1, Math.min(200, Math.floor(Number(limit) || 100)));
+  return summarizeRequests(getRequests(), sinceTs, n).topSongs;
+}
+
+/**
  * Top guest requesters by count (display name). Empty names are skipped.
  * @param {Array} events
  * @param {number} [sinceTs]

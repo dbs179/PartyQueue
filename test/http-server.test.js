@@ -186,6 +186,8 @@ describe("HTTP server harness", { concurrency: false }, () => {
     assert.match(html, /id="booth-new-party"/);
     assert.match(html, /id="set-loved-reaction-set"/);
     assert.match(html, /id="set-hated-reaction-set"/);
+    assert.match(html, /id="set-requested-reaction-set"/);
+    assert.match(html, /id="set-special-set-every"/);
   });
 
   test("GET /api/settings/pin-required reports whether a host PIN is set", async () => {

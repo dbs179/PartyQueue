@@ -65,10 +65,13 @@ export function bustSettingsCache() {
 //   artistCap          - max plays of any one artist within that window
 //   endlessQueueCount  - songs Never-Ending Queue adds on each refill
 //   strictFill         - when true, never drop song memory just to fill a short batch
-  //   sameArtistBatchEnabled / sameArtistBatchEveryN — Booth: automatic same-artist
-  //     showcase every N Random/Never-Ending sets (overrides unique-artist harden).
-  //   loved/hatedReactionSet* — Most Loved / Most Hated sets from guest reactions
-  //     (threshold 10; every N independent schedules).
+  //   sameArtistBatchEnabled — Booth: automatic same-artist showcase
+  //     (overrides unique-artist harden).
+  //   loved/hated/requestedReactionSetEnabled — Most Loved / Most Hated /
+  //     Most Requested sets (Loved/Hated need 5 songs at 5+ reactions;
+  //     Requested needs 5 songs at 5+ guest requests).
+  //   specialSetEveryN — shared once-per-X cadence for Same Artist + the
+  //     three crowd sets (default 5).
 export const RANDOMNESS_DEFAULTS = {
   songMemory: 500,
   artistWindow: 30,
@@ -76,11 +79,10 @@ export const RANDOMNESS_DEFAULTS = {
   endlessQueueCount: 5,
   strictFill: true,
   sameArtistBatchEnabled: true,
-  sameArtistBatchEveryN: 8,
   lovedReactionSetEnabled: true,
-  lovedReactionSetEveryN: 6,
   hatedReactionSetEnabled: true,
-  hatedReactionSetEveryN: 6,
+  requestedReactionSetEnabled: true,
+  specialSetEveryN: 5,
 };
 
 // Generous sanity bounds so a typo can't wedge the picker (e.g. a 10-million
@@ -90,9 +92,7 @@ const RANDOMNESS_BOUNDS = {
   artistWindow: { min: 1, max: 1000 },
   artistCap: { min: 1, max: 100 },
   endlessQueueCount: { min: 1, max: 100 },
-  sameArtistBatchEveryN: { min: 1, max: 100 },
-  lovedReactionSetEveryN: { min: 1, max: 100 },
-  hatedReactionSetEveryN: { min: 1, max: 100 },
+  specialSetEveryN: { min: 1, max: 100 },
 };
 
 const RANDOMNESS_INT_KEYS = [
@@ -100,10 +100,28 @@ const RANDOMNESS_INT_KEYS = [
   "artistWindow",
   "artistCap",
   "endlessQueueCount",
-  "sameArtistBatchEveryN",
+  "specialSetEveryN",
+];
+
+const SPECIAL_SET_EVERY_ALIASES = [
+  "specialSetEveryN",
   "lovedReactionSetEveryN",
   "hatedReactionSetEveryN",
+  "sameArtistBatchEveryN",
 ];
+
+function resolveSpecialSetEveryN(s = {}) {
+  for (const key of SPECIAL_SET_EVERY_ALIASES) {
+    if (s[key] != null) {
+      return clampInt(
+        s[key],
+        RANDOMNESS_DEFAULTS.specialSetEveryN,
+        RANDOMNESS_BOUNDS.specialSetEveryN
+      );
+    }
+  }
+  return RANDOMNESS_DEFAULTS.specialSetEveryN;
+}
 
 function clampInt(value, fallback, { min, max }) {
   const n = Number(value);
@@ -118,6 +136,12 @@ export function getRandomnessSettings() {
   for (const key of RANDOMNESS_INT_KEYS) {
     out[key] = clampInt(s[key], RANDOMNESS_DEFAULTS[key], RANDOMNESS_BOUNDS[key]);
   }
+  const specialEvery = resolveSpecialSetEveryN(s);
+  out.specialSetEveryN = specialEvery;
+  // Legacy aliases — one cadence for Same Artist / Loved / Hated / Requested.
+  out.sameArtistBatchEveryN = specialEvery;
+  out.lovedReactionSetEveryN = specialEvery;
+  out.hatedReactionSetEveryN = specialEvery;
   out.strictFill =
     typeof s.strictFill === "boolean" ? s.strictFill : RANDOMNESS_DEFAULTS.strictFill;
   out.sameArtistBatchEnabled =
@@ -132,6 +156,10 @@ export function getRandomnessSettings() {
     typeof s.hatedReactionSetEnabled === "boolean"
       ? s.hatedReactionSetEnabled
       : RANDOMNESS_DEFAULTS.hatedReactionSetEnabled;
+  out.requestedReactionSetEnabled =
+    typeof s.requestedReactionSetEnabled === "boolean"
+      ? s.requestedReactionSetEnabled
+      : RANDOMNESS_DEFAULTS.requestedReactionSetEnabled;
   return out;
 }
 
@@ -1610,6 +1638,21 @@ export function setRandomnessSettings(partial = {}) {
   }
   if (partial.hatedReactionSetEnabled != null) {
     next.hatedReactionSetEnabled = !!partial.hatedReactionSetEnabled;
+  }
+  if (partial.requestedReactionSetEnabled != null) {
+    next.requestedReactionSetEnabled = !!partial.requestedReactionSetEnabled;
+  }
+  const everyAlias = SPECIAL_SET_EVERY_ALIASES.find((key) => partial[key] != null);
+  if (everyAlias) {
+    const everyN = clampInt(
+      partial[everyAlias],
+      current.specialSetEveryN ?? RANDOMNESS_DEFAULTS.specialSetEveryN,
+      RANDOMNESS_BOUNDS.specialSetEveryN
+    );
+    next.specialSetEveryN = everyN;
+    next.sameArtistBatchEveryN = everyN;
+    next.lovedReactionSetEveryN = everyN;
+    next.hatedReactionSetEveryN = everyN;
   }
   saveSettings(next);
   return getRandomnessSettings();

@@ -57,7 +57,7 @@ function newInstanceKey() {
 
 function cleanReactionSet(value) {
   const s = String(value || "").trim().toLowerCase();
-  return s === "loved" || s === "hated" ? s : null;
+  return s === "loved" || s === "hated" || s === "requested" ? s : null;
 }
 
 function rowMeta(e) {

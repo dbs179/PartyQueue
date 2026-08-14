@@ -169,7 +169,7 @@ export function sameArtistPoolReady(playlists, opts = {}) {
 export function getSameArtistBatchState() {
   const cfg = getRandomnessSettings();
   const enabled = !!cfg.sameArtistBatchEnabled;
-  const everyN = cfg.sameArtistBatchEveryN;
+  const everyN = cfg.specialSetEveryN ?? cfg.sameArtistBatchEveryN;
   const setsSince = setsSinceLastShowcase;
   return {
     enabled,
