@@ -14,6 +14,7 @@ import {
   getBrandingSettings,
   getContentSettings,
   getDiscoverySettings,
+  getRandomnessSettings,
   getRotationSettings,
   setContentSettings,
   setDiscoverySettings,
@@ -21,6 +22,7 @@ import {
 } from "./settings.js";
 import { isPartyOver, setKidsLock } from "./party-rituals.js";
 import { getSameArtistBatchState } from "./same-artist-batch.js";
+import { getNextSpecialSetState } from "./special-set-next.js";
 
 /** Vibe-page toggles — public on the LAN (no host PIN). */
 const PUBLIC_VIBE_TOGGLE_KEYS = [
@@ -94,6 +96,13 @@ export function readPartySettingsSnapshot() {
     closingTimeAt: getClosingTimeAt(),
     partyRecap: getLastPartyRecap(),
     sameArtistBatch: getSameArtistBatchState(),
+    nextSpecialSet: getNextSpecialSetState({
+      setSize: getRandomnessSettings().endlessQueueCount,
+      playlistIds: fill.playlistIds,
+      genres: fill.genres,
+      mood: fill.mood,
+      filterExplicit: !!content.filterExplicit,
+    }),
   };
 }
 
@@ -105,6 +114,11 @@ export function partySettingsSignature(snapshot = null) {
     : snapshot.mixGenres == null
       ? ""
       : String(snapshot.mixGenres);
+  const nextSpecial = snapshot.nextSpecialSet;
+  const nextSpecialKey =
+    nextSpecial && typeof nextSpecial === "object"
+      ? `${nextSpecial.kind || ""}:${nextSpecial.setsUntil ?? ""}`
+      : "";
   const sameArtist = snapshot.sameArtistBatch;
   const sameArtistKey =
     sameArtist && typeof sameArtist === "object"
@@ -137,6 +151,7 @@ export function partySettingsSignature(snapshot = null) {
     snapshot.closingTimeAt ?? "",
     recapKey,
     sameArtistKey,
+    nextSpecialKey,
   ].join("\x1f");
 }
 

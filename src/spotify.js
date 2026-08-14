@@ -547,6 +547,14 @@ export function getPoolWarmedAt() {
   return playlistPoolCache.builtAt || 0;
 }
 
+/** Sync peek of the warmed playlist cache (empty before the first warm). */
+export function peekCachedPlaylists() {
+  loadDiskCache();
+  return Array.isArray(playlistPoolCache.playlists)
+    ? playlistPoolCache.playlists
+    : [];
+}
+
 /** Build a Set of Spotify track ids from a playlist-pool shape. */
 export function trackIdsFromPlaylistPool(playlists) {
   const ids = new Set();

@@ -184,7 +184,7 @@ refreshGuestFairness = () => {
 };
 
 const sameArtistCountdownUi = createSameArtistCountdownUi({
-  el: document.getElementById("same-artist-countdown"),
+  el: document.getElementById("special-set-countdown"),
 });
 
 const dedicationOverlay = document.getElementById("dedication-overlay");
@@ -1974,7 +1974,7 @@ function applyPartySettings(payload) {
     syncHostControlsVisibility();
   }
   maybeAnnounceClosingTime(payload.closingTimeAt, payload.partyRecap);
-  sameArtistCountdownUi.paint(payload.sameArtistBatch);
+  sameArtistCountdownUi.paint(payload.nextSpecialSet);
 }
 
 const partyDisplayIdle = createPartyDisplayIdle();

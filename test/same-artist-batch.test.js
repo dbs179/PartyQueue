@@ -4,6 +4,7 @@ import {
   listPoolArtists,
   filterPlaylistsByPrimaryArtist,
   pickShowcaseArtistFromPlaylists,
+  sameArtistPoolReady,
   noteRandomSetBuilt,
   getSetsSinceLastSameArtistBatch,
   resetSameArtistBatchCountersForTests,
@@ -78,6 +79,32 @@ test("counter advances for normal sets and resets on showcase", () => {
   );
   noteRandomSetBuilt({ wasShowcase: true });
   assert.equal(getSetsSinceLastSameArtistBatch(), 0);
+});
+
+test("sameArtistPoolReady needs an artist with enough tracks", () => {
+  assert.equal(
+    sameArtistPoolReady(
+      [{ id: "p", tracks: [{ artist: "Solo", name: "One" }] }],
+      { minTracks: 3 }
+    ),
+    false
+  );
+  assert.equal(
+    sameArtistPoolReady(
+      [
+        {
+          id: "p",
+          tracks: [
+            { artist: "Foo", name: "A" },
+            { artist: "Foo", name: "B" },
+            { artist: "Foo", name: "C" },
+          ],
+        },
+      ],
+      { minTracks: 3 }
+    ),
+    true
+  );
 });
 
 test("sameArtistSetsUntil counts remaining sets and hides when off", () => {

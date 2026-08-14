@@ -110,6 +110,62 @@ export function resetSameArtistBatchCountersForTests() {
   setsSinceLastShowcase = 0;
 }
 
+/**
+ * Apply the same Mood / Genre / explicit filters Random uses, from an
+ * already-loaded playlist list (sync).
+ */
+export function filterSameArtistUsable(playlists, opts = {}) {
+  let usable = (Array.isArray(playlists) ? playlists : []).filter(
+    (p) => (p.tracks || []).length > 0
+  );
+  if (Array.isArray(opts.playlistIds)) {
+    const allow = new Set(opts.playlistIds);
+    usable = usable.filter((p) => allow.has(p.id));
+  }
+  if (Array.isArray(opts.genres)) {
+    const enabled = new Set(opts.genres);
+    usable = usable
+      .map((p) => ({
+        ...p,
+        tracks: (p.tracks || []).filter((t) =>
+          artistMatchesGenres(t.artist, enabled)
+        ),
+      }))
+      .filter((p) => p.tracks.length > 0);
+  }
+  if (opts.filterExplicit) {
+    usable = usable
+      .map((p) => ({
+        ...p,
+        tracks: (p.tracks || []).filter((t) => !t.explicit),
+      }))
+      .filter((p) => p.tracks.length > 0);
+  }
+  const activeMoodPack = eraMoodPack(opts.mood);
+  if (activeMoodPack) {
+    usable = usable
+      .map((p) => ({
+        ...p,
+        tracks: (p.tracks || []).filter((t) =>
+          trackFitsMood(t, activeMoodPack)
+        ),
+      }))
+      .filter((p) => p.tracks.length > 0);
+  }
+  return usable;
+}
+
+/**
+ * True when at least one artist in the filtered pool can fill a showcase.
+ * @param {object[]} playlists
+ * @param {{ minTracks?: number, playlistIds?: string[]|null, genres?: string[]|null, mood?: string|null, filterExplicit?: boolean }} [opts]
+ */
+export function sameArtistPoolReady(playlists, opts = {}) {
+  const minTracks = Math.max(1, Math.floor(Number(opts.minTracks) || 2));
+  const usable = filterSameArtistUsable(playlists, opts);
+  return listPoolArtists(usable).some((a) => a.trackCount >= minTracks);
+}
+
 export function getSameArtistBatchState() {
   const cfg = getRandomnessSettings();
   const enabled = !!cfg.sameArtistBatchEnabled;
@@ -156,45 +212,13 @@ export async function buildSameArtistPool(opts = {}) {
   const filterExplicit = !!opts.filterExplicit;
 
   const playlists = await buildPlaylistPool();
-  let usable = playlists.filter((p) => (p.tracks || []).length > 0);
-
-  if (Array.isArray(playlistIds)) {
-    const allow = new Set(playlistIds);
-    usable = usable.filter((p) => allow.has(p.id));
-  }
-
-  if (Array.isArray(genres)) {
-    const enabled = new Set(genres);
-    usable = usable
-      .map((p) => ({
-        ...p,
-        tracks: (p.tracks || []).filter((t) =>
-          artistMatchesGenres(t.artist, enabled)
-        ),
-      }))
-      .filter((p) => p.tracks.length > 0);
-  }
-
-  if (filterExplicit) {
-    usable = usable
-      .map((p) => ({
-        ...p,
-        tracks: (p.tracks || []).filter((t) => !t.explicit),
-      }))
-      .filter((p) => p.tracks.length > 0);
-  }
-
+  const usable = filterSameArtistUsable(playlists, {
+    playlistIds,
+    genres,
+    mood,
+    filterExplicit,
+  });
   const activeMoodPack = eraMoodPack(mood);
-  if (activeMoodPack) {
-    usable = usable
-      .map((p) => ({
-        ...p,
-        tracks: (p.tracks || []).filter((t) =>
-          trackFitsMood(t, activeMoodPack)
-        ),
-      }))
-      .filter((p) => p.tracks.length > 0);
-  }
 
   return {
     usable,

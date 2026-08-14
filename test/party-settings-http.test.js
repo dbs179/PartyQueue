@@ -68,6 +68,7 @@ test("party settings snapshot exposes guest-safe flags only", () => {
     "closingTimeAt",
     "partyRecap",
     "sameArtistBatch",
+    "nextSpecialSet",
   ]) {
     assert.ok(key in snap, `missing ${key}`);
   }

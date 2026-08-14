@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sameArtistCountdownLabel } from "../public/js/same-artist-countdown-ui.js";
+import {
+  sameArtistCountdownLabel,
+  specialSetCountdownLabel,
+} from "../public/js/same-artist-countdown-ui.js";
 
 test("sameArtistCountdownLabel hides when disabled", () => {
   assert.equal(sameArtistCountdownLabel(null), "");
@@ -20,4 +23,16 @@ test("sameArtistCountdownLabel uses the PC bar copy", () => {
     sameArtistCountdownLabel({ enabled: true, setsUntil: 0 }),
     "Same Artist Set In : next set"
   );
+});
+
+test("specialSetCountdownLabel names Loved and Hated", () => {
+  assert.equal(
+    specialSetCountdownLabel({ kind: "loved", setsUntil: 3 }),
+    "Most Loved Set In : 3 sets"
+  );
+  assert.equal(
+    specialSetCountdownLabel({ kind: "hated", setsUntil: 1 }),
+    "Most Hated Set In : 1 set"
+  );
+  assert.equal(specialSetCountdownLabel({ kind: "loved" }), "");
 });

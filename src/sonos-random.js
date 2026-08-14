@@ -33,11 +33,14 @@ import {
   filterPlaylistsByPrimaryArtist,
 } from "./same-artist-batch.js";
 import {
-  reactionSetDue,
   pickReactionSetTracks,
   noteReactionSetPlayed,
   noteReactionSetBuilt,
 } from "./reaction-sets.js";
+import {
+  pickNextSpecialSet,
+  clearSpecialSetReservation,
+} from "./special-set-next.js";
 import {
   recentTrackIds,
   recentEntries,
@@ -234,18 +237,28 @@ async function buildRandomPlan(
   cfg.bucketsFor = bucketsForArtistSync;
   cfg.lastArtist = queueTailArtist;
 
-  // Most Loved / Most Hated: every-N, genre-agnostic, uniform sample from
-  // reaction pool. Checked before same-artist showcase; Loved wins ties.
-  // Independent schedules: if Loved is due but unfillable, Hated may still play.
+  // Most Loved / Most Hated / Same Artist: one reserved winner when several
+  // are equally due and fillable. Loved no longer always beats the others.
   const reactionSetSize = Math.max(1, Math.floor(Number(count) || 5));
+  const nextSpecial = pickNextSpecialSet({
+    setSize: reactionSetSize,
+    playlistIds,
+    genres,
+    mood: opts.mood,
+    filterExplicit: !!opts.filterExplicit,
+    playlists: usable,
+    settings: cfg,
+  });
   let reactionSetKind = null;
-  for (const kind of ["loved", "hated"]) {
-    if (!reactionSetDue(kind, cfg)) continue;
-    const picked = pickReactionSetTracks(kind, reactionSetSize, {
+  if (
+    nextSpecial?.setsUntil === 0 &&
+    (nextSpecial.kind === "loved" || nextSpecial.kind === "hated")
+  ) {
+    const picked = pickReactionSetTracks(nextSpecial.kind, reactionSetSize, {
       excludeIds: exclude,
     });
-    if (!picked?.length) continue;
-    reactionSetKind = kind;
+    if (picked?.length) {
+    reactionSetKind = nextSpecial.kind;
     const order = picked.map((t) => ({
       uri: t.uri,
       id: t.id,
@@ -253,7 +266,7 @@ async function buildRandomPlan(
       name: t.name || "",
       discovered: false,
       moodPick: false,
-      reactionSet: kind,
+      reactionSet: reactionSetKind,
     }));
     const batchArtists = new Set();
     for (const item of order) {
@@ -266,7 +279,7 @@ async function buildRandomPlan(
       artistByUri.set(item.uri, item.artist);
       nameByUri.set(item.uri, item.name);
     }
-    console.log(`[random] reaction set=${kind} size=${order.length}`);
+    console.log(`[random] reaction set=${reactionSetKind} size=${order.length}`);
     return {
       count,
       genres,
@@ -308,13 +321,18 @@ async function buildRandomPlan(
       moodAddedPreview: 0,
       preemptGeneration: opts.preemptGeneration,
     };
+    }
   }
 
   // Same-artist showcase: automatic every-N from the current Mood/Genre pool.
   // Filters the pool to one artist; Discover / lane-hits / era top-ups off.
   let showcaseArtistKey = null;
   let showcaseArtistName = null;
-  if (allowSameArtistBatch(cfg, getSetsSinceLastSameArtistBatch())) {
+  if (
+    nextSpecial?.setsUntil === 0 &&
+    nextSpecial.kind === "sameArtist" &&
+    allowSameArtistBatch(cfg, getSetsSinceLastSameArtistBatch())
+  ) {
     const picked = pickShowcaseArtistFromPlaylists(usable, {
       minTracks: Math.min(3, Math.max(2, Number(count) || 2)),
       excludeKeys: blockedArtists,
@@ -1172,9 +1190,11 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
     if (reactionSetKind) {
       noteReactionSetBuilt({ kind: reactionSetKind });
       noteRandomSetBuilt({ wasShowcase: false });
+      clearSpecialSetReservation();
     } else if (showcaseArtistKey) {
       noteRandomSetBuilt({ wasShowcase: true });
       noteReactionSetBuilt({ kind: null });
+      clearSpecialSetReservation();
     } else {
       noteRandomSetBuilt({ wasShowcase: false });
       noteReactionSetBuilt({ kind: null });

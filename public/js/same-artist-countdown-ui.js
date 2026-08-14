@@ -1,26 +1,44 @@
 /**
- * PC search-bar countdown for the next automatic same-artist set.
+ * PC search-bar countdown for the next automatic special set.
  */
+
+const TITLES = {
+  sameArtist: "Same Artist Set",
+  loved: "Most Loved Set",
+  hated: "Most Hated Set",
+};
 
 /**
  * @param {{ enabled?: boolean, setsUntil?: number|null }} [batch]
  */
 export function sameArtistCountdownLabel(batch) {
   if (!batch?.enabled) return "";
-  const n = Math.floor(Number(batch.setsUntil));
+  return specialSetCountdownLabel({
+    kind: "sameArtist",
+    setsUntil: batch.setsUntil,
+  });
+}
+
+/**
+ * @param {{ kind?: string|null, setsUntil?: number|null }} [next]
+ */
+export function specialSetCountdownLabel(next) {
+  const title = TITLES[next?.kind];
+  if (!title) return "";
+  const n = Math.floor(Number(next.setsUntil));
   if (!Number.isFinite(n) || n < 0) return "";
-  if (n <= 0) return "Same Artist Set In : next set";
-  if (n === 1) return "Same Artist Set In : 1 set";
-  return `Same Artist Set In : ${n} sets`;
+  if (n <= 0) return `${title} In : next set`;
+  if (n === 1) return `${title} In : 1 set`;
+  return `${title} In : ${n} sets`;
 }
 
 /**
  * @param {{ el?: HTMLElement|null }} [opts]
  */
 export function createSameArtistCountdownUi({ el } = {}) {
-  function paint(batch) {
+  function paint(next) {
     if (!el) return;
-    const label = sameArtistCountdownLabel(batch);
+    const label = specialSetCountdownLabel(next);
     if (!label) {
       el.hidden = true;
       el.textContent = "";
@@ -30,5 +48,5 @@ export function createSameArtistCountdownUi({ el } = {}) {
     el.textContent = label;
   }
 
-  return { paint, sameArtistCountdownLabel };
+  return { paint, sameArtistCountdownLabel, specialSetCountdownLabel };
 }

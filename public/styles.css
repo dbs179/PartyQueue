@@ -770,7 +770,7 @@ button.subpage-head-link:active {
     padding: 10px 48px 10px 14px;
   }
 
-  body:has(#view-main:not([hidden])) #view-main .same-artist-countdown:not([hidden]) {
+  body:has(#view-main:not([hidden])) #view-main .special-set-countdown:not([hidden]) {
     display: block;
     position: absolute;
     left: 50%;
@@ -1055,7 +1055,7 @@ button.np-vibe-link:focus-visible {
 }
 
 /* PC-only: centered between "Adding as" and fairness. */
-.same-artist-countdown {
+.special-set-countdown {
   display: none;
   margin: 0;
   padding: 0 2px;
@@ -1072,7 +1072,7 @@ button.np-vibe-link:focus-visible {
   pointer-events: none;
 }
 
-.same-artist-countdown[hidden] {
+.special-set-countdown[hidden] {
   display: none;
 }
 

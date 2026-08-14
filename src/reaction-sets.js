@@ -226,6 +226,39 @@ export function reactionSetDue(kind, settings = null, setsSince = null) {
 }
 
 /**
+ * Sets remaining before this reaction set is due. Null when the toggle is off.
+ * @param {"loved"|"hated"} kind
+ * @param {object} [settings]
+ * @param {number} [setsSince]
+ */
+export function reactionSetSetsUntil(kind, settings = null, setsSince = null) {
+  if (!REACTION_SET_KINDS.has(kind)) return null;
+  const cfg = settings || getRandomnessSettings();
+  const enabled =
+    kind === "hated"
+      ? !!cfg.hatedReactionSetEnabled
+      : !!cfg.lovedReactionSetEnabled;
+  if (!enabled) return null;
+  const every = Math.max(
+    1,
+    Math.floor(
+      Number(
+        kind === "hated"
+          ? cfg.hatedReactionSetEveryN
+          : cfg.lovedReactionSetEveryN
+      ) || 6
+    )
+  );
+  const since =
+    setsSince != null
+      ? Math.max(0, Math.floor(Number(setsSince) || 0))
+      : kind === "hated"
+        ? setsSinceHated
+        : setsSinceLoved;
+  return Math.max(0, every - Math.max(0, Math.floor(Number(since) || 0)));
+}
+
+/**
  * Pick which reaction set (if any) should build this plan.
  * Loved wins when both due; Hated stays due for a later build.
  * @param {number} setSize
