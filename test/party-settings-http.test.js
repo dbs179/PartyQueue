@@ -67,12 +67,15 @@ test("party settings snapshot exposes guest-safe flags only", () => {
     "hostControlsOnly",
     "closingTimeAt",
     "partyRecap",
+    "sameArtistBatch",
   ]) {
     assert.ok(key in snap, `missing ${key}`);
   }
   assert.equal(typeof snap.neverEnding, "boolean");
   assert.equal(typeof snap.discoverEnabled, "boolean");
   assert.equal(typeof snap.partyOver, "boolean");
+  assert.equal(typeof snap.sameArtistBatch?.enabled, "boolean");
+  assert.equal(typeof snap.sameArtistBatch?.everyN, "number");
   assert.equal("pin" in snap, false);
   assert.equal("spotifyClientSecret" in snap, false);
 });
@@ -110,6 +113,13 @@ test("party settings signature ignores stream metadata and senses flag changes",
   assert.notEqual(
     partySettingsSignature(base),
     partySettingsSignature({ ...base, mixMood: "90s" })
+  );
+  assert.notEqual(
+    partySettingsSignature(base),
+    partySettingsSignature({
+      ...base,
+      sameArtistBatch: { enabled: true, everyN: 8, setsSince: 3 },
+    })
   );
 });
 

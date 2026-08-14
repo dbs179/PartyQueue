@@ -28,6 +28,7 @@ import {
 import { dedicationOf } from "./queue-origin.js";
 import { sanitizeDedication } from "./display-name.js";
 import { spotifyTrackId } from "./sampler.js";
+import { pickFlavorAnnounceLines } from "./dj-flavor-announce.js";
 
 let searchAddCount = 0;
 
@@ -204,6 +205,10 @@ function buildRequestShoutPrompt({
   djSettings = null,
   priorScripts = [],
   stricter = false,
+  kind = "songRequest",
+  flavorIntro = "",
+  flavorBlurb = "",
+  trackCount = 0,
 }) {
   const song = String(name || "this next track").trim();
   const who = String(artist || "").trim();
@@ -232,6 +237,17 @@ function buildRequestShoutPrompt({
   const dedRule = forWho
     ? `- REQUIRED: say this request goes out to ${forWho} (dedication). Keep it natural — e.g. "this one goes out to ${forWho}".`
     : `- No dedication — do not invent a dedicatee.`;
+
+  const setKind = kind === "setRequest";
+  const kindRule = setKind
+    ? `- REQUIRED: this is a SET REQUEST from ${by} — several songs by ${who || "one artist"}, not a single-song request. Say "Set Request" or "mini-set". Do not treat it as one track.`
+    : `- REQUIRED: this is a single SONG REQUEST from ${by}, not a Set Request and not a Random fill. Say it is a request.`;
+  const flavorRule = flavorBlurb
+    ? `- REQUIRED beat (say it once, naturally): ${flavorBlurb}`
+    : "";
+  const introHint = flavorIntro
+    ? `- Scripted flavor (you may echo the idea, do not copy word-for-word unless it fits): ${flavorIntro}`
+    : "";
 
   const priors = (Array.isArray(priorScripts) ? priorScripts : [])
     .map((s) => String(s || "").trim())
@@ -266,13 +282,18 @@ Hard limits:
 ${blurbRule}
 ${bdayRule}
 ${dedRule}
+${kindRule}
+${flavorRule}
+${introHint}
 ${avoidRule}${ban}${strictExtra}
 
 Facts:
+- Shout kind: ${setKind ? "SET REQUEST (mini-set, several songs)" : "SONG REQUEST (one track)"}
 - Requester display name: ${by}
 - Dedication (goes out to): ${forWho || "(none)"}
-- Song title: ${song}
+- ${setKind ? "First song in the set" : "Song title"}: ${song}
 - Artist: ${who || "(unknown)"}
+- Set track count: ${setKind ? trackCount || "a few" : "1"}
 - Birthday today: ${isBirthday ? `YES — ${birthdayLabel}` : "no"}
 
 Host blurbs (use these closely — they are the jokes):
@@ -282,8 +303,9 @@ Must include:
 1) shout-out to ${by}
 2) ${isBirthday ? `happy birthday + "${birthdayLabel}"` : "no birthday line"}
 3) ${forWho ? `dedication line for ${forWho}` : "no dedication line"}
-4) the song (and artist if known)
+4) ${setKind ? `Set Request / mini-set by ${who || "the artist"}, then the first song` : "the song (and artist if known)"}
 5) ${count ? `all ${count} blurb(s) above, close to the original wording` : "no blurb"}
+6) ${setKind ? 'the words "Set Request" or "mini-set"' : "that this is a song request, not a set"}
 
 Write only the spoken announcement now.`;
 }
@@ -310,9 +332,24 @@ export async function writeRequestShoutScript({
   requestedBy,
   dedication = null,
   trackId = null,
+  kind = "songRequest",
+  trackCount = 0,
 } = {}) {
   const dj = getDjVoiceSettings();
   const by = String(requestedBy || "").trim();
+  const shoutKind = kind === "setRequest" ? "setRequest" : "songRequest";
+  const flavor = pickFlavorAnnounceLines(shoutKind, {
+    guest: by || "a guest",
+    artist,
+    song: name,
+    count: trackCount,
+    salt:
+      (by.length * 13 +
+        String(artist || "").length +
+        String(name || "").length +
+        Number(trackCount || 0)) %
+      97,
+  });
   const profile = by ? getGuestProfile(by) : null;
   // Prefer live origin dedication (toast may land while TTS is generating).
   const forWho =
@@ -325,27 +362,37 @@ export async function writeRequestShoutScript({
   const birthdayLabel = by ? birthdayShoutLabel(by) : "birthday star";
   const priorScripts = by ? getRecentScripts(by, 3) : [];
   const maxWords = Math.min(
-    isBirthday || notes.length || forWho ? 70 : 45,
-    Math.max(32, (Number(dj.djAnnounceMaxWords) || 55) + 10)
+    shoutKind === "setRequest" || isBirthday || notes.length || forWho
+      ? 75
+      : 45,
+    Math.max(32, (Number(dj.djAnnounceMaxWords) || 55) + 15)
   );
 
+  const promptArgs = {
+    name,
+    artist,
+    requestedBy: by,
+    dedication: forWho,
+    notes,
+    isBirthday,
+    birthdayLabel,
+    djName: dj.djName,
+    maxWords,
+    banList: dj.djBanList,
+    djSettings: dj,
+    priorScripts,
+    kind: shoutKind,
+    flavorIntro: flavor?.intro || "",
+    flavorBlurb: flavor?.blurb || "",
+    trackCount,
+  };
+
+  // Unique Set Request / song-request templates already name the kind.
+  // Only call the LLM when there is extra guest fuel to weave in.
   if (notes.length || isBirthday || forWho) {
     try {
       let line = await generateDjSpeechFromPrompt(
-        buildRequestShoutPrompt({
-          name,
-          artist,
-          requestedBy: by,
-          dedication: forWho,
-          notes,
-          isBirthday,
-          birthdayLabel,
-          djName: dj.djName,
-          maxWords,
-          banList: dj.djBanList,
-          djSettings: dj,
-          priorScripts,
-        }),
+        buildRequestShoutPrompt(promptArgs),
         { maxWords, banList: dj.djBanList }
       );
 
@@ -356,18 +403,7 @@ export async function writeRequestShoutScript({
         );
         line = await generateDjSpeechFromPrompt(
           buildRequestShoutPrompt({
-            name,
-            artist,
-            requestedBy: by,
-            dedication: forWho,
-            notes,
-            isBirthday,
-            birthdayLabel,
-            djName: dj.djName,
-            maxWords,
-            banList: dj.djBanList,
-            djSettings: dj,
-            priorScripts,
+            ...promptArgs,
             stricter: true,
           }),
           { maxWords, banList: dj.djBanList }
@@ -385,7 +421,7 @@ export async function writeRequestShoutScript({
       }
 
       console.log(
-        `[dj-shout] script via OpenAI (blurbs=${notes.length}, birthday=${isBirthday}, dedication=${forWho || "none"}, profile=${profile?.name || "none"})`
+        `[dj-shout] script via OpenAI (kind=${shoutKind}, blurbs=${notes.length}, birthday=${isBirthday}, dedication=${forWho || "none"}, profile=${profile?.name || "none"})`
       );
       console.log(`[dj-shout] blurb fuel: ${notes.join(" | ") || "(none)"}`);
       return rememberAndReturn(line, { by, notes, isBirthday });
@@ -410,6 +446,9 @@ export async function writeRequestShoutScript({
       isBirthday,
       birthdayLabel,
       notes,
+      kind: shoutKind,
+      trackCount,
+      flavorIntro: flavor?.intro || "",
     }),
     { by, notes, isBirthday }
   );
@@ -430,6 +469,8 @@ export async function announceRequestShout(
     dedication = null,
     uri = null,
     trackId = null,
+    kind = "songRequest",
+    trackCount = 0,
     queuePosition,
     startPlayback = false,
     preemptGeneration = queueWorkGeneration(),
@@ -450,6 +491,8 @@ export async function announceRequestShout(
     requestedBy,
     dedication,
     trackId: id,
+    kind,
+    trackCount,
   });
   if (queueWorkWasPreempted(preemptGeneration)) {
     return { ok: false, skipped: true, reason: "queue-preempted" };

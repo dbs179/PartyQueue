@@ -36,8 +36,12 @@ import {
   queueWorkGeneration,
   queueWorkWasPreempted,
 } from "./queue-preempt.js";
-import { normalizeMood, moodPack } from "./moods.js";
-import { presetGenres, presetIdForGenres } from "./genre-presets.js";
+import { normalizeMood, moodPack, moodLabel } from "./moods.js";
+import {
+  presetGenres,
+  presetIdForGenres,
+  MOOD_PRESET_LABELS,
+} from "./genre-presets.js";
 import { eligiblePoolSize } from "./genres.js";
 
 // Top up when this many (or fewer) songs remain AFTER the current one. Keeping
@@ -266,7 +270,16 @@ export async function rotateSelectionIfDue(deps = {}) {
           .filter(Boolean)
           .join(", ")
     );
-    return { genres: applied.genres, mood: applied.mood };
+    return {
+      genres: applied.genres,
+      mood: applied.mood,
+      rotatedMood:
+        nextPreset !== undefined
+          ? MOOD_PRESET_LABELS[nextPreset] || nextPreset
+          : null,
+      rotatedDecade:
+        nextDecade !== undefined ? moodLabel(nextDecade) || nextDecade : null,
+    };
   } catch (err) {
     console.error("[rotate] failed:", err.message);
     return null;
@@ -300,7 +313,7 @@ async function tick() {
       filling = true;
       try {
         // Random Mood / Random Decade: maybe pick a fresh mix for this set.
-        await rotateSelectionIfDue();
+        const rotated = await rotateSelectionIfDue();
         if (queueWorkWasPreempted(workGeneration)) return;
         // Honor the host's current discovery + content + refill size settings.
         const { discoverEnabled, similarCount } = getDiscoverySettings();
@@ -335,6 +348,12 @@ async function tick() {
                 : "")
         );
         if (res.added > 0 && !queueWorkWasPreempted(workGeneration)) {
+          if (rotated?.rotatedMood || rotated?.rotatedDecade) {
+            res.rotation = {
+              mood: rotated.rotatedMood || null,
+              decade: rotated.rotatedDecade || null,
+            };
+          }
           await scheduleRefillAnnounce(res, {
             boundaryTrack,
             upcoming: status.upcoming,

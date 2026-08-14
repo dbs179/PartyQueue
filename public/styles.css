@@ -770,6 +770,14 @@ button.subpage-head-link:active {
     padding: 10px 48px 10px 14px;
   }
 
+  body:has(#view-main:not([hidden])) #view-main .same-artist-countdown:not([hidden]) {
+    display: block;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1;
+  }
+
   /* Fairness line can be long (songs + sets); allow wrap on PC. */
   body:has(#view-main:not([hidden])) #view-main .guest-fairness {
     max-width: min(68%, 52ch);
@@ -1037,12 +1045,35 @@ button.np-vibe-link:focus-visible {
 
 /* Name + fairness on one row above Search. */
 .guest-meta-row {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   min-width: 0;
   width: 100%;
+}
+
+/* PC-only: centered between "Adding as" and fairness. */
+.same-artist-countdown {
+  display: none;
+  margin: 0;
+  padding: 0 2px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.same-artist-countdown[hidden] {
+  display: none;
 }
 
 /* Name chip above Search — separate from the search field itself. */

@@ -98,9 +98,12 @@ export function getSetsSinceLastSameArtistBatch() {
 export function noteRandomSetBuilt({ wasShowcase = false } = {}) {
   if (wasShowcase) {
     setsSinceLastShowcase = 0;
-    return;
+  } else {
+    setsSinceLastShowcase += 1;
   }
-  setsSinceLastShowcase += 1;
+  import("./party-settings-http.js")
+    .then((m) => m.nudgePartySettingsStream())
+    .catch(() => {});
 }
 
 export function resetSameArtistBatchCountersForTests() {
@@ -109,11 +112,27 @@ export function resetSameArtistBatchCountersForTests() {
 
 export function getSameArtistBatchState() {
   const cfg = getRandomnessSettings();
+  const enabled = !!cfg.sameArtistBatchEnabled;
+  const everyN = cfg.sameArtistBatchEveryN;
+  const setsSince = setsSinceLastShowcase;
   return {
-    enabled: !!cfg.sameArtistBatchEnabled,
-    everyN: cfg.sameArtistBatchEveryN,
-    setsSince: setsSinceLastShowcase,
+    enabled,
+    everyN,
+    setsSince,
+    setsUntil: sameArtistSetsUntil({ enabled, everyN, setsSince }),
   };
+}
+
+/**
+ * Sets remaining before the next automatic showcase. 0 = due on the next
+ * Random / Never-Ending set. Null when the Booth toggle is off.
+ * @param {{ enabled?: boolean, everyN?: number, setsSince?: number }} [state]
+ */
+export function sameArtistSetsUntil(state = getSameArtistBatchState()) {
+  if (!state?.enabled) return null;
+  const every = Math.max(1, Math.floor(Number(state.everyN) || 1));
+  const since = Math.max(0, Math.floor(Number(state.setsSince) || 0));
+  return Math.max(0, every - since);
 }
 
 /**

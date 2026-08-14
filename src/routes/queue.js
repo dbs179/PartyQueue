@@ -319,6 +319,7 @@ export function registerQueueRoutes(app, ctx) {
                 dedication: note,
                 uri,
                 trackId: reqId,
+                kind: "songRequest",
                 queuePosition: pos,
                 startPlayback: true,
                 preemptGeneration,
@@ -365,6 +366,7 @@ export function registerQueueRoutes(app, ctx) {
                 dedication: note,
                 uri,
                 trackId: reqId,
+                kind: "songRequest",
                 queuePosition: shoutPos,
                 startPlayback: false,
                 preemptGeneration,
@@ -575,6 +577,10 @@ export function registerQueueRoutes(app, ctx) {
                 requestedBy: user,
                 uri: first.uri,
                 trackId: first.id,
+                kind: "setRequest",
+                trackCount: Array.isArray(result.tracks)
+                  ? result.tracks.length
+                  : 0,
                 queuePosition: shoutPos,
                 startPlayback,
                 preemptGeneration,
@@ -683,6 +689,7 @@ export function registerQueueRoutes(app, ctx) {
               dedication: forWho,
               uri,
               trackId: id,
+              kind: "songRequest",
               queuePosition: shoutPos,
               startPlayback: false,
               preemptGeneration,
@@ -793,6 +800,15 @@ export function registerQueueRoutes(app, ctx) {
             added: plannedCount,
             highlights: batchPlan.highlightsPreview ?? [],
             similarAdded: batchPlan.similarAddedPreview ?? 0,
+            reactionSet: batchPlan.reactionSetKind
+              ? { kind: batchPlan.reactionSetKind }
+              : null,
+            sameArtistBatch: batchPlan.showcaseArtistKey
+              ? {
+                  artist: batchPlan.showcaseArtistName,
+                  key: batchPlan.showcaseArtistKey,
+                }
+              : null,
           },
           { preemptGeneration }
         );

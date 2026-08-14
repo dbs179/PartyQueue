@@ -8,6 +8,7 @@ import {
 } from "./guest-profiles.js";
 import { getDjVoiceSettings } from "./settings.js";
 import { getEndOfNightTrack } from "./closing-time.js";
+import { pickFlavorAnnounceLines } from "./dj-flavor-announce.js";
 
 const RECAP_WINDOW_HOURS = 12;
 
@@ -197,11 +198,15 @@ export function writeRequestShoutTemplate({
   isBirthday = false,
   birthdayLabel = "birthday star",
   notes = null,
+  kind = "songRequest",
+  trackCount = 0,
+  flavorIntro = "",
 } = {}) {
   const dj = getDjVoiceSettings();
   const forWho = String(dedication || "").trim();
+  const setKind = kind === "setRequest";
   const maxWords = Math.min(
-    isBirthday || forWho ? 55 : 45,
+    setKind || isBirthday || forWho ? 70 : 50,
     Math.max(22, Number(dj.djAnnounceMaxWords) || 55)
   );
   const song = String(name || "this next track").trim();
@@ -212,9 +217,20 @@ export function writeRequestShoutTemplate({
     : by
       ? pickGuestNotes(by, 2)
       : [];
+  const opener =
+    String(flavorIntro || "").trim() ||
+    pickFlavorAnnounceLines(setKind ? "setRequest" : "songRequest", {
+      guest: by || "a guest",
+      artist: who,
+      song,
+      count: trackCount,
+    })?.intro ||
+    "";
 
   const parts = [];
-  if (by) {
+  if (opener) {
+    parts.push(opener);
+  } else if (by) {
     parts.push(
       pick([
         `Shout-out to ${by}!`,
@@ -247,15 +263,26 @@ export function writeRequestShoutTemplate({
     );
   }
 
-  if (who) {
+  if (setKind) {
     parts.push(
-      pick([
-        `Up next: ${song} by ${who}.`,
-        `We're spinning ${song} by ${who}.`,
-      ])
+      who
+        ? pick([
+            `Opening with ${song} by ${who}.`,
+            `First up: ${song} by ${who}.`,
+          ])
+        : pick([`Opening with ${song}.`, `First up: ${song}.`])
     );
-  } else {
-    parts.push(pick([`Up next: ${song}.`, `Here's ${song}.`]));
+  } else if (!opener) {
+    if (who) {
+      parts.push(
+        pick([
+          `Up next: ${song} by ${who}.`,
+          `We're spinning ${song} by ${who}.`,
+        ])
+      );
+    } else {
+      parts.push(pick([`Up next: ${song}.`, `Here's ${song}.`]));
+    }
   }
 
   for (const note of noteBits) {

@@ -20,6 +20,7 @@ import {
   setRotationSettings,
 } from "./settings.js";
 import { isPartyOver, setKidsLock } from "./party-rituals.js";
+import { getSameArtistBatchState } from "./same-artist-batch.js";
 
 /** Vibe-page toggles — public on the LAN (no host PIN). */
 const PUBLIC_VIBE_TOGGLE_KEYS = [
@@ -92,6 +93,7 @@ export function readPartySettingsSnapshot() {
     hostControlsOnly: !!content.hostControlsOnly,
     closingTimeAt: getClosingTimeAt(),
     partyRecap: getLastPartyRecap(),
+    sameArtistBatch: getSameArtistBatchState(),
   };
 }
 
@@ -103,6 +105,15 @@ export function partySettingsSignature(snapshot = null) {
     : snapshot.mixGenres == null
       ? ""
       : String(snapshot.mixGenres);
+  const sameArtist = snapshot.sameArtistBatch;
+  const sameArtistKey =
+    sameArtist && typeof sameArtist === "object"
+      ? [
+          sameArtist.enabled ? 1 : 0,
+          sameArtist.everyN ?? "",
+          sameArtist.setsSince ?? "",
+        ].join(":")
+      : "";
   const recap = snapshot.partyRecap;
   const recapKey =
     recap && typeof recap === "object"
@@ -125,6 +136,7 @@ export function partySettingsSignature(snapshot = null) {
     snapshot.hostControlsOnly ? 1 : 0,
     snapshot.closingTimeAt ?? "",
     recapKey,
+    sameArtistKey,
   ].join("\x1f");
 }
 

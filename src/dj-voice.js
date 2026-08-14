@@ -78,6 +78,16 @@ import {
   pickDjNextSetLines,
 } from "./dj-set-packs.js";
 import {
+  SAME_ARTIST_ALWAYS,
+  SAME_ARTIST_NEVER,
+  cleanSameArtistBatch,
+  pickSameArtistAnnounceLines,
+} from "./dj-same-artist-announce.js";
+import {
+  cleanRotationFlavor,
+  pickFlavorAnnounceLines,
+} from "./dj-flavor-announce.js";
+import {
   getRecentDjAnnounceScripts,
   rememberDjAnnounceScript,
   rememberDjClipScript,
@@ -1507,7 +1517,65 @@ export function buildSetDescription({
   firstArtist = "",
   introHasCount = false,
   salt = 0,
+  sameArtistName = "",
+  rotation = null,
 } = {}) {
+  const showcase = String(sameArtistName || "").trim();
+  if (showcase) {
+    const Count = String(howMany).charAt(0).toUpperCase() + String(howMany).slice(1);
+    const startClause = firstArtist ? `, starting with ${firstArtist}` : "";
+    const templates = introHasCount
+      ? [
+          `It's a same-artist set — all ${showcase}${startClause}.`,
+          `One artist for this block: ${showcase}${startClause}.`,
+          `This is a one-artist mini-set by ${showcase}${startClause}.`,
+        ]
+      : [
+          `${Count} tracks, same-artist set — all ${showcase}${startClause}.`,
+          `I lined up a ${showcase} same-artist set${startClause}.`,
+          `${Count} songs, one name: ${showcase}${startClause}.`,
+        ];
+    return pick(templates, salt);
+  }
+  const rot = cleanRotationFlavor(rotation);
+  if (rot?.decade || rot?.mood) {
+    const Count = String(howMany).charAt(0).toUpperCase() + String(howMany).slice(1);
+    const startClause = firstArtist ? `, starting with ${firstArtist}` : "";
+    if (rot.decade && rot.mood) {
+      const templates = introHasCount
+        ? [
+            `We rotated — ${rot.mood} mood, ${rot.decade} decade${startClause}.`,
+            `Mood and decade both flipped: ${rot.mood}, ${rot.decade}${startClause}.`,
+          ]
+        : [
+            `${Count} tracks after a double rotate — ${rot.mood} and the ${rot.decade}${startClause}.`,
+            `I lined up a ${rot.mood} ${rot.decade} set after the rotate${startClause}.`,
+          ];
+      return pick(templates, salt);
+    }
+    if (rot.decade) {
+      const templates = introHasCount
+        ? [
+            `We just rotated the decade. This set is the ${rot.decade}${startClause}.`,
+            `Era change: a ${rot.decade} block${startClause}.`,
+          ]
+        : [
+            `${Count} tracks after a decade rotate — all ${rot.decade}${startClause}.`,
+            `I lined up a ${rot.decade} set after the decade wheel landed${startClause}.`,
+          ];
+      return pick(templates, salt);
+    }
+    const templates = introHasCount
+      ? [
+          `We just rotated the mood. This set is ${rot.mood}${startClause}.`,
+          `New vibe after the rotate: ${rot.mood}${startClause}.`,
+        ]
+      : [
+          `${Count} tracks after a mood rotate — this block is ${rot.mood}${startClause}.`,
+          `I lined up a ${rot.mood} set after the mood wheel landed${startClause}.`,
+        ];
+    return pick(templates, salt);
+  }
   const desc = String(descriptor || "hand-picked").trim() || "hand-picked";
   const article = descriptorArticle(desc);
   const Count = String(howMany).charAt(0).toUpperCase() + String(howMany).slice(1);
@@ -1552,6 +1620,8 @@ export function buildSetScript({
   djAlwaysInstructions = null,
   djNeverInstructions = null,
   djPronunciations = null,
+  sameArtistName = "",
+  rotation = null,
 } = {}) {
   const knobs =
     characterKnobs ||
@@ -1620,6 +1690,8 @@ export function buildSetScript({
     firstArtist: artists[0] || "",
     introHasCount,
     salt,
+    sameArtistName,
+    rotation,
   });
   const middle = [
     nameLine,
@@ -1675,6 +1747,8 @@ export function buildLlmPrompt(summary) {
     descriptor = "",
     nameMention = false,
     introHasCount = false,
+    sameArtistName = "",
+    rotation = null,
   } = summary;
   const name = String(djName || DJ_VOICE_DEFAULTS.djName).trim() || DJ_VOICE_DEFAULTS.djName;
   const highlightList = Array.isArray(highlights) ? highlights : [];
@@ -1727,6 +1801,13 @@ Playlist block:
 - Enabled genres (context only — do not read aloud as a list): ${genreLine}
 - Set energy signature: ${mood.energySignature}
 - Track count: ${count}
+- Set type: ${
+    sameArtistName
+      ? `same-artist showcase — every track is ${sameArtistName}`
+      : rotation?.decade || rotation?.mood
+        ? `rotation set — ${[rotation.decade && `decade ${rotation.decade}`, rotation.mood && `mood ${rotation.mood}`].filter(Boolean).join(" and ")}`
+        : "mixed playlist set"
+  }
 - Discoveries enabled: ${discoveryEnabled ? "yes" : "no"}
 - Discovery tracks in this block: ${discoveryEnabled ? similarAdded : 0}
 - First song after this announce (plays immediately after the DJ clip): ${leadLine}
@@ -1843,11 +1924,18 @@ export async function writeSetScript(summary = {}) {
       : summary.reactionSet === "loved" || summary.reactionSet === "hated"
         ? summary.reactionSet
         : null;
-  const discoveryEnabled = reactionSetKind
-    ? false
-    : summary.discoveryEnabled != null
-      ? !!summary.discoveryEnabled
-      : !!getDiscoverySettings().discoverEnabled;
+  const sameArtist = reactionSetKind
+    ? null
+    : cleanSameArtistBatch(summary.sameArtistBatch);
+  const rotation = reactionSetKind || sameArtist
+    ? null
+    : cleanRotationFlavor(summary.rotation);
+  const discoveryEnabled =
+    reactionSetKind || sameArtist
+      ? false
+      : summary.discoveryEnabled != null
+        ? !!summary.discoveryEnabled
+        : !!getDiscoverySettings().discoverEnabled;
   const similarAdded = discoveryEnabled ? Number(summary.similarAdded) || 0 : 0;
   const introPercent =
     summary.nameIntroPercent != null
@@ -1866,6 +1954,26 @@ export async function writeSetScript(summary = {}) {
             : "glorious trainwreck energy",
         eraLabel: null,
       }
+    : sameArtist
+      ? {
+          mood: "party",
+          moodLabel: "Same-artist set",
+          genreLabels: [],
+          energySignature: "one-artist showcase energy",
+          eraLabel: null,
+        }
+    : rotation
+      ? {
+          mood: summary.moodContext?.mood || "party",
+          moodLabel: rotation.decade
+            ? `${rotation.decade} rotation`
+            : `${rotation.mood} rotation`,
+          genreLabels: [],
+          energySignature: rotation.decade
+            ? `${rotation.decade} era energy`
+            : `${rotation.mood} mood energy`,
+          eraLabel: rotation.decade || null,
+        }
     : summary.moodContext ||
       resolveDjMoodContext({
         genres: summary.genres ?? enabledGenresFromSettings(),
@@ -1915,6 +2023,75 @@ export async function writeSetScript(summary = {}) {
       (Array.isArray(highlights) ? highlights.length : 0) +
       String(moodContext.mood || "").length) %
     97;
+  const sameArtistLines = sameArtist
+    ? pickSameArtistAnnounceLines({
+        artist: sameArtist.artist,
+        salt: saltHint,
+      })
+    : null;
+  const rotationLines = rotation
+    ? pickFlavorAnnounceLines(rotation.decade ? "rotateDecade" : "rotateMood", {
+        salt: saltHint,
+        mood: rotation.mood || "",
+        decade: rotation.decade || "",
+      })
+    : null;
+  if (rotationLines && rotation.mood && rotation.decade) {
+    const moodExtra = pickFlavorAnnounceLines("rotateMood", {
+      salt: saltHint + 3,
+      mood: rotation.mood,
+    });
+    if (moodExtra?.blurb) {
+      rotationLines.blurb = `${rotationLines.blurb} Also hit the mood rotate: ${moodExtra.blurb}`;
+    }
+  }
+  if (sameArtistLines) {
+    console.log(
+      `[dj-voice] same-artist set announce (${sameArtistLines.artist})`
+    );
+    characterKnobs = {
+      ...characterKnobs,
+      alwaysInstructions: [
+        characterKnobs.alwaysInstructions,
+        SAME_ARTIST_ALWAYS,
+        sameArtistLines.blurb
+          ? `Hit this set beat once, naturally: ${sameArtistLines.blurb}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      neverInstructions: [
+        characterKnobs.neverInstructions,
+        SAME_ARTIST_NEVER,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    };
+  } else if (rotationLines) {
+    console.log(
+      `[dj-voice] rotation announce (${rotation.decade || rotation.mood})`
+    );
+    characterKnobs = {
+      ...characterKnobs,
+      alwaysInstructions: [
+        characterKnobs.alwaysInstructions,
+        rotation.decade
+          ? `This set follows a DECADE ROTATION to the ${rotation.decade}. Say we rotated the decade.`
+          : `This set follows a MOOD ROTATION to ${rotation.mood}. Say we rotated the mood.`,
+        rotationLines.blurb
+          ? `Hit this set beat once, naturally: ${rotationLines.blurb}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      neverInstructions: [
+        characterKnobs.neverInstructions,
+        "Do not pretend this is the same vibe as the last set. Name the rotate.",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    };
+  }
   const characterMoment =
     summary.characterMoment ||
     resolveCharacterMoment({
@@ -1937,7 +2114,7 @@ export async function writeSetScript(summary = {}) {
       ? String(summary.outro).trim()
       : null;
   const nextSetLines =
-    summary.skipNextSetPack || reactionSetKind
+    summary.skipNextSetPack || reactionSetKind || sameArtist || rotation
       ? null
       : pickDjNextSetLines({ salt: saltHint + 41 });
   if (nextSetLines) {
@@ -1969,6 +2146,10 @@ export async function writeSetScript(summary = {}) {
       intro = "Up next: the room's most loved songs.";
     } else if (reactionSetKind === "hated") {
       intro = "Up next: the room's most hated songs.";
+    } else if (sameArtistLines?.intro) {
+      intro = sameArtistLines.intro;
+    } else if (rotationLines?.intro) {
+      intro = rotationLines.intro;
     } else {
       intro = reserveIntroPhrase(event, saltHint + 19)?.text || "";
     }
@@ -1984,8 +2165,12 @@ export async function writeSetScript(summary = {}) {
         ? "most-loved"
         : reactionSetKind === "hated"
           ? "most-hated"
-          : reserveSetDescriptor(moodContext.mood, saltHint + 29)?.text ||
-            "hand-picked";
+          : sameArtistLines
+            ? sameArtistLines.descriptor
+            : rotationLines
+              ? rotationLines.descriptor
+              : reserveSetDescriptor(moodContext.mood, saltHint + 29)?.text ||
+                "hand-picked";
 
   // Occasional DJ-name mention lives in the middle now (intensity/host knob).
   const nameMention =
@@ -2021,6 +2206,8 @@ export async function writeSetScript(summary = {}) {
     introHasCount,
     recordMemory: true,
     recentAnnounceScripts: getRecentDjAnnounceScripts(5),
+    sameArtistName: sameArtistLines?.artist || "",
+    rotation,
   };
 
   try {
@@ -3053,6 +3240,12 @@ export async function scheduleRefillAnnounce(
     count: summary?.added ?? summary?.count ?? 0,
     highlights: summary?.highlights ?? [],
     similarAdded: summary?.similarAdded ?? 0,
+    reactionSet: summary?.reactionSet ?? null,
+    sameArtistBatch: summary?.sameArtistBatch ?? null,
+    rotation: summary?.rotation ?? null,
+    genreLane: summary?.genreLane ?? null,
+    mood: summary?.mood ?? null,
+    eraMood: summary?.mood ?? null,
   });
   if (queueWorkWasPreempted(preemptGeneration)) return null;
   const left = Math.max(0, Math.floor(Number(upcoming) || 0));
@@ -3172,6 +3365,12 @@ export async function announceFreshSet(
       count: summary.added,
       highlights: summary.highlights ?? [],
       similarAdded: summary.similarAdded ?? 0,
+      reactionSet: summary.reactionSet ?? null,
+      sameArtistBatch: summary.sameArtistBatch ?? null,
+      rotation: summary.rotation ?? null,
+      genreLane: summary.genreLane ?? null,
+      mood: summary.mood ?? null,
+      eraMood: summary.mood ?? null,
     });
     clip = null;
   }
@@ -3235,6 +3434,12 @@ export async function announceSetBatch(
       count: summary.added,
       highlights: summary.highlights ?? [],
       similarAdded: summary.similarAdded ?? 0,
+      reactionSet: summary.reactionSet ?? null,
+      sameArtistBatch: summary.sameArtistBatch ?? null,
+      rotation: summary.rotation ?? null,
+      genreLane: summary.genreLane ?? null,
+      mood: summary.mood ?? null,
+      eraMood: summary.mood ?? null,
     });
     clip = null;
   }

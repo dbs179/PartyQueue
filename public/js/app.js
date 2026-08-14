@@ -12,6 +12,7 @@ import { createConfirmModal } from "./confirm-modal.js";
 import { createHostPinUi } from "./host-pin-ui.js";
 import { createGuestNameUi } from "./guest-name-ui.js";
 import { createGuestFairnessUi } from "./guest-fairness-ui.js";
+import { createSameArtistCountdownUi } from "./same-artist-countdown-ui.js";
 import { loadMemory as loadMemoryUi } from "./memory-ui.js";
 import { createPartyRecapUi } from "./party-recap.js";
 import { createSonosGroups } from "./sonos-groups.js";
@@ -181,6 +182,10 @@ const guestFairnessUi = createGuestFairnessUi({
 refreshGuestFairness = () => {
   guestFairnessUi.refresh();
 };
+
+const sameArtistCountdownUi = createSameArtistCountdownUi({
+  el: document.getElementById("same-artist-countdown"),
+});
 
 const dedicationOverlay = document.getElementById("dedication-overlay");
 const dedicationInput = document.getElementById("dedication-input");
@@ -1969,6 +1974,7 @@ function applyPartySettings(payload) {
     syncHostControlsVisibility();
   }
   maybeAnnounceClosingTime(payload.closingTimeAt, payload.partyRecap);
+  sameArtistCountdownUi.paint(payload.sameArtistBatch);
 }
 
 const partyDisplayIdle = createPartyDisplayIdle();

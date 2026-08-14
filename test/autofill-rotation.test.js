@@ -56,6 +56,8 @@ test("decade rotation never repeats the current decade and persists", async () =
   });
   const out = await autofill.rotateSelectionIfDue({ poolSize: bigPool });
   assert.equal(out.mood, "90s", "only non-current pool entry must win");
+  assert.equal(out.rotatedDecade, "90's");
+  assert.equal(out.rotatedMood, null);
   assert.equal(autofill.getAutoFillState().mood, "90s");
   // Persisted through savePickerSelection -> settings file.
   settings.bustSettingsCache();
@@ -80,6 +82,8 @@ test("mood preset rotation applies the preset's genre buckets", async () => {
     [...presets.presetGenres("chill")].sort()
   );
   assert.equal(out.mood, null, "decade untouched when only mood rotates");
+  assert.equal(out.rotatedMood, "Chill");
+  assert.equal(out.rotatedDecade, null);
 });
 
 test("cadence: every N sets means N-1 quiet sets between changes", async () => {

@@ -57,9 +57,9 @@ describe("dj-set-packs", () => {
     assert.ok(packs.some((pack) => pack.id === "maria-cooking"));
     const pack = getDjSetPack("maria-cooking");
     assert.equal(pack.label, "Maria is cooking dinner");
-    assert.ok(pack.intros.length >= 4);
-    assert.ok(pack.blurbs.length >= 4);
-    assert.ok(pack.outros.length >= 4);
+    assert.equal(pack.intros.length, 30);
+    assert.equal(pack.blurbs.length, 30);
+    assert.equal(pack.outros.length, 30);
   });
 
   it("rejects unknown packs", () => {

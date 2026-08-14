@@ -61,6 +61,61 @@ describe("refill announce guard", () => {
     assert.equal(refillSetFlavorChanged(null, "hiphop", "party"), false);
   });
 
+  test("refillSetFlavorChanged treats same-artist as a flavor change", () => {
+    const guard = buildRefillAnnounceGuard({
+      added: 5,
+      genreLane: "rock",
+      mood: null,
+      sameArtistBatch: { artist: "Foo Fighters", key: "foo fighters" },
+      highlights: [{ name: "Run", artist: "Foo Fighters" }],
+    });
+    assert.equal(guard.sameArtist, "Foo Fighters");
+    assert.equal(
+      refillSetFlavorChanged(guard, "rock", null, null, "Foo Fighters"),
+      false
+    );
+    assert.equal(refillSetFlavorChanged(guard, "rock", null, null, null), true);
+    assert.equal(
+      refillSetFlavorChanged(guard, "rock", null, null, "Queen"),
+      true
+    );
+  });
+
+  test("refillSetFlavorChanged treats rotation as a flavor change", () => {
+    const guard = buildRefillAnnounceGuard({
+      added: 5,
+      genreLane: "rock",
+      mood: "party",
+      rotation: { decade: "80's", mood: null },
+      highlights: [{ name: "A", artist: "B" }],
+    });
+    assert.equal(guard.rotation, "80's");
+    assert.equal(
+      refillSetFlavorChanged(guard, "rock", "party", null, null, "80's"),
+      false
+    );
+    assert.equal(
+      refillSetFlavorChanged(guard, "rock", "party", null, null, null),
+      false,
+      "same-set top-up after a rotate is not a new flavor"
+    );
+    assert.equal(
+      refillSetFlavorChanged(guard, "rock", "party", null, null, "90's"),
+      true
+    );
+    const plain = buildRefillAnnounceGuard({
+      added: 5,
+      genreLane: "rock",
+      mood: "party",
+      highlights: [{ name: "A", artist: "B" }],
+    });
+    assert.equal(
+      refillSetFlavorChanged(plain, "rock", "party", null, null, "80's"),
+      true,
+      "a new rotate on an unlabeled guard must announce"
+    );
+  });
+
   test("refillSetFlavorChanged treats reactionSet as a flavor change", () => {
     const guard = buildRefillAnnounceGuard({
       added: 5,
@@ -124,6 +179,41 @@ describe("refill announce guard", () => {
         now: 1_000 + 60_000,
         nextGenreLane: "hiphop",
         nextMood: "party",
+      }),
+      false
+    );
+  });
+
+  test("shouldSuppress: same-set top-up after a rotate stays silent", () => {
+    const guard = buildRefillAnnounceGuard(
+      {
+        added: 5,
+        genreLane: "rock",
+        mood: "80s",
+        rotation: { decade: "80's", mood: null },
+        highlights: [{ name: "Song A", artist: "Artist A" }],
+      },
+      1_000
+    );
+    assert.equal(
+      shouldSuppressRefillAnnounce({
+        guard,
+        anyHighlightQueued: true,
+        now: 1_000 + 60_000,
+        nextGenreLane: "rock",
+        nextMood: "80s",
+        nextRotation: null,
+      }),
+      true
+    );
+    assert.equal(
+      shouldSuppressRefillAnnounce({
+        guard,
+        anyHighlightQueued: true,
+        now: 1_000 + 60_000,
+        nextGenreLane: "rock",
+        nextMood: "80s",
+        nextRotation: "90's",
       }),
       false
     );

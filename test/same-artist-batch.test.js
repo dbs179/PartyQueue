@@ -7,6 +7,7 @@ import {
   noteRandomSetBuilt,
   getSetsSinceLastSameArtistBatch,
   resetSameArtistBatchCountersForTests,
+  sameArtistSetsUntil,
 } from "../src/same-artist-batch.js";
 import { allowSameArtistBatch } from "../src/sampler.js";
 
@@ -77,4 +78,12 @@ test("counter advances for normal sets and resets on showcase", () => {
   );
   noteRandomSetBuilt({ wasShowcase: true });
   assert.equal(getSetsSinceLastSameArtistBatch(), 0);
+});
+
+test("sameArtistSetsUntil counts remaining sets and hides when off", () => {
+  assert.equal(sameArtistSetsUntil({ enabled: false, everyN: 8, setsSince: 3 }), null);
+  assert.equal(sameArtistSetsUntil({ enabled: true, everyN: 8, setsSince: 0 }), 8);
+  assert.equal(sameArtistSetsUntil({ enabled: true, everyN: 8, setsSince: 7 }), 1);
+  assert.equal(sameArtistSetsUntil({ enabled: true, everyN: 8, setsSince: 8 }), 0);
+  assert.equal(sameArtistSetsUntil({ enabled: true, everyN: 5, setsSince: 9 }), 0);
 });

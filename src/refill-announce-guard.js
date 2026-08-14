@@ -2,8 +2,9 @@
 // Pure helpers stay free of Sonos/settings imports; live queue lookup is injected.
 //
 // Same genreLane + mood early top-ups stay silent while the prior announced
-// batch is still queued. A new set flavor (lane or mood change) always allows
-// an intro so genre rotation is never mute.
+// batch is still queued. A new set flavor (lane, mood, reaction, same-artist,
+// or a fresh rotate event) always allows an intro. A rotate flag on the prior
+// guard does not force a second intro on the next same-set top-up.
 
 /** Safety TTL so unmatched/renamed tracks cannot mute refill intros forever. */
 export function refillAnnounceGuardTtlMs(setSize) {
@@ -30,17 +31,41 @@ export function refillSetFlavorChanged(
   guard,
   nextGenreLane = null,
   nextMood = null,
-  nextReactionSet = null
+  nextReactionSet = null,
+  nextSameArtist = null,
+  nextRotation = null
 ) {
   if (!guard) return false;
   const gRs = cleanFlavorPart(guard.reactionSet);
   const nRs = cleanFlavorPart(nextReactionSet);
   if (gRs !== nRs) return true;
+  const gSa = cleanFlavorPart(guard.sameArtist);
+  const nSa = cleanFlavorPart(nextSameArtist);
+  if (gSa !== nSa) return true;
+  const gRot = cleanFlavorPart(guard.rotation);
+  const nRot = cleanFlavorPart(nextRotation);
+  // Rotation is a one-shot event on the batch that just rotated. A later
+  // same-lane top-up with no rotation flag is still that set — do not treat
+  // "had a rotate → no rotate" as a new flavor. A *new* rotate always is.
+  if (nRot && gRot !== nRot) return true;
   const gLane = cleanFlavorPart(guard.genreLane);
   const gMood = cleanFlavorPart(guard.mood);
   const nLane = cleanFlavorPart(nextGenreLane);
   const nMood = cleanFlavorPart(nextMood);
-  if (!gLane && !gMood && !nLane && !nMood && !gRs && !nRs) return false;
+  if (
+    !gLane &&
+    !gMood &&
+    !nLane &&
+    !nMood &&
+    !gRs &&
+    !nRs &&
+    !gSa &&
+    !nSa &&
+    !gRot &&
+    !nRot
+  ) {
+    return false;
+  }
   return gLane !== nLane || gMood !== nMood;
 }
 
@@ -54,9 +79,22 @@ export function shouldSuppressRefillAnnounce({
   now = Date.now(),
   nextGenreLane = null,
   nextMood = null,
+  nextReactionSet = null,
+  nextSameArtist = null,
+  nextRotation = null,
 } = {}) {
   if (!guard) return false;
-  if (refillSetFlavorChanged(guard, nextGenreLane, nextMood)) return false;
+  if (
+    refillSetFlavorChanged(
+      guard,
+      nextGenreLane,
+      nextMood,
+      nextReactionSet,
+      nextSameArtist,
+      nextRotation
+    )
+  )
+    return false;
   const createdAt = Number(guard.createdAt) || 0;
   if (now - createdAt >= refillAnnounceGuardTtlMs(guard.setSize)) return false;
   const highlights = Array.isArray(guard.highlights) ? guard.highlights : [];
@@ -83,6 +121,18 @@ export function buildRefillAnnounceGuard(summary, createdAt = Date.now()) {
   const mood = cleanFlavorPart(summary?.mood) || null;
   const reactionSet =
     cleanFlavorPart(summary?.reactionSet?.kind || summary?.reactionSet) || null;
+  const sameArtist =
+    cleanFlavorPart(
+      summary?.sameArtistBatch?.artist ||
+        summary?.sameArtistBatch?.key ||
+        summary?.sameArtist
+    ) || null;
+  const rotation = [
+    cleanFlavorPart(summary?.rotation?.decade),
+    cleanFlavorPart(summary?.rotation?.mood),
+  ]
+    .filter(Boolean)
+    .join("+") || null;
   return {
     highlights,
     setSize,
@@ -90,6 +140,8 @@ export function buildRefillAnnounceGuard(summary, createdAt = Date.now()) {
     genreLane,
     mood,
     reactionSet,
+    sameArtist,
+    rotation,
   };
 }
 
@@ -125,7 +177,7 @@ export function setRefillAnnounceGuardForTests(guard = null) {
  * @param {{
  *   findUpcoming?: (track: { name?: string, artist?: string }) => Promise<number|null>,
  *   now?: number,
- *   nextSummary?: { genreLane?: string|null, mood?: string|null, reactionSet?: { kind?: string }|string|null }|null,
+   *   nextSummary?: { genreLane?: string|null, mood?: string|null, reactionSet?: { kind?: string }|string|null, sameArtistBatch?: { artist?: string, key?: string }|null }|null,
  *   nextGenreLane?: string|null,
  *   nextMood?: string|null,
  * }} [opts]
@@ -158,9 +210,22 @@ export async function isRefillAnnounceSuppressed({
       : nextSummary?.reactionSet != null
         ? nextSummary.reactionSet
         : null;
+  const sameArtist =
+    nextSummary?.sameArtistBatch?.artist ||
+    nextSummary?.sameArtistBatch?.key ||
+    nextSummary?.sameArtist ||
+    null;
+  const rotation = [
+    nextSummary?.rotation?.decade,
+    nextSummary?.rotation?.mood,
+  ]
+    .filter(Boolean)
+    .join("+") || null;
 
   // New set flavor — allow without Sonos highlight lookups.
-  if (refillSetFlavorChanged(guard, lane, mood, reactionSet)) {
+  if (
+    refillSetFlavorChanged(guard, lane, mood, reactionSet, sameArtist, rotation)
+  ) {
     refillAnnounceGuard = null;
     return false;
   }
