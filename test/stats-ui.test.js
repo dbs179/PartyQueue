@@ -5,6 +5,9 @@ import {
   statRows,
   paintStatsReactionList,
   statsSummaryCardsHtml,
+  displayTonightStatsHtml,
+  displayWindowStatsHtml,
+  paintDisplayTonightStats,
   dedicationsHtml,
   karaokeRowsHtml,
   statsEmptyMessage,
@@ -87,6 +90,51 @@ test("karaokeRowsHtml includes mic emoji and Mic'd by line", () => {
   assert.match(html, new RegExp(REACTION_EMOJI.mic));
   assert.match(html, /Mic'd by/);
   assert.match(html, /Dave/);
+});
+
+test("displayTonightStatsHtml paints tonight highlights", () => {
+  const html = displayTonightStatsHtml({
+    tonight: {
+      total: 12,
+      topSongs: [{ name: "Thunderstruck", artist: "AC/DC", count: 3 }],
+      topArtists: [{ artist: "AC/DC", count: 4 }],
+      topRequesters: [{ name: "Maria", count: 5 }],
+    },
+  });
+  assert.match(html, /Requests/);
+  assert.match(html, />12</);
+  assert.match(html, /Thunderstruck/);
+  assert.match(html, /Maria/);
+  assert.match(html, /5\u00d7/);
+});
+
+test("displayWindowStatsHtml paints all-time highlights", () => {
+  const html = displayWindowStatsHtml({
+    total: 88,
+    topSongs: [{ name: "Africa", artist: "Toto", count: 9 }],
+    topArtists: [{ artist: "Toto", count: 11 }],
+    topRequesters: [{ name: "Dave", count: 20 }],
+  });
+  assert.match(html, />88</);
+  assert.match(html, /Africa/);
+  assert.match(html, /Dave/);
+  assert.match(html, /20\u00d7/);
+});
+
+test("paintDisplayTonightStats fills tonight and all-time grids", () => {
+  const tonightGrid = { innerHTML: "" };
+  const allTimeGrid = { innerHTML: "" };
+  paintDisplayTonightStats(
+    { tonightGrid, allTimeGrid },
+    {
+      tonight: { total: 3, topRequesters: [{ name: "Maria", count: 2 }] },
+      allTime: { total: 40, topRequesters: [{ name: "Dave", count: 12 }] },
+    }
+  );
+  assert.match(tonightGrid.innerHTML, />3</);
+  assert.match(tonightGrid.innerHTML, /Maria/);
+  assert.match(allTimeGrid.innerHTML, />40</);
+  assert.match(allTimeGrid.innerHTML, /Dave/);
 });
 
 test("statsEmptyMessage differs for tonight vs all-time", () => {

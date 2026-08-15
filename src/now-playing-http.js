@@ -162,6 +162,18 @@ export function resolveDisplayGenre(
     }
     return { mixGenreLane: lane, mixGenreLabel: labelForLane(lane) };
   }
+
+  // Untracked queue rows (no origin yet) still get an artist-mapped genre.
+  // Do not inherit setLane here — that would revive a stale lane on idle.
+  const buckets =
+    typeof bucketsFor === "function" ? bucketsFor(np.artist) || [] : [];
+  const artistLane = dominantBucket(buckets);
+  if (artistLane && artistLane !== "other") {
+    return {
+      mixGenreLane: artistLane,
+      mixGenreLabel: labelForLane(artistLane),
+    };
+  }
   return { mixGenreLane: null, mixGenreLabel: null };
 }
 export async function enrichNowPlaying(np) {

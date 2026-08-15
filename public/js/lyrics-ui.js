@@ -140,6 +140,16 @@ export function createLyricsUi(els, deps) {
     return [npFsLyrics, displayLyrics].filter(Boolean);
   }
 
+  function setDisplayLyricsVisible(on, { dj = false } = {}) {
+    if (!displayLyrics) return;
+    displayLyrics.hidden = !on;
+    displayLyrics.classList?.toggle?.("is-dj", !!(on && dj));
+    if (!on) {
+      displayLyrics.replaceChildren();
+      displayLyrics.innerHTML = "";
+    }
+  }
+
   function lyricsContainerHasPaint(el) {
     return !!el?.querySelector(
       ".np-fs-lyrics-synced, .np-fs-lyrics-plain, .np-fs-lyrics-status"
@@ -152,19 +162,14 @@ export function createLyricsUi(els, deps) {
     if (!source) return;
     for (const el of containers) {
       if (el === source || lyricsContainerHasPaint(el)) continue;
-      if (
-        el === displayLyrics &&
-        syncedLines &&
-        source.querySelector(".np-fs-lyrics-synced")
-      ) {
-        continue;
-      }
+      if (el === displayLyrics) continue;
       el.innerHTML = source.innerHTML;
     }
   }
 
   function paintDisplayLyricWindow(activeIdx) {
     if (!displayLyrics || !syncedLines) return;
+    displayLyrics.hidden = false;
     const ul = document.createElement("ul");
     ul.className = "np-fs-lyrics-synced party-display-lyrics-window";
     // 5-line karaoke window: two before, active, two after.
@@ -196,25 +201,39 @@ export function createLyricsUi(els, deps) {
     displayLyrics.replaceChildren(ul);
   }
 
-  function setNpFsLyricsStatus(msg) {
+  function setNpFsLyricsStatus(msg, { showOnDisplay = false } = {}) {
     syncedLines = null;
-    const html = `<p class="np-fs-lyrics-status">${escapeHtml(msg)}</p>`;
-    for (const el of lyricsContainers()) el.innerHTML = html;
+    if (npFsLyrics) {
+      npFsLyrics.innerHTML = `<p class="np-fs-lyrics-status">${escapeHtml(msg)}</p>`;
+    }
+    if (showOnDisplay && displayLyrics) {
+      setDisplayLyricsVisible(true, { dj: true });
+      displayLyrics.innerHTML = `<p class="np-fs-lyrics-status">${escapeHtml(msg)}</p>`;
+    } else {
+      setDisplayLyricsVisible(false);
+    }
   }
 
-  function renderPlainLyrics(text) {
+  function renderPlainLyrics(text, { showOnDisplay = false } = {}) {
     syncedLines = null;
-    for (const el of lyricsContainers()) {
+    if (npFsLyrics) {
       const pre = document.createElement("pre");
       pre.className = "np-fs-lyrics-plain";
       pre.textContent = text;
-      el.innerHTML = "";
-      el.appendChild(pre);
+      npFsLyrics.innerHTML = "";
+      npFsLyrics.appendChild(pre);
+    }
+    if (showOnDisplay && displayLyrics) {
+      setDisplayLyricsVisible(true, { dj: true });
+      displayLyrics.innerHTML = `<pre class="np-fs-lyrics-plain">${escapeHtml(text)}</pre>`;
+    } else {
+      setDisplayLyricsVisible(false);
     }
   }
 
   function renderSyncedLyrics(lines) {
     syncedLines = lines;
+    setDisplayLyricsVisible(true);
     if (npFsLyrics) {
       const ul = document.createElement("ul");
       ul.className = "np-fs-lyrics-synced";
@@ -445,11 +464,12 @@ export function createLyricsUi(els, deps) {
     if (np?.djVoice) {
       const script = formatDjAnnounceScript(np.announceScript);
       if (script) {
-        renderPlainLyrics(script);
+        renderPlainLyrics(script, { showOnDisplay: true });
         return;
       }
       setNpFsLyricsStatus(
-        np.djSilence ? "DJ coming up…" : "DJ Voice — waiting for script"
+        np.djSilence ? "DJ coming up…" : "DJ Voice — waiting for script",
+        { showOnDisplay: true }
       );
       return;
     }

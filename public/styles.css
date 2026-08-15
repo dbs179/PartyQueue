@@ -4932,14 +4932,13 @@ body.party-display-active.party-display-preview .party-display-view {
   flex: 0 0 auto;
 }
 
-/* Brand + version stay over the art column (not into Up Next). */
+/* Brand sits over the left meta column. */
 .party-display-brand {
   display: flex;
   align-items: baseline;
   gap: calc(12 * var(--pd));
   min-width: 0;
-  /* Match art width: square sized to most of the Now band height. */
-  max-width: min(100%, calc(var(--pd-vh, 100dvh) * 0.62));
+  max-width: min(100%, calc(var(--pd-vh, 100dvh) * 0.42));
 }
 
 .party-display-kicker,
@@ -5005,30 +5004,33 @@ body.party-display-active.party-display-preview .party-display-view {
 }
 
 .party-display-layout {
+  --display-lyric-size: calc(26 * var(--pd));
+  --display-lyric-line: 1.2;
+  --display-lyric-gap: calc(6 * var(--pd));
+  --display-lyric-block: calc(
+    (5 * var(--display-lyric-size) * var(--display-lyric-line)) +
+      (4 * var(--display-lyric-gap)) +
+      (12 * var(--pd))
+  );
+  container-type: size;
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 2.2fr) minmax(calc(380 * var(--pd)), 0.95fr);
-  /* Row 1: art+meta | Up Next (pulled up). Row 2: lyrics | Join at screen bottom. */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /* Equal side columns keep the art+lyrics track on the screen center. */
   grid-template-rows: minmax(0, 1fr) auto;
   align-items: stretch;
-  column-gap: calc(24 * var(--pd));
+  column-gap: calc(16 * var(--pd));
   row-gap: calc(10 * var(--pd));
 }
 
-.party-display-now {
-  grid-column: 1;
-  grid-row: 1;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  justify-content: stretch;
+.party-display-now,
+.party-display-hero {
+  display: contents;
 }
 
 .party-display-side {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 1;
   min-height: 0;
   overflow: hidden;
@@ -5046,29 +5048,31 @@ body.party-display-active.party-display-preview .party-display-view {
   padding: 0;
 }
 
-/* Art | meta | (queue in side): shared top/bottom of the Now row. */
-.party-display-hero {
-  container-type: size;
-  flex: 1 1 auto;
-  width: 100%;
+.party-display-art-col {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   min-height: 0;
   height: 100%;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: stretch;
-  gap: calc(28 * var(--pd));
+  width: min(100cqh, 38cqi);
+  justify-self: center;
+  align-self: stretch;
+  gap: calc(12 * var(--pd));
+}
+
+.party-display-art-col:has(.party-display-lyrics:not([hidden])) {
+  width: min(calc(100cqh - var(--display-lyric-block)), 38cqi);
 }
 
 .party-display-art-wrap {
   position: relative;
-  /* Square fills Now-row height — top/bottom align with queue + meta. */
-  height: 100%;
-  width: min(100cqh, 86cqi);
-  max-width: 100%;
-  max-height: 100%;
+  flex: 0 0 auto;
+  width: 100%;
+  height: auto;
   aspect-ratio: 1;
-  align-self: stretch;
-  justify-self: start;
+  max-height: 100%;
   border-radius: calc(22 * var(--pd));
   overflow: hidden;
   background: var(--surface);
@@ -5103,24 +5107,28 @@ body.party-display-active.party-display-preview .party-display-view {
 }
 
 .party-display-meta {
+  grid-column: 1;
+  grid-row: 1 / -1;
   min-width: 0;
   min-height: 0;
+  height: 100%;
   max-height: 100%;
   overflow: hidden;
   align-self: stretch;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
+  gap: calc(12 * var(--pd));
   padding: 0;
 }
 
-/* Song / artist / transport — centered between pills (top) and reactions (bottom). */
+/* Song / artist / transport — packed under the pills so Tonight stats can sit below. */
 .party-display-track {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .party-display-state {
@@ -5141,7 +5149,7 @@ body.party-display-active.party-display-preview .party-display-view {
   flex-wrap: wrap;
   align-items: center;
   gap: calc(8 * var(--pd));
-  margin: 0 0 calc(12 * var(--pd));
+  margin: 0;
 }
 
 .party-display-pills .party-display-state {
@@ -5293,7 +5301,7 @@ body.party-display-active.party-display-preview .party-display-view {
 }
 
 .party-display-progress {
-  margin-top: 0;
+  margin-top: calc(12 * var(--pd));
   width: 100%;
 }
 
@@ -5308,14 +5316,94 @@ body.party-display-active.party-display-preview .party-display-view {
 }
 
 .party-display-reactions {
-  /* Bottom of meta column; track flex fills space above. */
   margin-top: 0;
   width: 100%;
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-template-rows: auto auto;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-rows: auto;
+  gap: calc(6 * var(--pd));
+}
+
+.party-display-stats-stack {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: calc(14 * var(--pd));
+  overflow: hidden;
+}
+
+.party-display-stats {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   gap: calc(8 * var(--pd));
+  margin-top: 0;
+}
+
+.party-display-stats > .party-display-label {
+  margin: 0;
+}
+
+.party-display-stats-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: calc(8 * var(--pd));
+}
+
+.party-display-stat {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: calc(4 * var(--pd));
+  padding: max(8px, calc(12 * var(--pd))) max(10px, calc(12 * var(--pd)));
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: calc(12 * var(--pd));
+  box-sizing: border-box;
+}
+
+.party-display-stat-label {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: max(11px, calc(13 * var(--pd)));
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.party-display-stat strong {
+  min-width: 0;
+  max-width: 100%;
+  font-size: max(16px, calc(22 * var(--pd)));
+  font-weight: 750;
+  line-height: 1.15;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.party-display-stat-sub {
+  max-width: 100%;
+  color: var(--muted);
+  font-size: max(11px, calc(13 * var(--pd)));
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .party-display-reactions[hidden] {
@@ -5327,11 +5415,11 @@ body.party-display-active.party-display-preview .party-display-view {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: calc(5 * var(--pd));
-  padding: calc(10 * var(--pd)) calc(6 * var(--pd));
+  gap: calc(4 * var(--pd));
+  padding: calc(6 * var(--pd)) calc(4 * var(--pd));
   background: var(--surface);
   border-radius: 999px;
-  font-size: calc(20 * var(--pd));
+  font-size: calc(18 * var(--pd));
 }
 
 .party-display-reactions strong {
@@ -5339,17 +5427,19 @@ body.party-display-active.party-display-preview .party-display-view {
   font-variant-numeric: tabular-nums;
 }
 
-/* 5-line karaoke — stretch to Join/QR card height (shared bottom row). */
+/* 5-line karaoke — same width as the album art above it. */
 .party-display-lyrics {
-  --display-lyric-size: calc(24 * var(--pd));
+  --display-lyric-size: calc(22 * var(--pd));
   --display-lyric-line: 1.2;
   --display-lyric-gap: calc(4 * var(--pd));
-  grid-column: 1;
-  grid-row: 2;
-  align-self: stretch;
+  flex: 0 0 auto;
   width: 100%;
   min-width: 0;
   min-height: 0;
+  height: calc(
+    (5 * var(--display-lyric-size) * var(--display-lyric-line)) +
+      (4 * var(--display-lyric-gap))
+  );
   display: flex;
   flex-direction: column;
   justify-content: stretch;
@@ -5357,6 +5447,17 @@ body.party-display-active.party-display-preview .party-display-view {
   padding: 0 2px;
   text-align: left;
   box-sizing: border-box;
+}
+
+.party-display-lyrics[hidden] {
+  display: none;
+}
+
+.party-display-lyrics.is-dj {
+  height: calc(
+    (6 * var(--display-lyric-size) * var(--display-lyric-line)) +
+      (5 * var(--display-lyric-gap))
+  );
 }
 
 .party-display-lyrics .np-fs-lyrics-status {
@@ -5564,7 +5665,7 @@ body.party-display-active.party-display-preview .party-display-view {
 }
 
 .party-display-join {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 2;
   /* Intrinsic height from QR sets the bottom-row size; lyrics stretch to match. */
   align-self: start;
@@ -5661,20 +5762,48 @@ body.party-display-active.party-display-preview .party-display-view {
 
   body.party-display-active:not(.party-display-kiosk) .party-display-layout {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto auto;
+    grid-template-rows: auto auto auto;
   }
 
   body.party-display-active:not(.party-display-kiosk) .party-display-now,
   body.party-display-active:not(.party-display-kiosk) .party-display-side,
-  body.party-display-active:not(.party-display-kiosk) .party-display-lyrics,
   body.party-display-active:not(.party-display-kiosk) .party-display-join {
     grid-column: 1;
   }
 
   body.party-display-active:not(.party-display-kiosk) .party-display-now {
+    display: flex;
+    flex-direction: column;
     grid-row: 1;
     overflow: visible;
     justify-content: flex-start;
+  }
+
+  body.party-display-active:not(.party-display-kiosk) .party-display-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(calc(160 * var(--pd)), 42%);
+    align-items: start;
+    height: auto;
+  }
+
+  body.party-display-active:not(.party-display-kiosk) .party-display-meta,
+  body.party-display-active:not(.party-display-kiosk) .party-display-art-col {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  body.party-display-active:not(.party-display-kiosk) .party-display-art-col,
+  body.party-display-active:not(.party-display-kiosk) .party-display-art-col:has(.party-display-lyrics:not([hidden])) {
+    width: 100%;
+    height: auto;
+  }
+
+  body.party-display-active:not(.party-display-kiosk) .party-display-lyrics {
+    width: 100%;
+  }
+
+  body.party-display-active:not(.party-display-kiosk) .party-display-stats-stack {
+    flex-direction: column;
   }
 
   body.party-display-active:not(.party-display-kiosk) .party-display-side {
@@ -5683,19 +5812,10 @@ body.party-display-active.party-display-preview .party-display-view {
     align-items: stretch;
   }
 
-  body.party-display-active:not(.party-display-kiosk) .party-display-lyrics {
-    grid-row: 3;
-  }
-
   body.party-display-active:not(.party-display-kiosk) .party-display-join {
-    grid-row: 4;
+    grid-row: 3;
     width: 100%;
     justify-self: stretch;
-  }
-
-  body.party-display-active:not(.party-display-kiosk) .party-display-hero {
-    grid-template-columns: minmax(calc(160 * var(--pd)), 40%) minmax(0, 1fr);
-    align-items: start;
   }
 
   body.party-display-active:not(.party-display-kiosk) .party-display-art-wrap {
@@ -5742,8 +5862,14 @@ body.party-display-active.party-display-kiosk .party-display-back {
     flex-direction: column;
   }
 
-  body.party-display-active:not(.party-display-kiosk) .party-display-art-wrap {
+  body.party-display-active:not(.party-display-kiosk) .party-display-art-col {
+    order: -1;
     width: min(100%, 70dvh);
+    justify-self: center;
+  }
+
+  body.party-display-active:not(.party-display-kiosk) .party-display-art-wrap {
+    width: 100%;
     justify-self: center;
   }
 

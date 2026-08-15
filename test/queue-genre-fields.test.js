@@ -35,12 +35,23 @@ test("queueTrackGenreFields skips DJ clips and unknown origins", () => {
       genreLabels: [],
     }
   );
-  assert.deepEqual(queueTrackGenreFields("Ariana Grande", null), {
-    genreLane: null,
-    genreLabel: null,
-    genreLanes: [],
-    genreLabels: [],
+  assert.deepEqual(
+    queueTrackGenreFields("Ariana Grande", null, { bucketsFor: () => [] }),
+    {
+      genreLane: null,
+      genreLabel: null,
+      genreLanes: [],
+      genreLabels: [],
+    }
+  );
+});
+
+test("queueTrackGenreFields maps untracked origin from artist cache", () => {
+  const out = queueTrackGenreFields("Ariana Grande", null, {
+    bucketsFor: () => ["pop"],
   });
+  assert.deepEqual(out.genreLanes, ["pop"]);
+  assert.deepEqual(out.genreLabels, ["Pop"]);
 });
 
 test("queueTrackGenreFields keeps only the matched set-lane genre", () => {

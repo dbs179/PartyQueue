@@ -25,6 +25,17 @@ test("enrichNowPlaying stays track-scoped (party flags live on /api/party)", asy
   assert.equal("mixGenres" in enriched, false);
 });
 
+test("resolveDisplayGenre maps untracked origin from artist buckets", async () => {
+  const { resolveDisplayGenre } = await import("../src/now-playing-http.js");
+  assert.deepEqual(
+    resolveDisplayGenre(
+      { title: "X", artist: "Y", uri: "spotify:track:1", origin: null },
+      { setLane: "folk", bucketsFor: () => ["metal"] }
+    ),
+    { mixGenreLane: "metal", mixGenreLabel: "Metal" }
+  );
+});
+
 test("resolveDisplayGenre hides stale set lane when idle", async () => {
   const { resolveDisplayGenre } = await import("../src/now-playing-http.js");
   assert.deepEqual(resolveDisplayGenre({}, { setLane: "folk" }), {

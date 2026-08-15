@@ -129,6 +129,75 @@ export function statsSummaryCardsHtml(s) {
   `;
 }
 
+/**
+ * Compact request tiles for Party Display (TV). Same shape as the Stats
+ * page tonight / all-time windows.
+ * @param {object|null|undefined} windowStats
+ */
+export function displayWindowStatsHtml(windowStats) {
+  const s = windowStats || {};
+  const topSong = s.topSongs?.[0];
+  const topArtist = s.topArtists?.[0];
+  const topRequester = s.topRequesters?.[0];
+  const song = topSong
+    ? escapeHtml(topSong.name || "Unknown")
+    : "\u2014";
+  const songSub = topSong?.artist
+    ? `<span class="party-display-stat-sub">${escapeHtml(topSong.artist)}</span>`
+    : "";
+  const artist = topArtist
+    ? escapeHtml(topArtist.artist || "Unknown")
+    : "\u2014";
+  const requester = topRequester
+    ? escapeHtml(topRequester.name || "Guest")
+    : "\u2014";
+  const requesterSub =
+    topRequester?.count != null
+      ? `<span class="party-display-stat-sub">${topRequester.count}\u00d7</span>`
+      : "";
+  return `
+    <div class="party-display-stat">
+      <span class="party-display-stat-label">Requests</span>
+      <strong>${Number(s.total) || 0}</strong>
+    </div>
+    <div class="party-display-stat">
+      <span class="party-display-stat-label">Top guest</span>
+      <strong>${requester}</strong>${requesterSub}
+    </div>
+    <div class="party-display-stat">
+      <span class="party-display-stat-label">Top song</span>
+      <strong>${song}</strong>${songSub}
+    </div>
+    <div class="party-display-stat">
+      <span class="party-display-stat-label">Top artist</span>
+      <strong>${artist}</strong>
+    </div>
+  `;
+}
+
+/**
+ * @param {object|null|undefined} stats
+ */
+export function displayTonightStatsHtml(stats) {
+  return displayWindowStatsHtml(stats?.tonight);
+}
+
+/**
+ * @param {{
+ *   tonightGrid?: HTMLElement|null,
+ *   allTimeGrid?: HTMLElement|null,
+ * }|HTMLElement|null|undefined} targets
+ * @param {object|null|undefined} stats
+ */
+export function paintDisplayTonightStats(targets, stats) {
+  const tonightGrid =
+    targets && "tonightGrid" in targets ? targets.tonightGrid : targets;
+  const allTimeGrid =
+    targets && "allTimeGrid" in targets ? targets.allTimeGrid : null;
+  if (tonightGrid) tonightGrid.innerHTML = displayWindowStatsHtml(stats?.tonight);
+  if (allTimeGrid) allTimeGrid.innerHTML = displayWindowStatsHtml(stats?.allTime);
+}
+
 /** @param {Array<object>|null|undefined} wall */
 export function dedicationsHtml(wall) {
   return (Array.isArray(wall) ? wall : [])

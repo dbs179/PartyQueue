@@ -49,6 +49,7 @@ import {
   paintStatsReactionList,
   statRows,
   statsSummaryCardsHtml,
+  paintDisplayTonightStats,
   dedicationsHtml,
   karaokeRowsHtml,
   statsEmptyMessage,
@@ -1756,6 +1757,19 @@ function renderStats() {
   }
 }
 
+let displayStatsTimer = null;
+function syncDisplayStatsPolling(on) {
+  if (displayStatsTimer) {
+    clearInterval(displayStatsTimer);
+    displayStatsTimer = null;
+  }
+  if (!on) return;
+  displayStatsTimer = setInterval(() => {
+    void loadStats();
+  }, 45_000);
+  displayStatsTimer.unref?.();
+}
+
 async function loadStats() {
   statsEmpty.hidden = true;
   try {
@@ -1763,11 +1777,25 @@ async function loadStats() {
     if (!res.ok) throw new Error("Could not load stats.");
     statsData = await res.json();
     renderStats();
+    paintDisplayTonightStats(
+      {
+        tonightGrid: document.getElementById("display-stats-grid"),
+        allTimeGrid: document.getElementById("display-stats-all-grid"),
+      },
+      statsData
+    );
   } catch {
     statsData = null;
     statsBody.hidden = true;
     statsEmpty.hidden = false;
     statsEmpty.textContent = "Could not load stats.";
+    paintDisplayTonightStats(
+      {
+        tonightGrid: document.getElementById("display-stats-grid"),
+        allTimeGrid: document.getElementById("display-stats-all-grid"),
+      },
+      null
+    );
   }
 }
 
@@ -2053,12 +2081,13 @@ function showView(name) {
     clearPendingPinAction();
     closePinGate(); // leaving the Booth (e.g. phone Back) dismisses the gate
   }
-  if (target === "stats") loadStats();
+  if (target === "stats" || target === "display") loadStats();
   if (target === "join" || target === "display") loadJoinCode();
   if (target === "display" && displayEventName) {
     displayEventName.textContent =
       document.getElementById("event-name")?.textContent?.trim() || "PartyQueue";
   }
+  syncDisplayStatsPolling(target === "display");
   lyricsUi.onViewChange({ target, previous: previousView });
   // Main search-bar fairness is view-local; refresh when Back lands here so
   // Booth toggles show without a hard reload.

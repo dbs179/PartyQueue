@@ -10,7 +10,18 @@ import {
 
 function makeLyricsEl() {
   let html = "";
+  const classes = new Set();
   return {
+    hidden: false,
+    classList: {
+      toggle(name, on) {
+        if (on) classes.add(name);
+        else classes.delete(name);
+      },
+      contains(name) {
+        return classes.has(name);
+      },
+    },
     get innerHTML() {
       return html;
     },
@@ -52,6 +63,16 @@ function makeLyricsEl() {
         })
         .join("");
     },
+    appendChild(node) {
+      if (!node) return;
+      if (typeof node.outerHTML === "string") html += node.outerHTML;
+      else if (node.className) {
+        html += `<${node.tagName || "div"} class="${node.className}">${
+          node.textContent || ""
+        }</${node.tagName || "div"}>`;
+      }
+    },
+    prepend() {},
   };
 }
 
@@ -123,6 +144,7 @@ test("track change clears prior karaoke before a lyrics miss returns", async () 
         appendChild(child) {
           kids.push(child);
         },
+        append() {},
         prepend() {},
         querySelector() {
           return null;
@@ -203,17 +225,218 @@ test("track change clears prior karaoke before a lyrics miss returns", async () 
       positionSec: 0,
     };
     ui.sync(nowPlaying);
-    assert.match(
-      displayLyrics.innerHTML,
-      /Loading lyrics/,
-      "prior karaoke must clear before miss returns"
+    assert.equal(
+      displayLyrics.hidden,
+      true,
+      "Party Display hides lyrics until timed karaoke is ready"
     );
     assert.doesNotMatch(displayLyrics.innerHTML, /np-fs-lyrics-synced/);
+    assert.match(npFsLyrics.innerHTML, /Loading lyrics/);
 
     resolveMiss();
     await new Promise((r) => setTimeout(r, 0));
-    assert.match(displayLyrics.innerHTML, /No lyrics found/);
+    assert.equal(displayLyrics.hidden, true);
+    assert.match(npFsLyrics.innerHTML, /No lyrics found/);
   } finally {
+    if (prevDocument === undefined) delete globalThis.document;
+    else globalThis.document = prevDocument;
+    if (prevWindow === undefined) delete globalThis.window;
+    else globalThis.window = prevWindow;
+    if (prevMatchMedia === undefined) delete globalThis.matchMedia;
+    else globalThis.matchMedia = prevMatchMedia;
+  }
+});
+
+test("Party Display stays hidden for plain lyrics and shows timed karaoke", async () => {
+  const displayLyrics = makeLyricsEl();
+  displayLyrics.hidden = true;
+  const npFsLyrics = makeLyricsEl();
+  let nowPlaying = {
+    title: "Plain Song",
+    artist: "Artist",
+    uri: "spotify:track:cccccccccccccccccccccc",
+    queueTrack: 1,
+    isPlaying: true,
+    durationSec: 120,
+    positionSec: 0,
+  };
+
+  const prevDocument = globalThis.document;
+  const prevWindow = globalThis.window;
+  const prevMatchMedia = globalThis.matchMedia;
+  globalThis.document = {
+    body: { classList: { add() {}, remove() {} } },
+    createElement(tag) {
+      const el = {
+        tagName: tag,
+        className: "",
+        textContent: "",
+        innerHTML: "",
+        classList: { add() {}, contains() { return false; } },
+        appendChild() {},
+        append() {},
+        prepend() {},
+        get outerHTML() {
+          return `<${tag} class="${this.className}"></${tag}>`;
+        },
+      };
+      return el;
+    },
+  };
+  globalThis.window = {
+    addEventListener() {},
+    matchMedia: () => ({ matches: true }),
+    setInterval: () => 0,
+    setTimeout,
+    clearTimeout,
+  };
+  globalThis.matchMedia = () => ({ matches: true });
+
+  let ui;
+  try {
+    ui = createLyricsUi(
+      { displayLyrics, npFsLyrics },
+      {
+        fetch: async (url) => {
+          const u = String(url);
+          if (u.includes("Plain")) {
+            return {
+              ok: true,
+              json: async () => ({
+                found: true,
+                plainLyrics: "Verse one\nVerse two\nVerse three\n".repeat(40),
+              }),
+            };
+          }
+          return {
+            ok: true,
+            json: async () => ({
+              found: true,
+              syncedLyrics: "[00:00.00] Line A1\n[00:05.00] Line A2\n",
+            }),
+          };
+        },
+        getLastNowPlaying: () => nowPlaying,
+        getCurrentView: () => "display",
+        isModalOpen: () => false,
+        bindArtwork: () => {},
+      }
+    );
+
+    ui.sync(nowPlaying);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(displayLyrics.hidden, true);
+
+    nowPlaying = {
+      title: "Timed Song",
+      artist: "Artist",
+      uri: "spotify:track:dddddddddddddddddddddd",
+      queueTrack: 2,
+      isPlaying: true,
+      durationSec: 120,
+      positionSec: 0,
+    };
+    ui.sync(nowPlaying);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(displayLyrics.hidden, false);
+    assert.match(
+      displayLyrics.innerHTML,
+      /party-display-lyrics-window|np-fs-lyrics-synced/
+    );
+  } finally {
+    ui?.onViewChange({ target: "main", previous: "display" });
+    if (prevDocument === undefined) delete globalThis.document;
+    else globalThis.document = prevDocument;
+    if (prevWindow === undefined) delete globalThis.window;
+    else globalThis.window = prevWindow;
+    if (prevMatchMedia === undefined) delete globalThis.matchMedia;
+    else globalThis.matchMedia = prevMatchMedia;
+  }
+});
+
+test("Party Display shows DJ announce script and hides untimed song lyrics", async () => {
+  const displayLyrics = makeLyricsEl();
+  displayLyrics.hidden = true;
+  const npFsLyrics = makeLyricsEl();
+  let nowPlaying = {
+    title: "DJ Voice",
+    artist: "PartyQueue",
+    djVoice: true,
+    announceScript: "Hello party. Here comes the set!",
+    uri: "spotify:track:djpad0000000000000000",
+    queueTrack: 1,
+    isPlaying: true,
+  };
+
+  const prevDocument = globalThis.document;
+  const prevWindow = globalThis.window;
+  const prevMatchMedia = globalThis.matchMedia;
+  globalThis.document = {
+    body: { classList: { add() {}, remove() {} } },
+    createElement(tag) {
+      return {
+        tagName: tag,
+        className: "",
+        textContent: "",
+        innerHTML: "",
+        classList: { add() {}, contains() { return false; } },
+        appendChild() {},
+        get outerHTML() {
+          return `<${tag} class="${this.className}">${this.textContent}</${tag}>`;
+        },
+      };
+    },
+  };
+  globalThis.window = {
+    addEventListener() {},
+    matchMedia: () => ({ matches: true }),
+    setInterval: () => 0,
+    setTimeout,
+    clearTimeout,
+  };
+  globalThis.matchMedia = () => ({ matches: true });
+
+  let ui;
+  try {
+    ui = createLyricsUi(
+      { displayLyrics, npFsLyrics },
+      {
+        fetch: async () => ({
+          ok: true,
+          json: async () => ({
+            found: true,
+            plainLyrics: "Should not appear on the TV",
+          }),
+        }),
+        getLastNowPlaying: () => nowPlaying,
+        getCurrentView: () => "display",
+        isModalOpen: () => false,
+        bindArtwork: () => {},
+      }
+    );
+
+    ui.sync(nowPlaying);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(displayLyrics.hidden, false);
+    assert.match(displayLyrics.innerHTML, /Hello party/);
+    assert.match(displayLyrics.innerHTML, /np-fs-lyrics-plain/);
+    assert.equal(displayLyrics.classList.contains("is-dj"), true);
+
+    nowPlaying = {
+      title: "Plain Song",
+      artist: "Artist",
+      uri: "spotify:track:eeeeeeeeeeeeeeeeeeeeee",
+      queueTrack: 2,
+      isPlaying: true,
+      durationSec: 120,
+      positionSec: 0,
+    };
+    ui.sync(nowPlaying);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(displayLyrics.hidden, true);
+    assert.doesNotMatch(displayLyrics.innerHTML, /Should not appear/);
+  } finally {
+    ui?.onViewChange({ target: "main", previous: "display" });
     if (prevDocument === undefined) delete globalThis.document;
     else globalThis.document = prevDocument;
     if (prevWindow === undefined) delete globalThis.window;

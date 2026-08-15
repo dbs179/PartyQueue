@@ -437,6 +437,7 @@ export function queueTrackGenreFields(
   if (djClip) return emptyQueueGenreFields();
   const source = meta?.source ?? null;
   if (
+    source &&
     source !== "filler" &&
     source !== "discovered" &&
     source !== "mood" &&

@@ -466,31 +466,27 @@
           <div class="party-display-layout">
             <section class="party-display-now" aria-labelledby="display-title">
               <div class="party-display-hero">
-                <div class="party-display-art-wrap">
-                  <img id="display-art" class="party-display-art" alt="" />
-                  <p id="display-empty" class="party-display-empty">Connecting…</p>
-                </div>
                 <div class="party-display-meta">
-          <div class="party-display-pills">
-            <span id="display-state" class="party-display-state" hidden></span>
-            <span id="display-origin" class="party-display-state party-display-origin" hidden></span>
-            <span id="display-mix" class="party-display-state party-display-mix" hidden></span>
-            <span id="display-genre" class="party-display-state party-display-genre" hidden></span>
-            <span id="display-party-over" class="party-display-state party-display-over" hidden>The party is over &mdash; you have to go home now.</span>
-          </div>
-                  <div class="party-display-track">
-                  <h3 id="display-title" class="party-display-title"></h3>
-                  <p id="display-artist" class="party-display-artist"></p>
-                  <p id="display-album" class="party-display-album"></p>
-                  <div id="display-progress" class="np-progress party-display-progress" hidden>
-                    <div class="np-progress-track" role="progressbar" aria-label="Track progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                      <span id="display-progress-fill" class="np-progress-fill"></span>
-                    </div>
-                    <div class="np-progress-times" aria-hidden="true">
-                      <span id="display-progress-elapsed">0:00</span>
-                      <span id="display-progress-duration">0:00</span>
-                    </div>
+                  <div class="party-display-pills">
+                    <span id="display-state" class="party-display-state" hidden></span>
+                    <span id="display-origin" class="party-display-state party-display-origin" hidden></span>
+                    <span id="display-mix" class="party-display-state party-display-mix" hidden></span>
+                    <span id="display-genre" class="party-display-state party-display-genre" hidden></span>
+                    <span id="display-party-over" class="party-display-state party-display-over" hidden>The party is over &mdash; you have to go home now.</span>
                   </div>
+                  <div class="party-display-track">
+                    <h3 id="display-title" class="party-display-title"></h3>
+                    <p id="display-artist" class="party-display-artist"></p>
+                    <p id="display-album" class="party-display-album"></p>
+                    <div id="display-progress" class="np-progress party-display-progress" hidden>
+                      <div class="np-progress-track" role="progressbar" aria-label="Track progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                        <span id="display-progress-fill" class="np-progress-fill"></span>
+                      </div>
+                      <div class="np-progress-times" aria-hidden="true">
+                        <span id="display-progress-elapsed">0:00</span>
+                        <span id="display-progress-duration">0:00</span>
+                      </div>
+                    </div>
                   </div>
                   <div id="display-reactions" class="party-display-reactions" aria-label="Current reactions" hidden>
                     <span title="Thumbs up">&#128077; <strong data-display-count="up">0</strong></span>
@@ -502,6 +498,29 @@
                     <span title="Party">&#127881; <strong data-display-count="party">0</strong></span>
                     <span title="Karaoke">&#127908; <strong data-display-count="mic">0</strong></span>
                   </div>
+                  <div class="party-display-stats-stack">
+                    <section id="display-stats" class="party-display-stats" aria-label="Tonight">
+                      <p class="party-display-label">Tonight</p>
+                      <div id="display-stats-grid" class="party-display-stats-grid"></div>
+                    </section>
+                    <section id="display-stats-all" class="party-display-stats" aria-label="All Time">
+                      <p class="party-display-label">All Time</p>
+                      <div id="display-stats-all-grid" class="party-display-stats-grid"></div>
+                    </section>
+                  </div>
+                </div>
+                <div class="party-display-art-col">
+                  <div class="party-display-art-wrap">
+                    <img id="display-art" class="party-display-art" alt="" />
+                    <p id="display-empty" class="party-display-empty">Connecting…</p>
+                  </div>
+                  <div
+                    id="display-lyrics"
+                    class="party-display-lyrics"
+                    aria-live="polite"
+                    aria-label="Lyrics"
+                    hidden
+                  ></div>
                 </div>
               </div>
             </section>
@@ -525,13 +544,6 @@
                 <p id="display-queue-empty" class="party-display-side-empty">Connecting…</p>
               </section>
             </aside>
-
-            <div
-              id="display-lyrics"
-              class="party-display-lyrics"
-              aria-live="polite"
-              aria-label="Lyrics"
-            ></div>
 
             <section class="party-display-join" aria-label="Join PartyQueue">
               <div id="display-join-qr" class="party-display-qr" aria-hidden="true"></div>
