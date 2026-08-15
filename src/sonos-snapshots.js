@@ -507,6 +507,7 @@ async function getQueueListRaw() {
       albumArt: djClip
         ? djPersona.albumArt
         : albumArtUrl(t.AlbumArtUri, coordinator.Host),
+      origin: source || null,
       searched: source === "searched",
       setRequest: source === "searched" ? !!meta?.setRequest : false,
       discovered: source === "discovered",

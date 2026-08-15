@@ -534,8 +534,9 @@ export async function announceRequestShout(
     // glued to it if the queue shifted during script generation.
     applyLeadBuffer: !startPlayback,
     requestUri: uri || null,
-    // Never Pause a playing song for a request / Set Request shout.
+    // Never Pause mid-song. Next-up may hold at the last ~2s until pads land.
     allowImminentPause: false,
+    holdAtTrackEnd: !startPlayback && Number(queuePosition) === 1,
   });
 }
 

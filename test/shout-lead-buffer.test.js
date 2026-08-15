@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import {
   SHOUT_LEAD_BUFFER_SEC,
   IMMINENT_ANNOUNCE_PAUSE_SEC,
+  TRACK_END_ANNOUNCE_HOLD_SEC,
   needsShoutLeadBuffer,
   shouldPauseForImminentAnnounce,
+  shouldHoldAtTrackEndForAnnounce,
   findShoutBufferTrackNumber,
   requestPosAfterShoutBuffer,
 } from "../src/shout-lead-buffer.js";
@@ -148,6 +150,40 @@ test("shouldPauseForImminentAnnounce uses a narrower window than lead buffer", (
       ...base,
       remainingSec: 5,
       isPlaying: false,
+    }),
+    false
+  );
+});
+
+test("shouldHoldAtTrackEndForAnnounce only at the tail or after playhead moves", () => {
+  const base = {
+    nextUp: true,
+    playingFromQueue: true,
+    currentTrack: 4,
+    startedOnTrack: 4,
+  };
+  assert.equal(TRACK_END_ANNOUNCE_HOLD_SEC, 2);
+  assert.equal(
+    shouldHoldAtTrackEndForAnnounce({ ...base, remainingSec: 20 }),
+    false
+  );
+  assert.equal(
+    shouldHoldAtTrackEndForAnnounce({ ...base, remainingSec: 2 }),
+    true
+  );
+  assert.equal(
+    shouldHoldAtTrackEndForAnnounce({
+      ...base,
+      remainingSec: 20,
+      currentTrack: 5,
+    }),
+    true
+  );
+  assert.equal(
+    shouldHoldAtTrackEndForAnnounce({
+      ...base,
+      nextUp: false,
+      remainingSec: 1,
     }),
     false
   );

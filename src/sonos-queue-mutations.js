@@ -32,6 +32,48 @@ import {
 import { sanitizeDisplayName } from "./display-name.js";
 import { queueWorkWasPreempted } from "./queue-preempt.js";
 
+/**
+ * Live Sonos queue + playhead for request insert. Retries once, then throws
+ * so we never append a guest request behind filler on a failed read.
+ * Position / media / transport soft-fail; GetQueue must succeed.
+ */
+export async function readLiveQueueForInsert(coordinator, { attempts = 2 } = {}) {
+  const tries = Math.max(1, Math.floor(Number(attempts) || 2));
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const [queue, pos, media, transport] = await Promise.all([
+        coordinator.GetQueue(),
+        coordinator.AVTransportService.GetPositionInfo().catch(() => ({
+          Track: 0,
+        })),
+        coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(
+          () => ({ CurrentURI: "" })
+        ),
+        coordinator.AVTransportService.GetTransportInfo().catch(() => ({})),
+      ]);
+      return {
+        items: Array.isArray(queue.Result) ? queue.Result : [],
+        updateId: Number(queue.UpdateID) || 0,
+        currentTrack: Number(pos.Track) || 0,
+        playingFromQueue: /^x-rincon-queue:/.test(media.CurrentURI || ""),
+        transportState: transport?.CurrentTransportState || "",
+      };
+    } catch (err) {
+      lastErr = err;
+      console.error(
+        `[queue] live read failed (${i + 1}/${tries}):`,
+        err.message
+      );
+    }
+  }
+  const error = new Error(
+    lastErr?.message || "Could not read the Sonos queue."
+  );
+  error.cause = lastErr;
+  throw error;
+}
+
 // Remove already-played songs (everything before the current track) so the queue
 // stays lean and newly added songs are never buried under a night's history.
 // Only acts while the QUEUE is the active source and at least one song sits
@@ -236,30 +278,11 @@ async function addSetRequestToQueueUnlocked(
     setRequest: true,
   };
 
-  let items = [];
-  let currentTrack = 0;
-  let playingFromQueue = false;
-  try {
-    const [queue, pos, media] = await Promise.all([
-      coordinator.GetQueue(),
-      coordinator.AVTransportService.GetPositionInfo().catch(() => ({ Track: 0 })),
-      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
-        CurrentURI: "",
-      })),
-    ]);
-    items = Array.isArray(queue.Result) ? queue.Result : [];
-    currentTrack = Number(pos.Track) || 0;
-    playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
-  } catch (err) {
-    console.error("[queue] set-request live read failed:", err.message);
-  }
-  let transportState = "";
-  try {
-    const transport = await coordinator.AVTransportService.GetTransportInfo();
-    transportState = transport?.CurrentTransportState || "";
-  } catch {
-    /* hold decision treats unknown as not playing */
-  }
+  const live = await readLiveQueueForInsert(coordinator);
+  const items = live.items;
+  const currentTrack = live.currentTrack;
+  const playingFromQueue = live.playingFromQueue;
+  const transportState = live.transportState;
 
   const start = playingFromQueue && currentTrack >= 1 ? currentTrack : 0;
   const upcomingIds = new Set();
@@ -382,32 +405,14 @@ async function addTrackToQueueUnlocked(
   const id = spotifyTrackId(trackUri);
   const wantKey = songMatchKey(name, artist);
 
-  // Read the live queue once: we use it both to find the searched insert spot
-  // (ahead of filler, after any waiting searched songs) and to detect whether
-  // this exact song is already sitting in the queue. Best-effort - if the read
-  // fails we fall back to a plain append.
-  let items = [];
-  let updateId = 0;
-  let currentTrack = 0;
-  let playingFromQueue = false;
-  let transportState = "";
-  try {
-    const [queue, pos, media, transport] = await Promise.all([
-      coordinator.GetQueue(),
-      coordinator.AVTransportService.GetPositionInfo().catch(() => ({ Track: 0 })),
-      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
-        CurrentURI: "",
-      })),
-      coordinator.AVTransportService.GetTransportInfo().catch(() => ({})),
-    ]);
-    items = Array.isArray(queue.Result) ? queue.Result : [];
-    updateId = Number(queue.UpdateID) || 0;
-    currentTrack = Number(pos.Track) || 0;
-    playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
-    transportState = transport?.CurrentTransportState || "";
-  } catch (err) {
-    console.error("[queue] live read failed, appending:", err.message);
-  }
+  // Live queue is required to insert ahead of filler. Retry once, then fail
+  // closed — never append a request behind Random on a dropped GetQueue.
+  const live = await readLiveQueueForInsert(coordinator);
+  const items = live.items;
+  const updateId = live.updateId;
+  const currentTrack = live.currentTrack;
+  const playingFromQueue = live.playingFromQueue;
+  const transportState = live.transportState;
 
   const insertPos = findInsertPosition(items, {
     currentTrack,

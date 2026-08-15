@@ -12,6 +12,7 @@ import { createConfirmModal } from "./confirm-modal.js";
 import { createHostPinUi } from "./host-pin-ui.js";
 import { createGuestNameUi } from "./guest-name-ui.js";
 import { createGuestFairnessUi } from "./guest-fairness-ui.js";
+import { createDebounced } from "./debounce.js";
 import { createSameArtistCountdownUi } from "./same-artist-countdown-ui.js";
 import { loadMemory as loadMemoryUi } from "./memory-ui.js";
 import { createPartyRecapUi } from "./party-recap.js";
@@ -183,6 +184,12 @@ const guestFairnessUi = createGuestFairnessUi({
 refreshGuestFairness = () => {
   guestFairnessUi.refresh();
 };
+// Queue SSE ticks ~3s; debounce so fairness follows the live list without
+// a GET /api/fairness on every snapshot.
+const scheduleFairnessRefresh = createDebounced(() => {
+  refreshGuestFairness();
+}, 400);
+let lastFairnessTrackKey = "";
 
 const sameArtistCountdownUi = createSameArtistCountdownUi({
   el: document.getElementById("special-set-countdown"),
@@ -2827,8 +2834,10 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
     const hide = !!np.djVoice || stateUpdating;
     displayOriginPill.hidden = hide;
     if (!hide) {
-      displayOriginPill.textContent = displayOriginLabel(np, activeEraMoodId());
-      paintOriginToneClass(displayOriginPill, displayOriginTone(np));
+      const originText = displayOriginLabel(np, activeEraMoodId());
+      displayOriginPill.hidden = !originText;
+      displayOriginPill.textContent = originText;
+      paintOriginToneClass(displayOriginPill, originText ? displayOriginTone(np) : null);
     } else {
       paintOriginToneClass(displayOriginPill, null);
     }
@@ -2905,6 +2914,13 @@ function renderNowPlaying(transport) {
   if (resolved.confirmed) lastConfirmedNp = resolved.confirmed;
   const np = resolved.display;
   lastNowPlaying = np;
+  const fairnessTrackKey = np?.djVoice
+    ? lastFairnessTrackKey
+    : np?.uri || `${np?.title || ""}\0${np?.artist || ""}`;
+  if (fairnessTrackKey && fairnessTrackKey !== lastFairnessTrackKey) {
+    lastFairnessTrackKey = fairnessTrackKey;
+    scheduleFairnessRefresh();
+  }
 
   const hasTrack = !!(np && (np.title || np.artist || np.albumArt));
   lyricsUi.applyPlaybackClock(np);
@@ -3006,6 +3022,7 @@ function applyQueueTracks(tracks) {
   queueUi.render(tracks);
   queueUi.renderPartyDisplay(tracks);
   prefetchUpcomingAlbumArt(tracks);
+  scheduleFairnessRefresh();
 }
 
 

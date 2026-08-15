@@ -82,13 +82,13 @@ export function nowPlayingOriginLabel(np, hasTrack) {
 
 /**
  * Party Display Now Playing pill + Up Next rows:
- * dedication > requested > era hit > Discover > Random.
+ * dedication > requested > era hit > Discover > Random (filler only).
  *
  * @param {object} track
  * @param {string|null|undefined} [activeEraMood] current Decades mood id
  */
 export function displayOriginLabel(track, activeEraMood = null) {
-  if (!track) return "Random";
+  if (!track) return "";
   const requester = sanitizeDisplayName(track.requestedBy || "");
   const dedication = sanitizeDedication(track.dedication || "");
   if (dedication) return dedicationDisplayLabel(dedication, requester);
@@ -103,7 +103,8 @@ export function displayOriginLabel(track, activeEraMood = null) {
   if (track.reactionSet === "loved") return "Most Loved";
   if (track.reactionSet === "hated") return "Most Hated";
   if (track.reactionSet === "requested") return "Most Requested";
-  return "Random";
+  if (track.origin === "filler") return "Random";
+  return "";
 }
 
 const ORIGIN_TONE_CLASSES = [
@@ -121,7 +122,7 @@ const ORIGIN_TONE_CLASSES = [
  * @param {object|null|undefined} track
  */
 export function displayOriginTone(track) {
-  if (!track) return "origin-random";
+  if (!track) return "";
   const origin =
     track.origin ||
     (track.discovered ? "discovered" : track.searched ? "searched" : null);
@@ -131,7 +132,8 @@ export function displayOriginTone(track) {
   if (track.reactionSet === "loved") return "origin-loved";
   if (track.reactionSet === "hated") return "origin-hated";
   if (track.reactionSet === "requested") return "origin-requested";
-  return "origin-random";
+  if (origin === "filler") return "origin-random";
+  return "";
 }
 
 /**

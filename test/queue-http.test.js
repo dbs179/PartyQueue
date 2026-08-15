@@ -92,6 +92,10 @@ test("queue signature ignores object key order but sees badge and edit fields", 
     queueSignature({ tracks: [a] }),
     queueSignature({ tracks: [{ ...a, moodPick: true, mood: "80s" }] })
   );
+  assert.notEqual(
+    queueSignature({ tracks: [a] }),
+    queueSignature({ tracks: [{ ...a, origin: "filler" }] })
+  );
 });
 
 test("queue SSE route sends retained data and releases demand on close", () => {

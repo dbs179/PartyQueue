@@ -78,6 +78,7 @@ export {
   trimPlayedTracks,
   addTrackToQueue,
   addSetRequestToQueue,
+  readLiveQueueForInsert,
   SET_REQUEST_SIZE,
   filterSetRequestTracks,
   addPlaylistToQueue,
@@ -94,8 +95,10 @@ export {
 export {
   SHOUT_LEAD_BUFFER_SEC,
   IMMINENT_ANNOUNCE_PAUSE_SEC,
+  TRACK_END_ANNOUNCE_HOLD_SEC,
   needsShoutLeadBuffer,
   shouldPauseForImminentAnnounce,
+  shouldHoldAtTrackEndForAnnounce,
   findShoutBufferTrackNumber,
   requestPosAfterShoutBuffer,
 } from "./shout-lead-buffer.js";

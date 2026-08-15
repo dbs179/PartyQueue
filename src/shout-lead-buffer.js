@@ -2,8 +2,9 @@
  * Guest request order is FIFO. We never demote a request to make room for TTS —
  * that split set-requests and played later adds before earlier ones.
  *
- * Mid-queue / Set Request paths never Pause a playing song. Imminent pause
- * stays as an opt-in last-song helper and is unused on those product paths.
+ * Mid-queue / Set Request paths never Pause a playing song mid-track.
+ * Next-up request shouts may hold at the last ~2s (or after the playhead
+ * leaves the current song) until pads are inserted, then Play the announce.
  *
  * Helpers below stay for tests / pause eligibility. ensureShoutLeadBuffer is a
  * no-op so route and insert-lock call sites cannot move guest songs.
@@ -20,6 +21,9 @@ export const SHOUT_LEAD_BUFFER_SEC = 45;
  * ends (last-song / no-filler edge). Wider remaining times rely on lead buffer.
  */
 export const IMMINENT_ANNOUNCE_PAUSE_SEC = 15;
+
+/** Hold at the tail of the current song — never a mid-track cut. */
+export const TRACK_END_ANNOUNCE_HOLD_SEC = 2;
 
 /**
  * True when the request is next-up and remaining time is too short to rely on
@@ -65,6 +69,32 @@ export function shouldPauseForImminentAnnounce({
   const rem = Number(remainingSec);
   if (!Number.isFinite(rem)) return false;
   const threshold = Number(pauseThresholdSec);
+  if (!Number.isFinite(threshold) || threshold < 0) return false;
+  return rem <= threshold;
+}
+
+/**
+ * Next-up shout hold: current song plays out. True when remaining time is at
+ * the tail, or the playhead already left the track we started on.
+ */
+export function shouldHoldAtTrackEndForAnnounce({
+  nextUp = false,
+  remainingSec,
+  currentTrack,
+  startedOnTrack,
+  playingFromQueue,
+  holdSec = TRACK_END_ANNOUNCE_HOLD_SEC,
+} = {}) {
+  if (!nextUp || !playingFromQueue) return false;
+  const cur = Math.floor(Number(currentTrack));
+  const start = Math.floor(Number(startedOnTrack));
+  if (Number.isFinite(cur) && Number.isFinite(start) && cur !== start) {
+    return true;
+  }
+  if (remainingSec == null || remainingSec === "") return false;
+  const rem = Number(remainingSec);
+  if (!Number.isFinite(rem)) return false;
+  const threshold = Number(holdSec);
   if (!Number.isFinite(threshold) || threshold < 0) return false;
   return rem <= threshold;
 }

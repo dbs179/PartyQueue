@@ -111,7 +111,8 @@ test("queueOriginBadgeHtml covers dedication, request, discover, era, random", (
     /Requested/
   );
   assert.equal(queueOriginBadgeHtml({ djVoice: true }), "");
-  assert.match(queueOriginBadgeHtml({}), /Random/);
+  assert.equal(queueOriginBadgeHtml({}), "");
+  assert.match(queueOriginBadgeHtml({ origin: "filler" }), /Random/);
 });
 
 test("queueGenreLabel prefers genreLabels then genreLabel then lane", () => {

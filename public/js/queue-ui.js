@@ -47,6 +47,7 @@ export function queueTrackSig(track, { showQueueGenre = false } = {}) {
   // full row rebuild (badge/pill flash) every maintenance pass.
   return [
     track.uri || "",
+    track.origin || "",
     track.searched ? 1 : 0,
     track.discovered ? 1 : 0,
     track.moodPick ? 1 : 0,
@@ -103,7 +104,10 @@ export function queueOriginBadgeHtml(track, { eraLabel = "" } = {}) {
     return `<span class="searched-badge" title="${tip}">${label}</span>`;
   }
   if (track.djVoice) return "";
-  return `<span class="memory-random-badge" title="Added by Random / Never-Ending">\u{1F3B2} Random</span>`;
+  if (track.origin === "filler") {
+    return `<span class="memory-random-badge" title="Added by Random / Never-Ending">\u{1F3B2} Random</span>`;
+  }
+  return "";
 }
 
 /**
@@ -445,10 +449,13 @@ export function createQueueUi(els, deps) {
       meta.append(title, artist);
 
       if (!track.djVoice) {
-        const source = document.createElement("span");
-        source.className = "party-display-queue-source";
-        source.textContent = displayOriginLabel(track, eraMood);
-        meta.appendChild(source);
+        const originText = displayOriginLabel(track, eraMood);
+        if (originText) {
+          const source = document.createElement("span");
+          source.className = "party-display-queue-source";
+          source.textContent = originText;
+          meta.appendChild(source);
+        }
 
         // Same Show song genre toggle as main Up Next (genre + From Playlists).
         if (showGenre) {

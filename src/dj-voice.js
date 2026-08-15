@@ -44,6 +44,7 @@ import { findUpcomingAnnounceHandoffPlan } from "./skip-announce-policy.js";
 import {
   IMMINENT_ANNOUNCE_PAUSE_SEC,
   shouldPauseForImminentAnnounce,
+  shouldHoldAtTrackEndForAnnounce,
 } from "./shout-lead-buffer.js";
 import {
   queueWorkGeneration,
@@ -2392,6 +2393,72 @@ export function ensureSilenceRamp(durationSec = silenceDurationSec()) {
  * last-song edge case when shout-lead-buffer found no filler to play first.
  * After a successful buffer demote, queuePosition is past next-up and this no-ops.
  */
+const TRACK_END_HOLD_POLL_MS = 400;
+
+/**
+ * Let the current song play while `work` (TTS) runs. Pause only at the tail
+ * (~2s left) or after the playhead leaves that track.
+ */
+async function holdAtTrackEndWhile(work) {
+  const { getAnnouncePlaybackContext, pause } = await import("./sonos.js");
+  let held = false;
+  let stopped = false;
+  const startCtx = await getAnnouncePlaybackContext().catch(() => null);
+  const startedOnTrack = startCtx?.track ?? null;
+
+  const maybeHold = async () => {
+    if (held || stopped) return held;
+    const ctx = await getAnnouncePlaybackContext().catch(() => null);
+    if (!ctx) return false;
+    if (
+      !shouldHoldAtTrackEndForAnnounce({
+        nextUp: true,
+        remainingSec: ctx.remainingSec,
+        currentTrack: ctx.track,
+        startedOnTrack,
+        playingFromQueue: ctx.playingFromQueue,
+      })
+    ) {
+      return false;
+    }
+    await pause();
+    held = true;
+    const left =
+      ctx.remainingSec == null ? "playhead moved" : `${Math.round(ctx.remainingSec)}s left`;
+    console.log(
+      `[dj-voice] held at track end for announce (${left} on track ${ctx.track})`
+    );
+    return true;
+  };
+
+  const poller = (async () => {
+    while (!stopped && !held) {
+      await new Promise((resolve) => setTimeout(resolve, TRACK_END_HOLD_POLL_MS));
+      if (stopped || held) break;
+      try {
+        await maybeHold();
+      } catch (err) {
+        console.warn("[dj-voice] track-end hold poll skipped:", err.message);
+      }
+    }
+  })();
+
+  try {
+    const result = await work();
+    if (!held) {
+      try {
+        await maybeHold();
+      } catch (err) {
+        console.warn("[dj-voice] track-end hold after TTS skipped:", err.message);
+      }
+    }
+    return { result, held };
+  } finally {
+    stopped = true;
+    await poller.catch(() => {});
+  }
+}
+
 async function pauseIfAnnounceImminent(queuePosition) {
   try {
     const { getAnnouncePlaybackContext, pause } = await import("./sonos.js");
@@ -3000,6 +3067,7 @@ export async function announceOnSonos(
     applyLeadBuffer = false,
     requestUri = null,
     allowImminentPause = false,
+    holdAtTrackEnd = false,
   } = {}
 ) {
   return withAnnounceLock(() =>
@@ -3012,6 +3080,7 @@ export async function announceOnSonos(
       applyLeadBuffer,
       requestUri,
       allowImminentPause,
+      holdAtTrackEnd,
     })
   );
 }
@@ -3027,6 +3096,7 @@ async function announceOnSonosUnlocked(
     applyLeadBuffer = false,
     requestUri = null,
     allowImminentPause = false,
+    holdAtTrackEnd = false,
   } = {}
 ) {
   const preempted = () => queueWorkWasPreempted(preemptGeneration);
@@ -3046,10 +3116,11 @@ async function announceOnSonosUnlocked(
   let didStart = false;
   let volHold = null;
   let pausedForImminent = false;
+  let heldAtTrackEnd = false;
   try {
-    // Set Request / mid-queue shouts must never stop a song. Imminent pause
-    // is opt-in and unused on those paths (empty/idle uses startPlayback).
-    if (!startPlayback && allowImminentPause) {
+    // Set Request / mid-queue shouts must never stop a song mid-track.
+    // Imminent pause stays unused on request paths (empty/idle uses startPlayback).
+    if (!startPlayback && allowImminentPause && !holdAtTrackEnd) {
       pausedForImminent = await pauseIfAnnounceImminent(queuePosition);
     }
     // Empty/idle shouts: pause BEFORE TTS generation. Waiting until after
@@ -3067,15 +3138,21 @@ async function announceOnSonosUnlocked(
       return { ok: false, skipped: true, reason: "queue-preempted" };
     }
     let clip = prebuiltClip;
-    if (!clip?.publicUrl) {
-      clip = await saveTtsClip(String(message).trim());
-      console.log(
-        `[dj-voice] saved ${clip.fileName} (${clip.bytes} bytes; ` +
-          `${clip.publicUrl === clip.localUrl ? "local media" : "external TTS media"})`
-      );
+    const buildClip = async () => {
+      if (clip?.publicUrl) return clip;
+      return saveTtsClip(String(message).trim());
+    };
+    if (holdAtTrackEnd && !startPlayback) {
+      const wrapped = await holdAtTrackEndWhile(buildClip);
+      clip = wrapped.result;
+      heldAtTrackEnd = wrapped.held;
     } else {
+      clip = await buildClip();
+    }
+    if (clip?.fileName) {
       console.log(
-        `[dj-voice] using prebuilt TTS clip ${clip.fileName || clip.publicUrl}`
+        `[dj-voice] ${prebuiltClip?.publicUrl ? "using prebuilt" : "saved"} TTS clip ${clip.fileName}` +
+          (clip.bytes != null ? ` (${clip.bytes} bytes)` : "")
       );
     }
     // Bind spoken copy to clip URL(s) so lyrics / Party Display can show it
@@ -3171,19 +3248,20 @@ async function announceOnSonosUnlocked(
       publicUrl: clip.publicUrl,
       approxDurationSec: clip.approxDurationSec,
       silenceSec: ramp.durationSec,
-      startPlayback: !!startPlayback,
+      startPlayback: !!startPlayback || heldAtTrackEnd,
       ttsPosition: ttsPos,
       musicPosition: restorePos + 1,
     });
     volHold = vol.startHold || null;
-    if (startPlayback && !vol.cancelled) {
+    if ((startPlayback || heldAtTrackEnd) && !vol.cancelled) {
       // Arm before Play so the first pre-silence poll owns the baseline.
+      // Track-end hold: do not resume the dying song — Play the announce block.
       volHold?.();
       volHold = null;
       await startQueuePlayback(rampPos);
       didStart = true;
     } else if (pausedForImminent) {
-      // Resume the current song without SeekTrack (keeps queue index).
+      // Legacy mid-song imminent pause: resume the current song.
       try {
         const { resumeQueuePlayback } = await import("./sonos.js");
         await resumeQueuePlayback();

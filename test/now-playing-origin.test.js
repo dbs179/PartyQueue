@@ -81,7 +81,8 @@ test("displayOriginLabel precedence: dedication > requested > era > discover > r
     "80's Hit"
   );
   assert.equal(displayOriginLabel({ discovered: true }), "Discover");
-  assert.equal(displayOriginLabel({}), "Random");
+  assert.equal(displayOriginLabel({ origin: "filler" }), "Random");
+  assert.equal(displayOriginLabel({}), "");
 });
 
 test("displayOriginTone matches Requested / Discover / Random / Mood", () => {
@@ -98,5 +99,5 @@ test("displayOriginTone matches Requested / Discover / Random / Mood", () => {
     displayOriginTone({ moodPick: true, mood: "80s" }),
     "origin-mood"
   );
-  assert.equal(displayOriginTone({}), "origin-random");
+  assert.equal(displayOriginTone({}), "");
 });

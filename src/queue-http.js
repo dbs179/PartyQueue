@@ -27,6 +27,7 @@ function trackSignature(track) {
     track.artist ?? "",
     track.album ?? "",
     track.albumArt ?? "",
+    track.origin ?? "",
     track.searched ? 1 : 0,
     track.discovered ? 1 : 0,
     track.moodPick ? 1 : 0,
