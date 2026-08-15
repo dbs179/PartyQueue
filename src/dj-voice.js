@@ -2327,8 +2327,8 @@ export function announceVolumeFromMusic(volumeLevel, opts) {
   return Math.min(100, Math.max(1, musicPct + Math.max(0, boost)));
 }
 
-// Last-song / no-buffer fallback threshold (see shout-lead-buffer.js). Prefer
-// demoting the request behind filler — that path never hard-pauses.
+// Mid-queue announces never Pause a playing song. Empty/idle startPlayback
+// still parks the room so the first track cannot tease before the DJ.
 
 function silenceFileName(sec) {
   return `silence-${djSilenceLabel(sec)}s.mp3`;
@@ -2435,8 +2435,20 @@ async function beginVolumeSession({
     silenceSec,
     ttsPosition,
     musicPosition,
+    takeOver: !!startPlayback,
+    rearmOnComplete: true,
     calculateTarget: (baseline) => announceVolumeFromMusic(baseline, tiers),
   });
+  if (handoff?.deferred) {
+    return {
+      musicVol: null,
+      announceLevel: null,
+      tiers,
+      cancelled: false,
+      startHold: null,
+      handoff,
+    };
+  }
   const startHold = () => {
     handoff.start()?.catch((err) =>
       console.error("[dj-volume] handoff crashed:", err.message)
@@ -2909,14 +2921,25 @@ async function startQueuePlayback(trackNumber = 1) {
   await play({ trackNumber });
 }
 
-// Serialize Sonos DJ inserts so empty-queue shouts, random fresh sets, and
-// refill announces can't interleave (double TTS / stuck loud volume).
+// Serialize Sonos DJ inserts so stacked shouts, set intros, and refills
+// lock in one-by-one (no interleaved pads / cancelled volume handoffs).
 let announceChain = Promise.resolve();
+let announceDepth = 0;
 function withAnnounceLock(fn) {
+  announceDepth += 1;
+  if (announceDepth > 1) {
+    console.log(
+      `[dj-voice] announce queued (${announceDepth} in flight — processing one by one)`
+    );
+  }
   const run = announceChain.then(fn, fn);
   announceChain = run.then(
-    () => {},
-    () => {}
+    () => {
+      announceDepth = Math.max(0, announceDepth - 1);
+    },
+    () => {
+      announceDepth = Math.max(0, announceDepth - 1);
+    }
   );
   return run;
 }
@@ -2976,6 +2999,7 @@ export async function announceOnSonos(
     clip = null,
     applyLeadBuffer = false,
     requestUri = null,
+    allowImminentPause = false,
   } = {}
 ) {
   return withAnnounceLock(() =>
@@ -2987,6 +3011,7 @@ export async function announceOnSonos(
       clip,
       applyLeadBuffer,
       requestUri,
+      allowImminentPause,
     })
   );
 }
@@ -3001,6 +3026,7 @@ async function announceOnSonosUnlocked(
     clip: prebuiltClip = null,
     applyLeadBuffer = false,
     requestUri = null,
+    allowImminentPause = false,
   } = {}
 ) {
   const preempted = () => queueWorkWasPreempted(preemptGeneration);
@@ -3021,9 +3047,9 @@ async function announceOnSonosUnlocked(
   let volHold = null;
   let pausedForImminent = false;
   try {
-    // Mid-set / refill: if the announce would be next and the song is almost
-    // over, pause so TTS generation can't lose the race to the playhead.
-    if (!startPlayback) {
+    // Set Request / mid-queue shouts must never stop a song. Imminent pause
+    // is opt-in and unused on those paths (empty/idle uses startPlayback).
+    if (!startPlayback && allowImminentPause) {
       pausedForImminent = await pauseIfAnnounceImminent(queuePosition);
     }
     // Empty/idle shouts: pause BEFORE TTS generation. Waiting until after
@@ -3295,10 +3321,11 @@ export async function scheduleRefillAnnounce(
     // the batch start live instead of trusting pre-refill arithmetic.
     const first = summary?.highlights?.[0];
     const anchored =
-      first && (first.name || first.artist)
+      first && (first.name || first.artist || first.uri)
         ? await sonosMod.findUpcomingTrackPosition({
             name: first.name,
             artist: first.artist,
+            uri: first.uri || first.trackUri || null,
           })
         : null;
     if (anchored && anchored >= 1) {
@@ -3488,10 +3515,11 @@ export async function announceSetBatch(
   try {
     const first = summary.highlights?.[0];
     const anchored =
-      sonosMod && first && (first.name || first.artist)
+      sonosMod && first && (first.name || first.artist || first.uri)
         ? await sonosMod.findUpcomingTrackPosition({
             name: first.name,
             artist: first.artist,
+            uri: first.uri || first.trackUri || null,
           })
         : null;
     if (anchored && anchored >= 1) {

@@ -1,11 +1,12 @@
 /**
- * Mid-set shout lead buffer: when a guest request would be next-up and the
- * current song ends before TTS can land, demote the request behind one
- * non-request track so music keeps playing (no hard-pause). Announce still
- * inserts immediately before the request.
+ * Guest request order is FIFO. We never demote a request to make room for TTS —
+ * that split set-requests and played later adds before earlier ones.
  *
- * Last-song / empty-buffer edge case keeps a narrower imminent pause in
- * dj-voice (see IMMINENT_ANNOUNCE_PAUSE_SEC).
+ * Mid-queue / Set Request paths never Pause a playing song. Imminent pause
+ * stays as an opt-in last-song helper and is unused on those product paths.
+ *
+ * Helpers below stay for tests / pause eligibility. ensureShoutLeadBuffer is a
+ * no-op so route and insert-lock call sites cannot move guest songs.
  */
 
 import { isAnnounceQueuePad } from "./sonos-queue-policy.js";

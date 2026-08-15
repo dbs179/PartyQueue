@@ -26,7 +26,11 @@ import {
   shouldAnnouncePartyRecap,
 } from "../closing-time.js";
 import { buildPartyRecap } from "../party-recap.js";
-import { shouldShoutOnSearch, announceRequestShout } from "../dj-shout.js";
+import {
+  shouldShoutOnSearch,
+  announceRequestShout,
+  queueRequestShout,
+} from "../dj-shout.js";
 import {
   GENRE_BUCKETS,
   GENRE_TAG_GUIDE,
@@ -306,7 +310,9 @@ export function registerQueueRoutes(app, ctx) {
         // shouts when enabled (and starts playback from the TTS clip).
         // Speak/key off User (real name), never the queue alias.
         const pos = Number(result.absoluteQueuePosition ?? result.queuePosition);
-        const startPlayback = !!(result.queueWasEmpty || result.deferredStart);
+        // Only Play-from-DJ when we actually held idle. Empty queue + already
+        // playing must not Pause / Seek the current song.
+        const startPlayback = !!result.deferredStart && !result.alreadyPlaying;
         if (Number.isFinite(pos) && pos >= 1) {
           if (startPlayback) {
             // Await empty/idle shouts so we can fall back to playing the song if
@@ -342,35 +348,27 @@ export function registerQueueRoutes(app, ctx) {
               }
             }
           } else {
-            // Mid-set request: await TTS insert so the playhead can't race past
-            // the shout. When next-up with little time left, demote behind one
-            // non-request track first (music keeps playing). Last-song / no
-            // buffer still uses the imminent pause inside announceOnSonos.
+            // Mid-set: never Pause. Next-up awaits the insert; further-back
+            // shouts queue on the announce lock so several adds in a row each
+            // lock in without blocking the next append.
             try {
-              let shoutPos = pos;
-              try {
-                const lead = await sonos.ensureShoutLeadBuffer(pos);
-                if (Number.isFinite(lead?.absoluteQueuePosition)) {
-                  shoutPos = lead.absoluteQueuePosition;
-                }
-              } catch (err) {
-                console.warn(
-                  "[queue] shout lead buffer skipped:",
-                  err.message
-                );
-              }
-              await announceRequestShout({
-                name,
-                artist,
-                requestedBy: user,
-                dedication: note,
-                uri,
-                trackId: reqId,
-                kind: "songRequest",
-                queuePosition: shoutPos,
-                startPlayback: false,
-                preemptGeneration,
-              });
+              const shoutPos = pos;
+              const nextUp = Number(result.queuePosition) === 1;
+              await queueRequestShout(
+                {
+                  name,
+                  artist,
+                  requestedBy: user,
+                  dedication: note,
+                  uri,
+                  trackId: reqId,
+                  kind: "songRequest",
+                  queuePosition: shoutPos,
+                  startPlayback: false,
+                  preemptGeneration,
+                },
+                { awaitInsert: nextUp }
+              );
             } catch (err) {
               console.error("[queue] request shout:", err.message);
             }
@@ -554,23 +552,11 @@ export function registerQueueRoutes(app, ctx) {
           const pos = Number(
             result.absoluteQueuePosition ?? result.queuePosition
           );
-          const startPlayback = !!(result.queueWasEmpty || result.deferredStart);
+          // Set Request must never stop a song mid-play.
+          const startPlayback = !!result.deferredStart && !result.alreadyPlaying;
           if (Number.isFinite(pos) && pos >= 1) {
             try {
-              let shoutPos = pos;
-              if (!startPlayback) {
-                try {
-                  const lead = await sonos.ensureShoutLeadBuffer(pos);
-                  if (Number.isFinite(lead?.absoluteQueuePosition)) {
-                    shoutPos = lead.absoluteQueuePosition;
-                  }
-                } catch (err) {
-                  console.warn(
-                    "[queue/set-request] shout lead buffer skipped:",
-                    err.message
-                  );
-                }
-              }
+              const shoutPos = pos;
               const voice = await announceRequestShout({
                 name: first.name || "Set Request",
                 artist: artistName,
@@ -667,22 +653,10 @@ export function registerQueueRoutes(app, ctx) {
       const by = identity.user || requestedByUserOf(id) || requestedByOf(id);
       try {
         const { findUpcomingTrackPosition } = await import("../sonos.js");
-        const pos = await findUpcomingTrackPosition({ name, artist });
+        const pos = await findUpcomingTrackPosition({ name, artist, uri });
         if (pos != null && pos >= 1) {
-          void (async () => {
-            let shoutPos = pos;
-            try {
-              const lead = await sonos.ensureShoutLeadBuffer(pos);
-              if (Number.isFinite(lead?.absoluteQueuePosition)) {
-                shoutPos = lead.absoluteQueuePosition;
-              }
-            } catch (err) {
-              console.warn(
-                "[queue] dedication shout lead buffer skipped:",
-                err.message
-              );
-            }
-            await announceRequestShout({
+          void queueRequestShout(
+            {
               name,
               artist,
               requestedBy: by,
@@ -690,12 +664,11 @@ export function registerQueueRoutes(app, ctx) {
               uri,
               trackId: id,
               kind: "songRequest",
-              queuePosition: shoutPos,
+              queuePosition: pos,
               startPlayback: false,
               preemptGeneration,
-            });
-          })().catch((err) =>
-            console.error("[queue] dedication shout refresh:", err.message)
+            },
+            { awaitInsert: false }
           );
         }
       } catch (err) {

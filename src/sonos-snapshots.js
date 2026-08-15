@@ -15,7 +15,7 @@ import {
   isDjVoiceUri,
   isDjSilenceUri,
   isDjSilenceTrack,
-  songMatchKey,
+  findUpcomingTrackPositionInItems,
   queueTrackGenreFields,
   queueTrackFromPlaylist,
   visibleUpcomingQueueItems,
@@ -637,7 +637,12 @@ export function invalidateSonosSnapshots() {
  * Live 1-based queue index of a searched track (for DJ shout placement).
  * Returns null when the song is no longer upcoming.
  */
-export async function findUpcomingTrackPosition({ name = "", artist = "" } = {}) {
+export async function findUpcomingTrackPosition({
+  name = "",
+  artist = "",
+  uri = null,
+  expected = null,
+} = {}) {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
   const [pos, media, queue] = await Promise.all([
@@ -650,14 +655,14 @@ export async function findUpcomingTrackPosition({ name = "", artist = "" } = {})
   const items = Array.isArray(queue.Result) ? queue.Result : [];
   const track = Number(pos.Track) || 0;
   const playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
-  const start = playingFromQueue && track >= 1 ? track : 0; // 0-based upcoming start
-  const want = songMatchKey(name, artist);
-  if (!want) return null;
-  for (let i = start; i < items.length; i++) {
-    const it = items[i];
-    if (songMatchKey(it.Title, it.Artist) === want) return i + 1;
-  }
-  return null;
+  return findUpcomingTrackPositionInItems(items, {
+    name,
+    artist,
+    uri,
+    expected,
+    currentTrack: track,
+    playingFromQueue,
+  });
 }
 
 /** Used by transport.next when a skip clears the heard-track dedupe. */

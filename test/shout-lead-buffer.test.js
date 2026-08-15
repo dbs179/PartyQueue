@@ -47,6 +47,8 @@ test("needsShoutLeadBuffer only when next-up and short remaining", () => {
 });
 
 test("findShoutBufferTrackNumber skips other requests to reach filler", () => {
+  // Unused by product path: demoting past other requests (#2 behind #7)
+  // split set-requests and broke FIFO. ensureShoutLeadBuffer is a no-op.
   const items = [
     { TrackUri: "spotify:track:cur", Title: "Cur" },
     { TrackUri: "spotify:track:req", Title: "Req" },

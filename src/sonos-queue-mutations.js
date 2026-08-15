@@ -12,16 +12,13 @@ import {
   autoStartDecision,
   findInsertPosition,
   findUpcomingAnnouncePadIndices,
+  announcePadsToSupersede,
   songMatchKey,
   isAnnounceQueuePad,
+  isTransportPlaying,
+  shoutPlaybackHoldDecision,
 } from "./sonos-queue-policy.js";
 import { ensureOrderedPlayModeOn } from "./sonos-transport.js";
-import {
-  needsShoutLeadBuffer,
-  findShoutBufferTrackNumber,
-  requestPosAfterShoutBuffer,
-  SHOUT_LEAD_BUFFER_SEC,
-} from "./shout-lead-buffer.js";
 import { spotifyTrackId } from "./sampler.js";
 import { getDjVoiceSettings } from "./settings.js";
 import {
@@ -33,7 +30,6 @@ import {
   requestedByUserOf,
 } from "./queue-origin.js";
 import { sanitizeDisplayName } from "./display-name.js";
-import { parseSonosTime } from "./sonos-snapshots.js";
 import { queueWorkWasPreempted } from "./queue-preempt.js";
 
 // Remove already-played songs (everything before the current track) so the queue
@@ -119,14 +115,30 @@ export async function autoStartIfIdle(coordinator) {
  */
 export async function holdIdleForDeferredShout(coordinator) {
   try {
+    const transport = await coordinator.AVTransportService.GetTransportInfo().catch(
+      () => null
+    );
+    const state = transport?.CurrentTransportState || "";
+    if (isTransportPlaying(state)) {
+      console.log("[queue] skip idle hold — music is already playing");
+      return false;
+    }
     const media = await coordinator.AVTransportService.GetMediaInfo({
       InstanceID: 0,
     }).catch(() => null);
     const onQueue = /^x-rincon-queue:/.test(media?.CurrentURI || "");
     if (!onQueue) await coordinator.SwitchToQueue();
-    // Always Pause after landing on the queue. Sonos sometimes begins the first
-    // enqueued track on SwitchToQueue / AddURIToQueue; leaving it PLAYING here
-    // is exactly the empty-queue "tease → DJ → restart" glitch.
+    // Recheck after SwitchToQueue — never Pause a song that started playing.
+    const again = await coordinator.AVTransportService.GetTransportInfo().catch(
+      () => null
+    );
+    if (isTransportPlaying(again?.CurrentTransportState)) {
+      console.log("[queue] skip idle hold — music started during switch");
+      return false;
+    }
+    // Park idle/stopped rooms only. Sonos sometimes begins the first enqueued
+    // track on SwitchToQueue / AddURIToQueue; Pause here is the empty-queue
+    // "tease → DJ → restart" guard, not a mid-song interrupt.
     try {
       await coordinator.Pause();
     } catch {
@@ -241,6 +253,13 @@ async function addSetRequestToQueueUnlocked(
   } catch (err) {
     console.error("[queue] set-request live read failed:", err.message);
   }
+  let transportState = "";
+  try {
+    const transport = await coordinator.AVTransportService.GetTransportInfo();
+    transportState = transport?.CurrentTransportState || "";
+  } catch {
+    /* hold decision treats unknown as not playing */
+  }
 
   const start = playingFromQueue && currentTrack >= 1 ? currentTrack : 0;
   const upcomingIds = new Set();
@@ -307,12 +326,15 @@ async function addSetRequestToQueueUnlocked(
 
   const queueWasEmpty = items.length === 0;
   const dj = getDjVoiceSettings();
-  const deferStartForShout =
-    queueWasEmpty && !!dj.djVoiceEnabled && !!dj.djShoutEnabled;
+  const hold = shoutPlaybackHoldDecision({
+    queueWasEmpty,
+    transportState,
+    djShoutReady: !!dj.djVoiceEnabled && !!dj.djShoutEnabled,
+  });
   let started = false;
-  if (deferStartForShout) {
+  if (hold.holdIdle) {
     await holdIdleForDeferredShout(coordinator);
-  } else {
+  } else if (!hold.alreadyPlaying) {
     started = await autoStartIfIdle(coordinator);
   }
   invalidateSonosSnapshots();
@@ -328,7 +350,8 @@ async function addSetRequestToQueueUnlocked(
     added: added.length,
     tracks: added,
     queueWasEmpty,
-    deferredStart: deferStartForShout,
+    deferredStart: hold.holdIdle,
+    alreadyPlaying: hold.alreadyPlaying,
     queuePosition,
     absoluteQueuePosition: firstAbs,
     requestCreated: true,
@@ -367,18 +390,21 @@ async function addTrackToQueueUnlocked(
   let updateId = 0;
   let currentTrack = 0;
   let playingFromQueue = false;
+  let transportState = "";
   try {
-    const [queue, pos, media] = await Promise.all([
+    const [queue, pos, media, transport] = await Promise.all([
       coordinator.GetQueue(),
       coordinator.AVTransportService.GetPositionInfo().catch(() => ({ Track: 0 })),
       coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
         CurrentURI: "",
       })),
+      coordinator.AVTransportService.GetTransportInfo().catch(() => ({})),
     ]);
     items = Array.isArray(queue.Result) ? queue.Result : [];
     updateId = Number(queue.UpdateID) || 0;
     currentTrack = Number(pos.Track) || 0;
     playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
+    transportState = transport?.CurrentTransportState || "";
   } catch (err) {
     console.error("[queue] live read failed, appending:", err.message);
   }
@@ -473,15 +499,19 @@ async function addTrackToQueueUnlocked(
   // skipped — not at enqueue — so a host delete before play leaves Random free.
 
   const queueWasEmpty = items.length === 0;
-  // Empty queue + shout-outs: skip auto-start so the DJ clip can lead.
+  // Empty + idle + shout-outs: skip auto-start so the DJ clip can lead.
+  // Never Pause when a song is already playing (Set Request / busy night).
   const dj = getDjVoiceSettings();
-  const deferStartForShout =
-    queueWasEmpty && !!dj.djVoiceEnabled && !!dj.djShoutEnabled;
+  const hold = shoutPlaybackHoldDecision({
+    queueWasEmpty,
+    transportState,
+    djShoutReady: !!dj.djVoiceEnabled && !!dj.djShoutEnabled,
+  });
 
   let started = false;
-  if (deferStartForShout) {
+  if (hold.holdIdle) {
     await holdIdleForDeferredShout(coordinator);
-  } else {
+  } else if (!hold.alreadyPlaying) {
     started = await autoStartIfIdle(coordinator);
   }
   invalidateSonosSnapshots();
@@ -509,7 +539,8 @@ async function addTrackToQueueUnlocked(
     requestCreated: !existing || promoted || duplicated,
     alreadyRequested,
     queueWasEmpty,
-    deferredStart: deferStartForShout,
+    deferredStart: hold.holdIdle,
+    alreadyPlaying: hold.alreadyPlaying,
     queuePosition,
     // Absolute 1-based Sonos index (for DJ TTS inserts). queuePosition above is
     // guest-facing (#1 = next up) and is wrong for AddURIToQueue placement.
@@ -590,7 +621,7 @@ async function enqueueHttpAudioUnlocked(
  * @param {{
  *   queuePosition?: number,
  *   preemptGeneration?: number,
- *   applyLeadBuffer?: boolean,
+ *   applyLeadBuffer?: boolean, // re-resolve request position; never reorders
  *   requestUri?: string|null,
  *   ramp: { url: string, title?: string, artist?: string, durationSec?: number },
  *   tts: { url: string, title?: string, artist?: string, durationSec?: number },
@@ -648,9 +679,9 @@ async function insertAnnounceBlockUnlocked({
   pauseTrim(25000);
   let rampPos = Number(queuePosition) || 1;
 
-  // Mid-set guest shouts: re-resolve + demote under this same write lock so the
-  // pads cannot land after another mutation shifted the request back to next-up
-  // during script/TTS (route demote alone leaves that gap).
+  // Re-resolve the request under this write lock so pads stay glued to it if
+  // another add shifted positions during script/TTS. Guest songs are never
+  // reordered (lead buffer is a no-op).
   if (applyLeadBuffer) {
     try {
       if (requestUri) {
@@ -914,11 +945,13 @@ function contiguousIndexRanges(indices) {
 }
 
 /**
- * Strip unplayed DJ ramp/TTS pads from the upcoming queue so a new announce
- * can supersede ones that haven't started (avoids back-to-back shout-outs).
+ * Strip unplayed DJ ramp/TTS pads that a new announce replaces.
+ * With beforePosition, only the contiguous pad run at that slot is removed
+ * (this track's existing shout / dedication). Earlier request-glued shouts
+ * stay. Without beforePosition, all upcoming pads are stripped (startup).
  * @param {{ beforePosition?: number }} [opts]
- *   beforePosition: count how many removed pads sat strictly before this
- *   1-based index (for adjusting an insert position after the wipe).
+ *   beforePosition: 1-based insert index; also used to count removed pads
+ *   strictly before that index (for adjusting the insert after a wipe).
  * @returns {Promise<{
  *   removed: number,
  *   removedBefore: number,
@@ -976,22 +1009,9 @@ async function removeUpcomingAnnouncePadsUnlocked({ beforePosition } = {}) {
   }
 
   const before = Number(beforePosition) || 0;
-  // When inserting a new announce, only supersede pads that would play at or
-  // before that slot. Later refill/set pads (after guest requests / music)
-  // stay glued to their batch — wiping them made Set Request shouts erase a
-  // pending Random intro that should still fire after the request set.
-  let toRemove = indices;
-  if (before >= 1) {
-    const indexSet = new Set(indices);
-    toRemove = indices.filter((i) => {
-      if (i < before) return true;
-      // Contiguous pad run starting exactly at the insert position.
-      for (let j = before; j <= i; j++) {
-        if (!indexSet.has(j)) return false;
-      }
-      return true;
-    });
-  }
+  // Keep earlier request-glued shouts. Only replace the pad run at this slot
+  // (or strip everything on startup when beforePosition is omitted).
+  const toRemove = announcePadsToSupersede(indices, before);
   if (!toRemove.length) {
     return { removed: 0, removedBefore: 0, protectedThrough };
   }
@@ -1117,133 +1137,20 @@ async function removeUpcomingFillerTracksUnlocked({ beforePosition } = {}) {
 // InsertBefore in the queue's current numbering, so the neighbor's live
 // position is exactly the value we need.
 /**
- * When a mid-set shout would race the end of the current song, demote the
- * request behind one non-request track so that song plays first (no pause).
- * Returns the (possibly updated) absolute queue position of the request.
+ * Guest request order is FIFO — never reorder a request to make room for TTS.
+ * Imminent pause in dj-voice covers the last-song race. Kept as a lock-safe
+ * no-op so existing route / insert-block call sites stay valid.
  */
 export async function ensureShoutLeadBuffer(...args) {
   return withSonosWriteLock(() => ensureShoutLeadBufferUnlocked(...args));
 }
 
-async function ensureShoutLeadBufferUnlocked(
-  requestAbsPos,
-  { thresholdSec = SHOUT_LEAD_BUFFER_SEC } = {}
-) {
+async function ensureShoutLeadBufferUnlocked(requestAbsPos) {
   const planned = Math.max(1, Math.floor(Number(requestAbsPos)) || 1);
-  const m = await getManager();
-  const coordinator = await resolveCoordinator(m);
-
-  let items = [];
-  let updateId = 0;
-  let currentTrack = 0;
-  let playingFromQueue = false;
-  let remainingSec = null;
-  try {
-    const [queue, pos, media] = await Promise.all([
-      coordinator.GetQueue(),
-      coordinator.AVTransportService.GetPositionInfo().catch(() => ({
-        Track: 0,
-        RelTime: "",
-        TrackDuration: "",
-      })),
-      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(
-        () => ({ CurrentURI: "" })
-      ),
-    ]);
-    items = Array.isArray(queue.Result) ? queue.Result : [];
-    updateId = Number(queue.UpdateID) || 0;
-    currentTrack = Number(pos.Track) || 0;
-    playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
-    const durationSec = parseSonosTime(pos.TrackDuration);
-    const positionSec = parseSonosTime(pos.RelTime);
-    if (
-      Number.isFinite(durationSec) &&
-      durationSec > 0 &&
-      Number.isFinite(positionSec)
-    ) {
-      remainingSec = Math.max(0, durationSec - positionSec);
-    }
-  } catch (err) {
-    console.warn("[queue] shout lead buffer read failed:", err.message);
-    return {
-      buffered: false,
-      absoluteQueuePosition: planned,
-      reason: "read-failed",
-    };
-  }
-
-  if (!playingFromQueue) {
-    return {
-      buffered: false,
-      absoluteQueuePosition: planned,
-      reason: "not-on-queue",
-    };
-  }
-
-  if (
-    !needsShoutLeadBuffer({
-      requestAbsPos: planned,
-      currentTrack,
-      remainingSec,
-      thresholdSec,
-    })
-  ) {
-    return {
-      buffered: false,
-      absoluteQueuePosition: planned,
-      reason: "not-needed",
-    };
-  }
-
-  const bufferPos = findShoutBufferTrackNumber(items, {
-    requestAbsPos: planned,
-    searchedIds: searchedIdSet(),
-  });
-  if (bufferPos == null) {
-    // Last song / only requests — keep request next-up; imminent pause applies.
-    return {
-      buffered: false,
-      absoluteQueuePosition: planned,
-      reason: "no-buffer",
-    };
-  }
-
-  const insertBefore = bufferPos + 1;
-  if (insertBefore === planned || insertBefore === planned + 1) {
-    return {
-      buffered: false,
-      absoluteQueuePosition: planned,
-      reason: "already-buffered",
-    };
-  }
-
-  try {
-    await coordinator.AVTransportService.ReorderTracksInQueue({
-      InstanceID: 0,
-      StartingIndex: planned,
-      NumberOfTracks: 1,
-      InsertBefore: insertBefore,
-      UpdateID: updateId,
-    });
-  } catch (err) {
-    console.warn("[queue] shout lead buffer reorder failed:", err.message);
-    return {
-      buffered: false,
-      absoluteQueuePosition: planned,
-      reason: "reorder-failed",
-    };
-  }
-
-  const nextPos = requestPosAfterShoutBuffer(planned, bufferPos);
-  invalidateSonosSnapshots();
-  console.log(
-    `[queue] shout lead buffer: demoted request #${planned} behind #${bufferPos} → #${nextPos} (${Math.round(remainingSec)}s left)`
-  );
   return {
-    buffered: true,
-    absoluteQueuePosition: nextPos,
-    bufferTrack: bufferPos,
-    reason: "demoted",
+    buffered: false,
+    absoluteQueuePosition: planned,
+    reason: "no-reorder",
   };
 }
 

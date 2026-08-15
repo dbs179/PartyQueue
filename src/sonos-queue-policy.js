@@ -73,6 +73,30 @@ export function autoStartDecision(state) {
   return "start";
 }
 
+/** True when Sonos is actively playing or transitioning (do not Pause). */
+export function isTransportPlaying(state) {
+  const s = String(state || "").toUpperCase();
+  return s === "PLAYING" || s === "TRANSITIONING";
+}
+
+/**
+ * Empty-queue DJ hold / Play-from-shout is only safe when nothing is playing.
+ * Set Request and mid-party adds must never Pause a song in progress.
+ */
+export function shoutPlaybackHoldDecision({
+  queueWasEmpty = false,
+  transportState = "",
+  djShoutReady = false,
+} = {}) {
+  if (isTransportPlaying(transportState)) {
+    return { holdIdle: false, startPlayback: false, alreadyPlaying: true };
+  }
+  if (queueWasEmpty && djShoutReady) {
+    return { holdIdle: true, startPlayback: true, alreadyPlaying: false };
+  }
+  return { holdIdle: false, startPlayback: false, alreadyPlaying: false };
+}
+
 // Pure: whether Random+DJ may wipe the Sonos queue before enqueueing a fresh
 // set. Only safe when the queue is already empty (clear still runs Stop() to
 // reset the playhead). Never clear when tracks are waiting — guest requests
@@ -202,9 +226,87 @@ export function findInsertPosition(items, { currentTrack = 0, playingFromQueue =
   return insertAt + 1;
 }
 
+/**
+ * Which upcoming announce pads a new insert may replace.
+ * Only the contiguous pad run at the insert slot (this track's existing shout
+ * or dedication). Earlier request-glued shouts stay put — wiping them caused
+ * empty DJ clips and songs landing in the wrong spot.
+ * No beforePosition (startup reconcile) still returns every listed index.
+ */
+export function announcePadsToSupersede(indices, beforePosition) {
+  const list = (Array.isArray(indices) ? indices : [])
+    .map((n) => Number(n))
+    .filter((n) => Number.isFinite(n) && n >= 1);
+  const before = Number(beforePosition) || 0;
+  if (before < 1) return list;
+  const indexSet = new Set(list);
+  return list.filter((i) => {
+    if (i < before) return false;
+    for (let j = before; j <= i; j++) {
+      if (!indexSet.has(j)) return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Live 1-based queue index of an upcoming track. Prefer URI / Spotify id so a
+ * shout stays glued to the request that triggered it; fall back to title+artist.
+ * Duplicate copies pick the match nearest `expected` when provided.
+ */
+export function findUpcomingTrackPositionInItems(
+  items,
+  {
+    name = "",
+    artist = "",
+    uri = null,
+    expected = null,
+    currentTrack = 0,
+    playingFromQueue = false,
+  } = {}
+) {
+  const list = Array.isArray(items) ? items : [];
+  const track = Math.floor(Number(currentTrack) || 0);
+  const start = playingFromQueue && track >= 1 ? track : 0;
+  const wantUri = String(uri || "").trim();
+  const wantId = spotifyTrackId(wantUri);
+  const wantExpected = Number(expected);
+  const nearest = (matches) => {
+    if (!matches.length) return null;
+    if (matches.length === 1 || !Number.isFinite(wantExpected)) return matches[0];
+    return matches.reduce((best, p) =>
+      Math.abs(p - wantExpected) < Math.abs(best - wantExpected) ? p : best
+    );
+  };
+
+  if (wantUri || wantId) {
+    const matches = [];
+    for (let i = start; i < list.length; i++) {
+      const itUri = list[i]?.TrackUri ?? list[i]?.uri ?? "";
+      if (wantUri && itUri === wantUri) matches.push(i + 1);
+      else if (wantId && spotifyTrackId(itUri) === wantId) matches.push(i + 1);
+    }
+    const hit = nearest(matches);
+    if (hit != null) return hit;
+  }
+
+  const want = songMatchKey(name, artist);
+  if (!want) return null;
+  const matches = [];
+  for (let i = start; i < list.length; i++) {
+    const it = list[i];
+    if (
+      songMatchKey(it.Title ?? it.title, it.Artist ?? it.artist) === want
+    ) {
+      matches.push(i + 1);
+    }
+  }
+  return nearest(matches);
+}
+
 // Pure: 1-based queue indices of unplayed DJ ramp/TTS pads (after the current
-// track when playing from the queue). Used to strip superseded shout-outs so
-// two announces don't play back-to-back. Exported for unit testing.
+// track when playing from the queue). Insert replaces only the pad run at the
+// target slot — earlier request-glued shouts stay. Exported for unit testing.
 export function findUpcomingAnnouncePadIndices(
   items,
   { currentTrack = 0, playingFromQueue = false } = {}

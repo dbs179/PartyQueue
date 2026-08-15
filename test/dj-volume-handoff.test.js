@@ -449,6 +449,39 @@ test("supersede cancellation restores the immutable pre-DJ baseline", async () =
   assert.equal(run.handoff.snapshot().phase, "cancelled");
 });
 
+test("later shout does not cancel an earlier volume handoff", async () => {
+  let releaseSleep;
+  const sleep = () =>
+    new Promise((resolve) => {
+      releaseSleep = resolve;
+    });
+  const first = fakeHandoff({
+    timeline: [PRE, DJ, POST, MUSIC],
+    sleep,
+  });
+  first.options.ttsPosition = 2;
+  const active = await beginDjVolumeHandoff(first.options);
+  active.start();
+
+  for (let i = 0; i < 100 && !releaseSleep; i++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(typeof releaseSleep, "function");
+  assert.equal(active.snapshot().cancelled, false);
+
+  const later = fakeHandoff({ timeline: [PRE, DJ, POST, MUSIC] });
+  later.options.ttsPosition = 8;
+  const deferred = await beginDjVolumeHandoff(later.options);
+  assert.equal(deferred.deferred, true);
+  assert.equal(active.snapshot().cancelled, false);
+  assert.notEqual(getDjVolumeHandoffState().phase, "cancelled");
+  assert.notEqual(getDjVolumeHandoffState().phase, "idle");
+
+  const cancelled = active.cancelAndRestore("test cleanup");
+  releaseSleep();
+  await cancelled;
+});
+
 test("failed supersede restore preserves the original baseline", async () => {
   let releaseSleep;
   let blockFirstSleep = true;

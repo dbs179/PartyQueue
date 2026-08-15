@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Live smoke: two back-to-back shout-worthy adds must supersede pads
- * (≤ one ramp+TTS pair left upcoming) and restore music volume.
+ * Live smoke: two back-to-back shout-worthy adds keep both request-glued
+ * shouts (FIFO songs; each announce sits immediately before its track) and
+ * restore music volume after the first DJ stretch.
  *
  *   node scripts/smoke-announce-supersede.mjs
  *   PQ_HOST_PIN=**** PQ_BASELINE=15 node scripts/smoke-announce-supersede.mjs
@@ -78,10 +79,10 @@ async function main() {
   const djClips = countUpcomingDjClips(q);
   console.log(`upcoming DJ TTS rows after dual add: ${djClips}`);
 
-  // Guest list hides silence ramps; after supersede at most one TTS should remain.
-  if (djClips > 1) {
+  // Guest list hides silence ramps. Both request shouts must stay glued.
+  if (djClips < 2) {
     throw new Error(
-      `Expected at most 1 upcoming DJ clip after supersede, found ${djClips}`
+      `Expected both request shouts to stay in queue, found ${djClips}`
     );
   }
 

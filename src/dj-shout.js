@@ -502,7 +502,12 @@ export async function announceRequestShout(
   if (!startPlayback) {
     try {
       const { findUpcomingTrackPosition } = await import("./sonos.js");
-      const live = await findUpcomingTrackPosition({ name, artist });
+      const live = await findUpcomingTrackPosition({
+        name,
+        artist,
+        uri,
+        expected: pos,
+      });
       if (live != null && live !== pos) {
         console.log(
           `[dj-shout] shout insert catch-up: planned #${pos} → #${live} (live song position)`
@@ -520,9 +525,26 @@ export async function announceRequestShout(
     startPlayback: !!startPlayback,
     queuePosition: pos,
     preemptGeneration,
-    // Re-demote under the announce insert lock after TTS so pads stay glued
-    // to the request even if the queue shifted during script generation.
+    // Re-resolve the request under the insert lock after TTS so pads stay
+    // glued to it if the queue shifted during script generation.
     applyLeadBuffer: !startPlayback,
     requestUri: uri || null,
+    // Never Pause a playing song for a request / Set Request shout.
+    allowImminentPause: false,
   });
+}
+
+/**
+ * Queue a mid-party shout onto the announce lock. Next-up / empty-queue
+ * callers should await so pads land before the HTTP response. Further-back
+ * adds return immediately so several songs in a row each lock in a shout
+ * without blocking the next append.
+ */
+export function queueRequestShout(opts, { awaitInsert = false } = {}) {
+  const run = announceRequestShout(opts);
+  if (awaitInsert) return run;
+  void run.catch((err) =>
+    console.error("[queue] request shout:", err.message)
+  );
+  return Promise.resolve({ ok: true, queued: true });
 }

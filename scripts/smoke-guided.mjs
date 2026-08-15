@@ -162,8 +162,8 @@ async function withForcedShouts(fn) {
 async function phaseSupersede() {
   banner("PHASE 1 — Announce supersede");
   console.log(`BASE=${BASE}  baseline volume target=${BASELINE}`);
-  console.log(
-    "Goal: two guest adds close together → ONE DJ pad left → ONE shout you hear."
+    console.log(
+    "Goal: two guest adds close together → BOTH request-glued shouts stay → songs in add order."
   );
 
   await ensureHostAuth();
@@ -229,7 +229,7 @@ async function phaseSupersede() {
 
     banner("Guest add #1 — Mark");
     expect(
-      "usually NOTHING spoken yet (pad queues after the song). Do NOT expect two DJs."
+      "usually NOTHING spoken yet (pad queues after the song). Mark's shout stays glued to his track."
     );
     console.log(`adding: ${a.name}`);
     await addAs("Mark", a);
@@ -239,31 +239,28 @@ async function phaseSupersede() {
       `upcoming DJ clips: ${countUpcomingDjClips(await queueList())} (expect 1)`
     );
 
-    banner("Guest add #2 — Alex (supersede)");
+    banner("Guest add #2 — Alex (stacked request shout)");
     expect(
-      "still no back-to-back double shout. Alex should REPLACE Mark's unplayed pad."
+      "Alex's shout inserts before his track. Mark's unplayed shout stays."
     );
     console.log(`adding: ${b.name}`);
     await addAs("Alex", b);
-    await pause("after Alex — supersede should have wiped Mark's pad");
+    await pause("after Alex — both request shouts should still be queued");
     await statusLine("after-alex");
     const clips = countUpcomingDjClips(await queueList());
     console.log(`upcoming DJ TTS rows: ${clips}`);
-    if (clips > 1) {
-      throw new Error(`FAIL supersede: expected ≤1 DJ clip, found ${clips}`);
-    }
-    if (clips < 1) {
+    if (clips < 2) {
       throw new Error(
-        "FAIL: no DJ pad after dual add (forced every-add shouts should always insert one)."
+        `FAIL stacked shouts: expected both request shouts, found ${clips}`
       );
     }
-    console.log("PASS check: only one DJ pad queued after dual add.");
+    console.log("PASS check: both request-glued DJ pads queued after dual add.");
 
     await skipTowardDj();
     await waitForDj({ timeoutMs: 120000 });
     banner("PHASE 1 RESULT: PASS");
     console.log(
-      "You should have heard exactly ONE mid-queue DJ shout (likely Alex), not Mark then Alex."
+      "You should hear Mark's shout before his song, then later Alex's before his."
     );
   });
 }

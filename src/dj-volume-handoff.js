@@ -130,6 +130,8 @@ export function createDjVolumeHandoff({
     started,
     volumeLocked,
     deadlineAt,
+    ttsPosition,
+    musicPosition,
   });
 
   const setPhase = (next) => {
@@ -521,12 +523,64 @@ export function createDjVolumeHandoff({
   };
 }
 
+function isLaterAnnounce(previous, next) {
+  const prevTts = Number(previous?.ttsPosition);
+  const nextTts = Number(next?.ttsPosition);
+  if (!Number.isFinite(prevTts) || !Number.isFinite(nextTts)) return false;
+  return nextTts > prevTts;
+}
+
+function createDeferredHandoff() {
+  return {
+    deferred: true,
+    start: async () => ({
+      phase: "deferred",
+      cancelled: false,
+      started: false,
+      volumeLocked: false,
+      deadlineAt: null,
+      ttsPosition: null,
+      musicPosition: null,
+      baselineVolume: null,
+      announceVolume: null,
+    }),
+    cancelAndRestore: async () => true,
+    isVolumeLocked: () => false,
+    snapshot: () => ({
+      phase: "deferred",
+      baselineVolume: null,
+      announceVolume: null,
+      cancelled: false,
+      started: false,
+      volumeLocked: false,
+      deadlineAt: null,
+      ttsPosition: null,
+      musicPosition: null,
+      deferred: true,
+    }),
+    restoreExact: async () => true,
+    get done() {
+      return Promise.resolve();
+    },
+  };
+}
+
 export async function beginDjVolumeHandoff(options = {}) {
   let preservedBaseline = null;
   if (activeHandoff) {
     const previous = activeHandoff.snapshot();
     const previousPhase = previous.phase;
     if (previousPhase !== "complete" && previousPhase !== "cancelled") {
+      // A later request shout must not cancel the earlier handoff. Cancelling
+      // left the first ramp in queue with no TTS session — empty DJ, then a
+      // jump to the later song. Rearm when the active handoff completes.
+      if (!options.takeOver && isLaterAnnounce(previous, options)) {
+        console.info(
+          `[dj-volume] keeping active handoff tts@${previous.ttsPosition}; ` +
+            `later shout tts@${options.ttsPosition} will rearm`
+        );
+        return createDeferredHandoff();
+      }
       const restored = await activeHandoff.cancelAndRestore("superseded announce");
       if (!restored && previous.baselineVolume != null) {
         // Never let a failed restore ratchet the next announce upward by
@@ -543,10 +597,21 @@ export async function beginDjVolumeHandoff(options = {}) {
   handoff.start = () => {
     const running = start();
     void running.then(
-      () => {
+      async (snap) => {
         if (activeHandoff === handoff) {
           activeHandoff = null;
           syncHandoffActiveFlag();
+        }
+        if (options.rearmOnComplete && snap?.phase === "complete") {
+          try {
+            const voice = await import("./dj-voice.js");
+            await voice.rearmOrphanedDjVolumeHandoff();
+          } catch (err) {
+            console.warn(
+              "[dj-volume] rearm after handoff failed:",
+              err?.message || err
+            );
+          }
         }
       },
       () => {

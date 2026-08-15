@@ -4,8 +4,12 @@ import assert from "node:assert/strict";
 import {
   removeRangeFor,
   autoStartDecision,
+  isTransportPlaying,
+  shoutPlaybackHoldDecision,
   findInsertPosition,
   findUpcomingAnnouncePadIndices,
+  announcePadsToSupersede,
+  findUpcomingTrackPositionInItems,
   shouldClearQueueForRandomDj,
   randomDjAnnouncePlan,
   songMatchKey,
@@ -31,6 +35,46 @@ test("removeRangeFor trims everything before the current track", () => {
 });
 
 // autoStartDecision: whether an add should kick off playback.
+
+test("shoutPlaybackHoldDecision never pauses a playing song", () => {
+  assert.deepEqual(
+    shoutPlaybackHoldDecision({
+      queueWasEmpty: true,
+      transportState: "PLAYING",
+      djShoutReady: true,
+    }),
+    { holdIdle: false, startPlayback: false, alreadyPlaying: true }
+  );
+  assert.deepEqual(
+    shoutPlaybackHoldDecision({
+      queueWasEmpty: false,
+      transportState: "TRANSITIONING",
+      djShoutReady: true,
+    }),
+    { holdIdle: false, startPlayback: false, alreadyPlaying: true }
+  );
+  assert.equal(isTransportPlaying("PLAYING"), true);
+  assert.equal(isTransportPlaying("STOPPED"), false);
+});
+
+test("shoutPlaybackHoldDecision holds idle only when empty and not playing", () => {
+  assert.deepEqual(
+    shoutPlaybackHoldDecision({
+      queueWasEmpty: true,
+      transportState: "STOPPED",
+      djShoutReady: true,
+    }),
+    { holdIdle: true, startPlayback: true, alreadyPlaying: false }
+  );
+  assert.deepEqual(
+    shoutPlaybackHoldDecision({
+      queueWasEmpty: true,
+      transportState: "STOPPED",
+      djShoutReady: false,
+    }),
+    { holdIdle: false, startPlayback: false, alreadyPlaying: false }
+  );
+});
 
 test("autoStartDecision skips while the system is playing (queue or external)", () => {
   assert.equal(autoStartDecision("PLAYING"), "skip");
@@ -371,6 +415,60 @@ test("findInsertPosition inserts before announce pads glued to filler", () => {
     searchedIds: new Set(),
   });
   assert.equal(pos, 2);
+});
+
+test("findInsertPosition appends after two request-glued shout blocks", () => {
+  // Last night: two shouts in queue. A new add must still land after both
+  // requests (bottom of the request block), not before the first ramp.
+  const pad = (uri, title) => ({
+    TrackUri: uri,
+    Title: title,
+    Artist: "PartyQueue",
+  });
+  const list = [
+    { TrackUri: "spotify:track:cur", Title: "Cur", Artist: "A" },
+    pad("http://x/media/tts/silence-ramp-3s.mp3", "PartyQueue Volume Ramp"),
+    pad("http://ha/api/tts_proxy/city.mp3", "Party DJ"),
+    pad("http://x/media/tts/silence-3s.mp3", "PartyQueue Silence Bridge"),
+    { TrackUri: "spotify:track:s1", Title: "City", Artist: "Goo" },
+    pad("http://x/media/tts/silence-ramp-3s.mp3", "PartyQueue Volume Ramp"),
+    pad("http://ha/api/tts_proxy/friday.mp3", "Party DJ"),
+    pad("http://x/media/tts/silence-3s.mp3", "PartyQueue Silence Bridge"),
+    { TrackUri: "spotify:track:s2", Title: "Friday", Artist: "Cure" },
+    { TrackUri: "spotify:track:f1", Title: "Filler", Artist: "D" },
+  ];
+  const pos = findInsertPosition(list, {
+    currentTrack: 1,
+    playingFromQueue: true,
+    searchedIds: new Set(["s1", "s2"]),
+  });
+  assert.equal(pos, 10);
+});
+
+test("announcePadsToSupersede keeps earlier request shouts", () => {
+  assert.deepEqual(announcePadsToSupersede([2, 3, 4, 8, 9, 10], 8), [8, 9, 10]);
+  assert.deepEqual(announcePadsToSupersede([2, 3, 4], 8), []);
+  assert.deepEqual(announcePadsToSupersede([5, 6, 7], 5), [5, 6, 7]);
+  assert.deepEqual(announcePadsToSupersede([2, 3, 4, 6, 7, 8], 6), [6, 7, 8]);
+  assert.deepEqual(announcePadsToSupersede([2, 3, 4], 0), [2, 3, 4]);
+});
+
+test("findUpcomingTrackPositionInItems prefers URI over title", () => {
+  const list = [
+    { TrackUri: "spotify:track:cur", Title: "Cur", Artist: "A" },
+    { TrackUri: "spotify:track:aaa", Title: "Same Title", Artist: "X" },
+    { TrackUri: "spotify:track:bbb", Title: "Same Title", Artist: "X" },
+  ];
+  assert.equal(
+    findUpcomingTrackPositionInItems(list, {
+      name: "Same Title",
+      artist: "X",
+      uri: "spotify:track:bbb",
+      currentTrack: 1,
+      playingFromQueue: true,
+    }),
+    3
+  );
 });
 
 test("findInsertPosition skips announce pads between searched songs", () => {
