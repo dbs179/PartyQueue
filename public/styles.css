@@ -5389,18 +5389,19 @@ body.party-display-active.party-display-preview .party-display-view {
   flex-direction: column;
   justify-content: center;
   align-items: flex-start;
-  gap: calc(4 * var(--pd));
-  padding: max(8px, calc(12 * var(--pd))) max(10px, calc(12 * var(--pd)));
+  gap: calc(3 * var(--pd));
+  padding: calc(8 * var(--pd)) calc(10 * var(--pd));
   background: var(--surface);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: calc(12 * var(--pd));
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .party-display-stat-label {
   flex: 0 0 auto;
   color: var(--muted);
-  font-size: max(11px, calc(13 * var(--pd)));
+  font-size: calc(11 * var(--pd));
   font-weight: 700;
   letter-spacing: 0.06em;
   line-height: 1.1;
@@ -5410,10 +5411,11 @@ body.party-display-active.party-display-preview .party-display-view {
 .party-display-stat strong {
   min-width: 0;
   max-width: 100%;
-  font-size: max(16px, calc(22 * var(--pd)));
+  font-size: calc(15 * var(--pd));
   font-weight: 750;
-  line-height: 1.15;
+  line-height: 1.2;
   overflow: hidden;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -5423,7 +5425,7 @@ body.party-display-active.party-display-preview .party-display-view {
 .party-display-stat-sub {
   max-width: 100%;
   color: var(--muted);
-  font-size: max(11px, calc(13 * var(--pd)));
+  font-size: calc(11 * var(--pd));
   line-height: 1.15;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5589,7 +5591,7 @@ body.party-display-active.party-display-preview .party-display-view {
 /* Up Next type (PC + TV shared) — compact so ≥4 songs fit with request lines. */
 .party-display-side > .party-display-section-head .party-display-label,
 .party-display-queue .party-display-label {
-  font-size: calc(18 * var(--pd));
+  font-size: calc(22 * var(--pd));
 }
 
 .party-display-queue-status {
@@ -5605,7 +5607,7 @@ body.party-display-active.party-display-preview .party-display-view {
 
 .party-display-queue-count {
   color: var(--muted);
-  font-size: calc(18 * var(--pd));
+  font-size: calc(22 * var(--pd));
 }
 
 .party-display-queue-list {
@@ -5623,10 +5625,10 @@ body.party-display-active.party-display-preview .party-display-view {
 .party-display-queue-list li {
   min-width: 0;
   display: grid;
-  grid-template-columns: calc(22 * var(--pd)) minmax(0, 1fr);
-  gap: calc(6 * var(--pd));
+  grid-template-columns: calc(26 * var(--pd)) minmax(0, 1fr);
+  gap: calc(8 * var(--pd));
   align-items: start;
-  padding: calc(4 * var(--pd)) 0;
+  padding: calc(6 * var(--pd)) 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -5636,11 +5638,11 @@ body.party-display-active.party-display-preview .party-display-view {
 
 .party-display-queue-index {
   color: var(--muted);
-  font-size: calc(18 * var(--pd));
+  font-size: calc(22 * var(--pd));
   font-variant-numeric: tabular-nums;
   text-align: center;
   line-height: 1.2;
-  padding-top: calc(1 * var(--pd));
+  padding-top: calc(2 * var(--pd));
 }
 
 .party-display-queue-meta {
@@ -5665,13 +5667,13 @@ body.party-display-active.party-display-preview .party-display-view {
 }
 
 .party-display-queue-meta strong {
-  font-size: calc(20 * var(--pd));
+  font-size: calc(24 * var(--pd));
   line-height: 1.15;
 }
 
 .party-display-queue-meta > span {
   color: var(--muted);
-  font-size: calc(15 * var(--pd));
+  font-size: calc(18 * var(--pd));
   line-height: 1.2;
 }
 
@@ -5679,7 +5681,7 @@ body.party-display-active.party-display-preview .party-display-view {
   flex: 1 1 100%;
   min-width: 0;
   color: #8ef0ae;
-  font-size: calc(14 * var(--pd));
+  font-size: calc(16 * var(--pd));
   line-height: 1.25;
   font-weight: 700;
   white-space: normal;
@@ -5701,7 +5703,7 @@ body.party-display-active.party-display-preview .party-display-view {
 .party-display-queue-meta .party-display-queue-playlist {
   flex: 0 1 auto;
   min-width: 0;
-  font-size: calc(13 * var(--pd));
+  font-size: calc(15 * var(--pd));
   line-height: 1.2;
   font-weight: 700;
   letter-spacing: 0.02em;
