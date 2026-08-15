@@ -628,6 +628,19 @@ export function clearDjNightMemory() {
   }
 }
 
+/**
+ * Reset request shout-out memory only: first-request, birthday-once, used
+ * blurbs, and recent shout scripts. Keeps set-announce phrase / tagline
+ * history so Random intros stay unique.
+ */
+export function clearDjShoutOutMemory() {
+  const store = load();
+  for (const key of Object.keys(store.guests)) {
+    delete store.guests[key];
+  }
+  persist();
+}
+
 /** Test helper for reloading a fixture from disk. */
 export function resetDjNightMemoryCacheForTests() {
   cache = null;

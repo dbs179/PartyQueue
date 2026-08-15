@@ -32,9 +32,14 @@ import { pickFlavorAnnounceLines } from "./dj-flavor-announce.js";
 
 let searchAddCount = 0;
 
+/** Reset the every-N search-add counter (host shout-out memory clear). */
+export function resetSearchAddCount() {
+  searchAddCount = 0;
+}
+
 /** Test helper: reset the every-N search-add counter. */
 export function resetSearchAddCountForTests() {
-  searchAddCount = 0;
+  resetSearchAddCount();
 }
 
 /**

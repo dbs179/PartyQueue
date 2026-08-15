@@ -13,8 +13,51 @@ export function withRequestFairnessLock(fn) {
   return run;
 }
 
+/** Caps stay off until this many distinct Users have requested recently. */
+export const REQUEST_FAIRNESS_MIN_USERS = 2;
+
 const userKey = (value) =>
   String(sanitizeDisplayName(value) || "").toLocaleLowerCase();
+
+function isSongRequestEvent(event) {
+  return event?.kind !== "setRequest" && event?.kind !== "setTrack";
+}
+
+function recentSongRequestEvents(events, { key = "", resetAt, now, windowMs }) {
+  return (Array.isArray(events) ? events : [])
+    .filter(
+      (event) =>
+        isSongRequestEvent(event) &&
+        (!key || userKey(event?.requestedBy) === key) &&
+        Number(event?.ts) > resetAt &&
+        Number(event?.ts) > now - windowMs &&
+        Number(event?.ts) <= now
+    )
+    .sort((a, b) => Number(a.ts) - Number(b.ts));
+}
+
+function uniqueRequesterCount({
+  queue,
+  events,
+  user,
+  resetAt,
+  now,
+  windowMs,
+}) {
+  const users = new Set();
+  const incoming = userKey(user);
+  if (incoming) users.add(incoming);
+  for (const track of Array.isArray(queue) ? queue : []) {
+    if (!track?.searched || track?.setRequest) continue;
+    const key = userKey(track.requestedByUser);
+    if (key) users.add(key);
+  }
+  for (const event of recentSongRequestEvents(events, { resetAt, now, windowMs })) {
+    const key = userKey(event?.requestedBy);
+    if (key) users.add(key);
+  }
+  return users.size;
+}
 
 function sameRequestedTrack(track, target, force) {
   const targetId = spotifyTrackId(target.uri);
@@ -91,23 +134,6 @@ export function evaluateRequestFairness({
       !track?.setRequest &&
       userKey(track.requestedByUser) === key
   ).length;
-  if (
-    totalRequestedUpcoming >= upcomingThreshold &&
-    upcomingCount >= upcomingCap
-  ) {
-    return {
-      allowed: false,
-      status: 409,
-      code: "upcoming_cap",
-      totalRequestedUpcoming,
-      upcomingThreshold,
-      upcomingCount,
-      upcomingCap,
-      error: `There are ${totalRequestedUpcoming} requested songs waiting, and you already have ${upcomingCap} song${
-        upcomingCap === 1 ? "" : "s"
-      } coming up. Wait for one to start or be removed.`,
-    };
-  }
 
   const rollingMax = Math.max(
     1,
@@ -118,20 +144,45 @@ export function evaluateRequestFairness({
     Math.floor(Number(policy.requestFairnessWindowMinutes) || 1)
   );
   const windowMs = windowMinutes * 60_000;
-  const recent = (Array.isArray(events) ? events : [])
-    .filter(
-      (event) =>
-        // Set Request ledger rows never consume song-request rolling quota.
-        event?.kind !== "setRequest" &&
-        event?.kind !== "setTrack" &&
-        userKey(event?.requestedBy) === key &&
-        Number(event?.ts) > resetAt &&
-        Number(event?.ts) > now - windowMs &&
-        Number(event?.ts) <= now
-    )
-    .sort((a, b) => Number(a.ts) - Number(b.ts));
+  const uniqueRequesters = uniqueRequesterCount({
+    queue: upcoming,
+    events,
+    user,
+    resetAt,
+    now,
+    windowMs,
+  });
+  const recent = recentSongRequestEvents(events, {
+    key,
+    resetAt,
+    now,
+    windowMs,
+  });
+  // Solo loaders stay unlimited. Caps turn on once a second person has
+  // requested (waiting queue or rolling window) and enough requested songs
+  // are waiting; they turn back off when the waiting list drains.
+  const limitsActive =
+    uniqueRequesters >= REQUEST_FAIRNESS_MIN_USERS &&
+    totalRequestedUpcoming >= upcomingThreshold;
 
-  if (recent.length >= rollingMax) {
+  if (limitsActive && upcomingCount >= upcomingCap) {
+    return {
+      allowed: false,
+      status: 409,
+      code: "upcoming_cap",
+      limitsActive,
+      uniqueRequesters,
+      totalRequestedUpcoming,
+      upcomingThreshold,
+      upcomingCount,
+      upcomingCap,
+      error: `There are ${totalRequestedUpcoming} requested songs waiting, and you already have ${upcomingCap} song${
+        upcomingCap === 1 ? "" : "s"
+      } coming up. Wait for one to start or be removed.`,
+    };
+  }
+
+  if (limitsActive && recent.length >= rollingMax) {
     const retryAt = Number(recent[recent.length - rollingMax]?.ts) + windowMs;
     const retryAfterSec = Math.max(1, Math.ceil((retryAt - now) / 1000));
     const retryMinutes = Math.max(1, Math.ceil(retryAfterSec / 60));
@@ -139,6 +190,8 @@ export function evaluateRequestFairness({
       allowed: false,
       status: 429,
       code: "rolling_quota",
+      limitsActive,
+      uniqueRequesters,
       rollingCount: recent.length,
       rollingMax,
       windowMinutes,
@@ -155,6 +208,8 @@ export function evaluateRequestFairness({
   return {
     allowed: true,
     requestCreated: true,
+    limitsActive,
+    uniqueRequesters,
     totalRequestedUpcoming,
     upcomingThreshold,
     upcomingCount,

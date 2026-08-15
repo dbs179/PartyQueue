@@ -70,15 +70,34 @@ test("upcoming wait when guest is at their waiting-queue cap", () => {
     user: "Alex",
     songSettings: { ...songOn, requestFairnessUpcomingThreshold: 2 },
     setSettings: { setRequestFairnessEnabled: false },
-    queue: [requested("Alex", "one"), requested("Alex", "two")],
+    queue: [
+      requested("Alex", "one"),
+      requested("Alex", "two"),
+      requested("Bailey", "three"),
+    ],
     events: [],
   });
+  assert.equal(status.song.limitsActive, true);
   assert.equal(status.song.upcomingActive, true);
   assert.equal(status.song.upcomingRemaining, 0);
   assert.equal(status.song.canRequest, false);
   assert.equal(status.song.code, "upcoming_cap");
   // Rolling budget is still reported separately.
   assert.equal(status.song.rollingRemaining, 5);
+});
+
+test("song limits stay open for a solo requester", () => {
+  const status = buildGuestFairnessStatus({
+    user: "Alex",
+    songSettings: songOn,
+    setSettings: { setRequestFairnessEnabled: false },
+    queue: ["one", "two", "three", "four", "five", "six"].map((id) =>
+      requested("Alex", id)
+    ),
+    events: [],
+  });
+  assert.equal(status.song.limitsActive, false);
+  assert.equal(status.song.canRequest, true);
 });
 
 test("needsName when policy is on but user is blank", () => {

@@ -24,6 +24,8 @@ export function guestFairnessLabel(status, opts = {}) {
   if (song?.enabled) {
     if (song.needsName) {
       parts.push("Songs: set your name");
+    } else if (song.limitsActive === false) {
+      parts.push("Songs: open");
     } else if (
       song.upcomingActive &&
       Number(song.upcomingRemaining) <= 0

@@ -183,6 +183,7 @@ describe("HTTP server harness", { concurrency: false }, () => {
     assert.match(html, /id="set-set-request-fairness-enabled"/);
     assert.match(html, /id="set-set-request-fairness-window"/);
     assert.match(html, /id="settings-clear-fairness"/);
+    assert.match(html, /id="settings-clear-dj-shout-memory"/);
     assert.match(html, /id="booth-new-party"/);
     assert.match(html, /id="set-loved-reaction-set"/);
     assert.match(html, /id="set-hated-reaction-set"/);

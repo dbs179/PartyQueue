@@ -518,6 +518,42 @@ test("clearDjNightMemory resets first-shout and birthday flags", () => {
   assert.equal(mem.isFirstShoutTonight("Mark"), true);
 });
 
+test("clearDjShoutOutMemory resets guest shouts and keeps set phrases", () => {
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  guests.setGuestBirthday("Mark", `${mm}-${dd}`, "boy");
+
+  mem.rememberShout({
+    name: "Mark",
+    script: "yo Mark",
+    birthday: true,
+    notes: ["likes crayons"],
+  });
+  assert.equal(mem.isFirstShoutTonight("Mark"), false);
+  assert.equal(mem.shouldBirthdayShout("Mark"), false);
+
+  mem.rememberDjAnnounceScript("set intro");
+  mem.reserveDjPhrase("intro", [
+    { id: "intro-1", text: "Welcome to the party" },
+  ]);
+  const tagline = mem.reserveClipTagline("spotify:track:abc", [
+    "Live from the Booth",
+  ]);
+
+  mem.clearDjShoutOutMemory();
+
+  assert.equal(mem.isFirstShoutTonight("Mark"), true);
+  assert.equal(mem.shouldBirthdayShout("Mark"), true);
+  assert.deepEqual(mem.getRecentScripts("Mark"), []);
+  assert.deepEqual(mem.getRecentDjAnnounceScripts(1), ["set intro"]);
+  assert.deepEqual(mem.getRecentDjPhraseIds("intro", 5), ["intro-1"]);
+  assert.equal(
+    mem.reserveClipTagline("spotify:track:abc", ["Live from the Booth"]),
+    tagline
+  );
+});
+
 test("forgetBirthdayShout clears birthday + first-shout but keeps blurbs", () => {
   const now = new Date();
   const mm = String(now.getMonth() + 1).padStart(2, "0");

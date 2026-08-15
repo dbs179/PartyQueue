@@ -91,6 +91,7 @@
   "POST /api/selection :: <anonymous>",
   "POST /api/settings :: requireHost > <anonymous>",
   "POST /api/settings/clear-dj-memory :: requireHostStrict > <anonymous>",
+  "POST /api/settings/clear-dj-shout-memory :: requireHostStrict > <anonymous>",
   "POST /api/settings/clear-fairness :: requireHostStrict > <anonymous>",
   "POST /api/settings/clear-history :: requireHostStrict > <anonymous>",
   "POST /api/settings/clear-karaoke :: requireHostStrict > <anonymous>",

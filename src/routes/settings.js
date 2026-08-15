@@ -43,7 +43,8 @@ import {
 } from "../party-rituals.js";
 import { clearHistory } from "../play-history.js";
 import { clearRequests } from "../request-log.js";
-import { clearDjNightMemory } from "../dj-night-memory.js";
+import { clearDjNightMemory, clearDjShoutOutMemory } from "../dj-night-memory.js";
+import { resetSearchAddCount } from "../dj-shout.js";
 import { clearReactionSetMemory } from "../reaction-sets.js";
 import {
   clearMoodReactions,
@@ -186,10 +187,25 @@ export function registerSettingsRoutes(app) {
   app.post("/api/settings/clear-dj-memory", requireHostStrict, (_req, res) => {
     try {
       clearDjNightMemory();
+      resetSearchAddCount();
       res.json({ ok: true });
     } catch (err) {
       console.error("[settings/clear-dj-memory]", err.message);
       res.status(500).json({ error: err.message || "Could not clear DJ memory." });
+    }
+  });
+
+  // Request shout-outs only — keeps set-announce phrase / tagline history.
+  app.post("/api/settings/clear-dj-shout-memory", requireHostStrict, (_req, res) => {
+    try {
+      clearDjShoutOutMemory();
+      resetSearchAddCount();
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("[settings/clear-dj-shout-memory]", err.message);
+      res.status(500).json({
+        error: err.message || "Could not clear DJ shout-out memory.",
+      });
     }
   });
 

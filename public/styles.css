@@ -1700,6 +1700,10 @@ button.guest-name:focus-visible {
   .settings-hub-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  #view-settings-reset .settings-hub-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 /* Users hub: denser grid — 3 cols on desktop, 4 when the viewport is wide. */

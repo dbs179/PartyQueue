@@ -22,6 +22,7 @@ test("guestFairnessLabel shows remaining song and set quotas", () => {
     active: true,
     song: {
       enabled: true,
+      limitsActive: true,
       rollingRemaining: 3,
       upcomingActive: false,
       upcomingRemaining: 2,
@@ -41,6 +42,7 @@ test("guestFairnessLabel prefers upcoming wait and retry copy", () => {
       active: true,
       song: {
         enabled: true,
+        limitsActive: true,
         rollingRemaining: 2,
         upcomingActive: true,
         upcomingRemaining: 0,
@@ -54,4 +56,19 @@ test("guestFairnessLabel prefers upcoming wait and retry copy", () => {
     { now }
   );
   assert.equal(label, "Songs: wait for one of yours · Sets: wait ~12m");
+});
+
+test("guestFairnessLabel shows open when song limits are inactive", () => {
+  const label = guestFairnessLabel({
+    active: true,
+    song: {
+      enabled: true,
+      limitsActive: false,
+      rollingRemaining: 0,
+      upcomingActive: false,
+      upcomingRemaining: 0,
+    },
+    setRequest: { enabled: false },
+  });
+  assert.equal(label, "Songs: open");
 });

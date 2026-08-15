@@ -112,19 +112,23 @@ export function buildGuestFairnessStatus({
         queue,
         displayUser
       );
-      const upcomingActive = totalRequestedUpcoming >= upcomingThreshold;
+      const limitsActive = !!gateDecision.limitsActive;
+      const upcomingActive = limitsActive;
 
       song = {
         enabled: true,
         needsName: false,
         canRequest: !!gateDecision.allowed,
         code: gateDecision.allowed ? null : gateDecision.code || null,
+        limitsActive,
+        uniqueRequesters: Number(gateDecision.uniqueRequesters) || 0,
         rollingCount,
         rollingMax,
         rollingRemaining: remainingOf(rollingMax, rollingCount),
         windowMinutes,
-        retryAt: rollingDecision.retryAt || null,
-        retryAfterSec: rollingDecision.retryAfterSec || null,
+        retryAt: gateDecision.retryAt || rollingDecision.retryAt || null,
+        retryAfterSec:
+          gateDecision.retryAfterSec || rollingDecision.retryAfterSec || null,
         upcomingActive,
         upcomingCount,
         upcomingCap,

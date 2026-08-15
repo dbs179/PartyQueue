@@ -239,8 +239,17 @@ describe("queue routes with a fake speaker", { concurrency: false }, () => {
     });
     try {
       // Ada already has TRACK_A upcoming (searched). A second distinct request
-      // from Ada must hit the upcoming cap and never reach the speaker.
+      // from Ada must hit the upcoming cap and never reach the speaker once
+      // another guest is also in the waiting list.
       fake.tracks[0].requestedByUser = "Ada";
+      fake.tracks[0].searched = true;
+      fake.tracks.push({
+        uri: "spotify:track:other0000000000000000AA",
+        title: "Other",
+        artist: "Artist",
+        searched: true,
+        requestedByUser: "Linus",
+      });
       const before = fake.tracks.length;
       const res = await postJson("/api/queue", {
         ...TRACK_B,
@@ -252,6 +261,7 @@ describe("queue routes with a fake speaker", { concurrency: false }, () => {
       assert.equal(body.code, "upcoming_cap");
       assert.equal(fake.tracks.length, before);
     } finally {
+      fake.tracks.splice(1);
       setRequestFairnessSettings({ requestFairnessEnabled: false });
     }
   });

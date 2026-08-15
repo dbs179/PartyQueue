@@ -40,7 +40,11 @@ test("upcoming cap uses canonical User case-insensitively", () => {
   const result = evaluateRequestFairness({
     settings: { ...enabled, requestFairnessUpcomingThreshold: 2 },
     user: "ALEX",
-    queue: [requested("Alex", "one"), requested("alex", "two")],
+    queue: [
+      requested("Alex", "one"),
+      requested("alex", "two"),
+      requested("Bailey", "three"),
+    ],
     target: { uri: "spotify:track:new", name: "New", artist: "Artist" },
   });
   assert.equal(result.allowed, false);
@@ -49,20 +53,39 @@ test("upcoming cap uses canonical User case-insensitively", () => {
   assert.equal(result.upcomingCount, 2);
 });
 
-test("upcoming cap begins only after the requested queue reaches its threshold", () => {
+test("solo requester is not capped even with a full waiting queue", () => {
+  const eightByAlex = ["one", "two", "three", "four", "five", "six", "seven", "eight"].map(
+    (id) => requested("Alex", id)
+  );
+  const result = evaluateRequestFairness({
+    settings: enabled,
+    user: "Alex",
+    queue: eightByAlex,
+    events: Array.from({ length: 8 }, (_, i) => ({
+      requestedBy: "Alex",
+      ts: Date.now() - i * 1000,
+    })),
+    target: { uri: "spotify:track:nine", name: "Song nine", artist: "Artist" },
+  });
+  assert.equal(result.allowed, true);
+  assert.equal(result.limitsActive, false);
+  assert.equal(result.uniqueRequesters, 1);
+});
+
+test("upcoming cap begins only after a second requester and the song threshold", () => {
   const fourByAlex = ["one", "two", "three", "four"].map((id) =>
     requested("Alex", id)
   );
   const belowThreshold = evaluateRequestFairness({
     settings: enabled,
-    user: "Alex",
+    user: "Bailey",
     queue: fourByAlex,
     target: { uri: "spotify:track:five", name: "Song five", artist: "Artist" },
   });
   const atThreshold = evaluateRequestFairness({
     settings: enabled,
     user: "Alex",
-    queue: [...fourByAlex, requested("Alex", "five")],
+    queue: [...fourByAlex, requested("Bailey", "five")],
     target: { uri: "spotify:track:six", name: "Song six", artist: "Artist" },
   });
   const anotherGuestBelowCap = evaluateRequestFairness({
@@ -73,10 +96,53 @@ test("upcoming cap begins only after the requested queue reaches its threshold",
   });
 
   assert.equal(belowThreshold.allowed, true);
+  assert.equal(belowThreshold.limitsActive, false);
   assert.equal(atThreshold.allowed, false);
   assert.equal(atThreshold.totalRequestedUpcoming, 5);
   assert.equal(atThreshold.upcomingThreshold, 5);
+  assert.equal(atThreshold.uniqueRequesters, 2);
   assert.equal(anotherGuestBelowCap.allowed, true);
+});
+
+test("second requester in the rolling window keeps limits on after their song plays", () => {
+  const sixByAlex = ["one", "two", "three", "four", "five", "six"].map((id) =>
+    requested("Alex", id)
+  );
+  const now = Date.now();
+  const result = evaluateRequestFairness({
+    settings: enabled,
+    user: "Alex",
+    queue: sixByAlex,
+    events: [{ requestedBy: "Bailey", ts: now - 60_000 }],
+    target: { uri: "spotify:track:seven", name: "Song seven", artist: "Artist" },
+    now,
+  });
+  assert.equal(result.allowed, false);
+  assert.equal(result.code, "upcoming_cap");
+  assert.equal(result.limitsActive, true);
+});
+
+test("limits turn back off when requested songs waiting drop below the threshold", () => {
+  const now = Date.now();
+  const result = evaluateRequestFairness({
+    settings: enabled,
+    user: "Alex",
+    queue: [
+      requested("Alex", "one"),
+      requested("Alex", "two"),
+      requested("Bailey", "three"),
+      requested("Bailey", "four"),
+    ],
+    events: [
+      { requestedBy: "Alex", ts: now - 60_000 },
+      { requestedBy: "Bailey", ts: now - 30_000 },
+    ],
+    target: { uri: "spotify:track:five", name: "Song five", artist: "Artist" },
+    now,
+  });
+  assert.equal(result.allowed, true);
+  assert.equal(result.limitsActive, false);
+  assert.equal(result.totalRequestedUpcoming, 4);
 });
 
 test("rolling quota returns a retry time based on the expiring request", () => {
@@ -84,9 +150,17 @@ test("rolling quota returns a retry time based on the expiring request", () => {
   const result = evaluateRequestFairness({
     settings: { ...enabled, requestFairnessRollingMax: 2 },
     user: "Alex",
+    queue: [
+      requested("Alex", "one"),
+      requested("Bailey", "two"),
+      requested("Bailey", "three"),
+      requested("Bailey", "four"),
+      requested("Bailey", "five"),
+    ],
     events: [
       { requestedBy: "alex", ts: 300_000 },
       { requestedBy: "Alex", ts: 1_200_000 },
+      { requestedBy: "Bailey", ts: 1_000_000 },
     ],
     target: { uri: "spotify:track:new", name: "New", artist: "Artist" },
     now,
@@ -153,7 +227,11 @@ test("force only bypasses a same-song match, never an exact ID", () => {
 });
 
 test("authenticated host bypass is optional", () => {
-  const atCap = [requested("Host", "one"), requested("Host", "two")];
+  const atCap = [
+    requested("Host", "one"),
+    requested("Host", "two"),
+    requested("Bailey", "three"),
+  ];
   const bypassed = evaluateRequestFairness({
     settings: enabled,
     user: "Host",

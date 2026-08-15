@@ -451,6 +451,7 @@ const settingsResetBtn = document.getElementById("settings-reset");
 const settingsClearHistoryBtn = document.getElementById("settings-clear-history");
 const settingsClearStatsBtn = document.getElementById("settings-clear-stats");
 const settingsClearDjMemoryBtn = document.getElementById("settings-clear-dj-memory");
+const settingsClearDjShoutMemoryBtn = document.getElementById("settings-clear-dj-shout-memory");
 const settingsClearSuggestionsBtn = document.getElementById("settings-clear-suggestions");
 const settingsClearReactionsBtn = document.getElementById("settings-clear-reactions");
 const settingsClearKaraokeBtn = document.getElementById("settings-clear-karaoke");
@@ -1416,6 +1417,27 @@ settingsClearDjMemoryBtn?.addEventListener("click", async () => {
     showToast(err.message, true);
   } finally {
     settingsClearDjMemoryBtn.disabled = false;
+  }
+});
+
+settingsClearDjShoutMemoryBtn?.addEventListener("click", async () => {
+  const ok = await confirmModal(
+    "Reset DJ shout-out memory? Guests can get first-request and birthday shouts again. Set intro phrases and DJ Voice taglines stay.",
+    "Reset shout-outs"
+  );
+  if (!ok) return;
+  settingsClearDjShoutMemoryBtn.disabled = true;
+  try {
+    const res = await hostFetch("/api/settings/clear-dj-shout-memory", {
+      method: "POST",
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not clear DJ shout-out memory.");
+    showToast("DJ shout-out memory cleared");
+  } catch (err) {
+    showToast(err.message, true);
+  } finally {
+    settingsClearDjShoutMemoryBtn.disabled = false;
   }
 });
 

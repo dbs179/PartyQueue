@@ -1240,7 +1240,7 @@
               <div class="setting-row">
                 <label class="setting-label" for="set-request-fairness-threshold">Limit starts at</label>
                 <input type="number" id="set-request-fairness-threshold" class="setting-input" min="1" max="100" step="1" inputmode="numeric" />
-                <span class="setting-hint">total requested songs waiting; below this, guests may add freely (default 5)</span>
+                <span class="setting-hint">requested songs waiting. Limits stay off for one person, turn on when a second person requests, and turn back off below this (default 5)</span>
               </div>
               <div class="setting-row">
                 <label class="setting-label" for="set-request-fairness-upcoming">Upcoming limit</label>
@@ -1934,6 +1934,12 @@
                   <span class="settings-hub-desc">Set phrases, recent scripts, birthdays, and guest blurbs.</span>
                 </p>
               </button>
+              <button type="button" class="settings-hub-card" id="settings-clear-dj-shout-memory" title="Clear first-request and birthday shout-out memory only">
+                <p class="settings-hub-heading">
+                  <span class="settings-hub-title">Reset DJ shout-outs:</span>
+                  <span class="settings-hub-desc">First-request and birthday shouts, guest shout scripts, and the every-N counter. Set intros stay.</span>
+                </p>
+              </button>
               <button type="button" class="settings-hub-card" id="settings-clear-history" title="Clear played/skipped song memory and artist skip cooldowns">
                 <p class="settings-hub-heading">
                   <span class="settings-hub-title">Reset song memory:</span>
@@ -1960,7 +1966,7 @@
               </button>
               <button
                 type="button"
-                class="settings-hub-card settings-hub-card-full"
+                class="settings-hub-card"
                 id="settings-clear-fairness"
                 title="Clear rolling song-request and Set Request fairness limits"
               >
