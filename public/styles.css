@@ -2042,25 +2042,61 @@ body:has(#view-settings-user-edit:not([hidden])) > .container {
 
   #view-booth .settings-hub-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
+    gap: 6px;
   }
 
   #view-booth .settings-hub-card {
-    padding: 8px 10px;
-    gap: 2px;
+    padding: 6px 8px;
+    gap: 1px;
   }
 
   #view-booth .settings-hub-title {
-    font-size: 0.88rem;
+    font-size: 0.8rem;
   }
 
   #view-booth .settings-hub-desc {
-    font-size: 0.7rem;
-    line-height: 1.2;
+    font-size: 0.65rem;
+    line-height: 1.15;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   #view-booth .settings-hub-stat {
-    font-size: 0.78rem;
+    font-size: 0.72rem;
+  }
+
+  /* Second row: title + optional count only, two lines tall. */
+  #view-booth .settings-hub-card-twoline {
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 4px 6px;
+    gap: 0;
+    min-height: 2.55em;
+  }
+
+  #view-booth .settings-hub-card-twoline .settings-hub-title {
+    width: 100%;
+    font-size: 0.72rem;
+    line-height: 1.15;
+    text-align: center;
+  }
+
+  #view-booth .settings-hub-card-twoline .settings-hub-stat {
+    width: 100%;
+    font-size: 0.66rem;
+    line-height: 1.1;
+    text-align: center;
+  }
+
+  #view-booth .settings-hub-card-twoline .settings-hub-desc {
+    display: none;
+  }
+
+  #view-booth .settings-hub-card-full {
+    padding: 5px 8px;
   }
 }
 

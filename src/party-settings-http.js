@@ -14,8 +14,11 @@ import {
   getBrandingSettings,
   getContentSettings,
   getDiscoverySettings,
+  getFairnessResetAt,
   getRandomnessSettings,
+  getRequestFairnessSettings,
   getRotationSettings,
+  getSetRequestFairnessSettings,
   setContentSettings,
   setDiscoverySettings,
   setRotationSettings,
@@ -80,6 +83,8 @@ export function readPartySettingsSnapshot() {
   const fill = getAutoFillState();
   const rotation = getRotationSettings();
   const content = getContentSettings();
+  const songFair = getRequestFairnessSettings();
+  const setFair = getSetRequestFairnessSettings();
   return {
     neverEnding: !!fill.enabled,
     mixGenres: fill.genres,
@@ -93,6 +98,9 @@ export function readPartySettingsSnapshot() {
     requestsPaused: !!content.requestsPaused,
     partyOver: !!isPartyOver(),
     hostControlsOnly: !!content.hostControlsOnly,
+    requestFairnessEnabled: !!songFair.requestFairnessEnabled,
+    setRequestFairnessEnabled: !!setFair.setRequestFairnessEnabled,
+    fairnessResetAt: getFairnessResetAt() || 0,
     closingTimeAt: getClosingTimeAt(),
     partyRecap: getLastPartyRecap(),
     sameArtistBatch: getSameArtistBatchState(),
@@ -148,6 +156,9 @@ export function partySettingsSignature(snapshot = null) {
     snapshot.requestsPaused ? 1 : 0,
     snapshot.partyOver ? 1 : 0,
     snapshot.hostControlsOnly ? 1 : 0,
+    snapshot.requestFairnessEnabled ? 1 : 0,
+    snapshot.setRequestFairnessEnabled ? 1 : 0,
+    snapshot.fairnessResetAt ?? "",
     snapshot.closingTimeAt ?? "",
     recapKey,
     sameArtistKey,

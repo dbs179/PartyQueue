@@ -1951,6 +1951,7 @@ function syncPolling() {
 /** Apply guest-safe party flags from /api/party (SSE or HTTP). */
 function applyPartySettings(payload) {
   if (!payload || typeof payload !== "object") return;
+  const prev = lastPartySettings;
   lastPartySettings = payload;
   if ("neverEnding" in payload) syncAutoFillFromServer(payload.neverEnding);
   if ("discoverEnabled" in payload) {
@@ -1975,6 +1976,11 @@ function applyPartySettings(payload) {
   }
   maybeAnnounceClosingTime(payload.closingTimeAt, payload.partyRecap);
   sameArtistCountdownUi.paint(payload.nextSpecialSet);
+  const fairnessChanged =
+    payload.requestFairnessEnabled !== prev?.requestFairnessEnabled ||
+    payload.setRequestFairnessEnabled !== prev?.setRequestFairnessEnabled ||
+    payload.fairnessResetAt !== prev?.fairnessResetAt;
+  if (fairnessChanged) refreshGuestFairness();
 }
 
 const partyDisplayIdle = createPartyDisplayIdle();
@@ -2032,6 +2038,9 @@ function showView(name) {
       document.getElementById("event-name")?.textContent?.trim() || "PartyQueue";
   }
   lyricsUi.onViewChange({ target, previous: previousView });
+  // Main search-bar fairness is view-local; refresh when Back lands here so
+  // Booth toggles show without a hard reload.
+  if (target === "main" && previousView !== "main") refreshGuestFairness();
   if (!hostLocked) {
     if (target === "booth") {
       updateBoothHubSummaries();

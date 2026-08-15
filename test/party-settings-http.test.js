@@ -65,6 +65,9 @@ test("party settings snapshot exposes guest-safe flags only", () => {
     "requestsPaused",
     "partyOver",
     "hostControlsOnly",
+    "requestFairnessEnabled",
+    "setRequestFairnessEnabled",
+    "fairnessResetAt",
     "closingTimeAt",
     "partyRecap",
     "sameArtistBatch",
@@ -95,6 +98,9 @@ test("party settings signature ignores stream metadata and senses flag changes",
     requestsPaused: false,
     partyOver: false,
     hostControlsOnly: false,
+    requestFairnessEnabled: false,
+    setRequestFairnessEnabled: true,
+    fairnessResetAt: 0,
     closingTimeAt: null,
     partyRecap: null,
   };
@@ -121,6 +127,14 @@ test("party settings signature ignores stream metadata and senses flag changes",
       ...base,
       sameArtistBatch: { enabled: true, everyN: 8, setsSince: 3 },
     })
+  );
+  assert.notEqual(
+    partySettingsSignature(base),
+    partySettingsSignature({ ...base, requestFairnessEnabled: true })
+  );
+  assert.notEqual(
+    partySettingsSignature(base),
+    partySettingsSignature({ ...base, setRequestFairnessEnabled: false })
   );
 });
 
