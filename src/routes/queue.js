@@ -1008,6 +1008,7 @@ export function registerQueueRoutes(app, ctx) {
 
   app.get("/api/queue/list", asyncHandler(async (_req, res) => {
     try {
+      res.setHeader("Cache-Control", "no-store");
       res.json({ tracks: await sonos.getQueueList() });
     } catch (err) {
       res.status(502).json({ error: err.message });
@@ -1035,6 +1036,7 @@ export function registerQueueRoutes(app, ctx) {
         queue = [];
       }
     }
+    res.setHeader("Cache-Control", "no-store");
     res.json(
       buildGuestFairnessStatus({
         user,

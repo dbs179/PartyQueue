@@ -3,12 +3,15 @@ import assert from "node:assert/strict";
 import {
   shouldPollView,
   createLiveStreams,
+  bindForegroundResume,
   nowPlayingLooksActive,
   NOW_PLAYING_FALLBACK_MS,
   NOW_PLAYING_FALLBACK_PAUSED_MS,
   QUEUE_FALLBACK_MS,
   PARTY_FALLBACK_MS,
   QUEUE_STALE_MESSAGE,
+  FOREGROUND_RESUME_DEBOUNCE_MS,
+  FOCUS_RESUME_FRESH_MS,
 } from "../public/js/live-streams.js";
 
 function makeStatusEl() {
@@ -214,4 +217,134 @@ test("queue EventSource error marks Up Next stale", async () => {
   assert.equal(queueConnectionStatus.hidden, false);
   assert.equal(queueConnectionStatus.textContent, QUEUE_STALE_MESSAGE);
   live.closeQueueStream();
+});
+
+test("bindForegroundResume debounces stacked unlock events", () => {
+  const listeners = new Map();
+  const target = {
+    visibilityState: "visible",
+    addEventListener(name, fn) {
+      listeners.set(`doc:${name}`, fn);
+    },
+    removeEventListener(name) {
+      listeners.delete(`doc:${name}`);
+    },
+  };
+  const win = {
+    addEventListener(name, fn) {
+      listeners.set(`win:${name}`, fn);
+    },
+    removeEventListener(name) {
+      listeners.delete(`win:${name}`);
+    },
+  };
+  let now = 1_000;
+  let resumes = 0;
+  let sleeps = 0;
+  const unbind = bindForegroundResume({
+    onResume: () => {
+      resumes += 1;
+    },
+    onSleep: () => {
+      sleeps += 1;
+    },
+    target,
+    win,
+    now: () => now,
+    debounceMs: FOREGROUND_RESUME_DEBOUNCE_MS,
+  });
+
+  listeners.get("win:pageshow")();
+  listeners.get("doc:visibilitychange")();
+  listeners.get("win:focus")();
+  assert.equal(resumes, 1);
+
+  now += FOREGROUND_RESUME_DEBOUNCE_MS + 1;
+  listeners.get("win:pageshow")();
+  assert.equal(resumes, 2);
+
+  listeners.get("win:pagehide")();
+  assert.equal(sleeps, 1);
+  unbind();
+});
+
+test("bindForegroundResume skips a fresh focus hop", () => {
+  const listeners = new Map();
+  const target = {
+    visibilityState: "visible",
+    addEventListener(name, fn) {
+      listeners.set(`doc:${name}`, fn);
+    },
+    removeEventListener() {},
+  };
+  const win = {
+    addEventListener(name, fn) {
+      listeners.set(`win:${name}`, fn);
+    },
+    removeEventListener() {},
+  };
+  let resumes = 0;
+  bindForegroundResume({
+    onResume: () => {
+      resumes += 1;
+    },
+    shouldResumeOnFocus: () => false,
+    target,
+    win,
+    now: () => 5_000,
+  });
+  listeners.get("win:focus")();
+  assert.equal(resumes, 0);
+  listeners.get("win:pageshow")();
+  assert.equal(resumes, 1);
+  assert.ok(FOCUS_RESUME_FRESH_MS > 0);
+});
+
+test("force reconnect closes a zombie EventSource and fetches without cache", async () => {
+  const fetches = [];
+  let sources = 0;
+  let closes = 0;
+  const live = createLiveStreams(
+    {},
+    {
+      fetch: async (url, opts) => {
+        fetches.push({ url, cache: opts?.cache });
+        return { ok: true, async json() { return { title: "np", tracks: [] }; } };
+      },
+      EventSource: class {
+        constructor() {
+          sources += 1;
+          this.addEventListener = () => {};
+          this.close = () => {
+            closes += 1;
+          };
+          queueMicrotask(() => this.onopen?.());
+        }
+      },
+      getVisibilityState: () => "visible",
+      getCurrentView: () => "main",
+      renderNowPlaying: () => {},
+      applyQueueTracks: () => {},
+      applyPartySettings: () => {},
+      freezePlayhead: () => {},
+      isQueueEditMode: () => false,
+      setPendingStreamTracks: () => {},
+      clearPendingStreamTracks: () => {},
+      loadGroups: () => {},
+    }
+  );
+
+  live.syncPolling();
+  await new Promise((r) => setTimeout(r, 10));
+  const opened = sources;
+  assert.ok(opened >= 3);
+  assert.ok(fetches.every((item) => item.cache === "no-store"));
+
+  live.syncPolling({ forceReconnect: true });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(closes >= 3);
+  assert.ok(sources >= opened + 3);
+  live.closeNowPlayingStream();
+  live.closeQueueStream();
+  live.closePartyStream();
 });

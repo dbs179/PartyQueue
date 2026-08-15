@@ -2535,9 +2535,6 @@ const searchUi = createSearchUi(
 );
 
 refreshGuestFairness();
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") refreshGuestFairness();
-});
 
 
 const reactionsUi = createReactionsUi(
@@ -3005,6 +3002,9 @@ liveStreams = createLiveStreams(
     loadGroups: (force) => loadGroups(force),
   }
 );
+liveStreams.bindResume({
+  onResume: () => refreshGuestFairness(),
+});
 
 async function postControl(btn, endpoint, onOk) {
   btn.disabled = true;
@@ -3165,11 +3165,8 @@ loadPinRequired();
   refreshPoolSizeHint();
 })();
 
-// Pause/resume polling when the tab is hidden/shown (locked phone, backgrounded
-// tab). Then mark the app ready and kick off the first poll cycle (an immediate
-// refresh plus the interval), which only actually runs when we're visible and on
-// the main view.
-document.addEventListener("visibilitychange", syncPolling);
+// Pause streams when the tab is hidden; force-reconnect on mobile resume
+// (pageshow / focus / visibility) so a frozen EventSource cannot stay stale.
 
 // Initial route: deferred to here (see the hashchange listener) so deep links
 // land on their view only after every declaration above has run.

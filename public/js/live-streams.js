@@ -14,6 +14,13 @@ export const QUEUE_FALLBACK_MS = 15000;
 export const QUEUE_FALLBACK_DELAY_MS = 5000;
 export const PARTY_FALLBACK_MS = 20000;
 export const PARTY_FALLBACK_DELAY_MS = 5000;
+/** Ignore stacked pageshow/focus/visibility resume events from one unlock. */
+export const FOREGROUND_RESUME_DEBOUNCE_MS = 1200;
+/** Skip a focus-only resume when SSE still delivered an event this recently. */
+export const FOCUS_RESUME_FRESH_MS = 8000;
+/** Visible-only safety net for a zombie EventSource that never errors. */
+export const STALE_LIVE_MS = 45000;
+export const STALE_LIVE_CHECK_MS = 30000;
 
 /** Shown on Up Next / Party Display when the queue stream is stale. */
 export const QUEUE_STALE_MESSAGE =
@@ -40,6 +47,59 @@ export function shouldPollView(visibilityState, currentView) {
       currentView === "display" ||
       currentView === "mix")
   );
+}
+
+/**
+ * Mobile Safari often freezes EventSource without a `hidden` visibility
+ * change. Resume from pageshow / focus / online, but debounce the burst
+ * and skip a desktop focus hop while streams are still fresh.
+ */
+export function bindForegroundResume({
+  onResume,
+  onSleep,
+  shouldResumeOnFocus,
+  target = typeof document !== "undefined" ? document : null,
+  win = typeof window !== "undefined" ? window : null,
+  now = () => Date.now(),
+  debounceMs = FOREGROUND_RESUME_DEBOUNCE_MS,
+} = {}) {
+  let lastResumeAt = 0;
+
+  function resume() {
+    const t = now();
+    if (lastResumeAt && t - lastResumeAt < debounceMs) return false;
+    lastResumeAt = t;
+    onResume?.();
+    return true;
+  }
+
+  function sleep() {
+    onSleep?.();
+  }
+
+  function onVisibility() {
+    if (target?.visibilityState === "hidden") sleep();
+    else resume();
+  }
+
+  function onFocus() {
+    if (shouldResumeOnFocus && !shouldResumeOnFocus()) return;
+    resume();
+  }
+
+  target?.addEventListener("visibilitychange", onVisibility);
+  win?.addEventListener("pageshow", resume);
+  win?.addEventListener("pagehide", sleep);
+  win?.addEventListener("focus", onFocus);
+  win?.addEventListener("online", resume);
+
+  return () => {
+    target?.removeEventListener("visibilitychange", onVisibility);
+    win?.removeEventListener("pageshow", resume);
+    win?.removeEventListener("pagehide", sleep);
+    win?.removeEventListener("focus", onFocus);
+    win?.removeEventListener("online", resume);
+  };
 }
 
 /**
@@ -84,6 +144,8 @@ export function createLiveStreams(els, deps) {
     (typeof EventSource !== "undefined" ? EventSource : null);
   const getVisibilityState =
     deps.getVisibilityState || (() => document.visibilityState);
+  const liveFetch = (url) => fetchFn(url, { cache: "no-store" });
+  const streamUrl = (path) => `${path}?resume=${Date.now()}`;
   const getCurrentView = deps.getCurrentView;
   const renderNowPlaying = deps.renderNowPlaying;
   const applyQueueTracks = deps.applyQueueTracks;
@@ -118,6 +180,32 @@ export function createLiveStreams(els, deps) {
   let partyFallbackTimer = null;
   let partyFallbackDelayTimer = null;
   let partyStreamCursor = createStreamCursor();
+  let lastLiveEventAt = 0;
+  let staleWatchTimer = null;
+
+  function noteLiveEvent() {
+    lastLiveEventAt = Date.now();
+  }
+
+  function stopStaleWatch() {
+    if (!staleWatchTimer) return;
+    clearInterval(staleWatchTimer);
+    staleWatchTimer = null;
+  }
+
+  function armStaleWatch() {
+    if (staleWatchTimer || !shouldPoll()) return;
+    staleWatchTimer = setInterval(() => {
+      if (!shouldPoll()) {
+        stopStaleWatch();
+        return;
+      }
+      if (lastLiveEventAt && Date.now() - lastLiveEventAt > STALE_LIVE_MS) {
+        syncPolling({ forceReconnect: true });
+      }
+    }, STALE_LIVE_CHECK_MS);
+    staleWatchTimer.unref?.();
+  }
 
   function shouldPoll() {
     return shouldPollView(getVisibilityState(), getCurrentView());
@@ -201,6 +289,7 @@ export function createLiveStreams(els, deps) {
     if (!next.accept) return;
     nowPlayingStreamCursor = next.cursor;
     nowPlayingStreamVersion += 1;
+    noteLiveEvent();
     noteNowPlayingActivity(snapshot);
     renderNowPlaying(snapshot);
   }
@@ -247,7 +336,7 @@ export function createLiveStreams(els, deps) {
     const requestId = ++nowPlayingHttpRequest;
     const streamVersionAtStart = nowPlayingStreamVersion;
     try {
-      const res = await fetchFn("/api/nowplaying");
+      const res = await liveFetch("/api/nowplaying");
       if (!res.ok) return;
       const snapshot = await res.json();
       if (
@@ -263,6 +352,7 @@ export function createLiveStreams(els, deps) {
       if (!next.accept) return;
       nowPlayingStreamCursor = next.cursor;
       nowPlayingStreamVersion += 1;
+      noteLiveEvent();
       noteNowPlayingActivity(snapshot);
       renderNowPlaying(snapshot);
     } catch {
@@ -278,7 +368,7 @@ export function createLiveStreams(els, deps) {
       return;
     }
     nowPlayingStreamCursor = resetStreamCursor();
-    const source = new EventSourceCtor("/api/nowplaying/stream");
+    const source = new EventSourceCtor(streamUrl("/api/nowplaying/stream"));
     nowPlayingSource = source;
     source.onopen = () => {
       if (nowPlayingSource !== source) return;
@@ -351,6 +441,7 @@ export function createLiveStreams(els, deps) {
     if (!next.accept) return;
     queueStreamCursor = next.cursor;
     queueStreamVersion += 1;
+    noteLiveEvent();
     const tracks = Array.isArray(snapshot?.tracks) ? snapshot.tracks : [];
     if (isQueueEditMode()) {
       setPendingStreamTracks(tracks);
@@ -365,7 +456,7 @@ export function createLiveStreams(els, deps) {
     const requestId = ++queueHttpRequest;
     const streamVersionAtStart = queueStreamVersion;
     try {
-      const res = await fetchFn("/api/queue/list");
+      const res = await liveFetch("/api/queue/list");
       if (!res.ok) return;
       const data = await res.json();
       if (
@@ -379,6 +470,7 @@ export function createLiveStreams(els, deps) {
       if (!next.accept) return;
       queueStreamCursor = next.cursor;
       queueStreamVersion += 1;
+      noteLiveEvent();
       const tracks = Array.isArray(data.tracks) ? data.tracks : [];
       applyQueueTracks(tracks);
     } catch {
@@ -388,13 +480,13 @@ export function createLiveStreams(els, deps) {
 
   function openQueueStream() {
     if (queueSource || !shouldPoll()) return;
+    void loadQueue();
     if (typeof EventSourceCtor !== "function") {
-      void loadQueue();
       startQueueFallback();
       return;
     }
     queueStreamCursor = resetStreamCursor();
-    const source = new EventSourceCtor("/api/queue/stream");
+    const source = new EventSourceCtor(streamUrl("/api/queue/stream"));
     queueSource = source;
     source.onopen = () => {
       if (queueSource !== source) return;
@@ -480,13 +572,15 @@ export function createLiveStreams(els, deps) {
     const next = advanceStreamCursor(partyStreamCursor, snapshot);
     if (!next.accept) return;
     partyStreamCursor = next.cursor;
+    noteLiveEvent();
     applyPartySettings(snapshot);
   }
 
   async function loadPartySettings() {
     try {
-      const res = await fetchFn("/api/party");
+      const res = await liveFetch("/api/party");
       if (!res.ok) return;
+      noteLiveEvent();
       applyPartySettings(await res.json());
     } catch {
       /* leave toggles as-is on transient errors */
@@ -501,7 +595,7 @@ export function createLiveStreams(els, deps) {
       return;
     }
     partyStreamCursor = resetStreamCursor();
-    const source = new EventSourceCtor("/api/party/stream");
+    const source = new EventSourceCtor(streamUrl("/api/party/stream"));
     partySource = source;
     source.onopen = () => {
       if (partySource !== source) return;
@@ -547,18 +641,39 @@ export function createLiveStreams(els, deps) {
     }
   }
 
-  function syncPolling() {
-    if (shouldPoll()) {
-      void loadQueue();
-      if (getCurrentView() !== "display") void loadGroups();
-      openNowPlayingStream();
-      openQueueStream();
-      openPartyStream();
-    } else {
-      closeNowPlayingStream();
-      closeQueueStream();
-      closePartyStream();
+  function closeAllStreams() {
+    closeNowPlayingStream();
+    closeQueueStream();
+    closePartyStream();
+    stopStaleWatch();
+  }
+
+  function syncPolling({ forceReconnect = false } = {}) {
+    if (!shouldPoll()) {
+      closeAllStreams();
+      return;
     }
+    if (forceReconnect) closeAllStreams();
+    if (getCurrentView() !== "display") void loadGroups();
+    openNowPlayingStream();
+    openQueueStream();
+    openPartyStream();
+    if (!lastLiveEventAt) noteLiveEvent();
+    armStaleWatch();
+  }
+
+  function bindResume(hooks = {}) {
+    return bindForegroundResume({
+      onResume: () => {
+        syncPolling({ forceReconnect: true });
+        hooks.onResume?.();
+      },
+      onSleep: () => closeAllStreams(),
+      shouldResumeOnFocus: () =>
+        !nowPlayingSource ||
+        !lastLiveEventAt ||
+        Date.now() - lastLiveEventAt >= FOCUS_RESUME_FRESH_MS,
+    });
   }
 
   function refreshSonos() {
@@ -572,6 +687,7 @@ export function createLiveStreams(els, deps) {
 
   return {
     syncPolling,
+    bindResume,
     loadQueue,
     loadNowPlaying,
     loadPartySettings,

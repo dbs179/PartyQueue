@@ -90,7 +90,7 @@ export function createGuestFairnessUi({
     const run = (async () => {
       try {
         const qs = user ? `?user=${encodeURIComponent(user)}` : "";
-        const res = await fetchImpl(`/api/fairness${qs}`);
+        const res = await fetchImpl(`/api/fairness${qs}`, { cache: "no-store" });
         if (!res.ok) {
           paint(null);
           return null;
