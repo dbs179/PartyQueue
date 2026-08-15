@@ -19,6 +19,11 @@ export const REQUEST_FAIRNESS_MIN_USERS = 2;
 const userKey = (value) =>
   String(sanitizeDisplayName(value) || "").toLocaleLowerCase();
 
+/** Live queue identity: User first, then badge, so legacy rows still count. */
+export function liveQueueRequesterKey(track) {
+  return userKey(track?.requestedByUser || track?.requestedBy);
+}
+
 function isSongRequestEvent(event) {
   return event?.kind !== "setRequest" && event?.kind !== "setTrack";
 }
@@ -49,7 +54,7 @@ function uniqueRequesterCount({
   if (incoming) users.add(incoming);
   for (const track of Array.isArray(queue) ? queue : []) {
     if (!track?.searched || track?.setRequest) continue;
-    const key = userKey(track.requestedByUser);
+    const key = liveQueueRequesterKey(track);
     if (key) users.add(key);
   }
   for (const event of recentSongRequestEvents(events, { resetAt, now, windowMs })) {
@@ -132,7 +137,7 @@ export function evaluateRequestFairness({
     (track) =>
       track?.searched &&
       !track?.setRequest &&
-      userKey(track.requestedByUser) === key
+      liveQueueRequesterKey(track) === key
   ).length;
 
   const rollingMax = Math.max(

@@ -24,6 +24,8 @@ import {
   pickFreshNotes,
   getRecentScripts,
   rememberShout,
+  reserveFirstShout,
+  releaseFirstShoutReservation,
 } from "./dj-night-memory.js";
 import { dedicationOf } from "./queue-origin.js";
 import { sanitizeDedication } from "./display-name.js";
@@ -59,13 +61,11 @@ export function shouldShoutOnSearch({
   if (!s.djShoutEnabled) return false;
   if (!(ready ?? isDjVoiceReady())) return false;
 
-  // Reserve first-shout synchronously when we decide to shout. Script/TTS can
-  // take many seconds; without this, a second concurrent add still sees
-  // isFirstShoutTonight and stacks another shout (two ramp+TTS back-to-back).
+  // Hold first-shout in memory (not persisted) so a second add cannot stack
+  // another shout while TTS/insert runs. Commit happens after pads land;
+  // a failed announce releases so this guest can still get the welcome.
   const reserveFirst = () => {
-    if (requestedBy && isFirstShoutTonight(requestedBy)) {
-      rememberShout({ name: requestedBy });
-    }
+    if (requestedBy) reserveFirstShout(requestedBy);
   };
 
   if (force) {
@@ -315,21 +315,25 @@ Must include:
 Write only the spoken announcement now.`;
 }
 
-function rememberAndReturn(line, { by, notes, isBirthday }) {
-  const script = String(line || "").trim();
-  if (by && script) {
-    rememberShout({
-      name: by,
-      notes,
-      script,
-      birthday: !!isBirthday,
-    });
-  }
-  return script;
+function shoutDraft(line, { by, notes, isBirthday }) {
+  return {
+    script: String(line || "").trim(),
+    requestedBy: by,
+    notes,
+    isBirthday: !!isBirthday,
+  };
+}
+
+/** Drop a pending first-shout when the announce never starts. */
+export function releaseReservedFirstShout(requestedBy) {
+  return releaseFirstShoutReservation(requestedBy);
 }
 
 /**
  * AI shout script from host notes; falls back to templates if LLM fails.
+ * Does not persist first-shout / notes / birthday — announceRequestShout
+ * commits after the pads land.
+ * @returns {Promise<{ script: string, requestedBy: string, notes: string[], isBirthday: boolean }>}
  */
 export async function writeRequestShoutScript({
   name,
@@ -429,7 +433,7 @@ export async function writeRequestShoutScript({
         `[dj-shout] script via OpenAI (kind=${shoutKind}, blurbs=${notes.length}, birthday=${isBirthday}, dedication=${forWho || "none"}, profile=${profile?.name || "none"})`
       );
       console.log(`[dj-shout] blurb fuel: ${notes.join(" | ") || "(none)"}`);
-      return rememberAndReturn(line, { by, notes, isBirthday });
+      return shoutDraft(line, { by, notes, isBirthday });
     } catch (err) {
       console.error(
         "[dj-shout] LLM shout failed, using template:",
@@ -442,7 +446,7 @@ export async function writeRequestShoutScript({
     );
   }
 
-  return rememberAndReturn(
+  return shoutDraft(
     writeRequestShoutTemplate({
       name,
       artist,
@@ -481,63 +485,85 @@ export async function announceRequestShout(
     preemptGeneration = queueWorkGeneration(),
   } = {}
 ) {
-  if (!isDjVoiceReady()) {
-    return { ok: false, skipped: true };
-  }
-  let pos = Number(queuePosition);
-  if (!Number.isFinite(pos) || pos < 1) {
-    return { ok: false, skipped: true, error: "Missing queue position." };
-  }
-  const id = trackId || spotifyTrackId(uri) || null;
-  // Re-read dedication at script time (toast dedicate may have landed).
-  const message = await writeRequestShoutScript({
-    name,
-    artist,
-    requestedBy,
-    dedication,
-    trackId: id,
-    kind,
-    trackCount,
-  });
-  if (queueWorkWasPreempted(preemptGeneration)) {
-    return { ok: false, skipped: true, reason: "queue-preempted" };
-  }
-  // Script/TTS can take several seconds — re-find the song so the shout still
-  // lands immediately before it (not after, if the queue shifted).
-  if (!startPlayback) {
-    try {
-      const { findUpcomingTrackPosition } = await import("./sonos.js");
-      const live = await findUpcomingTrackPosition({
-        name,
-        artist,
-        uri,
-        expected: pos,
-      });
-      if (live != null && live !== pos) {
-        console.log(
-          `[dj-shout] shout insert catch-up: planned #${pos} → #${live} (live song position)`
-        );
-        pos = live;
-      }
-    } catch (err) {
-      console.warn("[dj-shout] live position read failed:", err.message);
+  const by = String(requestedBy || "").trim();
+  let committed = false;
+  try {
+    if (!isDjVoiceReady()) {
+      return { ok: false, skipped: true };
     }
+    let pos = Number(queuePosition);
+    if (!Number.isFinite(pos) || pos < 1) {
+      return { ok: false, skipped: true, error: "Missing queue position." };
+    }
+    const id = trackId || spotifyTrackId(uri) || null;
+    // Re-read dedication at script time (toast dedicate may have landed).
+    const draft = await writeRequestShoutScript({
+      name,
+      artist,
+      requestedBy,
+      dedication,
+      trackId: id,
+      kind,
+      trackCount,
+    });
+    const message = draft?.script || "";
+    if (!message) {
+      return { ok: false, skipped: true, error: "Empty shout script." };
+    }
+    if (queueWorkWasPreempted(preemptGeneration)) {
+      return { ok: false, skipped: true, reason: "queue-preempted" };
+    }
+    // Script/TTS can take several seconds — re-find the song so the shout still
+    // lands immediately before it (not after, if the queue shifted).
+    if (!startPlayback) {
+      try {
+        const { findUpcomingTrackPosition } = await import("./sonos.js");
+        const live = await findUpcomingTrackPosition({
+          name,
+          artist,
+          uri,
+          expected: pos,
+        });
+        if (live != null && live !== pos) {
+          console.log(
+            `[dj-shout] shout insert catch-up: planned #${pos} → #${live} (live song position)`
+          );
+          pos = live;
+        }
+      } catch (err) {
+        console.warn("[dj-shout] live position read failed:", err.message);
+      }
+    }
+    console.log(
+      `[dj-shout] ${startPlayback ? "empty/idle start · " : ""}${message}`
+    );
+    const result = await announceOnSonos(message, {
+      startPlayback: !!startPlayback,
+      queuePosition: pos,
+      preemptGeneration,
+      // Re-resolve the request under the insert lock after TTS so pads stay
+      // glued to it if the queue shifted during script generation.
+      applyLeadBuffer: !startPlayback,
+      requestUri: uri || null,
+      // Never Pause mid-song. Next-up may hold at the last ~2s until pads land.
+      allowImminentPause: false,
+      holdAtTrackEnd: !startPlayback && Number(queuePosition) === 1,
+    });
+    // Commit once the announce block is in the queue (or Play succeeded).
+    // A failed/preempted insert releases so this guest can still get first-shout.
+    if (by && (result?.ok || result?.inserted)) {
+      rememberShout({
+        name: by,
+        notes: draft.notes,
+        script: message,
+        birthday: !!draft.isBirthday,
+      });
+      committed = true;
+    }
+    return result;
+  } finally {
+    if (!committed && by) releaseFirstShoutReservation(by);
   }
-  console.log(
-    `[dj-shout] ${startPlayback ? "empty/idle start · " : ""}${message}`
-  );
-  return announceOnSonos(message, {
-    startPlayback: !!startPlayback,
-    queuePosition: pos,
-    preemptGeneration,
-    // Re-resolve the request under the insert lock after TTS so pads stay
-    // glued to it if the queue shifted during script generation.
-    applyLeadBuffer: !startPlayback,
-    requestUri: uri || null,
-    // Never Pause mid-song. Next-up may hold at the last ~2s until pads land.
-    allowImminentPause: false,
-    holdAtTrackEnd: !startPlayback && Number(queuePosition) === 1,
-  });
 }
 
 /**

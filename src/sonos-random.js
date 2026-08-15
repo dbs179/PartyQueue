@@ -63,7 +63,7 @@ import {
   recordGenreLane,
 } from "./genre-flow.js";
 import { getSimilarUris, isDiscoveryAvailable } from "./similar.js";
-import { getLaneHits } from "./lane-hits.js";
+import { getLaneHits, laneHitAsFillerItem } from "./lane-hits.js";
 import { markOrigin } from "./queue-origin.js";
 import { queueWorkWasPreempted } from "./queue-preempt.js";
 import { yieldToEventLoop } from "./yield-event-loop.js";
@@ -632,7 +632,8 @@ async function buildRandomPlan(
     }
 
     // Still short of the batch target → Spotify / Last.fm exact-lane hits
-    // outside the library. Never pad with off-lane tracks.
+    // as Random filler. Never pad with off-lane tracks, and never badge
+    // these as Discover (that label is Songs Like only).
     {
       const need = Math.max(
         0,
@@ -665,8 +666,11 @@ async function buildRandomPlan(
               if (h.id) exclude.add(h.id);
               const artist = claimBatchArtist(h.artist);
               if (artist) lastPlaylistArtist = artist;
+              const item = laneHitAsFillerItem(h);
+              playlistUris.push(item.uri);
+              artistByUri.set(item.uri, item.artist);
+              nameByUri.set(item.uri, item.name);
             }
-            discoveries = discoveries.concat(hits);
             laneHitAdded += hits.length;
             batchArtistSeed = syncBatchArtistBlocks();
             console.log(
@@ -945,8 +949,8 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
   }
 
   // 5) Top up if some enqueues failed (or we are still under totalTarget).
-  // Exact-lane playlist leftovers first, then Spotify lane hits — never off-lane.
-  // Reaction sets stay reaction-only (no playlist/Discover top-up).
+  // Exact-lane playlist leftovers first, then Spotify lane hits as Random —
+  // never off-lane, never Discover. Reaction sets stay reaction-only.
   while (!reactionSetKind && added < totalTarget && !wasPreempted()) {
     // Top-up sampling can rescan the pool; yield so search/SSE stay responsive.
     await yieldToEventLoop();
@@ -1031,7 +1035,7 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
     }
     if (!hits.length) break;
     const recHits = [];
-    const discIds = [];
+    const fillerHits = [];
     for (const h of hits) {
       if (wasPreempted()) break;
       const artist = primaryArtist(h.artist);
@@ -1040,30 +1044,30 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
         continue;
       }
       try {
-        const meta = MetaDataHelper.GuessMetaDataAndTrackUri(h.uri, resolveRegion());
+        const item = laneHitAsFillerItem(h);
+        const meta = MetaDataHelper.GuessMetaDataAndTrackUri(item.uri, resolveRegion());
         await enqueueMeta(m, meta);
         added++;
-        similarAdded++;
         laneHitAdded += 1;
         progressed = true;
         claimBatchArtist(h.artist);
-        if (h.id) {
-          exclude.add(h.id);
-          recentIds.add(h.id);
-          discIds.push(h.id);
+        if (item.id) {
+          exclude.add(item.id);
+          recentIds.add(item.id);
+          fillerHits.push(item.id);
         }
         if (artist) lastPlaylistArtist = artist;
         recHits.push({
-          id: h.id,
-          artist: h.artist,
-          name: h.name,
-          source: "discovered",
+          id: item.id,
+          artist: item.artist,
+          name: item.name,
+          source: "filler",
         });
         recorded.push({
-          id: h.id,
-          artist: h.artist || "",
-          name: h.name || "",
-          discovered: true,
+          id: item.id,
+          artist: item.artist,
+          name: item.name,
+          discovered: false,
         });
         if (added >= totalTarget) break;
       } catch (err) {
@@ -1071,7 +1075,7 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
       }
     }
     if (recHits.length) recordPlayed(recHits);
-    if (discIds.length) markOrigin(discIds, "discovered", laneOpts);
+    if (fillerHits.length) markOrigin(fillerHits, "filler", laneOpts);
     if (!progressed) break;
   }
 

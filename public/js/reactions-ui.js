@@ -118,6 +118,7 @@ export function computeOptimisticReaction({ counts, mine, micMine, kind }) {
  *   showToast: (msg: string, isError?: boolean) => void,
  *   confirmModal: (message: string, confirmLabel?: string, cancelLabel?: string) => Promise<boolean>,
  *   getNowPlayingId: () => string|null,
+ *   getReactionPlayId?: () => string,
  *   getNowPlayingMeta: () => { title?: string|null, artist?: string|null },
  *   ensureDisplayName: (opts?: { required?: boolean }) => Promise<string|null|undefined>,
  *   guestBadgeName: () => string,
@@ -138,7 +139,13 @@ export function createReactionsUi(els, deps) {
   const showToast = deps.showToast;
   const confirmModal = deps.confirmModal;
   const getNowPlayingId = deps.getNowPlayingId;
+  const getReactionPlayId = deps.getReactionPlayId || (() => "");
   const getNowPlayingMeta = deps.getNowPlayingMeta;
+
+  function playSyncKey(trackId, playId) {
+    if (!trackId) return null;
+    return playId ? `${trackId}::${playId}` : trackId;
+  }
   const ensureDisplayName = deps.ensureDisplayName;
   const guestBadgeName = deps.guestBadgeName;
   const getCurrentView = deps.getCurrentView;
@@ -180,7 +187,7 @@ export function createReactionsUi(els, deps) {
     }
   }
 
-  async function syncMyReactions(trackId) {
+  async function syncMyReactions(trackId, playId = "") {
     if (!trackId) {
       myMood = null;
       myMic = false;
@@ -188,25 +195,29 @@ export function createReactionsUi(els, deps) {
       paint({});
       return;
     }
-    if (syncedFor === trackId) return;
+    const play = playId || getReactionPlayId() || "";
+    const key = playSyncKey(trackId, play);
+    if (syncedFor === key) return;
     try {
       const qs = new URLSearchParams({
         id: trackId,
         guestId: getReactGuestId(),
       });
+      if (play) qs.set("playId", play);
       const res = await fetchFn(`/api/reactions?${qs}`);
       if (!res.ok) return;
       const data = await res.json();
-      syncedFor = trackId;
+      syncedFor = key;
       paint(data);
     } catch {
       /* keep prior paint */
     }
   }
 
-  /** Reset local mine/mic when the Now Playing track id changes. */
-  function noteTrackChange(nextNpId) {
-    if (nextNpId !== syncedFor) {
+  /** Reset local mine when the Now Playing track or this play changes. */
+  function noteTrackChange(nextNpId, playId = "") {
+    const key = playSyncKey(nextNpId, playId || getReactionPlayId() || "");
+    if (key !== syncedFor) {
       myMood = null;
       myMic = false;
       syncedFor = null;
@@ -233,7 +244,7 @@ export function createReactionsUi(els, deps) {
         micMine: myMic,
       });
     }
-    if (!updating) void syncMyReactions(getNowPlayingId());
+    if (!updating) void syncMyReactions(getNowPlayingId(), getReactionPlayId());
   }
 
   function setDisplayHidden(hidden) {
@@ -243,7 +254,7 @@ export function createReactionsUi(els, deps) {
   function invalidateAndResync() {
     syncedFor = null;
     const id = getNowPlayingId();
-    if (id) void syncMyReactions(id);
+    if (id) void syncMyReactions(id, getReactionPlayId());
     else paint({ mine: null, micMine: false });
   }
 
@@ -258,6 +269,7 @@ export function createReactionsUi(els, deps) {
     e.stopPropagation();
     const kind = btn.getAttribute("data-react");
     const id = getNowPlayingId();
+    const playId = getReactionPlayId() || "";
     if (!id || !NP_REACTION_KINDS.includes(kind)) return;
 
     const displayName = await ensureDisplayName({ required: true });
@@ -292,11 +304,12 @@ export function createReactionsUi(els, deps) {
           by: guestBadgeName() || displayName,
           name: meta.title || "",
           artist: meta.artist || "",
+          playId,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not react.");
-      syncedFor = id;
+      syncedFor = playSyncKey(id, playId);
       paint(data);
       if (kind === "mic") {
         showToast(

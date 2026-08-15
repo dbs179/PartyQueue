@@ -104,6 +104,56 @@ test("upcoming cap begins only after a second requester and the song threshold",
   assert.equal(anotherGuestBelowCap.allowed, true);
 });
 
+test("legacy requestedBy-only queue rows still count as a second person", () => {
+  const fourByAlex = ["one", "two", "three", "four"].map((id) =>
+    requested("Alex", id)
+  );
+  const legacyBailey = {
+    uri: "spotify:track:five",
+    title: "Song five",
+    artist: "Artist",
+    searched: true,
+    requestedBy: "Bailey",
+  };
+  const result = evaluateRequestFairness({
+    settings: enabled,
+    user: "Alex",
+    queue: [...fourByAlex, legacyBailey],
+    target: { uri: "spotify:track:six", name: "Song six", artist: "Artist" },
+  });
+  assert.equal(result.uniqueRequesters, 2);
+  assert.equal(result.limitsActive, true);
+  assert.equal(result.allowed, false);
+});
+
+test("legacy requestedBy-only rows count toward that guest's upcoming cap", () => {
+  const result = evaluateRequestFairness({
+    settings: { ...enabled, requestFairnessUpcomingThreshold: 2 },
+    user: "Bailey",
+    queue: [
+      requested("Alex", "one"),
+      {
+        uri: "spotify:track:two",
+        title: "Song two",
+        artist: "Artist",
+        searched: true,
+        requestedBy: "Bailey",
+      },
+      {
+        uri: "spotify:track:three",
+        title: "Song three",
+        artist: "Artist",
+        searched: true,
+        requestedBy: "Bailey",
+      },
+    ],
+    target: { uri: "spotify:track:four", name: "Song four", artist: "Artist" },
+  });
+  assert.equal(result.allowed, false);
+  assert.equal(result.code, "upcoming_cap");
+  assert.equal(result.upcomingCount, 2);
+});
+
 test("second requester in the rolling window keeps limits on after their song plays", () => {
   const sixByAlex = ["one", "two", "three", "four", "five", "six"].map((id) =>
     requested("Alex", id)

@@ -22,6 +22,21 @@ import { isClosingTime } from "./closing-time.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Playlist-dry / shortfall lane hits are Random, not Songs Like.
+ * Discover stays reserved for getSimilarUris ("Songs Like") picks.
+ */
+export function laneHitAsFillerItem(hit) {
+  return {
+    uri: hit?.uri,
+    id: hit?.id,
+    artist: hit?.artist ?? "",
+    name: hit?.name ?? "",
+    discovered: false,
+    moodPick: false,
+  };
+}
+
 /** Last.fm tags + Spotify search terms per PartyQueue genre bucket. */
 export const LANE_SOURCES = {
   rock: { lastfmTags: ["rock", "classic rock"], searchTerms: ["rock"] },

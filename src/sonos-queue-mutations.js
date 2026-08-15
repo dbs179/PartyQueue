@@ -621,7 +621,8 @@ async function enqueueHttpAudioUnlocked(
  * Strip superseded announce pads and insert ramp → TTS → restore under a
  * single write lock so guest adds / Random cannot split the block. Checks
  * preempt between Sonos calls so Clear Queue can abort mid-insert (Pause
- * stays on the transport lane and does not wait for this lock).
+ * stays on the transport lane and does not wait for this lock). A partial
+ * insert strips the leftover ramp/TTS before releasing the lock.
  *
  * @param {{
  *   queuePosition?: number,
@@ -748,42 +749,49 @@ async function insertAnnounceBlockUnlocked({
     position,
   });
 
-  await enqueue(ramp.url, clipOpts(ramp, rampPos));
-  if (preempted()) {
+  const abortPartial = async () => {
+    let cleaned = false;
+    try {
+      await removePads({ beforePosition: rampPos });
+      cleaned = true;
+    } catch (err) {
+      console.warn(
+        "[announce-block] partial-insert cleanup failed:",
+        err?.message || err
+      );
+    }
     return {
       ok: false,
       skipped: true,
       reason: "queue-preempted",
       partial: true,
+      cleaned,
       wiped,
       rampPos,
       ttsPos,
       restorePos,
     };
+  };
+
+  await enqueue(ramp.url, clipOpts(ramp, rampPos));
+  if (preempted()) {
+    return abortPartial();
   }
 
   await enqueue(tts.url, clipOpts(tts, ttsPos));
   if (preempted()) {
-    return {
-      ok: false,
-      skipped: true,
-      reason: "queue-preempted",
-      partial: true,
-      wiped,
-      rampPos,
-      ttsPos,
-      restorePos,
-    };
+    return abortPartial();
   }
 
   await enqueue(restore.url, clipOpts(restore, restorePos));
   if (preempted()) {
-    // Pads are fully in; still skip handoff/Play so Clear can own the room.
+    // Complete block is in; skip handoff/Play so Clear can own the room.
     return {
       ok: false,
       skipped: true,
       reason: "queue-preempted",
-      partial: true,
+      partial: false,
+      inserted: true,
       wiped,
       rampPos,
       ttsPos,
@@ -793,6 +801,7 @@ async function insertAnnounceBlockUnlocked({
 
   return {
     ok: true,
+    inserted: true,
     rampPos,
     ttsPos,
     restorePos,

@@ -29,6 +29,12 @@ const MAX_CLIP_SCRIPTS = 120;
 
 let cache = null;
 
+/** In-memory first-shout hold so a second add cannot stack another shout
+ *  while TTS/insert runs. Not persisted — a crash must not burn the night. */
+const pendingFirstShouts = new Map();
+/** Drop a leaked reservation if announce never settles (ms). */
+export const FIRST_SHOUT_RESERVE_MS = 3 * 60 * 1000;
+
 function windowMs() {
   return NIGHT_WINDOW_HOURS * 60 * 60_000;
 }
@@ -300,6 +306,38 @@ function guestKey(name) {
   return sanitizeDisplayName(name);
 }
 
+function pendingFirstShoutAt(key, now = Date.now()) {
+  if (!key) return 0;
+  const at = Number(pendingFirstShouts.get(key)) || 0;
+  if (!at) return 0;
+  if (Number(now) - at > FIRST_SHOUT_RESERVE_MS) {
+    pendingFirstShouts.delete(key);
+    return 0;
+  }
+  return at;
+}
+
+/**
+ * Hold first-shout for this guest until announce commits or the reservation
+ * is released. Concurrent adds see isFirstShoutTonight === false.
+ * @returns {boolean} true when this call created the reservation
+ */
+export function reserveFirstShout(name, now = Date.now()) {
+  const key = guestKey(name);
+  if (!key) return false;
+  if (pendingFirstShoutAt(key, now)) return false;
+  if (!isFirstShoutTonight(name, now)) return false;
+  pendingFirstShouts.set(key, Number(now) || Date.now());
+  return true;
+}
+
+/** Drop a pending first-shout so a failed announce can try again tonight. */
+export function releaseFirstShoutReservation(name) {
+  const key = guestKey(name);
+  if (!key) return false;
+  return pendingFirstShouts.delete(key);
+}
+
 function getOrCreateGuest(name) {
   const key = guestKey(name);
   if (!key) return { key: null, entry: null };
@@ -480,6 +518,7 @@ export function getRecentDjAnnounceScripts(limit = 5, now = Date.now()) {
 export function isFirstShoutTonight(name, now = Date.now()) {
   const key = guestKey(name);
   if (!key) return false;
+  if (pendingFirstShoutAt(key, now)) return false;
   const store = pruneStore(now);
   const entry = store.guests[key];
   const at = Number(entry?.firstShoutAt) || 0;
@@ -568,6 +607,7 @@ export function rememberShout({
 } = {}, now = Date.now()) {
   const { key, entry } = getOrCreateGuest(name);
   if (!key || !entry) return;
+  pendingFirstShouts.delete(key);
   const ts = Number(now) || Date.now();
   if (!entry.firstShoutAt || entry.firstShoutAt < nightStart(ts)) {
     entry.firstShoutAt = ts;
@@ -610,6 +650,7 @@ export function forgetBirthdayShout(name) {
   const store = pruneStore();
   const entry = store.guests[key];
   if (!entry) return true;
+  pendingFirstShouts.delete(key);
   entry.birthdayShoutedAt = 0;
   entry.firstShoutAt = 0;
   const kept = pruneGuest(entry, nightStart());
@@ -620,6 +661,7 @@ export function forgetBirthdayShout(name) {
 }
 
 export function clearDjNightMemory() {
+  pendingFirstShouts.clear();
   cache = emptyStore();
   try {
     fs.rmSync(MEMORY_FILE, { force: true });
@@ -634,6 +676,7 @@ export function clearDjNightMemory() {
  * history so Random intros stay unique.
  */
 export function clearDjShoutOutMemory() {
+  pendingFirstShouts.clear();
   const store = load();
   for (const key of Object.keys(store.guests)) {
     delete store.guests[key];

@@ -73,6 +73,7 @@ export function nowPlayingSignature(snapshot = null) {
     snapshot.mixGenreLabel ?? "",
     snapshot.metadataPending ? 1 : 0,
     snapshot.updating ? 1 : 0,
+    snapshot.reactionPlayId ?? "",
     reactionsSignature(snapshot.reactions),
   ].join("\x1f");
 }

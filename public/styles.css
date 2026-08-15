@@ -5004,12 +5004,12 @@ body.party-display-active.party-display-preview .party-display-view {
 }
 
 .party-display-layout {
-  --display-lyric-size: calc(26 * var(--pd));
+  --display-lyric-size: calc(36 * var(--pd));
   --display-lyric-line: 1.2;
-  --display-lyric-gap: calc(6 * var(--pd));
+  --display-lyric-gap: calc(8 * var(--pd));
   --display-lyric-block: calc(
-    (5 * var(--display-lyric-size) * var(--display-lyric-line)) +
-      (4 * var(--display-lyric-gap)) +
+    (3 * var(--display-lyric-size) * var(--display-lyric-line)) +
+      (2 * var(--display-lyric-gap)) +
       (12 * var(--pd))
   );
   container-type: size;
@@ -5064,6 +5064,27 @@ body.party-display-active.party-display-preview .party-display-view {
 
 .party-display-art-col:has(.party-display-lyrics:not([hidden])) {
   width: min(calc(100cqh - var(--display-lyric-block)), 38cqi);
+}
+
+/* DJ scripts are the whole announce, not a 3-line karaoke window.
+   Shrink the square art so the full text fits under it. JS may set
+   --display-dj-lyric-block to the measured script height. */
+.party-display-art-col:has(.party-display-lyrics.is-dj) {
+  --display-lyric-size: calc(20 * var(--pd));
+  --display-lyric-line: 1.25;
+  --display-lyric-gap: calc(4 * var(--pd));
+  --display-lyric-block: var(
+    --display-dj-lyric-block,
+    calc(
+      (12 * var(--display-lyric-size) * var(--display-lyric-line)) +
+        (11 * var(--display-lyric-gap)) +
+        (12 * var(--pd))
+    )
+  );
+  width: min(
+    max(calc(100cqh - var(--display-lyric-block)), 28cqi),
+    38cqi
+  );
 }
 
 .party-display-art-wrap {
@@ -5427,18 +5448,18 @@ body.party-display-active.party-display-preview .party-display-view {
   font-variant-numeric: tabular-nums;
 }
 
-/* 5-line karaoke — same width as the album art above it. */
+/* 3-line karaoke — larger type, same width as the album art above it. */
 .party-display-lyrics {
-  --display-lyric-size: calc(22 * var(--pd));
+  --display-lyric-size: calc(36 * var(--pd));
   --display-lyric-line: 1.2;
-  --display-lyric-gap: calc(4 * var(--pd));
+  --display-lyric-gap: calc(8 * var(--pd));
   flex: 0 0 auto;
   width: 100%;
   min-width: 0;
   min-height: 0;
   height: calc(
-    (5 * var(--display-lyric-size) * var(--display-lyric-line)) +
-      (4 * var(--display-lyric-gap))
+    (3 * var(--display-lyric-size) * var(--display-lyric-line)) +
+      (2 * var(--display-lyric-gap))
   );
   display: flex;
   flex-direction: column;
@@ -5454,10 +5475,11 @@ body.party-display-active.party-display-preview .party-display-view {
 }
 
 .party-display-lyrics.is-dj {
-  height: calc(
-    (6 * var(--display-lyric-size) * var(--display-lyric-line)) +
-      (5 * var(--display-lyric-gap))
-  );
+  --display-lyric-size: calc(20 * var(--pd));
+  --display-lyric-line: 1.25;
+  height: auto;
+  max-height: none;
+  overflow: visible;
 }
 
 .party-display-lyrics .np-fs-lyrics-status {
@@ -5485,6 +5507,11 @@ body.party-display-active.party-display-preview .party-display-view {
   scrollbar-width: none;
 }
 
+.party-display-lyrics.is-dj .np-fs-lyrics-plain {
+  height: auto;
+  overflow: visible;
+}
+
 .party-display-lyrics .np-fs-lyrics-plain::-webkit-scrollbar {
   display: none;
 }
@@ -5497,7 +5524,7 @@ body.party-display-active.party-display-preview .party-display-view {
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-rows: repeat(5, 1fr);
+  grid-template-rows: repeat(3, 1fr);
   gap: var(--display-lyric-gap);
   align-items: center;
 }
@@ -5544,12 +5571,14 @@ body.party-display-active.party-display-preview .party-display-view {
   min-height: 0;
   height: 100%;
   padding: calc(14 * var(--pd));
-  /* Always three full Up Next rows — no partial-row scroll. */
+  display: flex;
+  flex-direction: column;
+  /* Full rows only — JS trims to what fits; no partial-row scroll. */
   overflow: hidden;
   box-sizing: border-box;
 }
 
-/* Up Next type (PC + TV shared) — three upcoming songs. */
+/* Up Next type (PC + TV shared) — as many complete songs as the column holds. */
 .party-display-side > .party-display-section-head .party-display-label,
 .party-display-queue .party-display-label {
   font-size: calc(30 * var(--pd));
@@ -5575,7 +5604,9 @@ body.party-display-active.party-display-preview .party-display-view {
   list-style: none;
   margin: calc(12 * var(--pd)) 0 0;
   padding: 0;
+  flex: 1 1 auto;
   display: grid;
+  align-content: start;
   gap: calc(4 * var(--pd));
   min-height: 0;
   overflow: hidden;

@@ -15,6 +15,8 @@ test("enrichNowPlaying stays track-scoped (party flags live on /api/party)", asy
   });
   assert.equal(enriched.title, "Test");
   assert.ok("reactions" in enriched);
+  assert.ok(enriched.reactionPlayId);
+  assert.match(String(enriched.reactionPlayId), /^abc:/);
   assert.ok("mixGenreLane" in enriched);
   assert.ok("mixGenreLabel" in enriched);
   assert.equal("neverEnding" in enriched, false);

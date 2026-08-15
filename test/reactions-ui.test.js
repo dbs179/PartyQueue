@@ -11,6 +11,7 @@ import {
   getReactGuestId,
   REACT_GUEST_KEY,
   computeOptimisticReaction,
+  createReactionsUi,
 } from "../public/js/reactions-ui.js";
 import { REACTION_KINDS, MOOD_REACTION_KINDS } from "../src/reactions.js";
 
@@ -106,4 +107,38 @@ test("computeOptimisticReaction toggles mood and mic independently", () => {
     }),
     null
   );
+});
+
+test("noteTrackChange treats a new play of the same track as unsynced", async () => {
+  const fetched = [];
+  const ui = createReactionsUi(
+    {},
+    {
+      fetch: async (url) => {
+        fetched.push(String(url));
+        return {
+          ok: true,
+          json: async () => ({ vomit: 0, mine: null, micMine: false }),
+        };
+      },
+      hostFetch: async () => ({ ok: true, json: async () => ({}) }),
+      showToast() {},
+      confirmModal: async () => false,
+      getNowPlayingId: () => "map1",
+      getReactionPlayId: () => "map1:200",
+      getNowPlayingMeta: () => ({}),
+      ensureDisplayName: async () => "Dave",
+      guestBadgeName: () => "Dave",
+      getCurrentView: () => "now",
+      loadStats() {},
+    }
+  );
+
+  await ui.syncMyReactions("map1", "map1:100");
+  assert.equal(ui.getSyncedFor(), "map1::map1:100");
+  ui.noteTrackChange("map1", "map1:200");
+  assert.equal(ui.getSyncedFor(), null);
+  await ui.syncMyReactions("map1", "map1:200");
+  assert.equal(ui.getSyncedFor(), "map1::map1:200");
+  assert.ok(fetched.some((url) => url.includes("playId=map1%3A200")));
 });

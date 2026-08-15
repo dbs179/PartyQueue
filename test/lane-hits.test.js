@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   laneSource,
   getLaneHits,
+  laneHitAsFillerItem,
   resetLaneCacheForTests,
 } from "../src/lane-hits.js";
 
@@ -23,6 +24,17 @@ function fakeResolver(catalog) {
     return catalog[key] || null;
   };
 }
+
+test("lane-hit top-ups are Random filler, not Discover", () => {
+  const item = laneHitAsFillerItem(
+    hit("abc1234567890abc1234567890abc123", "Lane Artist", "Lane Song")
+  );
+  assert.equal(item.discovered, false);
+  assert.equal(item.moodPick, false);
+  assert.equal(item.artist, "Lane Artist");
+  assert.equal(item.name, "Lane Song");
+  assert.match(item.uri, /^spotify:track:/);
+});
 
 test("laneSource maps PartyQueue buckets to Last.fm tags", () => {
   assert.ok(laneSource("folk")?.lastfmTags.includes("folk"));

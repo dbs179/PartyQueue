@@ -4,7 +4,8 @@ import {
   mainQueueCountLabel,
   partyQueueCountLabel,
   partyDisplayQueueSlice,
-  DISPLAY_QUEUE_VISIBLE,
+  DISPLAY_QUEUE_MAX,
+  countFullyVisibleQueueRows,
   queueTrackSig,
   queueOriginBadgeHtml,
   queueGenreLabel,
@@ -20,22 +21,43 @@ test("count labels", () => {
   assert.equal(partyQueueCountLabel(2), "2 queued");
 });
 
-test("Party Display Up Next always takes the next 3 songs", () => {
-  assert.equal(DISPLAY_QUEUE_VISIBLE, 3);
+test("Party Display Up Next slices to the fit limit, not a fixed 3", () => {
+  assert.equal(DISPLAY_QUEUE_MAX, 16);
   assert.deepEqual(partyDisplayQueueSlice(null), []);
   assert.deepEqual(
     partyDisplayQueueSlice([{ title: "A" }, { title: "B" }]).map((t) => t.title),
     ["A", "B"]
   );
+  const four = [
+    { title: "A" },
+    { title: "B" },
+    { title: "C" },
+    { title: "D" },
+  ];
   assert.deepEqual(
-    partyDisplayQueueSlice([
-      { title: "A" },
-      { title: "B" },
-      { title: "C" },
-      { title: "D" },
-    ]).map((t) => t.title),
+    partyDisplayQueueSlice(four, 3).map((t) => t.title),
     ["A", "B", "C"]
   );
+  assert.deepEqual(
+    partyDisplayQueueSlice(four, 8).map((t) => t.title),
+    ["A", "B", "C", "D"]
+  );
+  const many = Array.from({ length: 20 }, (_, i) => ({ title: String(i) }));
+  assert.equal(partyDisplayQueueSlice(many).length, DISPLAY_QUEUE_MAX);
+});
+
+test("countFullyVisibleQueueRows keeps only complete rows", () => {
+  const list = {
+    clientHeight: 200,
+    children: [
+      { offsetTop: 0, offsetHeight: 90 },
+      { offsetTop: 94, offsetHeight: 90 },
+      { offsetTop: 188, offsetHeight: 90 },
+    ],
+  };
+  assert.equal(countFullyVisibleQueueRows(list), 2);
+  assert.equal(countFullyVisibleQueueRows({ clientHeight: 0, children: list.children }), 0);
+  assert.equal(countFullyVisibleQueueRows(null), 0);
 });
 
 test("queueTrackSig ignores absolute Sonos position shifts", () => {
@@ -145,11 +167,12 @@ test("genre and playlist badges respect showQueueGenre", () => {
   );
 });
 
-test("missing genre shows muted Unknown badge when showQueueGenre is on", () => {
-  const html = queueGenreBadgeHtml({}, { showQueueGenre: true });
-  assert.match(html, /Unknown/);
-  assert.match(html, /is-unknown/);
-  assert.match(html, /Genre not matched yet/);
+test("missing genre hides the pill when showQueueGenre is on", () => {
+  assert.equal(queueGenreBadgeHtml({}, { showQueueGenre: true }), "");
+  assert.equal(
+    queueGenreBadgeHtml({ genreLabel: "" }, { showQueueGenre: true }),
+    ""
+  );
 });
 
 test("queueBadgeHtml concatenates origin + genre + playlist", () => {

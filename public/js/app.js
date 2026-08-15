@@ -2585,6 +2585,8 @@ const reactionsUi = createReactionsUi(
     showToast,
     confirmModal,
     getNowPlayingId: () => searchUi.getNowPlayingId(),
+    getReactionPlayId: () =>
+      lastNowPlaying?.reactionPlayId || lastNowPlaying?.reactions?.playId || "",
     getNowPlayingMeta: () => ({
       title: lastNowPlaying?.title || "",
       artist: lastNowPlaying?.artist || "",
@@ -2944,7 +2946,10 @@ function renderNowPlaying(transport) {
     !!lastConfirmedNp &&
     mediaIdentity(np) === mediaIdentity(lastConfirmedNp);
   const nextNpId = hasTrack && !updating ? trackIdFromUri(np.uri) : null;
-  reactionsUi.noteTrackChange(nextNpId);
+  reactionsUi.noteTrackChange(
+    nextNpId,
+    np?.reactionPlayId || np?.reactions?.playId || ""
+  );
   searchUi.setNowPlaying(hasTrack ? np : null, {
     includeId: hasTrack && !updating,
   });

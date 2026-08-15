@@ -9,7 +9,6 @@ import {
 } from "./guest.js";
 import { trackEraDisplayLabel } from "./genre-presets.js";
 import { displayOriginLabel } from "./now-playing-origin.js";
-import { UNKNOWN_GENRE_DISPLAY } from "./mix-labels.js";
 
 /**
  * @param {number} n
@@ -25,16 +24,38 @@ export function partyQueueCountLabel(n) {
   return n > 0 ? `${n} queued` : "";
 }
 
-/** Party Display Up Next always shows this many upcoming songs. */
-export const DISPLAY_QUEUE_VISIBLE = 3;
+/** Upper bound so a long queue does not paint every upcoming row. */
+export const DISPLAY_QUEUE_MAX = 16;
 
 /**
  * @param {unknown} tracks
+ * @param {number} [limit]
  * @returns {object[]}
  */
-export function partyDisplayQueueSlice(tracks) {
+export function partyDisplayQueueSlice(tracks, limit = DISPLAY_QUEUE_MAX) {
   const list = Array.isArray(tracks) ? tracks : [];
-  return list.slice(0, DISPLAY_QUEUE_VISIBLE);
+  const n = Math.max(0, Math.min(DISPLAY_QUEUE_MAX, Math.floor(Number(limit) || 0)));
+  return list.slice(0, n);
+}
+
+/**
+ * How many complete Up Next rows fit in the list box (no partial last row).
+ * @param {{ clientHeight?: number, children?: ArrayLike<{ offsetTop?: number, offsetHeight?: number }> }|null|undefined} listEl
+ */
+export function countFullyVisibleQueueRows(listEl) {
+  if (!listEl) return 0;
+  const limit = Number(listEl.clientHeight) || 0;
+  if (limit <= 0) return 0;
+  let n = 0;
+  const items = listEl.children || [];
+  for (const child of items) {
+    const top = Number(child?.offsetTop);
+    const height = Number(child?.offsetHeight);
+    if (!Number.isFinite(top) || !Number.isFinite(height)) continue;
+    if (top + height > limit + 1) break;
+    n += 1;
+  }
+  return n;
 }
 
 /**
@@ -135,15 +156,8 @@ export function queueGenreLabel(track) {
 export function queueGenreBadgeHtml(track, { showQueueGenre = false } = {}) {
   if (!showQueueGenre || track.djVoice) return "";
   const matched = queueGenreLabel(track);
-  const unknown = !matched;
-  const label = matched || UNKNOWN_GENRE_DISPLAY;
-  const cls = unknown
-    ? "queue-genre-badge is-unknown"
-    : "queue-genre-badge";
-  const title = unknown
-    ? "Genre not matched yet"
-    : "Matched song genre";
-  return `<span class="${cls}" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
+  if (!matched) return "";
+  return `<span class="queue-genre-badge" title="Matched song genre">${escapeHtml(matched)}</span>`;
 }
 
 /**
@@ -218,6 +232,10 @@ export function createQueueUi(els, deps) {
   /** @type {object[]|null} */
   let pendingStreamTracks = null;
   let lastDisplayQueueSig = "";
+  /** @type {object[]} */
+  let lastDisplayTracks = [];
+  let lastDisplayFitCount = 0;
+  let displayRelayoutQueued = false;
 
   function badgeOpts(track) {
     const showQueueGenre = !!getShowQueueGenre();
@@ -397,9 +415,31 @@ export function createQueueUi(els, deps) {
     syncSortable();
   }
 
-  function renderPartyDisplay(tracks) {
+  function displayQueueSig(visible, eraMood, showGenre) {
+    return visible
+      .map(
+        (track) =>
+          queueTrackSig(track, { showQueueGenre: showGenre }) +
+          "\0" +
+          displayOriginLabel(track, eraMood)
+      )
+      .join("\n");
+  }
+
+  function trimDisplayQueueToFit() {
+    const fit = countFullyVisibleQueueRows(displayQueue);
+    if (fit <= 0) return 0;
+    lastDisplayFitCount = fit;
+    while (displayQueue.children.length > fit) {
+      displayQueue.lastElementChild?.remove();
+    }
+    return fit;
+  }
+
+  function renderPartyDisplay(tracks, { relayout = false } = {}) {
     if (!displayQueue || !displayQueueEmpty || !displayQueueCount) return;
     const list = Array.isArray(tracks) ? tracks : [];
+    lastDisplayTracks = list;
 
     displayQueueCount.textContent = partyQueueCountLabel(list.length);
     displayQueueEmpty.textContent = "The queue is empty.";
@@ -408,26 +448,33 @@ export function createQueueUi(els, deps) {
       displayQueue.innerHTML = "";
       displayQueueEmpty.hidden = false;
       lastDisplayQueueSig = "";
+      lastDisplayFitCount = 0;
       return;
     }
     displayQueueEmpty.hidden = true;
 
-    const visible = partyDisplayQueueSlice(list);
+    const probeLimit =
+      !relayout && lastDisplayFitCount > 0
+        ? Math.min(list.length, lastDisplayFitCount + 1)
+        : Math.min(list.length, DISPLAY_QUEUE_MAX);
+    const visible = partyDisplayQueueSlice(list, probeLimit);
     const eraMood = getActiveEraMoodId();
     const showGenre = getShowQueueGenre();
-    const nextSig = visible
-      .map(
-        (track) =>
-          queueTrackSig(track, { showQueueGenre: showGenre }) +
-          "\0" +
-          displayOriginLabel(track, eraMood)
-      )
-      .join("\n");
-    // Skip DOM wipe when the visible three haven't changed.
+    const nextSig = displayQueueSig(visible, eraMood, showGenre);
+    // Skip DOM wipe when the probed rows haven't changed.
     if (
+      !relayout &&
       nextSig === lastDisplayQueueSig &&
       displayQueue.children.length === visible.length
     ) {
+      const fit = trimDisplayQueueToFit();
+      if (fit > 0 && fit < visible.length) {
+        lastDisplayQueueSig = displayQueueSig(
+          visible.slice(0, fit),
+          eraMood,
+          showGenre
+        );
+      }
       return;
     }
     lastDisplayQueueSig = nextSig;
@@ -460,15 +507,13 @@ export function createQueueUi(els, deps) {
         // Same Show song genre toggle as main Up Next (genre + From Playlists).
         if (showGenre) {
           const matched = queueGenreLabel(track);
-          const genre = document.createElement("span");
-          genre.className = matched
-            ? "party-display-queue-genre"
-            : "party-display-queue-genre is-unknown";
-          genre.textContent = matched || UNKNOWN_GENRE_DISPLAY;
-          genre.title = matched
-            ? "Matched song genre"
-            : "Genre not matched yet";
-          meta.appendChild(genre);
+          if (matched) {
+            const genre = document.createElement("span");
+            genre.className = "party-display-queue-genre";
+            genre.textContent = matched;
+            genre.title = "Matched song genre";
+            meta.appendChild(genre);
+          }
           if (track.fromPlaylist) {
             const playlist = document.createElement("span");
             playlist.className = "party-display-queue-playlist";
@@ -482,6 +527,34 @@ export function createQueueUi(els, deps) {
       row.append(number, meta);
       displayQueue.appendChild(row);
     });
+
+    const fit = trimDisplayQueueToFit();
+    if (fit > 0 && fit < visible.length) {
+      lastDisplayQueueSig = displayQueueSig(
+        visible.slice(0, fit),
+        eraMood,
+        showGenre
+      );
+    }
+  }
+
+  function scheduleDisplayRelayout() {
+    if (displayRelayoutQueued) return;
+    displayRelayoutQueued = true;
+    const later =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (fn) => setTimeout(fn, 0);
+    later(() => {
+      displayRelayoutQueued = false;
+      if (!lastDisplayTracks.length) return;
+      renderPartyDisplay(lastDisplayTracks, { relayout: true });
+    });
+  }
+
+  if (displayQueue && typeof ResizeObserver === "function") {
+    const resizeObs = new ResizeObserver(() => scheduleDisplayRelayout());
+    resizeObs.observe(displayQueue);
   }
 
   function isEditMode() {

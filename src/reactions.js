@@ -1,6 +1,7 @@
 // Now Playing reactions — persist until the host resets them.
-// Mood reactions: one active kind per guest per track (toggle / switch).
-// Mic is separate (karaoke list) and does not count against that limit.
+// Mood reactions: one active kind per guest per song play (toggle / switch).
+// The same track later is a new play — last week's vomit is not still selected.
+// Mic is separate (karaoke list, per track) and does not use play ids.
 // Each vote stores a display name (`by`) for Stats attribution.
 
 import fs from "node:fs";
@@ -9,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "./atomic-write.js";
 import { sanitizeDisplayName } from "./display-name.js";
 import { invalidatePartyStatsCache } from "./party-stats.js";
+import { playIdForTrack } from "./reaction-play.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STORE_FILE =
@@ -75,6 +77,7 @@ function readMoodVote(raw) {
       kind,
       by: cleanBy(raw.by),
       at: Number(raw.at) || 0,
+      playId: typeof raw.playId === "string" ? raw.playId : "",
     };
   }
   return null;
@@ -92,12 +95,19 @@ function readMicVote(raw) {
   return null;
 }
 
-function countsFromRow(row) {
+function voteKey(guest, playId) {
+  return playId ? `${playId}::${guest}` : guest;
+}
+
+function countsFromRow(row, playId = "") {
   const counts = emptyCounts();
   const votes = row?.votes && typeof row.votes === "object" ? row.votes : {};
+  const wantPlay = String(playId || "");
   for (const raw of Object.values(votes)) {
     const vote = readMoodVote(raw);
-    if (vote) counts[vote.kind] += 1;
+    if (!vote) continue;
+    if (wantPlay && (vote.playId || "") !== wantPlay) continue;
+    counts[vote.kind] += 1;
   }
   const micVotes =
     row?.micVotes && typeof row.micVotes === "object" ? row.micVotes : {};
@@ -109,8 +119,12 @@ function countsFromRow(row) {
   return counts;
 }
 
-function moodKindForGuest(row, guest) {
+function moodKindForGuest(row, guest, playId = "") {
   if (!guest || !row?.votes) return null;
+  if (playId) {
+    const keyed = readMoodVote(row.votes[voteKey(guest, playId)]);
+    return keyed?.kind || null;
+  }
   const vote = readMoodVote(row.votes[guest]);
   return vote?.kind || null;
 }
@@ -218,28 +232,37 @@ function pruneIfOverCap(keepId) {
   }
 }
 
-function snapshot(trackId, guestId = "") {
+function resolvePlayId(trackId, playId) {
+  const requested = String(playId || "").trim();
+  if (requested) return requested;
+  return playIdForTrack(trackId);
+}
+
+function snapshot(trackId, guestId = "", playId = "") {
   const guest = cleanGuestId(guestId);
+  const play = resolvePlayId(trackId, playId);
   if (!trackId) {
-    return { ...emptyCounts(), mine: null, micMine: false };
+    return { ...emptyCounts(), mine: null, micMine: false, playId: play };
   }
   load();
   const row = cache.byTrack[trackId];
-  const counts = row ? countsFromRow(row) : emptyCounts();
-  const mine = moodKindForGuest(row, guest);
+  const counts = row ? countsFromRow(row, play) : emptyCounts();
+  const mine = moodKindForGuest(row, guest, play);
   const micMine = hasMicForGuest(row, guest);
-  return { ...counts, mine, micMine };
+  return { ...counts, mine, micMine, playId: play };
 }
 
-export function getReactions(trackId, guestId = "") {
-  return snapshot(trackId, guestId);
+export function getReactions(trackId, guestId = "", playId = "") {
+  return snapshot(trackId, guestId, playId);
 }
 
 /**
- * Set / toggle a reaction for one guest on a track.
- * Mood kinds: one active at a time (tap again to clear, tap another to switch).
- * Mic: independent toggle for the Karaoke list.
+ * Set / toggle a reaction for one guest on a track play.
+ * Mood kinds: one active at a time for this play (tap again to clear,
+ * tap another to switch). A later play of the same song is a fresh vote.
+ * Mic: independent toggle for the Karaoke list (per track, not per play).
  * meta.by — display name for Stats attribution.
+ * meta.playId — this listen; defaults to the live Now Playing play.
  */
 export function setReaction(trackId, kind, guestId, meta = {}) {
   if (!trackId || typeof trackId !== "string") {
@@ -262,6 +285,7 @@ export function setReaction(trackId, kind, guestId, meta = {}) {
   if (name) row.name = name;
   if (artist) row.artist = artist;
   const by = cleanBy(meta.by);
+  const play = resolvePlayId(trackId, meta.playId);
 
   if (k === "mic") {
     if (readMicVote(row.micVotes[guest])) {
@@ -272,12 +296,13 @@ export function setReaction(trackId, kind, guestId, meta = {}) {
       row.micAt = now;
     }
   } else {
-    const prev = readMoodVote(row.votes[guest]);
+    const key = voteKey(guest, play);
+    const prev = readMoodVote(row.votes[key]);
     if (prev?.kind === k) {
-      delete row.votes[guest];
+      delete row.votes[key];
     } else {
       const now = Date.now();
-      row.votes[guest] = { kind: k, by, at: now };
+      row.votes[key] = { kind: k, by, at: now, playId: play };
       row.moodAt = now;
     }
   }
@@ -286,7 +311,7 @@ export function setReaction(trackId, kind, guestId, meta = {}) {
   pruneIfOverCap(trackId);
   schedulePersist();
   invalidatePartyStatsCache();
-  return { ok: true, ...snapshot(trackId, guest) };
+  return { ok: true, ...snapshot(trackId, guest, play) };
 }
 
 /** @deprecated use setReaction — kept for older call sites/tests */

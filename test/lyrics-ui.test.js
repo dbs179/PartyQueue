@@ -2,8 +2,10 @@ import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import {
   LYRICS_LEAD_SEC,
+  DISPLAY_LYRIC_WINDOW,
   activeSyncedLineIndex,
   createLyricsUi,
+  displayLyricWindowSlots,
   formatDjAnnounceScript,
   lyricsMissMessage,
 } from "../public/js/lyrics-ui.js";
@@ -78,6 +80,20 @@ function makeLyricsEl() {
 
 test("LYRICS_LEAD_SEC is a small positive offset", () => {
   assert.equal(LYRICS_LEAD_SEC, 0.75);
+});
+
+test("Party Display karaoke window is 3 lines around the active line", () => {
+  assert.equal(DISPLAY_LYRIC_WINDOW, 3);
+  assert.deepEqual(displayLyricWindowSlots(4), [
+    { i: 3, cls: "is-past" },
+    { i: 4, cls: "is-active" },
+    { i: 5, cls: "is-next" },
+  ]);
+  assert.deepEqual(displayLyricWindowSlots(0), [
+    { i: -1, cls: "is-past" },
+    { i: 0, cls: "is-active" },
+    { i: 1, cls: "is-next" },
+  ]);
 });
 
 test("activeSyncedLineIndex respects lead and timeline", () => {

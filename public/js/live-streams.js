@@ -25,6 +25,9 @@ export const STALE_LIVE_CHECK_MS = 30000;
 /** Shown on Up Next / Party Display when the queue stream is stale. */
 export const QUEUE_STALE_MESSAGE =
   "Queue reconnecting — showing the last known list.";
+/** Shown on Now Playing / Party Display when the NP stream is stale. */
+export const NOW_PLAYING_STALE_MESSAGE =
+  "Sonos reconnecting — showing the last update.";
 
 /** @param {object|null|undefined} snapshot */
 export function nowPlayingLooksActive(snapshot) {
@@ -180,6 +183,8 @@ export function createLiveStreams(els, deps) {
   let partyFallbackTimer = null;
   let partyFallbackDelayTimer = null;
   let partyStreamCursor = createStreamCursor();
+  let partyStreamVersion = 0;
+  let partyHttpRequest = 0;
   let lastLiveEventAt = 0;
   let staleWatchTimer = null;
 
@@ -302,14 +307,14 @@ export function createLiveStreams(els, deps) {
       npConnectionStatus.hidden = !disconnected;
       if (disconnected) {
         npConnectionStatus.textContent =
-          message || "Sonos reconnecting — showing the last update.";
+          message || NOW_PLAYING_STALE_MESSAGE;
       }
     }
     if (displayConnectionStatus) {
       displayConnectionStatus.hidden = !disconnected;
       if (disconnected) {
         displayConnectionStatus.textContent =
-          message || "Sonos reconnecting — showing the last update.";
+          message || NOW_PLAYING_STALE_MESSAGE;
       }
     }
   }
@@ -374,6 +379,7 @@ export function createLiveStreams(els, deps) {
       if (nowPlayingSource !== source) return;
       nowPlayingStreamConnected = true;
       stopNowPlayingFallback();
+      setNowPlayingConnectionStatus("connected");
     };
     source.addEventListener("sonos-status", (event) => {
       if (nowPlayingSource !== source) return;
@@ -396,6 +402,7 @@ export function createLiveStreams(els, deps) {
       if (nowPlayingSource !== source) return;
       nowPlayingStreamConnected = false;
       startNowPlayingFallback();
+      setNowPlayingConnectionStatus("disconnected");
     };
   }
 
@@ -572,16 +579,33 @@ export function createLiveStreams(els, deps) {
     const next = advanceStreamCursor(partyStreamCursor, snapshot);
     if (!next.accept) return;
     partyStreamCursor = next.cursor;
+    partyStreamVersion += 1;
     noteLiveEvent();
     applyPartySettings(snapshot);
   }
 
   async function loadPartySettings() {
+    const requestId = ++partyHttpRequest;
+    const streamVersionAtStart = partyStreamVersion;
     try {
       const res = await liveFetch("/api/party");
       if (!res.ok) return;
+      const snapshot = await res.json();
+      if (
+        requestId !== partyHttpRequest ||
+        partyStreamVersion !== streamVersionAtStart
+      ) {
+        return;
+      }
+      // SSE owns the toggles while connected — a late HTTP response must not
+      // flip Discover / Random Mood after a reconnect race.
+      if (partyStreamConnected) return;
+      const next = advanceStreamCursor(partyStreamCursor, snapshot);
+      if (!next.accept) return;
+      partyStreamCursor = next.cursor;
+      partyStreamVersion += 1;
       noteLiveEvent();
-      applyPartySettings(await res.json());
+      applyPartySettings(snapshot);
     } catch {
       /* leave toggles as-is on transient errors */
     }

@@ -2,7 +2,10 @@
 // Pure helpers so the UI and GET /api/fairness share one shape.
 
 import { sanitizeDisplayName } from "./display-name.js";
-import { evaluateRequestFairness } from "./request-fairness.js";
+import {
+  evaluateRequestFairness,
+  liveQueueRequesterKey,
+} from "./request-fairness.js";
 import { evaluateSetRequestFairness } from "./set-request-fairness.js";
 
 const PROBE_TARGET = {
@@ -31,7 +34,7 @@ function countUpcomingForUser(queue, user) {
   for (const track of queue) {
     if (!track?.searched || track?.setRequest) continue;
     totalRequestedUpcoming += 1;
-    if (userKey(track.requestedByUser) === key) upcomingCount += 1;
+    if (liveQueueRequesterKey(track) === key) upcomingCount += 1;
   }
   return { upcomingCount, totalRequestedUpcoming };
 }

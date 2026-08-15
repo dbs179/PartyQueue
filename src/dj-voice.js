@@ -3114,6 +3114,7 @@ async function announceOnSonosUnlocked(
   }
 
   let didStart = false;
+  let didInsert = false;
   let volHold = null;
   let pausedForImminent = false;
   let heldAtTrackEnd = false;
@@ -3221,13 +3222,19 @@ async function announceOnSonosUnlocked(
             (block.partial ? " (partial insert)" : "")
         );
       }
+      if (block?.cleaned) {
+        console.log("[dj-voice] stripped leftover announce pad(s) after preempt");
+      }
       return {
         ok: false,
         skipped: !!block?.skipped,
         reason: block?.reason || "announce-block-failed",
         partial: !!block?.partial,
+        inserted: !!block?.inserted,
+        cleaned: !!block?.cleaned,
       };
     }
+    didInsert = true;
     const { rampPos, ttsPos, restorePos, wiped } = block;
     if (wiped?.removedBefore > 0) {
       console.log(
@@ -3271,6 +3278,7 @@ async function announceOnSonosUnlocked(
     }
     return {
       ok: true,
+      inserted: true,
       mode: "queue",
       publicUrl: clip.publicUrl,
       position: ttsPos,
@@ -3299,7 +3307,11 @@ async function announceOnSonosUnlocked(
         /* ignore */
       }
     }
-    return { ok: false, error: err.message || "Announce failed." };
+    return {
+      ok: false,
+      inserted: didInsert,
+      error: err.message || "Announce failed.",
+    };
   }
 }
 

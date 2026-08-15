@@ -81,6 +81,7 @@ test("insertAnnounceBlock aborts between pads when Clear preempts", async () => 
   resetQueuePreemptForTests();
   const gen = queueWorkGeneration();
   const urls = [];
+  const strips = [];
 
   const result = await insertAnnounceBlock({
     queuePosition: 1,
@@ -89,11 +90,14 @@ test("insertAnnounceBlock aborts between pads when Clear preempts", async () => 
     tts: media("http://x/tts.mp3"),
     restore: media("http://x/restore.mp3"),
     ops: {
-      removePads: async () => ({
-        removed: 1,
-        removedBefore: 1,
-        protectedThrough: 0,
-      }),
+      removePads: async (opts) => {
+        strips.push(opts);
+        return {
+          removed: 1,
+          removedBefore: strips.length === 1 ? 1 : 0,
+          protectedThrough: 0,
+        };
+      },
       enqueue: async (url) => {
         urls.push(url);
         if (urls.length === 1) preemptQueueWork(); // Clear during insert
@@ -108,7 +112,84 @@ test("insertAnnounceBlock aborts between pads when Clear preempts", async () => 
   assert.equal(result.skipped, true);
   assert.equal(result.reason, "queue-preempted");
   assert.equal(result.partial, true);
+  assert.equal(result.cleaned, true);
   assert.deepEqual(urls, ["http://x/ramp.mp3"]);
+  assert.equal(strips.length, 2, "initial supersede strip plus leftover cleanup");
+  assert.equal(strips[1].beforePosition, 1);
+  resetQueuePreemptForTests();
+});
+
+test("insertAnnounceBlock strips leftover ramp+TTS when preempted before restore", async () => {
+  resetQueuePreemptForTests();
+  const urls = [];
+  const strips = [];
+
+  const result = await insertAnnounceBlock({
+    queuePosition: 2,
+    preemptGeneration: queueWorkGeneration(),
+    ramp: media("http://x/ramp.mp3"),
+    tts: media("http://x/tts.mp3"),
+    restore: media("http://x/restore.mp3"),
+    ops: {
+      removePads: async (opts) => {
+        strips.push(opts);
+        return { removed: 0, removedBefore: 0, protectedThrough: 0 };
+      },
+      enqueue: async (url) => {
+        urls.push(url);
+        if (urls.length === 2) preemptQueueWork();
+        return { url };
+      },
+      pauseTrim: () => {},
+      ensurePlayMode: async () => {},
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.partial, true);
+  assert.equal(result.cleaned, true);
+  assert.deepEqual(urls, ["http://x/ramp.mp3", "http://x/tts.mp3"]);
+  assert.equal(strips.length, 2);
+  assert.equal(strips[1].beforePosition, 2);
+  resetQueuePreemptForTests();
+});
+
+test("insertAnnounceBlock leaves a complete block when preempted after restore", async () => {
+  resetQueuePreemptForTests();
+  const urls = [];
+  let stripCount = 0;
+
+  const result = await insertAnnounceBlock({
+    queuePosition: 1,
+    preemptGeneration: queueWorkGeneration(),
+    ramp: media("http://x/ramp.mp3"),
+    tts: media("http://x/tts.mp3"),
+    restore: media("http://x/restore.mp3"),
+    ops: {
+      removePads: async () => {
+        stripCount += 1;
+        return { removed: 0, removedBefore: 0, protectedThrough: 0 };
+      },
+      enqueue: async (url) => {
+        urls.push(url);
+        if (urls.length === 3) preemptQueueWork();
+        return { url };
+      },
+      pauseTrim: () => {},
+      ensurePlayMode: async () => {},
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.skipped, true);
+  assert.equal(result.partial, false);
+  assert.equal(result.inserted, true);
+  assert.deepEqual(urls, [
+    "http://x/ramp.mp3",
+    "http://x/tts.mp3",
+    "http://x/restore.mp3",
+  ]);
+  assert.equal(stripCount, 1, "do not strip a complete announce block");
   resetQueuePreemptForTests();
 });
 

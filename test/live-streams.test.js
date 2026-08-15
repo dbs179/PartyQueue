@@ -10,6 +10,7 @@ import {
   QUEUE_FALLBACK_MS,
   PARTY_FALLBACK_MS,
   QUEUE_STALE_MESSAGE,
+  NOW_PLAYING_STALE_MESSAGE,
   FOREGROUND_RESUME_DEBOUNCE_MS,
   FOCUS_RESUME_FRESH_MS,
 } from "../public/js/live-streams.js";
@@ -217,6 +218,113 @@ test("queue EventSource error marks Up Next stale", async () => {
   assert.equal(queueConnectionStatus.hidden, false);
   assert.equal(queueConnectionStatus.textContent, QUEUE_STALE_MESSAGE);
   live.closeQueueStream();
+});
+
+test("now-playing EventSource error marks Now Playing stale", async () => {
+  assert.match(NOW_PLAYING_STALE_MESSAGE, /last update/i);
+
+  const npCard = makeStatusEl();
+  const npConnectionStatus = makeStatusEl();
+  const displayConnectionStatus = makeStatusEl();
+  /** @type {null | { onerror?: () => void }} */
+  let instance = null;
+
+  const live = createLiveStreams(
+    { npCard, npConnectionStatus, displayConnectionStatus },
+    {
+      fetch: async () => ({
+        ok: true,
+        async json() {
+          return { title: "np" };
+        },
+      }),
+      EventSource: class {
+        constructor() {
+          instance = this;
+          this.addEventListener = () => {};
+          this.close = () => {};
+          queueMicrotask(() => this.onopen?.());
+        }
+      },
+      getVisibilityState: () => "visible",
+      getCurrentView: () => "main",
+      renderNowPlaying: () => {},
+      applyQueueTracks: () => {},
+      applyPartySettings: () => {},
+      freezePlayhead: () => {},
+      isQueueEditMode: () => false,
+      setPendingStreamTracks: () => {},
+      clearPendingStreamTracks: () => {},
+      loadGroups: () => {},
+    }
+  );
+
+  live.openNowPlayingStream();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(npConnectionStatus.hidden, true);
+  instance.onerror();
+  assert.equal(npConnectionStatus.hidden, false);
+  assert.equal(npConnectionStatus.textContent, NOW_PLAYING_STALE_MESSAGE);
+  assert.equal(displayConnectionStatus.hidden, false);
+  assert.equal(displayConnectionStatus.textContent, NOW_PLAYING_STALE_MESSAGE);
+  assert.ok(npCard.classList.contains("is-stale"));
+  live.closeNowPlayingStream();
+});
+
+test("HTTP party fallback does not overwrite an active SSE paint", async () => {
+  const paints = [];
+  let resolveFetch;
+  const fetchPromise = new Promise((resolve) => {
+    resolveFetch = resolve;
+  });
+  const live = createLiveStreams(
+    {},
+    {
+      fetch: async () => {
+        await fetchPromise;
+        return {
+          ok: true,
+          async json() {
+            return { mixMood: "stale-http", streamSession: "s0", streamSequence: 1 };
+          },
+        };
+      },
+      EventSource: class {
+        constructor() {
+          queueMicrotask(() => {
+            this.onopen?.();
+            this.onmessage?.({
+              data: JSON.stringify({
+                mixMood: "fresh-sse",
+                streamSession: "s1",
+                streamSequence: 2,
+              }),
+            });
+          });
+        }
+        addEventListener() {}
+        close() {}
+      },
+      getVisibilityState: () => "visible",
+      getCurrentView: () => "main",
+      renderNowPlaying: () => {},
+      applyQueueTracks: () => {},
+      applyPartySettings: (snap) => paints.push(snap.mixMood),
+      freezePlayhead: () => {},
+      isQueueEditMode: () => false,
+      setPendingStreamTracks: () => {},
+      clearPendingStreamTracks: () => {},
+      loadGroups: () => {},
+    }
+  );
+
+  live.openPartyStream();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(paints, ["fresh-sse"]);
+  resolveFetch();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(paints, ["fresh-sse"]);
+  live.closePartyStream();
 });
 
 test("bindForegroundResume debounces stacked unlock events", () => {

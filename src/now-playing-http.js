@@ -4,6 +4,7 @@ import { createNowPlayingMonitor } from "./now-playing-stream.js";
 import { dominantBucket, getGenreFlowState } from "./genre-flow.js";
 import { bucketsForArtistSync, GENRE_BUCKETS } from "./genres.js";
 import { getReactions } from "./reactions.js";
+import { noteReactionPlayTrack } from "./reaction-play.js";
 import { originSnapshot } from "./queue-origin.js";
 import { spotifyTrackId } from "./sampler.js";
 import {
@@ -192,12 +193,16 @@ export async function enrichNowPlaying(np) {
   });
   const { upcomingForGenre: _upcomingHint, ...publicNp } = np || {};
   // Party-wide toggles / Vibe selection / Closing Time live on /api/party.
-  // NP enrich stays track-scoped: Genre header + reactions for this song.
+  // NP enrich stays track-scoped: Genre header + reactions for this play.
+  const playId = trackId
+    ? noteReactionPlayTrack(trackId, Date.now(), np?.positionSec)
+    : "";
   return {
     ...publicNp,
     mixGenreLane,
     mixGenreLabel,
-    reactions: trackId ? getReactions(trackId) : getReactions(""),
+    reactionPlayId: playId || undefined,
+    reactions: trackId ? getReactions(trackId, "", playId) : getReactions(""),
   };
 }
 

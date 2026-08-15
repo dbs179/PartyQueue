@@ -268,7 +268,7 @@ test("shouldShoutOnSearch forces first named request even when percent is 0", ()
       true,
       "first request always shouts"
     );
-    // Decision reserves first-shout immediately (no wait for TTS) so a concurrent
+    // Decision holds first-shout in memory (no persist) so a concurrent
     // second add cannot also claim first-shout and stack another announce.
     assert.equal(mem.isFirstShoutTonight("Mark"), false);
     assert.equal(
@@ -357,6 +357,65 @@ test("shouldShoutOnSearch keys first-shout on User, not queue alias", async () =
       djShoutPercent: prev.djShoutPercent,
     });
   }
+});
+
+test("failed announce releases first-shout so the guest can still get it", () => {
+  const prev = getDjVoiceSettings();
+  try {
+    setDjVoiceSettings({
+      djShoutEnabled: true,
+      djShoutMode: "percent",
+      djShoutPercent: 0,
+    });
+    assert.equal(
+      shouldShoutOnSearch({ requestedBy: "Mark", ready: true }),
+      true
+    );
+    assert.equal(mem.isFirstShoutTonight("Mark"), false);
+    mem.releaseFirstShoutReservation("Mark");
+    assert.equal(mem.isFirstShoutTonight("Mark"), true);
+    assert.equal(
+      shouldShoutOnSearch({ requestedBy: "Mark", ready: true }),
+      true,
+      "released reservation restores first-shout"
+    );
+  } finally {
+    setDjVoiceSettings({
+      djShoutEnabled: prev.djShoutEnabled,
+      djShoutMode: prev.djShoutMode,
+      djShoutPercent: prev.djShoutPercent,
+    });
+  }
+});
+
+test("rememberShout commits a reserved first-shout so release cannot undo it", () => {
+  assert.equal(mem.reserveFirstShout("Mark"), true);
+  assert.equal(mem.isFirstShoutTonight("Mark"), false);
+  mem.rememberShout({ name: "Mark", script: "Hey Mark" });
+  assert.equal(mem.releaseFirstShoutReservation("Mark"), false);
+  assert.equal(mem.isFirstShoutTonight("Mark"), false);
+});
+
+test("first-shout reservation expires so a hung announce cannot burn the night", () => {
+  const start = Date.now();
+  assert.equal(mem.reserveFirstShout("Mark", start), true);
+  assert.equal(mem.isFirstShoutTonight("Mark", start + 1_000), false);
+  assert.equal(
+    mem.isFirstShoutTonight("Mark", start + mem.FIRST_SHOUT_RESERVE_MS + 1),
+    true
+  );
+});
+
+test("writeRequestShoutScript does not persist first-shout before announce", async () => {
+  const { writeRequestShoutScript } = await import("../src/dj-shout.js");
+  const draft = await writeRequestShoutScript({
+    name: "Song",
+    artist: "Artist",
+    requestedBy: "Mark",
+  });
+  assert.ok(draft.script);
+  assert.equal(draft.requestedBy, "Mark");
+  assert.equal(mem.isFirstShoutTonight("Mark"), true);
 });
 
 test("shouldShoutOnSearch stays off when shout-outs disabled", () => {

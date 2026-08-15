@@ -11,8 +11,10 @@ const TMP_FILE = path.join(
 process.env.PARTYQUEUE_REACTIONS_FILE = TMP_FILE;
 
 const reactions = await import("../src/reactions.js");
+const { resetReactionPlayForTests } = await import("../src/reaction-play.js");
 
 beforeEach(() => {
+  resetReactionPlayForTests();
   reactions.clearReactions();
   try {
     fs.rmSync(TMP_FILE, { force: true });
@@ -284,4 +286,55 @@ test("legacy string and boolean vote shapes still count as Guest", () => {
   const reacted = reactions.listReactedTracks(10);
   assert.deepEqual(reacted[0].reactions[0].by, ["Guest"]);
   assert.equal(reacted[0].reactions[0].kind, "fire");
+});
+
+test("mood vote is per play; later listen starts clean; stats keep both", () => {
+  const first = reactions.setReaction("map1", "vomit", "guestdave1", {
+    playId: "map1:100",
+    by: "Dave",
+    name: "Get Out The Map",
+    artist: "Barenaked Ladies",
+  });
+  assert.equal(first.vomit, 1);
+  assert.equal(first.mine, "vomit");
+  assert.equal(first.playId, "map1:100");
+
+  const later = reactions.getReactions("map1", "guestdave1", "map1:200");
+  assert.equal(later.vomit, 0);
+  assert.equal(later.mine, null);
+  assert.equal(later.playId, "map1:200");
+
+  const again = reactions.setReaction("map1", "fire", "guestdave1", {
+    playId: "map1:200",
+    by: "Dave",
+  });
+  assert.equal(again.fire, 1);
+  assert.equal(again.vomit, 0);
+  assert.equal(again.mine, "fire");
+
+  const hated = reactions.listMostHatedTracks(10);
+  assert.equal(hated[0].id, "map1");
+  assert.equal(hated[0].count, 1);
+  const liked = reactions.listTopLikedTracks(10);
+  assert.equal(liked[0].id, "map1");
+  assert.equal(liked[0].count, 1);
+});
+
+test("legacy votes count in stats but not as this-play mine", () => {
+  reactions.setReaction("oldmap", "vomit", "guestdave1", { by: "Dave" });
+  const thisPlay = reactions.getReactions("oldmap", "guestdave1", "oldmap:9");
+  assert.equal(thisPlay.vomit, 0);
+  assert.equal(thisPlay.mine, null);
+  assert.equal(reactions.listMostHatedTracks(10)[0].count, 1);
+});
+
+test("mic stays per track across plays", () => {
+  reactions.setReaction("k1", "mic", "guestmic01", {
+    playId: "k1:1",
+    name: "Karaoke",
+    artist: "Band",
+  });
+  const next = reactions.getReactions("k1", "guestmic01", "k1:2");
+  assert.equal(next.mic, 1);
+  assert.equal(next.micMine, true);
 });

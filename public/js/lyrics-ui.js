@@ -10,6 +10,23 @@ import { prefersReducedMotion } from "./modal.js";
 
 export const LYRICS_LEAD_SEC = 0.75;
 
+/** Party Display karaoke: one line before, active, one after. */
+export const DISPLAY_LYRIC_WINDOW = 3;
+
+/**
+ * @param {number} activeIdx
+ * @returns {{ i: number, cls: "is-past"|"is-active"|"is-next" }[]}
+ */
+export function displayLyricWindowSlots(activeIdx) {
+  const idx = Number(activeIdx);
+  const active = Number.isFinite(idx) ? idx : -1;
+  return [
+    { i: active - 1, cls: "is-past" },
+    { i: active, cls: "is-active" },
+    { i: active + 1, cls: "is-next" },
+  ];
+}
+
 /**
  * @param {{ t: number, text: string }[]} lines
  * @param {number} posSec
@@ -140,11 +157,44 @@ export function createLyricsUi(els, deps) {
     return [npFsLyrics, displayLyrics].filter(Boolean);
   }
 
+  function clearDisplayDjLyricSize() {
+    displayLyrics?.style?.removeProperty?.("--display-dj-lyric-block");
+    displayLyrics?.parentElement?.style?.removeProperty?.(
+      "--display-dj-lyric-block"
+    );
+  }
+
+  function sizeDisplayDjLyrics() {
+    if (
+      !displayLyrics ||
+      displayLyrics.hidden ||
+      !displayLyrics.classList?.contains("is-dj")
+    ) {
+      clearDisplayDjLyricSize();
+      return;
+    }
+    const apply = () => {
+      const pre = displayLyrics.querySelector?.(".np-fs-lyrics-plain");
+      const raw =
+        Number(displayLyrics.scrollHeight) || Number(pre?.scrollHeight) || 0;
+      if (!raw) return;
+      displayLyrics.parentElement?.style?.setProperty?.(
+        "--display-dj-lyric-block",
+        `${Math.ceil(raw)}px`
+      );
+    };
+    apply();
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(apply);
+    }
+  }
+
   function setDisplayLyricsVisible(on, { dj = false } = {}) {
     if (!displayLyrics) return;
     displayLyrics.hidden = !on;
     displayLyrics.classList?.toggle?.("is-dj", !!(on && dj));
     if (!on) {
+      clearDisplayDjLyricSize();
       displayLyrics.replaceChildren();
       displayLyrics.innerHTML = "";
     }
@@ -172,14 +222,7 @@ export function createLyricsUi(els, deps) {
     displayLyrics.hidden = false;
     const ul = document.createElement("ul");
     ul.className = "np-fs-lyrics-synced party-display-lyrics-window";
-    // 5-line karaoke window: two before, active, two after.
-    const slots = [
-      { i: activeIdx - 2, cls: "is-past" },
-      { i: activeIdx - 1, cls: "is-past" },
-      { i: activeIdx, cls: "is-active" },
-      { i: activeIdx + 1, cls: "is-next" },
-      { i: activeIdx + 2, cls: "is-next" },
-    ];
+    const slots = displayLyricWindowSlots(activeIdx);
     for (const slot of slots) {
       const li = document.createElement("li");
       li.className = "np-fs-line";
@@ -226,6 +269,7 @@ export function createLyricsUi(els, deps) {
     if (showOnDisplay && displayLyrics) {
       setDisplayLyricsVisible(true, { dj: true });
       displayLyrics.innerHTML = `<pre class="np-fs-lyrics-plain">${escapeHtml(text)}</pre>`;
+      sizeDisplayDjLyrics();
     } else {
       setDisplayLyricsVisible(false);
     }
@@ -653,6 +697,10 @@ export function createLyricsUi(els, deps) {
 
   window.addEventListener("popstate", () => {
     if (overlayOpen) close({ fromPopstate: true });
+  });
+
+  window.addEventListener("resize", () => {
+    if (displayLyrics?.classList?.contains("is-dj")) sizeDisplayDjLyrics();
   });
 
   window.setInterval(

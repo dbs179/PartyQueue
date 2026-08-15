@@ -30,6 +30,7 @@ import {
   shouldShoutOnSearch,
   announceRequestShout,
   queueRequestShout,
+  releaseReservedFirstShout,
 } from "../dj-shout.js";
 import {
   GENRE_BUCKETS,
@@ -373,6 +374,8 @@ export function registerQueueRoutes(app, ctx) {
               console.error("[queue] request shout:", err.message);
             }
           }
+        } else {
+          releaseReservedFirstShout(user);
         }
       } else if (
         result.requestCreated !== false &&
@@ -595,6 +598,8 @@ export function registerQueueRoutes(app, ctx) {
                 }
               }
             }
+          } else {
+            releaseReservedFirstShout(user);
           }
         } else if (
           result.requestCreated !== false &&

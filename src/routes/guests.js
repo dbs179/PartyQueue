@@ -203,7 +203,7 @@ export function registerGuestRoutes(app) {
   });
   lyricsLimit.displayName = "lyricsLimit";
 
-  // Now Playing reactions (mood = one per guest; mic = karaoke, separate).
+  // Now Playing reactions (mood = one per guest per play; mic = karaoke, separate).
   app.get("/api/reactions", (req, res) => {
     const id =
       typeof req.query?.id === "string"
@@ -217,7 +217,9 @@ export function registerGuestRoutes(app) {
         : typeof req.query?.guest === "string"
           ? req.query.guest
           : "";
-    res.json(getReactions(id, guestId));
+    const playId =
+      typeof req.query?.playId === "string" ? req.query.playId : "";
+    res.json(getReactions(id, guestId, playId));
   });
 
   app.post("/api/reactions", reactionLimit, (req, res) => {
@@ -233,6 +235,7 @@ export function registerGuestRoutes(app) {
       name: req.body?.name,
       artist: req.body?.artist,
       by: req.body?.by ?? req.body?.requestedBy,
+      playId: req.body?.playId,
     });
     if (!result.ok) {
       return res.status(400).json({ error: result.error });
