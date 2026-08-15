@@ -9,15 +9,25 @@ import { DECADE_LABELS } from "./genre-presets.js";
  * @param {boolean} [skipped]
  * @param {string} [requestedBy]
  * @param {string} [mood]
+ * @param {string} [alias]
  */
-export function memorySourceBadge(source, skipped, requestedBy, mood) {
+export function memorySourceBadge(source, skipped, requestedBy, mood, alias) {
   const parts = [];
   switch (source) {
     case "searched": {
       const by = sanitizeDisplayName(requestedBy || "");
-      const label = by ? `Requested \u00b7 ${escapeHtml(by)}` : "Requested";
+      const as = sanitizeDisplayName(alias || "");
+      const showAlias = !!(as && as.toLowerCase() !== by.toLowerCase());
+      const who = by
+        ? showAlias
+          ? `${escapeHtml(by)} \u00b7 ${escapeHtml(as)}`
+          : escapeHtml(by)
+        : "";
+      const label = who ? `Requested \u00b7 ${who}` : "Requested";
       const title = by
-        ? `Requested by ${escapeHtml(by)}`
+        ? showAlias
+          ? `Requested by ${escapeHtml(by)} as ${escapeHtml(as)}`
+          : `Requested by ${escapeHtml(by)}`
         : "Guest searched and added this";
       parts.push(
         `<span class="searched-badge" title="${title}">\u{1F50D} ${label}</span>`

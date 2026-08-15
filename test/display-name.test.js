@@ -4,6 +4,8 @@ import {
   sanitizeDisplayName,
   sanitizeDedication,
   resolveGuestIdentity,
+  sameDisplayName,
+  distinctRequesterAlias,
   DISPLAY_NAME_MAX,
   DEDICATION_MAX,
 } from "../src/display-name.js";
@@ -21,6 +23,18 @@ test("sanitizeDedication trims, caps, and rejects blanks", () => {
   assert.equal(sanitizeDedication("  For Jen  "), "For Jen");
   assert.equal(sanitizeDedication("   "), null);
   assert.equal(sanitizeDedication("a".repeat(100)).length, DEDICATION_MAX);
+});
+
+test("sameDisplayName is case-insensitive", () => {
+  assert.equal(sameDisplayName("Maria", "maria"), true);
+  assert.equal(sameDisplayName("Maria", "Mia"), false);
+  assert.equal(sameDisplayName("", "Maria"), false);
+});
+
+test("distinctRequesterAlias drops aliases that match the User", () => {
+  assert.equal(distinctRequesterAlias("Maria", "Mia"), "Mia");
+  assert.equal(distinctRequesterAlias("Dave", "dave"), null);
+  assert.equal(distinctRequesterAlias("Dave", ""), null);
 });
 
 test("resolveGuestIdentity: empty alias falls back to User for badge", () => {

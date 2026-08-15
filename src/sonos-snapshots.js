@@ -23,6 +23,7 @@ import {
 } from "./sonos-queue-policy.js";
 import { spotifyTrackId } from "./sampler.js";
 import { recordPlayed } from "./play-history.js";
+import { memoryRequesterIdentityOf } from "./memory-requester.js";
 import {
   getSonosTargetRoom,
   getSonosPlayerTypes,
@@ -323,6 +324,8 @@ async function getNowPlayingRaw() {
     if (step.heardId) {
       const source = originOf(step.heardId) || null;
       const mood = source === "mood" ? moodOf(step.heardId) : null;
+      const who =
+        source === "searched" ? memoryRequesterIdentityOf(step.heardId) : null;
       recordPlayed([
         {
           id: step.heardId,
@@ -330,6 +333,8 @@ async function getNowPlayingRaw() {
           name: title || "",
           source,
           mood,
+          requestedBy: who?.requestedBy || null,
+          alias: who?.alias || null,
         },
       ]);
     }

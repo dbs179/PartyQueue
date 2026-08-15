@@ -15,7 +15,8 @@ export function memoryTrackRowHtml(track, index) {
     track?.source,
     track?.skipped,
     track?.requestedBy,
-    track?.mood
+    track?.mood,
+    track?.alias
   );
   return `
       <span class="queue-index">${index + 1}</span>

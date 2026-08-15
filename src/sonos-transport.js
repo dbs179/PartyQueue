@@ -9,6 +9,7 @@ import { assertManualVolumeAvailable } from "./sonos-volume.js";
 import { spotifyTrackId } from "./sampler.js";
 import { recordSkip } from "./play-history.js";
 import { originOf, moodOf, clearConsumedDedication } from "./queue-origin.js";
+import { memoryRequesterIdentityOf } from "./memory-requester.js";
 import {
   cancelActiveDjVolumeHandoff,
   getDjVolumeHandoffState,
@@ -221,6 +222,7 @@ function rememberSkippedTrack(skipped) {
     ...skipped,
     source,
     mood: source === "mood" ? moodOf(skipped.id) : null,
+    ...(source === "searched" ? memoryRequesterIdentityOf(skipped.id) : {}),
   });
   clearConsumedDedication(skipped.id);
   clearLastHeardIf(skipped.id);

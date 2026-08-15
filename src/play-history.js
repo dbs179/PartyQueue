@@ -9,7 +9,8 @@
 // Fed by Random / Never-Ending / Discover adds (at enqueue — those rows are
 // committed filler), actual now-playing transitions (guest requests + anything
 // Sonos starts), and skips (which also cool down that artist briefly). Guest
-// search / Set Request adds do NOT record until heard or skipped.
+// search / Set Request adds do NOT record until heard or skipped. When they
+// do, requestedBy is the User and alias is stored only when it differs.
 //
 // Stores an ordered list of { id, artist, name } entries (oldest first) backed
 // by a JSON file in data/. The tail also powers the per-artist budget window.
@@ -21,7 +22,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "./atomic-write.js";
-import { sanitizeDisplayName } from "./display-name.js";
+import {
+  distinctRequesterAlias,
+  sameDisplayName,
+  sanitizeDisplayName,
+} from "./display-name.js";
 import { primaryArtist } from "./sampler.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -85,6 +90,7 @@ function load() {
             mood: normalizeMood(e.mood),
             skipped: normalizeSkipped(e),
             requestedBy: sanitizeDisplayName(e.requestedBy),
+            alias: distinctRequesterAlias(e.requestedBy, e.alias),
           }))
       : [];
   } catch {
@@ -101,6 +107,7 @@ function persistNow() {
       if (e.mood) row.mood = e.mood;
       if (e.skipped) row.skipped = true;
       if (e.requestedBy) row.requestedBy = e.requestedBy;
+      if (e.alias) row.alias = e.alias;
       return row;
     });
     writeFileAtomic(HISTORY_FILE, JSON.stringify(out));
@@ -196,6 +203,7 @@ export function getHistory() {
       mood: e.mood || null,
       skipped: !!e.skipped,
       requestedBy: e.requestedBy || null,
+      alias: e.alias || null,
     }))
     .reverse();
 }
@@ -213,6 +221,7 @@ export function recentEntries(n = 3) {
     mood: e.mood || null,
     skipped: !!e.skipped,
     requestedBy: e.requestedBy || null,
+    alias: e.alias || null,
   }));
 }
 
@@ -262,6 +271,13 @@ export function recordPlayed(entries, maxSize = HISTORY_CAP) {
       nextSource === "searched"
         ? incomingBy || prev?.requestedBy || null
         : null;
+    const incomingAlias = Object.prototype.hasOwnProperty.call(e, "alias")
+      ? e.alias
+      : prev?.alias;
+    const nextAlias =
+      nextSource === "searched"
+        ? distinctRequesterAlias(nextRequestedBy, incomingAlias)
+        : null;
     list.push({
       id: e.id,
       artist: typeof e.artist === "string" ? e.artist : "",
@@ -270,6 +286,7 @@ export function recordPlayed(entries, maxSize = HISTORY_CAP) {
       mood: nextMood,
       skipped: nextSkipped,
       requestedBy: nextRequestedBy,
+      alias: nextAlias,
     });
   }
 
@@ -279,6 +296,49 @@ export function recordPlayed(entries, maxSize = HISTORY_CAP) {
 
   cache = list;
   persist();
+}
+
+/**
+ * Fill missing requester names on searched Memory rows.
+ * `lookup(id)` should return a display name or null (typically memoryRequesterOf).
+ * @param {(id: string) => string|null|undefined} lookup
+ * @returns {number} how many rows were stamped
+ */
+export function backfillMissingRequesters(lookup) {
+  if (typeof lookup !== "function") return 0;
+  const list = load();
+  let stamped = 0;
+  for (const e of list) {
+    if (!e || e.source !== "searched") continue;
+    const raw = lookup(e.id, { requestedBy: e.requestedBy, alias: e.alias });
+    const found =
+      raw && typeof raw === "object"
+        ? {
+            requestedBy: sanitizeDisplayName(raw.requestedBy),
+            alias: distinctRequesterAlias(raw.requestedBy, raw.alias),
+          }
+        : {
+            requestedBy: sanitizeDisplayName(raw),
+            alias: null,
+          };
+    if (!found.requestedBy) continue;
+    if (
+      e.requestedBy &&
+      !sameDisplayName(e.requestedBy, found.requestedBy) &&
+      !sameDisplayName(e.requestedBy, found.alias)
+    ) {
+      continue;
+    }
+    const nextAlias = found.alias;
+    if (e.requestedBy === found.requestedBy && (e.alias || null) === nextAlias) {
+      continue;
+    }
+    e.requestedBy = found.requestedBy;
+    e.alias = nextAlias;
+    stamped += 1;
+  }
+  if (stamped) persist();
+  return stamped;
 }
 
 // Guest skipped the current song: remember it in history AND cool down that
@@ -301,6 +361,8 @@ export function recordSkip(
         source: normalizeSource(entry.source),
         mood: normalizeMood(entry.mood),
         skipped: true,
+        requestedBy: entry.requestedBy,
+        alias: entry.alias,
       },
     ],
     maxSize

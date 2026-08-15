@@ -111,8 +111,8 @@ test("exposes history newest-first with title and artist", () => {
     { id: "new", artist: "Second", name: "New Song" },
   ]);
   assert.deepEqual(hist.getHistory(), [
-    { id: "new", artist: "Second", name: "New Song", source: null, mood: null, skipped: false, requestedBy: null },
-    { id: "old", artist: "First", name: "Old Song", source: null, mood: null, skipped: false, requestedBy: null },
+    { id: "new", artist: "Second", name: "New Song", source: null, mood: null, skipped: false, requestedBy: null, alias: null },
+    { id: "old", artist: "First", name: "Old Song", source: null, mood: null, skipped: false, requestedBy: null, alias: null },
   ]);
 });
 
@@ -129,8 +129,8 @@ test("recentEntries returns the newest N songs oldest-first within the slice", (
     { id: "3", artist: "C", name: "Three" },
   ]);
   assert.deepEqual(hist.recentEntries(2), [
-    { id: "2", artist: "B", name: "Two", source: null, mood: null, skipped: false, requestedBy: null },
-    { id: "3", artist: "C", name: "Three", source: null, mood: null, skipped: false, requestedBy: null },
+    { id: "2", artist: "B", name: "Two", source: null, mood: null, skipped: false, requestedBy: null, alias: null },
+    { id: "3", artist: "C", name: "Three", source: null, mood: null, skipped: false, requestedBy: null, alias: null },
   ]);
 });
 
@@ -186,6 +186,85 @@ test("era hits keep their decade for the Memory badge", () => {
   // Non-mood sources never carry a decade.
   hist.recordPlayed([{ id: "hit", artist: "A", name: "Era Song", source: "filler" }]);
   assert.equal(hist.getHistory()[0].mood, null);
+});
+
+test("recordSkip stamps requestedBy on first skip", () => {
+  hist.recordSkip(
+    {
+      id: "skip1",
+      artist: "A",
+      name: "Song",
+      source: "searched",
+      requestedBy: "Maria",
+    },
+    500,
+    2
+  );
+  const row = hist.getHistory()[0];
+  assert.equal(row.requestedBy, "Maria");
+  assert.equal(row.skipped, true);
+  assert.equal(row.source, "searched");
+});
+
+test("backfillMissingRequesters stamps only unnamed searched rows", () => {
+  hist.recordPlayed([
+    { id: "a", artist: "A", name: "One", source: "searched" },
+    { id: "b", artist: "B", name: "Two", source: "searched", requestedBy: "Dave" },
+    { id: "c", artist: "C", name: "Three", source: "filler" },
+  ]);
+  const names = { a: "Maria", b: "Ignored", c: "Nope" };
+  const stamped = hist.backfillMissingRequesters((id) => names[id] || null);
+  assert.equal(stamped, 1);
+  const list = hist.getHistory();
+  assert.equal(list.find((e) => e.id === "a").requestedBy, "Maria");
+  assert.equal(list.find((e) => e.id === "b").requestedBy, "Dave");
+  assert.equal(list.find((e) => e.id === "c").requestedBy, null);
+});
+
+test("backfillMissingRequesters adds a distinct alias and promotes alias-as-name", () => {
+  hist.recordPlayed([
+    { id: "a", artist: "A", name: "One", source: "searched" },
+    { id: "b", artist: "B", name: "Two", source: "searched", requestedBy: "Mia" },
+  ]);
+  const stamped = hist.backfillMissingRequesters((_id, stored) => {
+    if (stored?.requestedBy === "Mia") {
+      return { requestedBy: "Maria", alias: "Mia" };
+    }
+    return { requestedBy: "Maria", alias: "Mia" };
+  });
+  assert.equal(stamped, 2);
+  const list = hist.getHistory();
+  assert.equal(list.find((e) => e.id === "a").requestedBy, "Maria");
+  assert.equal(list.find((e) => e.id === "a").alias, "Mia");
+  assert.equal(list.find((e) => e.id === "b").requestedBy, "Maria");
+  assert.equal(list.find((e) => e.id === "b").alias, "Mia");
+});
+
+test("recordPlayed stores a distinct alias and drops a matching one", () => {
+  hist.recordPlayed([
+    {
+      id: "req2",
+      artist: "A",
+      name: "Song",
+      source: "searched",
+      requestedBy: "Maria",
+      alias: "Mia",
+    },
+  ]);
+  assert.equal(hist.getHistory()[0].requestedBy, "Maria");
+  assert.equal(hist.getHistory()[0].alias, "Mia");
+  hist.recordPlayed([
+    {
+      id: "req3",
+      artist: "A",
+      name: "Song",
+      source: "searched",
+      requestedBy: "Dave",
+      alias: "Dave",
+    },
+  ]);
+  assert.equal(hist.getHistory()[0].requestedBy, "Dave");
+  assert.equal(hist.getHistory()[0].alias, null);
 });
 
 test("stores and preserves requestedBy on searched history", () => {

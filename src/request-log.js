@@ -11,7 +11,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileAtomic } from "./atomic-write.js";
-import { sanitizeDisplayName, sanitizeDedication } from "./display-name.js";
+import {
+  distinctRequesterAlias,
+  sanitizeDisplayName,
+  sanitizeDedication,
+} from "./display-name.js";
 import { invalidatePartyStatsCache } from "./party-stats.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -128,8 +132,8 @@ export function recordRequest(
     ts: Number(ts) || Date.now(),
   };
   if (by) row.requestedBy = by;
-  // Only keep alias when it differs from the User (saves noise).
-  if (aliasClean && aliasClean !== by) row.alias = aliasClean;
+  const aliasOnly = distinctRequesterAlias(by, aliasClean);
+  if (aliasOnly) row.alias = aliasOnly;
   if (ded) row.dedication = ded;
   if (kind === "setRequest" || kind === "setTrack") row.kind = kind;
   list.push(row);
@@ -347,6 +351,30 @@ export function topSets(events, sinceTs = 0, limit = 5) {
   return [...map.values()]
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
     .slice(0, Math.max(1, Math.min(50, Math.floor(Number(limit) || 5))));
+}
+
+/**
+ * Most recent User (+ distinct alias) who requested this track id.
+ * Ignores setRequest ledger rows (`set:artistId`). Used to stamp Memory.
+ * @returns {{ requestedBy: string, alias: string|null }|null}
+ */
+export function latestRequesterIdentityOf(id) {
+  const key = String(id || "").trim();
+  if (!key) return null;
+  const list = load();
+  for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i];
+    if (!e || e.id !== key || e.kind === "setRequest") continue;
+    const by = sanitizeDisplayName(e.requestedBy);
+    if (!by) continue;
+    return { requestedBy: by, alias: distinctRequesterAlias(by, e.alias) };
+  }
+  return null;
+}
+
+/** Most recent User who requested this track id. */
+export function latestRequesterOf(id) {
+  return latestRequesterIdentityOf(id)?.requestedBy || null;
 }
 
 /** Most recent guest requests, newest first (for the live ticker). */

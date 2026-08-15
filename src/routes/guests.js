@@ -21,9 +21,14 @@ import {
   resolveGuestIdentity,
   sanitizeDisplayName,
 } from "../display-name.js";
-import { getHistory, HISTORY_CAP } from "../play-history.js";
+import {
+  getHistory,
+  HISTORY_CAP,
+  backfillMissingRequesters,
+} from "../play-history.js";
 import { getTracksByIds } from "../spotify.js";
-import { originOf, moodOf, requestedByOf } from "../queue-origin.js";
+import { originOf, moodOf } from "../queue-origin.js";
+import { memoryRequesterIdentityOf } from "../memory-requester.js";
 import {
   getReactions,
   setReaction,
@@ -128,6 +133,9 @@ export function registerGuestRoutes(app) {
   // (title + album art) best-effort so the list always reads nicely.
   app.get("/api/history", requireHost, asyncHandler(async (_req, res) => {
     try {
+      backfillMissingRequesters((id, stored) =>
+        memoryRequesterIdentityOf(id, stored)
+      );
       const entries = getHistory();
       const needLookup = entries.filter((e) => !e.name).map((e) => e.id);
 
@@ -145,10 +153,8 @@ export function registerGuestRoutes(app) {
         // Prefer history stamp; fall back to live queue-origin (helps recover
         // Songs Like / Random after a skip that used to overwrite source).
         const source = e.source || originOf(e.id) || null;
-        const requestedBy =
-          e.requestedBy ||
-          (source === "searched" ? requestedByOf(e.id) : null) ||
-          null;
+        const who =
+          source === "searched" ? memoryRequesterIdentityOf(e.id, e) : null;
         return {
           id: e.id,
           title: e.name || extra?.title || "",
@@ -159,7 +165,8 @@ export function registerGuestRoutes(app) {
           // predate the history stamp — recover it from queue-origin if held.
           mood: source === "mood" ? e.mood || moodOf(e.id) || null : null,
           skipped: !!e.skipped,
-          requestedBy: source === "searched" ? requestedBy : null,
+          requestedBy: who?.requestedBy || null,
+          alias: who?.alias || null,
         };
       });
 

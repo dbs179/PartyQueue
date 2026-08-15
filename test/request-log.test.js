@@ -221,6 +221,48 @@ test("stores dedication on record and listDedications", () => {
   assert.equal(wall[0].requestedBy, "Mark");
 });
 
+test("latestRequesterOf returns the newest User for a track", () => {
+  reqlog.recordRequest(
+    { id: "t1", name: "Song", artist: "Art", requestedBy: "Maria" },
+    10
+  );
+  reqlog.recordRequest(
+    { id: "t1", name: "Song", artist: "Art", requestedBy: "Dave" },
+    20
+  );
+  assert.equal(reqlog.latestRequesterOf("t1"), "Dave");
+  assert.equal(reqlog.latestRequesterOf("missing"), null);
+  assert.equal(reqlog.latestRequesterOf(""), null);
+});
+
+test("latestRequesterIdentityOf includes a distinct alias", () => {
+  reqlog.recordRequest(
+    {
+      id: "t1",
+      name: "Song",
+      artist: "Art",
+      requestedBy: "Maria",
+      alias: "Mia",
+    },
+    10
+  );
+  assert.deepEqual(reqlog.latestRequesterIdentityOf("t1"), {
+    requestedBy: "Maria",
+    alias: "Mia",
+  });
+});
+
+test("latestRequesterOf uses setTrack rows and ignores setRequest ledger ids", () => {
+  reqlog.recordSetRequest({
+    artistId: "art1",
+    artist: "Zach Bryan",
+    requestedBy: "Dave",
+    tracks: [{ id: "nine", name: "Nine Ball", artist: "Zach Bryan" }],
+  });
+  assert.equal(reqlog.latestRequesterOf("nine"), "Dave");
+  assert.equal(reqlog.latestRequesterOf("set:art1"), null);
+});
+
 test("setRequestDedication updates the newest matching request", () => {
   reqlog.recordRequest({ id: "x", name: "A", artist: "Y", requestedBy: "Pat" }, 10);
   assert.equal(reqlog.setRequestDedication("x", "Jess"), true);

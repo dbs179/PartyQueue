@@ -30,6 +30,24 @@ export function sanitizeDedication(value) {
  * Empty alias falls back to User for badges.
  * @returns {{ user: string|null, badge: string|null, alias: string|null }}
  */
+/** Case-insensitive compare of two sanitized display names. */
+export function sameDisplayName(a, b) {
+  const left = sanitizeDisplayName(a);
+  const right = sanitizeDisplayName(b);
+  if (!left || !right) return false;
+  return left.toLowerCase() === right.toLowerCase();
+}
+
+/**
+ * Queue alias only when it differs from the User (Maria / Mia, not Dave / Dave).
+ * @returns {string|null}
+ */
+export function distinctRequesterAlias(user, alias) {
+  const cleaned = sanitizeDisplayName(alias);
+  if (!cleaned || sameDisplayName(user, cleaned)) return null;
+  return cleaned;
+}
+
 export function resolveGuestIdentity({ requestedBy, requestedByUser } = {}) {
   const alias = sanitizeDisplayName(requestedBy);
   const userIn = sanitizeDisplayName(requestedByUser);
