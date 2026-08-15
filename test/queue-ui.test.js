@@ -12,7 +12,27 @@ import {
   queueGenreBadgeHtml,
   queuePlaylistBadgeHtml,
   queueBadgeHtml,
+  partyDisplaySourceClass,
 } from "../public/js/queue-ui.js";
+
+test("Party Display source class marks requests and dedications", () => {
+  assert.equal(
+    partyDisplaySourceClass({ searched: true, requestedBy: "Dave" }),
+    "party-display-queue-source is-request"
+  );
+  assert.equal(
+    partyDisplaySourceClass({
+      searched: true,
+      requestedBy: "Dave",
+      dedication: "For Sam",
+    }),
+    "party-display-queue-source is-dedication"
+  );
+  assert.equal(
+    partyDisplaySourceClass({ origin: "filler" }),
+    "party-display-queue-source"
+  );
+});
 
 test("count labels", () => {
   assert.equal(mainQueueCountLabel(0), "");

@@ -275,8 +275,42 @@ export const nowPlayingMonitor = createNowPlayingMonitor({
   logger: createLogger("now-playing-stream"),
 });
 
-const unsubscribeSonosStreamNudge = onSonosSnapshotsInvalidated(() => {
+/** Re-read after Play / Random settles (HA and Node-RED do not refresh the tab). */
+export const NOW_PLAYING_MUTATION_FOLLOWUP_MS = [400, 1600];
+let nowPlayingFollowupTimers = [];
+
+function writeNowPlayingChangedEvent() {
+  const payload = { at: Date.now() };
+  for (const res of nowPlayingStreamClients.keys()) {
+    writeNowPlayingStreamEvent(res, "nowplaying-changed", payload);
+  }
+}
+
+function clearNowPlayingFollowupNudges() {
+  for (const timer of nowPlayingFollowupTimers) clearTimeout(timer);
+  nowPlayingFollowupTimers = [];
+}
+
+function scheduleNowPlayingFollowupNudges() {
+  clearNowPlayingFollowupNudges();
+  nowPlayingFollowupTimers = NOW_PLAYING_MUTATION_FOLLOWUP_MS.map((ms) => {
+    const timer = setTimeout(() => {
+      getNowPlaying.bust();
+      nowPlayingMonitor.nudge();
+    }, ms);
+    timer.unref?.();
+    return timer;
+  });
+}
+
+export function broadcastNowPlayingMutation() {
+  writeNowPlayingChangedEvent();
   nowPlayingMonitor.nudge();
+  scheduleNowPlayingFollowupNudges();
+}
+
+const unsubscribeSonosStreamNudge = onSonosSnapshotsInvalidated(() => {
+  broadcastNowPlayingMutation();
 });
 
 export function nudgeNowPlayingStream() {
@@ -326,6 +360,7 @@ function removeNowPlayingStreamClient(res) {
 
 export function closeNowPlayingStreams() {
   unsubscribeSonosStreamNudge();
+  clearNowPlayingFollowupNudges();
   if (transitionConfirmTimer) {
     clearTimeout(transitionConfirmTimer);
     transitionConfirmTimer = null;

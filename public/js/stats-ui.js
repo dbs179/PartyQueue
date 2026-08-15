@@ -25,6 +25,32 @@ export function formatNameList(names) {
     .join(", ");
 }
 
+/** Party Display subtitle: "1 Request" / "14 Requests". */
+export function requestCountLabel(count) {
+  const n = Math.max(0, Math.floor(Number(count) || 0));
+  return n === 1 ? "1 Request" : `${n} Requests`;
+}
+
+function requestCountSub(count) {
+  if (count == null || count === "") return "";
+  const n = Number(count);
+  if (!Number.isFinite(n)) return "";
+  return `<span class="party-display-stat-sub">${escapeHtml(requestCountLabel(n))}</span>`;
+}
+
+/** Party Display subtitle for reaction ranks: "1 Reaction" / "4 Reactions". */
+export function reactionCountLabel(count) {
+  const n = Math.max(0, Math.floor(Number(count) || 0));
+  return n === 1 ? "1 Reaction" : `${n} Reactions`;
+}
+
+function reactionCountSub(count) {
+  if (count == null || count === "") return "";
+  const n = Number(count);
+  if (!Number.isFinite(n)) return "";
+  return `<span class="party-display-stat-sub">${escapeHtml(reactionCountLabel(n))}</span>`;
+}
+
 /**
  * @param {Array<object>|null|undefined} items
  * @param {"song"|"artist"|"requester"|"set"} primaryKey
@@ -142,26 +168,28 @@ export function displayWindowStatsHtml(windowStats) {
   const song = topSong
     ? escapeHtml(topSong.name || "Unknown")
     : "\u2014";
-  const songSub = topSong?.artist
-    ? `<span class="party-display-stat-sub">${escapeHtml(topSong.artist)}</span>`
-    : "";
   const artist = topArtist
     ? escapeHtml(topArtist.artist || "Unknown")
     : "\u2014";
   const requester = topRequester
     ? escapeHtml(topRequester.name || "Guest")
     : "\u2014";
-  const requesterSub =
-    topRequester?.count != null
-      ? `<span class="party-display-stat-sub">${topRequester.count}\u00d7</span>`
-      : "";
+  const requesterSub = requestCountSub(topRequester?.count);
+  const songSub = requestCountSub(topSong?.count);
+  const artistSub = requestCountSub(topArtist?.count);
+  const loved = s.topLiked?.[0];
+  const hated = s.mostHated?.[0];
+  const lovedTitle = loved ? escapeHtml(loved.name || "Unknown") : "\u2014";
+  const hatedTitle = hated ? escapeHtml(hated.name || "Unknown") : "\u2014";
+  const lovedSub = reactionCountSub(loved?.count);
+  const hatedSub = reactionCountSub(hated?.count);
   return `
     <div class="party-display-stat">
-      <span class="party-display-stat-label">Requests</span>
+      <span class="party-display-stat-label">Total Requests</span>
       <strong>${Number(s.total) || 0}</strong>
     </div>
     <div class="party-display-stat">
-      <span class="party-display-stat-label">Top guest</span>
+      <span class="party-display-stat-label">Top requestor</span>
       <strong>${requester}</strong>${requesterSub}
     </div>
     <div class="party-display-stat">
@@ -170,7 +198,15 @@ export function displayWindowStatsHtml(windowStats) {
     </div>
     <div class="party-display-stat">
       <span class="party-display-stat-label">Top artist</span>
-      <strong>${artist}</strong>
+      <strong>${artist}</strong>${artistSub}
+    </div>
+    <div class="party-display-stat">
+      <span class="party-display-stat-label">Most Loved</span>
+      <strong>${lovedTitle}</strong>${lovedSub}
+    </div>
+    <div class="party-display-stat">
+      <span class="party-display-stat-label">Most Hated</span>
+      <strong>${hatedTitle}</strong>${hatedSub}
     </div>
   `;
 }

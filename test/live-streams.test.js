@@ -271,6 +271,162 @@ test("now-playing EventSource error marks Now Playing stale", async () => {
   live.closeNowPlayingStream();
 });
 
+test("queue-changed pulls Up Next even while the queue SSE is connected", async () => {
+  const paints = [];
+  /** @type {null | { fire: (name: string, data?: object) => void }} */
+  let sourceApi = null;
+  const live = createLiveStreams(
+    {},
+    {
+      fetch: async (url) => {
+        if (String(url).startsWith("/api/queue/list")) {
+          return {
+            ok: true,
+            async json() {
+              return { tracks: [{ uri: "spotify:track:ha", title: "From HA" }] };
+            },
+          };
+        }
+        return { ok: true, async json() { return { tracks: [] }; } };
+      },
+      EventSource: class {
+        constructor() {
+          const listeners = new Map();
+          sourceApi = {
+            fire(name, data) {
+              listeners.get(name)?.({ data: JSON.stringify(data || {}) });
+            },
+          };
+          queueMicrotask(() => this.onopen?.());
+          this.addEventListener = (name, fn) => listeners.set(name, fn);
+          this.close = () => {};
+        }
+      },
+      getVisibilityState: () => "visible",
+      getCurrentView: () => "main",
+      renderNowPlaying: () => {},
+      applyQueueTracks: (tracks) => paints.push(tracks.map((t) => t.title)),
+      applyPartySettings: () => {},
+      freezePlayhead: () => {},
+      isQueueEditMode: () => false,
+      setPendingStreamTracks: () => {},
+      clearPendingStreamTracks: () => {},
+      loadGroups: () => {},
+    }
+  );
+
+  live.openQueueStream();
+  await new Promise((r) => setTimeout(r, 10));
+  paints.length = 0;
+  sourceApi.fire("queue-changed", { at: 1 });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(paints, [["From HA"]]);
+  live.closeQueueStream();
+});
+
+test("refreshSonos reloads the queue while SSE is connected", async () => {
+  const paints = [];
+  let queueListFetches = 0;
+  const live = createLiveStreams(
+    {},
+    {
+      fetch: async (url) => {
+        if (String(url).startsWith("/api/queue/list")) {
+          queueListFetches += 1;
+          return {
+            ok: true,
+            async json() {
+              return {
+                tracks: [{ uri: "spotify:track:n", title: `N${queueListFetches}` }],
+              };
+            },
+          };
+        }
+        return { ok: true, async json() { return { title: "np" }; } };
+      },
+      EventSource: class {
+        constructor() {
+          this.addEventListener = () => {};
+          this.close = () => {};
+          queueMicrotask(() => this.onopen?.());
+        }
+      },
+      getVisibilityState: () => "visible",
+      getCurrentView: () => "main",
+      renderNowPlaying: () => {},
+      applyQueueTracks: (tracks) => paints.push(tracks[0]?.title),
+      applyPartySettings: () => {},
+      freezePlayhead: () => {},
+      isQueueEditMode: () => false,
+      setPendingStreamTracks: () => {},
+      clearPendingStreamTracks: () => {},
+      loadGroups: () => {},
+    }
+  );
+
+  live.openQueueStream();
+  await new Promise((r) => setTimeout(r, 10));
+  const fetchesAtOpen = queueListFetches;
+  live.refreshSonos();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(queueListFetches > fetchesAtOpen);
+  assert.ok(paints.includes(`N${queueListFetches}`));
+  live.closeQueueStream();
+});
+
+test("nowplaying-changed pulls Now Playing even while SSE is connected", async () => {
+  const paints = [];
+  /** @type {null | { fire: (name: string, data?: object) => void }} */
+  let sourceApi = null;
+  const live = createLiveStreams(
+    {},
+    {
+      fetch: async (url) => {
+        if (String(url).startsWith("/api/nowplaying")) {
+          return {
+            ok: true,
+            async json() {
+              return { title: "HA Random" };
+            },
+          };
+        }
+        return { ok: true, async json() { return {}; } };
+      },
+      EventSource: class {
+        constructor() {
+          const listeners = new Map();
+          sourceApi = {
+            fire(name, data) {
+              listeners.get(name)?.({ data: JSON.stringify(data || {}) });
+            },
+          };
+          queueMicrotask(() => this.onopen?.());
+          this.addEventListener = (name, fn) => listeners.set(name, fn);
+          this.close = () => {};
+        }
+      },
+      getVisibilityState: () => "visible",
+      getCurrentView: () => "main",
+      renderNowPlaying: (snap) => paints.push(snap.title),
+      applyQueueTracks: () => {},
+      applyPartySettings: () => {},
+      freezePlayhead: () => {},
+      isQueueEditMode: () => false,
+      setPendingStreamTracks: () => {},
+      clearPendingStreamTracks: () => {},
+      loadGroups: () => {},
+    }
+  );
+
+  live.openNowPlayingStream();
+  await new Promise((r) => setTimeout(r, 10));
+  paints.length = 0;
+  sourceApi.fire("nowplaying-changed", { at: 1 });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(paints, ["HA Random"]);
+  live.closeNowPlayingStream();
+});
+
 test("HTTP party fallback does not overwrite an active SSE paint", async () => {
   const paints = [];
   let resolveFetch;

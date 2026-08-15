@@ -32,6 +32,18 @@ export const DISPLAY_QUEUE_MAX = 16;
  * @param {number} [limit]
  * @returns {object[]}
  */
+/**
+ * Extra class on Party Display Up Next origin line (request / dedication).
+ * @param {object|null|undefined} track
+ */
+export function partyDisplaySourceClass(track) {
+  if (sanitizeDedication(track?.dedication || "")) {
+    return "party-display-queue-source is-dedication";
+  }
+  if (track?.searched) return "party-display-queue-source is-request";
+  return "party-display-queue-source";
+}
+
 export function partyDisplayQueueSlice(tracks, limit = DISPLAY_QUEUE_MAX) {
   const list = Array.isArray(tracks) ? tracks : [];
   const n = Math.max(0, Math.min(DISPLAY_QUEUE_MAX, Math.floor(Number(limit) || 0)));
@@ -499,8 +511,9 @@ export function createQueueUi(els, deps) {
         const originText = displayOriginLabel(track, eraMood);
         if (originText) {
           const source = document.createElement("span");
-          source.className = "party-display-queue-source";
+          source.className = partyDisplaySourceClass(track);
           source.textContent = originText;
+          source.title = originText;
           meta.appendChild(source);
         }
 

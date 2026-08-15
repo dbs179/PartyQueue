@@ -7,6 +7,8 @@ import {
   statsSummaryCardsHtml,
   displayTonightStatsHtml,
   displayWindowStatsHtml,
+  requestCountLabel,
+  reactionCountLabel,
   paintDisplayTonightStats,
   dedicationsHtml,
   karaokeRowsHtml,
@@ -92,6 +94,17 @@ test("karaokeRowsHtml includes mic emoji and Mic'd by line", () => {
   assert.match(html, /Dave/);
 });
 
+test("requestCountLabel uses Requests wording", () => {
+  assert.equal(requestCountLabel(1), "1 Request");
+  assert.equal(requestCountLabel(14), "14 Requests");
+  assert.equal(requestCountLabel(0), "0 Requests");
+});
+
+test("reactionCountLabel uses Reactions wording", () => {
+  assert.equal(reactionCountLabel(1), "1 Reaction");
+  assert.equal(reactionCountLabel(4), "4 Reactions");
+});
+
 test("displayTonightStatsHtml paints tonight highlights", () => {
   const html = displayTonightStatsHtml({
     tonight: {
@@ -99,13 +112,25 @@ test("displayTonightStatsHtml paints tonight highlights", () => {
       topSongs: [{ name: "Thunderstruck", artist: "AC/DC", count: 3 }],
       topArtists: [{ artist: "AC/DC", count: 4 }],
       topRequesters: [{ name: "Maria", count: 5 }],
+      topLiked: [{ name: "Africa", count: 4 }],
+      mostHated: [{ name: "Friday", count: 2 }],
     },
   });
-  assert.match(html, /Requests/);
+  assert.match(html, /Total Requests/);
+  assert.match(html, /Top requestor/);
+  assert.match(html, /Most Loved/);
+  assert.match(html, /Most Hated/);
   assert.match(html, />12</);
   assert.match(html, /Thunderstruck/);
   assert.match(html, /Maria/);
-  assert.match(html, /5\u00d7/);
+  assert.match(html, /Africa/);
+  assert.match(html, /Friday/);
+  assert.match(html, /5 Requests/);
+  assert.match(html, /3 Requests/);
+  assert.match(html, /4 Requests/);
+  assert.match(html, /4 Reactions/);
+  assert.match(html, /2 Reactions/);
+  assert.doesNotMatch(html, /\u00d7/);
 });
 
 test("displayWindowStatsHtml paints all-time highlights", () => {
@@ -118,7 +143,12 @@ test("displayWindowStatsHtml paints all-time highlights", () => {
   assert.match(html, />88</);
   assert.match(html, /Africa/);
   assert.match(html, /Dave/);
-  assert.match(html, /20\u00d7/);
+  assert.match(html, /20 Requests/);
+  assert.match(html, /9 Requests/);
+  assert.match(html, /11 Requests/);
+  assert.match(html, /Most Loved/);
+  assert.match(html, /Most Hated/);
+  assert.doesNotMatch(html, /\u00d7/);
 });
 
 test("paintDisplayTonightStats fills tonight and all-time grids", () => {

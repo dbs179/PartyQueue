@@ -337,7 +337,7 @@ export function createLiveStreams(els, deps) {
     }
   }
 
-  async function loadNowPlaying() {
+  async function loadNowPlaying(force = false) {
     const requestId = ++nowPlayingHttpRequest;
     const streamVersionAtStart = nowPlayingStreamVersion;
     try {
@@ -350,9 +350,10 @@ export function createLiveStreams(els, deps) {
       ) {
         return;
       }
-      // SSE owns the paint while connected — a late HTTP response must not
-      // overwrite a fresher stream snapshot after reconnect races.
-      if (nowPlayingStreamConnected) return;
+      // SSE owns the paint while connected — unless a mutation (Node-RED
+      // Random, Clear, Play) asked every open tab to pull. A newer SSE
+      // snapshot still wins via streamVersion above.
+      if (nowPlayingStreamConnected && !force) return;
       const next = advanceStreamCursor(nowPlayingStreamCursor, snapshot);
       if (!next.accept) return;
       nowPlayingStreamCursor = next.cursor;
@@ -389,6 +390,11 @@ export function createLiveStreams(els, deps) {
       } catch {
         /* ignore malformed status events */
       }
+    });
+    source.addEventListener("nowplaying-changed", () => {
+      if (nowPlayingSource !== source) return;
+      noteLiveEvent();
+      void loadNowPlaying(true);
     });
     source.onmessage = (event) => {
       if (nowPlayingSource !== source) return;
@@ -472,7 +478,9 @@ export function createLiveStreams(els, deps) {
       ) {
         return;
       }
-      if (queueStreamConnected) return;
+      // Same as Now Playing: SSE wins unless a behind-the-scenes write
+      // (HA / Node-RED Add 5) told every already-open view to refresh.
+      if (queueStreamConnected && !force) return;
       const next = advanceStreamCursor(queueStreamCursor, data);
       if (!next.accept) return;
       queueStreamCursor = next.cursor;
@@ -519,6 +527,11 @@ export function createLiveStreams(els, deps) {
       } catch {
         /* ignore malformed status events */
       }
+    });
+    source.addEventListener("queue-changed", () => {
+      if (queueSource !== source) return;
+      noteLiveEvent();
+      void loadQueue(true);
     });
     source.onmessage = (event) => {
       if (queueSource !== source) return;
@@ -701,7 +714,8 @@ export function createLiveStreams(els, deps) {
   }
 
   function refreshSonos() {
-    if (!queueStreamConnected) void loadQueue();
+    void loadQueue(true);
+    void loadNowPlaying(true);
     if (getCurrentView() !== "display") void loadGroups();
   }
 

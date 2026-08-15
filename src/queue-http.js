@@ -80,8 +80,45 @@ export const queueMonitor = createSnapshotMonitor({
   logger: createLogger("queue-stream"),
 });
 
-const unsubscribeSonosStreamNudge = onSonosSnapshotsInvalidated(() => {
+/** Re-read after Sonos Browse catches up (Clear → Random from Node-RED / HA). */
+export const QUEUE_MUTATION_FOLLOWUP_MS = [400, 1600];
+let queueFollowupTimers = [];
+
+function writeQueueChangedEvent() {
+  const payload = { at: Date.now() };
+  for (const res of queueStreamClients.keys()) {
+    writeQueueStreamEvent(res, "queue-changed", payload);
+  }
+}
+
+function clearQueueFollowupNudges() {
+  for (const timer of queueFollowupTimers) clearTimeout(timer);
+  queueFollowupTimers = [];
+}
+
+function scheduleQueueFollowupNudges() {
+  clearQueueFollowupNudges();
+  queueFollowupTimers = QUEUE_MUTATION_FOLLOWUP_MS.map((ms) => {
+    const timer = setTimeout(() => {
+      // Bust again so a stale immediate GetQueue cannot occupy the 3s cache
+      // and hide the tracks Node-RED just enqueued.
+      getQueueList.bust();
+      queueMonitor.nudge();
+    }, ms);
+    timer.unref?.();
+    return timer;
+  });
+}
+
+/** Tell every open PC/phone view a behind-the-scenes queue write landed. */
+export function broadcastQueueMutation() {
+  writeQueueChangedEvent();
   queueMonitor.nudge();
+  scheduleQueueFollowupNudges();
+}
+
+const unsubscribeSonosStreamNudge = onSonosSnapshotsInvalidated(() => {
+  broadcastQueueMutation();
 });
 
 function removeQueueStreamClient(res) {
@@ -94,6 +131,7 @@ function removeQueueStreamClient(res) {
 
 export function closeQueueStreams() {
   unsubscribeSonosStreamNudge();
+  clearQueueFollowupNudges();
   for (const res of [...queueStreamClients.keys()]) {
     removeQueueStreamClient(res);
     try {

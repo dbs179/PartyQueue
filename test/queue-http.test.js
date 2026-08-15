@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import {
+  broadcastQueueMutation,
   queueSignature,
   registerQueueStreamRoutes,
 } from "../src/queue-http.js";
@@ -139,5 +140,31 @@ test("queue SSE route sends retained data and releases demand on close", () => {
 
   req.emit("close");
   assert.equal(subscribers, 0);
+});
+
+test("queue mutation pings every open SSE client so HA Random refreshes idle tabs", () => {
+  let route = null;
+  const monitor = {
+    health: { status: "connected" },
+    subscribe() {
+      return () => {};
+    },
+  };
+  const app = {
+    get(_path, handler) {
+      route = handler;
+    },
+  };
+  registerQueueStreamRoutes(app, { monitor });
+
+  const req = new EventEmitter();
+  const res = new FakeResponse();
+  route(req, res);
+  const before = res.output;
+  broadcastQueueMutation();
+  const added = res.output.slice(before.length);
+  assert.match(added, /event: queue-changed/);
+  assert.match(added, /data: \{/);
+  req.emit("close");
 });
 

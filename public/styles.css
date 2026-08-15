@@ -5004,9 +5004,12 @@ body.party-display-active.party-display-preview .party-display-view {
 }
 
 .party-display-layout {
-  --display-lyric-size: calc(36 * var(--pd));
-  --display-lyric-line: 1.2;
-  --display-lyric-gap: calc(8 * var(--pd));
+  --display-lyric-size: calc(26 * var(--pd));
+  --display-lyric-line: 1.22;
+  --display-lyric-gap: calc(6 * var(--pd));
+  --display-lyric-slot-lines: 2;
+  /* Same 3-line reserve as Docker so the square art column stays wide.
+     Karaoke can still wrap inside the leftover space under the art. */
   --display-lyric-block: calc(
     (3 * var(--display-lyric-size) * var(--display-lyric-line)) +
       (2 * var(--display-lyric-gap)) +
@@ -5375,7 +5378,7 @@ body.party-display-active.party-display-preview .party-display-view {
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(3, minmax(0, 1fr));
   gap: calc(8 * var(--pd));
 }
 
@@ -5448,19 +5451,20 @@ body.party-display-active.party-display-preview .party-display-view {
   font-variant-numeric: tabular-nums;
 }
 
-/* 3-line karaoke — larger type, same width as the album art above it. */
+/* Karaoke fills the leftover under the wide art; long lines wrap to 2. */
 .party-display-lyrics {
-  --display-lyric-size: calc(36 * var(--pd));
-  --display-lyric-line: 1.2;
-  --display-lyric-gap: calc(8 * var(--pd));
-  flex: 0 0 auto;
+  --display-lyric-size: calc(26 * var(--pd));
+  --display-lyric-line: 1.22;
+  --display-lyric-gap: calc(6 * var(--pd));
+  --display-lyric-slot-lines: 2;
+  flex: 1 1 auto;
   width: 100%;
   min-width: 0;
-  min-height: 0;
-  height: calc(
+  min-height: calc(
     (3 * var(--display-lyric-size) * var(--display-lyric-line)) +
       (2 * var(--display-lyric-gap))
   );
+  height: auto;
   display: flex;
   flex-direction: column;
   justify-content: stretch;
@@ -5536,8 +5540,12 @@ body.party-display-active.party-display-preview .party-display-view {
   line-height: var(--display-lyric-line);
   font-weight: 650;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
   transform: none;
   text-shadow: none;
   opacity: 1;
@@ -5578,10 +5586,10 @@ body.party-display-active.party-display-preview .party-display-view {
   box-sizing: border-box;
 }
 
-/* Up Next type (PC + TV shared) — as many complete songs as the column holds. */
+/* Up Next type (PC + TV shared) — compact so ≥4 songs fit with request lines. */
 .party-display-side > .party-display-section-head .party-display-label,
 .party-display-queue .party-display-label {
-  font-size: calc(30 * var(--pd));
+  font-size: calc(18 * var(--pd));
 }
 
 .party-display-queue-status {
@@ -5597,17 +5605,17 @@ body.party-display-active.party-display-preview .party-display-view {
 
 .party-display-queue-count {
   color: var(--muted);
-  font-size: calc(30 * var(--pd));
+  font-size: calc(18 * var(--pd));
 }
 
 .party-display-queue-list {
   list-style: none;
-  margin: calc(12 * var(--pd)) 0 0;
+  margin: calc(8 * var(--pd)) 0 0;
   padding: 0;
   flex: 1 1 auto;
   display: grid;
   align-content: start;
-  gap: calc(4 * var(--pd));
+  gap: calc(2 * var(--pd));
   min-height: 0;
   overflow: hidden;
 }
@@ -5615,10 +5623,10 @@ body.party-display-active.party-display-preview .party-display-view {
 .party-display-queue-list li {
   min-width: 0;
   display: grid;
-  grid-template-columns: calc(42 * var(--pd)) minmax(0, 1fr);
-  gap: calc(12 * var(--pd));
-  align-items: center;
-  padding: calc(8 * var(--pd)) 0;
+  grid-template-columns: calc(22 * var(--pd)) minmax(0, 1fr);
+  gap: calc(6 * var(--pd));
+  align-items: start;
+  padding: calc(4 * var(--pd)) 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -5628,9 +5636,11 @@ body.party-display-active.party-display-preview .party-display-view {
 
 .party-display-queue-index {
   color: var(--muted);
-  font-size: calc(33 * var(--pd));
+  font-size: calc(18 * var(--pd));
   font-variant-numeric: tabular-nums;
   text-align: center;
+  line-height: 1.2;
+  padding-top: calc(1 * var(--pd));
 }
 
 .party-display-queue-meta {
@@ -5655,30 +5665,44 @@ body.party-display-active.party-display-preview .party-display-view {
 }
 
 .party-display-queue-meta strong {
-  font-size: calc(39 * var(--pd));
-  line-height: 1.1;
+  font-size: calc(20 * var(--pd));
+  line-height: 1.15;
 }
 
 .party-display-queue-meta > span {
   color: var(--muted);
-  font-size: calc(30 * var(--pd));
-  line-height: 1.15;
+  font-size: calc(15 * var(--pd));
+  line-height: 1.2;
 }
 
 .party-display-queue-meta .party-display-queue-source {
-  flex: 0 1 auto;
+  flex: 1 1 100%;
   min-width: 0;
   color: #8ef0ae;
-  font-size: calc(27 * var(--pd));
-  line-height: 1.15;
+  font-size: calc(14 * var(--pd));
+  line-height: 1.25;
+  font-weight: 700;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.party-display-queue-meta .party-display-queue-source.is-dedication {
+  color: #fbbf24;
+}
+
+.party-display-queue-meta .party-display-queue-source.is-request {
+  color: #8ef0ae;
 }
 
 .party-display-queue-meta .party-display-queue-genre,
 .party-display-queue-meta .party-display-queue-playlist {
   flex: 0 1 auto;
   min-width: 0;
-  font-size: calc(24 * var(--pd));
-  line-height: 1.15;
+  font-size: calc(13 * var(--pd));
+  line-height: 1.2;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
@@ -5703,7 +5727,7 @@ body.party-display-active.party-display-preview .party-display-view {
 }
 
 .party-display-queue .party-display-side-empty {
-  font-size: calc(30 * var(--pd));
+  font-size: calc(16 * var(--pd));
 }
 
 .party-display-join {
