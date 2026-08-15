@@ -43,6 +43,10 @@ import {
   MOOD_PRESET_LABELS,
 } from "./genre-presets.js";
 import { eligiblePoolSize } from "./genres.js";
+import {
+  isAnnounceRampParkActive,
+  onAnnounceRampParkEnd,
+} from "./announce-ramp-park.js";
 
 // Top up when this many (or fewer) songs remain AFTER the current one. Keeping
 // it at 1 means we refill while a song is still queued, so playback never gaps.
@@ -93,9 +97,18 @@ function clearTimer() {
   }
 }
 
+// A parked shout freezes refills so the ramp → DJ → request block cannot be
+// split. Nothing else would re-arm the timer chain afterward, so the park
+// tells us the moment it lifts.
+onAnnounceRampParkEnd(() => {
+  if (!enabled || stopping || queueClearPauseCount > 0) return;
+  idleStreak = 0;
+  schedule(NUDGE_MS);
+});
+
 function schedule(ms) {
   clearTimer();
-  if (!enabled || stopping || queueClearPauseCount > 0) return;
+  if (!enabled || stopping || queueClearPauseCount > 0 || isAnnounceRampParkActive()) return;
   timer = setTimeout(() => {
     timer = null;
     const running = tick();
@@ -293,7 +306,7 @@ export function resetRotationCounters() {
 }
 
 async function tick() {
-  if (!enabled || queueClearPauseCount > 0) return;
+  if (!enabled || queueClearPauseCount > 0 || isAnnounceRampParkActive()) return;
   const workGeneration = queueWorkGeneration();
   try {
     const status = await getQueueStatus();
@@ -385,7 +398,7 @@ export function getAutoFillState() {
 
 /** Re-check soon after a skip/drain so Never-Ending can't lag behind Next. */
 export function nudgeAutoFill() {
-  if (!enabled || filling || stopping || queueClearPauseCount > 0) return false;
+  if (!enabled || filling || stopping || queueClearPauseCount > 0 || isAnnounceRampParkActive()) return false;
   idleStreak = 0;
   schedule(NUDGE_MS);
   return true;

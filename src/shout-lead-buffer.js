@@ -3,8 +3,9 @@
  * that split set-requests and played later adds before earlier ones.
  *
  * Mid-queue / Set Request paths never Pause a playing song mid-track.
- * Next-up request shouts may hold at the last ~2s (or after the playhead
- * leaves the current song) until pads are inserted, then Play the announce.
+ * Next-up shouts that cannot finish TTS before the current song ends park on
+ * the volume-ramp silence, boost volume there, and hold until the announce
+ * pads are queued — then the normal ramp → DJ → restore → music handoff runs.
  *
  * Helpers below stay for tests / pause eligibility. ensureShoutLeadBuffer is a
  * no-op so route and insert-lock call sites cannot move guest songs.
@@ -24,6 +25,22 @@ export const IMMINENT_ANNOUNCE_PAUSE_SEC = 15;
 
 /** Hold at the tail of the current song — never a mid-track cut. */
 export const TRACK_END_ANNOUNCE_HOLD_SEC = 2;
+
+/**
+ * Remaining time that cannot cover script + TTS + pad insert. Insert the
+ * volume ramp now and hold on it so the request cannot tease.
+ */
+export const ANNOUNCE_RAMP_PARK_SEC = 20;
+
+/** Jump onto the ramp only when the outgoing song is already gone or dying. */
+export const ANNOUNCE_RAMP_SEEK_SEC = 1;
+
+/**
+ * How far into the request we will still restart it for its own shout. Past
+ * this the tease is just the song playing, and yanking it back is worse than
+ * a late shout.
+ */
+export const ANNOUNCE_RAMP_RESTART_MAX_SEC = 12;
 
 /**
  * True when the request is next-up and remaining time is too short to rely on
@@ -95,6 +112,71 @@ export function shouldHoldAtTrackEndForAnnounce({
   const rem = Number(remainingSec);
   if (!Number.isFinite(rem)) return false;
   const threshold = Number(holdSec);
+  if (!Number.isFinite(threshold) || threshold < 0) return false;
+  return rem <= threshold;
+}
+
+/**
+ * Next-up (or already-current) request shout: the outgoing song will end
+ * before the announce clip can be queued. Park on the volume-ramp silence.
+ */
+export function shouldParkOnRampForAnnounce({
+  startPlayback = false,
+  requestAbsPos,
+  currentTrack,
+  remainingSec,
+  elapsedSec = null,
+  isPlaying = false,
+  playingFromQueue = false,
+  thresholdSec = ANNOUNCE_RAMP_PARK_SEC,
+  restartMaxSec = ANNOUNCE_RAMP_RESTART_MAX_SEC,
+} = {}) {
+  if (startPlayback) return false;
+  if (!playingFromQueue) return false;
+  const pos = Math.floor(Number(requestAbsPos));
+  const track = Math.floor(Number(currentTrack));
+  if (!Number.isFinite(pos) || pos < 1) return false;
+  if (!Number.isFinite(track) || track < 1) return false;
+  // Fill-in already ended — the request is now playing (the T.N.T. tease).
+  // Only worth undoing while it is still a tease, not minutes in.
+  if (pos === track) {
+    const elapsed = Number(elapsedSec);
+    const cap = Number(restartMaxSec);
+    if (!Number.isFinite(elapsed)) return true;
+    if (!Number.isFinite(cap) || cap < 0) return true;
+    return elapsed <= cap;
+  }
+  if (pos !== track + 1) return false;
+  if (!isPlaying) return true;
+  if (remainingSec == null || remainingSec === "") return false;
+  const rem = Number(remainingSec);
+  if (!Number.isFinite(rem)) return false;
+  const threshold = Number(thresholdSec);
+  if (!Number.isFinite(threshold) || threshold < 0) return false;
+  return rem <= threshold;
+}
+
+/**
+ * True when we must Seek/Play the parked ramp now instead of waiting for a
+ * natural track end (request already current, transport idle, or <1s left).
+ */
+export function shouldSeekRampNow({
+  requestAbsPos,
+  currentTrack,
+  remainingSec,
+  isPlaying = false,
+  seekSec = ANNOUNCE_RAMP_SEEK_SEC,
+} = {}) {
+  const pos = Math.floor(Number(requestAbsPos));
+  const track = Math.floor(Number(currentTrack));
+  if (Number.isFinite(pos) && Number.isFinite(track) && pos === track) {
+    return true;
+  }
+  if (!isPlaying) return true;
+  if (remainingSec == null || remainingSec === "") return false;
+  const rem = Number(remainingSec);
+  if (!Number.isFinite(rem)) return false;
+  const threshold = Number(seekSec);
   if (!Number.isFinite(threshold) || threshold < 0) return false;
   return rem <= threshold;
 }

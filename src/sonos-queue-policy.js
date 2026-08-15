@@ -253,6 +253,8 @@ export function announcePadsToSupersede(indices, beforePosition) {
  * Live 1-based queue index of an upcoming track. Prefer URI / Spotify id so a
  * shout stays glued to the request that triggered it; fall back to title+artist.
  * Duplicate copies pick the match nearest `expected` when provided.
+ * `includeCurrent` also considers the now-playing row — the announce-ramp park
+ * needs it because the request it belongs to may have already started.
  */
 export function findUpcomingTrackPositionInItems(
   items,
@@ -263,11 +265,13 @@ export function findUpcomingTrackPositionInItems(
     expected = null,
     currentTrack = 0,
     playingFromQueue = false,
+    includeCurrent = false,
   } = {}
 ) {
   const list = Array.isArray(items) ? items : [];
   const track = Math.floor(Number(currentTrack) || 0);
-  const start = playingFromQueue && track >= 1 ? track : 0;
+  const start =
+    playingFromQueue && track >= 1 ? (includeCurrent ? track - 1 : track) : 0;
   const wantUri = String(uri || "").trim();
   const wantId = spotifyTrackId(wantUri);
   const wantExpected = Number(expected);

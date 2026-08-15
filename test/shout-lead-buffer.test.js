@@ -4,9 +4,13 @@ import {
   SHOUT_LEAD_BUFFER_SEC,
   IMMINENT_ANNOUNCE_PAUSE_SEC,
   TRACK_END_ANNOUNCE_HOLD_SEC,
+  ANNOUNCE_RAMP_PARK_SEC,
+  ANNOUNCE_RAMP_RESTART_MAX_SEC,
   needsShoutLeadBuffer,
   shouldPauseForImminentAnnounce,
   shouldHoldAtTrackEndForAnnounce,
+  shouldParkOnRampForAnnounce,
+  shouldSeekRampNow,
   findShoutBufferTrackNumber,
   requestPosAfterShoutBuffer,
 } from "../src/shout-lead-buffer.js";
@@ -152,6 +156,121 @@ test("shouldPauseForImminentAnnounce uses a narrower window than lead buffer", (
       isPlaying: false,
     }),
     false
+  );
+});
+
+test("shouldParkOnRampForAnnounce is next-up or already-current when time is short", () => {
+  const nextUp = {
+    requestAbsPos: 2,
+    currentTrack: 1,
+    isPlaying: true,
+    playingFromQueue: true,
+  };
+  assert.equal(ANNOUNCE_RAMP_PARK_SEC, 20);
+  assert.equal(
+    shouldParkOnRampForAnnounce({ ...nextUp, remainingSec: 12 }),
+    true
+  );
+  assert.equal(
+    shouldParkOnRampForAnnounce({
+      ...nextUp,
+      remainingSec: ANNOUNCE_RAMP_PARK_SEC + 1,
+    }),
+    false
+  );
+  assert.equal(
+    shouldParkOnRampForAnnounce({
+      ...nextUp,
+      requestAbsPos: 4,
+      remainingSec: 5,
+    }),
+    false
+  );
+  assert.equal(
+    shouldParkOnRampForAnnounce({
+      requestAbsPos: 1,
+      currentTrack: 1,
+      isPlaying: true,
+      playingFromQueue: true,
+      remainingSec: 180,
+    }),
+    true
+  );
+  assert.equal(
+    shouldParkOnRampForAnnounce({
+      ...nextUp,
+      remainingSec: 8,
+      startPlayback: true,
+    }),
+    false
+  );
+  assert.equal(
+    shouldParkOnRampForAnnounce({
+      ...nextUp,
+      remainingSec: 8,
+      isPlaying: false,
+    }),
+    true
+  );
+});
+
+test("an already-current request is only restarted while it is still a tease", () => {
+  const current = {
+    requestAbsPos: 1,
+    currentTrack: 1,
+    isPlaying: true,
+    playingFromQueue: true,
+    remainingSec: 180,
+  };
+  assert.equal(ANNOUNCE_RAMP_RESTART_MAX_SEC, 12);
+  assert.equal(
+    shouldParkOnRampForAnnounce({ ...current, elapsedSec: 3 }),
+    true,
+    "a few seconds in is the tease we want to undo"
+  );
+  assert.equal(
+    shouldParkOnRampForAnnounce({
+      ...current,
+      elapsedSec: ANNOUNCE_RAMP_RESTART_MAX_SEC + 1,
+    }),
+    false,
+    "well into the song, a late shout beats yanking it back"
+  );
+  // Unknown elapsed keeps the old behavior rather than dropping the shout.
+  assert.equal(shouldParkOnRampForAnnounce({ ...current }), true);
+  assert.equal(
+    shouldParkOnRampForAnnounce({ ...current, elapsedSec: null }),
+    true
+  );
+});
+
+test("shouldSeekRampNow only when the request is already current or the song is dying", () => {
+  assert.equal(
+    shouldSeekRampNow({
+      requestAbsPos: 2,
+      currentTrack: 1,
+      isPlaying: true,
+      remainingSec: 12,
+    }),
+    false
+  );
+  assert.equal(
+    shouldSeekRampNow({
+      requestAbsPos: 2,
+      currentTrack: 1,
+      isPlaying: true,
+      remainingSec: 1,
+    }),
+    true
+  );
+  assert.equal(
+    shouldSeekRampNow({
+      requestAbsPos: 1,
+      currentTrack: 1,
+      isPlaying: true,
+      remainingSec: 180,
+    }),
+    true
   );
 });
 

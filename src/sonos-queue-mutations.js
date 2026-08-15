@@ -17,6 +17,7 @@ import {
   isAnnounceQueuePad,
   isTransportPlaying,
   shoutPlaybackHoldDecision,
+  findUpcomingTrackPositionInItems,
 } from "./sonos-queue-policy.js";
 import { ensureOrderedPlayModeOn } from "./sonos-transport.js";
 import { spotifyTrackId } from "./sampler.js";
@@ -31,6 +32,13 @@ import {
 } from "./queue-origin.js";
 import { sanitizeDisplayName } from "./display-name.js";
 import { queueWorkWasPreempted } from "./queue-preempt.js";
+import {
+  beginAnnounceRampPark,
+  endAnnounceRampPark,
+  forceEndAnnounceRampPark,
+  getAnnounceRampPark,
+  isAnnounceRampParkActive,
+} from "./announce-ramp-park.js";
 
 /**
  * Live Sonos queue + playhead for request insert. Retries once, then throws
@@ -644,6 +652,284 @@ export async function insertAnnounceBlock(opts) {
   return withSonosWriteLock(() => insertAnnounceBlockUnlocked(opts));
 }
 
+function clipEnqueueOpts(clip, position) {
+  return {
+    title: clip.title,
+    artist: clip.artist,
+    durationSec: clip.durationSec,
+    position,
+  };
+}
+
+/**
+ * Live 1-based index of a queued clip URL. Starts at the current track (we may
+ * already be holding ON the parked ramp) so played pads left behind by an
+ * earlier announce can never be mistaken for this one, and prefers the copy
+ * nearest where we last saw it.
+ */
+/**
+ * Does a queue row point at this clip URL? Exact first, then the unique
+ * per-announce segment, then the bare filename — Sonos may hand a query back
+ * escaped, and a false positive here only over-protects a pad.
+ */
+function matchesClipUrl(uri, url) {
+  const want = String(url || "");
+  const value = String(uri || "");
+  if (!want || !value) return false;
+  if (value === want) return true;
+  const segment = want.split("/").pop() || "";
+  if (segment && value.includes(segment)) return true;
+  const fileName = segment.split("?")[0] || "";
+  return !!fileName && value.includes(fileName);
+}
+
+function findQueueUrlPosition(
+  items,
+  url,
+  { currentTrack = 0, playingFromQueue = false, expected = null } = {}
+) {
+  const want = String(url || "");
+  if (!want) return null;
+  const list = Array.isArray(items) ? items : [];
+  const track = Math.floor(Number(currentTrack) || 0);
+  const start = playingFromQueue && track >= 1 ? track - 1 : 0;
+  const segment = want.split("/").pop() || "";
+  // Prefer the unique per-announce token; fall back to the bare filename in
+  // case Sonos hands the query back to us escaped.
+  const fileName = segment.split("?")[0] || "";
+  const wantExpected = Number(expected);
+  const nearest = (matches) => {
+    if (!matches.length) return null;
+    if (matches.length === 1 || !Number.isFinite(wantExpected)) return matches[0];
+    return matches.reduce((best, p) =>
+      Math.abs(p - wantExpected) < Math.abs(best - wantExpected) ? p : best
+    );
+  };
+
+  for (const needle of [segment, fileName]) {
+    if (!needle) continue;
+    const matches = [];
+    for (let i = start; i < list.length; i++) {
+      const uri = String(list[i]?.TrackUri ?? list[i]?.uri ?? "");
+      if (uri === want || uri.includes(needle)) matches.push(i + 1);
+    }
+    const hit = nearest(matches);
+    if (hit != null) return hit;
+  }
+  return null;
+}
+
+/**
+ * Queue items plus playhead for announce-park math. `readItems` (tests) may
+ * return a bare array; live reads carry the playhead so pads behind it are
+ * never matched.
+ */
+async function readQueueContext(readItems) {
+  if (readItems) {
+    const raw = await readItems();
+    if (Array.isArray(raw)) {
+      return { items: raw, currentTrack: 0, playingFromQueue: false };
+    }
+    return {
+      items: Array.isArray(raw?.items) ? raw.items : [],
+      currentTrack: Number(raw?.currentTrack) || 0,
+      playingFromQueue: !!raw?.playingFromQueue,
+    };
+  }
+  const m = await getManager();
+  const coordinator = await resolveCoordinator(m);
+  const [queue, pos, media] = await Promise.all([
+    coordinator.GetQueue().catch(() => ({ Result: [] })),
+    coordinator.AVTransportService.GetPositionInfo().catch(() => ({ Track: 0 })),
+    coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
+      CurrentURI: "",
+    })),
+  ]);
+  return {
+    items: Array.isArray(queue.Result) ? queue.Result : [],
+    currentTrack: Number(pos.Track) || 0,
+    playingFromQueue: /^x-rincon-queue:/.test(media.CurrentURI || ""),
+  };
+}
+
+/**
+ * Insert only the volume-ramp silence immediately before the request so a
+ * dying fill-in lands on silence instead of starting the guest song.
+ */
+export async function parkAnnounceRamp(opts) {
+  return withSonosWriteLock(() => parkAnnounceRampUnlocked(opts));
+}
+
+async function parkAnnounceRampUnlocked({
+  queuePosition = 1,
+  requestUri = null,
+  ramp,
+  preemptGeneration,
+  ops = {},
+} = {}) {
+  const enqueue = ops.enqueue || enqueueHttpAudioUnlocked;
+  const pauseTrim = ops.pauseTrim || pauseQueueTrim;
+  const readItems = ops.readItems;
+  const preempted = () =>
+    preemptGeneration != null && queueWorkWasPreempted(preemptGeneration);
+  if (preempted()) {
+    return { ok: false, skipped: true, reason: "queue-preempted" };
+  }
+  if (!ramp?.url) {
+    throw new Error("parkAnnounceRamp requires a ramp url.");
+  }
+
+  pauseTrim(90000);
+  let rampPos = Number(queuePosition) || 1;
+  if (requestUri || readItems) {
+    try {
+      const { items, currentTrack, playingFromQueue } =
+        await readQueueContext(readItems);
+      // includeCurrent: the request may already have started playing (the
+      // tease we are here to undo), so the ramp goes in at its own slot.
+      const live = findUpcomingTrackPositionInItems(items, {
+        uri: requestUri,
+        expected: rampPos,
+        currentTrack,
+        playingFromQueue,
+        includeCurrent: true,
+      });
+      if (live) rampPos = live;
+    } catch (err) {
+      console.warn("[announce-park] live position read failed:", err.message);
+    }
+  }
+  if (preempted()) {
+    return { ok: false, skipped: true, reason: "queue-preempted" };
+  }
+
+  await enqueue(ramp.url, clipEnqueueOpts(ramp, rampPos));
+  beginAnnounceRampPark({
+    rampUrl: ramp.url,
+    requestUri: requestUri || null,
+  });
+  console.log(`[dj-voice] parked volume ramp@${rampPos} until shout is ready`);
+  return { ok: true, rampPos, requestPos: rampPos + 1, rampUrl: ramp.url };
+}
+
+/**
+ * After TTS is ready, glue the DJ clip + restore pad after the parked ramp.
+ * Does not strip the ramp (we may already be holding on it).
+ */
+export async function completeParkedAnnounce(opts) {
+  return withSonosWriteLock(() => completeParkedAnnounceUnlocked(opts));
+}
+
+async function completeParkedAnnounceUnlocked({
+  rampUrl,
+  expectedRampPos,
+  tts,
+  restore,
+  preemptGeneration,
+  ops = {},
+} = {}) {
+  const enqueue = ops.enqueue || enqueueHttpAudioUnlocked;
+  const readItems = ops.readItems;
+  const preempted = () =>
+    preemptGeneration != null && queueWorkWasPreempted(preemptGeneration);
+  if (preempted()) {
+    return { ok: false, skipped: true, reason: "queue-preempted" };
+  }
+  if (!tts?.url || !restore?.url) {
+    throw new Error("completeParkedAnnounce requires tts and restore urls.");
+  }
+
+  let rampPos = 0;
+  try {
+    const { items, currentTrack, playingFromQueue } =
+      await readQueueContext(readItems);
+    const live = findQueueUrlPosition(items, rampUrl, {
+      currentTrack,
+      playingFromQueue,
+      expected: Number(expectedRampPos) || null,
+    });
+    if (live) rampPos = live;
+  } catch (err) {
+    console.warn("[announce-park] ramp lookup failed:", err.message);
+  }
+  // Never fall back to the remembered index: a stale slot would splice the DJ
+  // clip into the middle of somebody's request block.
+  if (!Number.isFinite(rampPos) || rampPos < 1) {
+    return { ok: false, reason: "parked-ramp-missing" };
+  }
+  if (preempted()) {
+    return { ok: false, skipped: true, reason: "queue-preempted" };
+  }
+
+  const ttsPos = rampPos + 1;
+  const restorePos = ttsPos + 1;
+  await enqueue(tts.url, clipEnqueueOpts(tts, ttsPos));
+  if (preempted()) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "queue-preempted",
+      partial: true,
+      rampPos,
+      ttsPos,
+    };
+  }
+  await enqueue(restore.url, clipEnqueueOpts(restore, restorePos));
+  endAnnounceRampPark();
+  console.log(
+    `[dj-voice] completed parked announce ramp@${rampPos} TTS@${ttsPos} restore@${restorePos}`
+  );
+  return { ok: true, inserted: true, rampPos, ttsPos, restorePos };
+}
+
+/**
+ * Drop a parked ramp that never got its DJ clip. Only removes it when it is
+ * still upcoming — if the room is already holding on that silence we leave it
+ * to play out (3s) rather than deleting the track under the playhead.
+ * @returns {Promise<{ removed: boolean, reason?: string, position?: number }>}
+ */
+export async function releaseParkedRamp(opts) {
+  return withSonosWriteLock(() => releaseParkedRampUnlocked(opts));
+}
+
+async function releaseParkedRampUnlocked({ rampUrl, ops = {} } = {}) {
+  if (!rampUrl) return { removed: false, reason: "no-ramp-url" };
+  const readItems = ops.readItems;
+  const removeRange = ops.removeRange;
+  try {
+    const { items, currentTrack, playingFromQueue } =
+      await readQueueContext(readItems);
+    const pos = findQueueUrlPosition(items, rampUrl, {
+      currentTrack,
+      playingFromQueue,
+    });
+    if (!pos) return { removed: false, reason: "not-found" };
+    const track = Math.floor(Number(currentTrack) || 0);
+    if (playingFromQueue && track >= 1 && pos <= track) {
+      return { removed: false, reason: "ramp-is-current", position: pos };
+    }
+    if (removeRange) {
+      await removeRange({ StartingIndex: pos, NumberOfTracks: 1 });
+    } else {
+      const m = await getManager();
+      const coordinator = await resolveCoordinator(m);
+      const queue = await coordinator.GetQueue().catch(() => ({ UpdateID: 0 }));
+      await coordinator.AVTransportService.RemoveTrackRangeFromQueue({
+        InstanceID: 0,
+        UpdateID: Number(queue.UpdateID) || 0,
+        StartingIndex: pos,
+        NumberOfTracks: 1,
+      });
+    }
+    invalidateSonosSnapshots();
+    console.log(`[announce-park] removed orphaned volume ramp@${pos}`);
+    return { removed: true, position: pos };
+  } catch (err) {
+    console.warn("[announce-park] ramp release failed:", err.message);
+    return { removed: false, reason: "error" };
+  }
+}
+
 async function insertAnnounceBlockUnlocked({
   queuePosition = 1,
   preemptGeneration,
@@ -1025,7 +1311,14 @@ async function removeUpcomingAnnouncePadsUnlocked({ beforePosition } = {}) {
   const before = Number(beforePosition) || 0;
   // Keep earlier request-glued shouts. Only replace the pad run at this slot
   // (or strip everything on startup when beforePosition is omitted).
-  const toRemove = announcePadsToSupersede(indices, before);
+  const toRemove = announcePadsToSupersede(indices, before).filter((i) => {
+    if (!isAnnounceRampParkActive()) return true;
+    const park = getAnnounceRampPark();
+    const item = items[i - 1];
+    const uri = String(item?.TrackUri ?? item?.uri ?? "");
+    // Never strip the pad a shout is currently holding on.
+    return !matchesClipUrl(uri, park.rampUrl);
+  });
   if (!toRemove.length) {
     return { removed: 0, removedBefore: 0, protectedThrough };
   }
@@ -1217,6 +1510,9 @@ export async function clearQueue(...args) {
 }
 
 async function clearQueueUnlocked() {
+  // A parked shout has nothing left to glue to — drop the freeze so
+  // Never-Ending is not stuck waiting on an announce that will never land.
+  forceEndAnnounceRampPark();
   const m = await getManager();
   let coordinator = await resolveCoordinator(m);
 

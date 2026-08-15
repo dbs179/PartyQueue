@@ -4,6 +4,8 @@ import { getDjVoiceSettings } from "./settings.js";
 import {
   isDjVoiceReady,
   announceOnSonos,
+  parkRampForShortAnnounce,
+  abortParkedAnnounce,
   formatMusicPronunciationGuide,
   formatHostDjGuidance,
   generateDjSpeechFromPrompt,
@@ -487,6 +489,10 @@ export async function announceRequestShout(
 ) {
   const by = String(requestedBy || "").trim();
   let committed = false;
+  // A park freezes Never-Ending and can hold the room on silence, so it must
+  // be unwound on every exit — including a thrown script/TTS error.
+  let parked = null;
+  let parkResolved = false;
   try {
     if (!isDjVoiceReady()) {
       return { ok: false, skipped: true };
@@ -494,6 +500,23 @@ export async function announceRequestShout(
     let pos = Number(queuePosition);
     if (!Number.isFinite(pos) || pos < 1) {
       return { ok: false, skipped: true, error: "Missing queue position." };
+    }
+    // Park on the volume ramp BEFORE script/TTS when the current song will
+    // end first — otherwise the request teases, then the insert steals the
+    // playhead and restarts it after the DJ.
+    if (!startPlayback) {
+      try {
+        parked = await parkRampForShortAnnounce({
+          queuePosition: pos,
+          requestUri: uri,
+          preemptGeneration,
+        });
+        if (parked?.requestPos) pos = Number(parked.requestPos);
+        else if (parked?.rampPos) pos = Number(parked.rampPos) + 1;
+      } catch (err) {
+        console.warn("[dj-shout] ramp park skipped:", err.message);
+        parked = null;
+      }
     }
     const id = trackId || spotifyTrackId(uri) || null;
     // Re-read dedication at script time (toast dedicate may have landed).
@@ -515,7 +538,7 @@ export async function announceRequestShout(
     }
     // Script/TTS can take several seconds — re-find the song so the shout still
     // lands immediately before it (not after, if the queue shifted).
-    if (!startPlayback) {
+    if (!startPlayback && !parked) {
       try {
         const { findUpcomingTrackPosition } = await import("./sonos.js");
         const live = await findUpcomingTrackPosition({
@@ -543,12 +566,21 @@ export async function announceRequestShout(
       preemptGeneration,
       // Re-resolve the request under the insert lock after TTS so pads stay
       // glued to it if the queue shifted during script generation.
-      applyLeadBuffer: !startPlayback,
+      applyLeadBuffer: !startPlayback && !parked,
       requestUri: uri || null,
-      // Never Pause mid-song. Next-up may hold at the last ~2s until pads land.
       allowImminentPause: false,
-      holdAtTrackEnd: !startPlayback && Number(queuePosition) === 1,
+      // Without a park, next-up still holds at the tail of the current song so
+      // the request cannot start before the pads land.
+      holdAtTrackEnd:
+        !startPlayback && !parked && Number(queuePosition) === 1,
+      parked,
     });
+    if (parked) {
+      if (!(result?.ok || result?.inserted)) {
+        await abortParkedAnnounce(parked, "shout insert failed");
+      }
+      parkResolved = true;
+    }
     // Commit once the announce block is in the queue (or Play succeeded).
     // A failed/preempted insert releases so this guest can still get first-shout.
     if (by && (result?.ok || result?.inserted)) {
@@ -562,6 +594,12 @@ export async function announceRequestShout(
     }
     return result;
   } finally {
+    if (parked && !parkResolved) {
+      await abortParkedAnnounce(parked, "shout aborted before insert").catch(
+        (err) =>
+          console.error("[dj-shout] park unwind failed:", err?.message || err)
+      );
+    }
     if (!committed && by) releaseFirstShoutReservation(by);
   }
 }

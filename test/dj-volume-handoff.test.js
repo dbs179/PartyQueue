@@ -525,6 +525,167 @@ test("failed supersede restore preserves the original baseline", async () => {
   assert.equal(nextRun.getVolume(), 10);
 });
 
+test("holdPreSilence pauses the ramp until the announce clip is queued", async () => {
+  let uri = PRE;
+  let state = "PLAYING";
+  const calls = [];
+  let releaseSleep;
+  const sleep = () =>
+    new Promise((resolve) => {
+      releaseSleep = resolve;
+    });
+  const adapter = {
+    async getNowPlaying() {
+      return { uri, state };
+    },
+    async getVolume() {
+      return 10;
+    },
+    async setVolume() {
+      return { locked: true };
+    },
+    async pause() {
+      calls.push("pause");
+      state = "PAUSED_PLAYBACK";
+    },
+    async resume() {
+      calls.push("resume");
+      state = "PLAYING";
+    },
+    async playAt() {},
+    async next() {},
+  };
+  const phases = [];
+  const handoff = createDjVolumeHandoff({
+    publicUrl: DJ,
+    holdPreSilence: true,
+    approxDurationSec: 5,
+    silenceSec: 3,
+    calculateTarget: () => 30,
+    adapter,
+    sleep,
+    now: () => 0,
+    pollMs: 0,
+    rampSteps: 2,
+    ttsPosition: 2,
+    musicPosition: 4,
+    logger: {
+      info(message) {
+        if (message.startsWith("phase ")) phases.push(message.slice(6));
+      },
+      warn() {},
+      error() {},
+    },
+  });
+
+  const started = handoff.start();
+  for (let i = 0; i < 50 && !releaseSleep; i++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.ok(phases.includes("holding-pre-silence"));
+  assert.ok(calls.includes("pause"));
+  assert.equal(calls.includes("resume"), false);
+
+  handoff.setTtsUrl(DJ);
+  handoff.setPositions({ ttsPosition: 3, musicPosition: 5 });
+  handoff.releasePreSilenceHold();
+  const firstSleep = releaseSleep;
+  releaseSleep = null;
+  firstSleep();
+  for (let i = 0; i < 50 && !phases.includes("announcing"); i++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.ok(calls.includes("resume"));
+  assert.ok(phases.includes("announcing"));
+
+  const cancelled = handoff.cancelAndRestore("test cleanup");
+  releaseSleep?.();
+  await cancelled;
+  await started.catch(() => {});
+});
+
+test("cancelling a pre-silence hold restores volume and resumes the room", async () => {
+  // A shout that dies while we hold on the ramp must never leave the party
+  // paused on 3s of silence.
+  let uri = PRE;
+  let state = "PLAYING";
+  const calls = [];
+  let volume = 10;
+  let releaseSleep;
+  const sleep = () =>
+    new Promise((resolve) => {
+      releaseSleep = resolve;
+    });
+  const adapter = {
+    async getNowPlaying() {
+      return { uri, state };
+    },
+    async getVolume() {
+      return volume;
+    },
+    async setVolume(level) {
+      volume = level;
+      calls.push(`set-volume:${level}`);
+      return { locked: true };
+    },
+    async pause() {
+      calls.push("pause");
+      state = "PAUSED_PLAYBACK";
+    },
+    async resume() {
+      calls.push("resume");
+      state = "PLAYING";
+    },
+    async playAt() {},
+    async next() {},
+  };
+  const handoff = createDjVolumeHandoff({
+    publicUrl: null,
+    holdPreSilence: true,
+    approxDurationSec: 45,
+    silenceSec: 3,
+    calculateTarget: () => 30,
+    adapter,
+    sleep,
+    now: () => 0,
+    pollMs: 0,
+    rampSteps: 2,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const started = handoff.start();
+  for (let i = 0; i < 50 && !calls.includes("pause"); i++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.ok(calls.includes("pause"), "should hold on the ramp");
+  assert.equal(handoff.heldPlayback, true);
+
+  const cancelled = handoff.cancelAndRestore("empty shout script");
+  releaseSleep?.();
+  await cancelled;
+  await started.catch(() => {});
+
+  assert.equal(volume, 10, "baseline volume must be restored");
+  assert.ok(calls.includes("resume"), "must resume playback after a held cancel");
+  // Baseline goes back before the room is let go, so the song never starts loud.
+  assert.ok(
+    calls.lastIndexOf("set-volume:10") < calls.lastIndexOf("resume"),
+    "restore should precede resume"
+  );
+  assert.equal(handoff.heldPlayback, false);
+});
+
+test("cancelling without a hold does not resume a paused room", async () => {
+  const run = fakeHandoff({ timeline: [PRE, DJ, POST, MUSIC] });
+  await run.handoff.start();
+  const resumesBefore = run.calls.filter(([name]) => name === "resume").length;
+
+  await run.handoff.cancelAndRestore("host paused");
+
+  const resumesAfter = run.calls.filter(([name]) => name === "resume").length;
+  assert.equal(resumesAfter, resumesBefore);
+});
+
 test("terminal handoff releases global ownership", async () => {
   const run = fakeHandoff({ timeline: [PRE, DJ, POST, MUSIC] });
   const handoff = await beginDjVolumeHandoff(run.options);

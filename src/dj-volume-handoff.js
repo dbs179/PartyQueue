@@ -86,6 +86,7 @@ export function createDjVolumeHandoff({
   ttsPosition = null,
   musicPosition = null,
   baselineOverride = null,
+  holdPreSilence = false,
   calculateTarget,
   adapter = null,
   sleep = sleepDefault,
@@ -114,6 +115,11 @@ export function createDjVolumeHandoff({
   let advancedFromRestore = false;
   let restoreHeldAt = null;
   let deadlineHandled = false;
+  let ttsPublicUrl = publicUrl;
+  let liveTtsPosition = ttsPosition;
+  let liveMusicPosition = musicPosition;
+  let preSilenceReleased = !holdPreSilence;
+  let pausedByHold = false;
   const preservedBaseline =
     baselineOverride == null ? null : clampVolume(baselineOverride);
 
@@ -130,8 +136,8 @@ export function createDjVolumeHandoff({
     started,
     volumeLocked,
     deadlineAt,
-    ttsPosition,
-    musicPosition,
+    ttsPosition: liveTtsPosition,
+    musicPosition: liveMusicPosition,
   });
 
   const setPhase = (next) => {
@@ -251,7 +257,7 @@ export function createDjVolumeHandoff({
     return (
       isRampSilenceUri(value) ||
       isRestoreSilenceUri(value) ||
-      isDjClipUri(value, publicUrl)
+      isDjClipUri(value, ttsPublicUrl)
     );
   };
 
@@ -313,23 +319,44 @@ export function createDjVolumeHandoff({
         const uri = String(np?.uri || "");
         const state = String(np?.state || "").toUpperCase();
         const onRamp = isRampSilenceUri(uri);
-        const onDj = isDjClipUri(uri, publicUrl);
+        const onDj = isDjClipUri(uri, ttsPublicUrl);
         const onRestore = isRestoreSilenceUri(uri);
         const onPad = onRamp || onDj || onRestore;
         let handledPad = false;
 
         if (onRamp && baselineVolume == null) {
           handledPad = true;
-          // Never pause pre-silence. Pause/resume on the ramp pad races Sonos
-          // into the following HTTP TTS clip and restarts it from 0 — classic
-          // "double announce" when Skip seekNearEnd lands on this block.
-          // Silence is silent: ramp volume while the pad keeps playing.
+          // Silence is silent: ramp volume while the pad is current.
+          // If the DJ clip is not queued yet, pause here so the 3s pad cannot
+          // expire into the guest request (tease → pause → restart).
           await captureBaseline();
           setPhase("ramping-up");
-          if (await ramp(baselineVolume, announceVolume)) {
+          await ramp(baselineVolume, announceVolume);
+          if (holdPreSilence && !preSilenceReleased) {
+            try {
+              await io.pause();
+              pausedByHold = true;
+            } catch (error) {
+              logger.warn(`could not hold pre-silence: ${error.message}`);
+            }
+            setPhase("holding-pre-silence");
+            logger.info("holding pre-silence until announce clip is queued");
+          } else {
             setPhase("announcing");
+            logger.info("volume ready on pre-silence; letting pad advance");
           }
-          logger.info("volume ready on pre-silence; letting pad advance");
+        } else if (onRamp && phase === "holding-pre-silence") {
+          handledPad = true;
+          if (preSilenceReleased) {
+            try {
+              await io.resume();
+              pausedByHold = false;
+            } catch (error) {
+              logger.warn(`pre-silence release failed: ${error.message}`);
+            }
+            setPhase("announcing");
+            logger.info("announce queued; releasing pre-silence hold");
+          }
         } else if (onDj) {
           if (baselineVolume == null) {
             handledPad = true;
@@ -348,7 +375,7 @@ export function createDjVolumeHandoff({
             sawDjPlaying &&
             !advancedFromDj &&
             (state === "STOPPED" || state === "PAUSED_PLAYBACK") &&
-            Number(musicPosition) >= 2 &&
+            Number(liveMusicPosition) >= 2 &&
             (typeof io.next === "function" || typeof io.playAt === "function")
           ) {
             handledPad = true;
@@ -365,7 +392,7 @@ export function createDjVolumeHandoff({
                 );
               }
             } else {
-              await io.playAt(Number(musicPosition) - 1);
+              await io.playAt(Number(liveMusicPosition) - 1);
             }
             advancedFromDj = true;
             logger.info("advanced completed DJ clip to post-silence");
@@ -396,7 +423,7 @@ export function createDjVolumeHandoff({
           }
           if (!advancedFromRestore) {
             await advanceAfterSilencePad(
-              musicPosition,
+              liveMusicPosition,
               "post-silence",
               restoreHeldAt ?? now(),
               { nextTransition: true }
@@ -429,6 +456,7 @@ export function createDjVolumeHandoff({
           baselineVolume != null &&
           volumeLocked &&
           !deadlineHandled &&
+          phase !== "holding-pre-silence" &&
           deadlineAt != null &&
           now() >= deadlineAt
         ) {
@@ -451,11 +479,11 @@ export function createDjVolumeHandoff({
               /* keep the poll's uri */
             }
             const liveOnRamp = isRampSilenceUri(liveUri);
-            const liveOnDj = isDjClipUri(liveUri, publicUrl);
+            const liveOnDj = isDjClipUri(liveUri, ttsPublicUrl);
             const liveOnRestore = isRestoreSilenceUri(liveUri);
-            if (liveOnRamp && Number(ttsPosition) >= 1) {
-              await io.playAt(Number(ttsPosition));
-            } else if (liveOnDj && Number(musicPosition) >= 2) {
+            if (liveOnRamp && Number(liveTtsPosition) >= 1) {
+              await io.playAt(Number(liveTtsPosition));
+            } else if (liveOnDj && Number(liveMusicPosition) >= 2) {
               // Past the lead-in — skip forward. Never SeekTrack the TTS URI
               // itself (that restarts the http clip from 0).
               advancedFromDj = true;
@@ -467,10 +495,10 @@ export function createDjVolumeHandoff({
                   /* best effort */
                 }
               } else {
-                await io.playAt(Number(musicPosition) - 1);
+                await io.playAt(Number(liveMusicPosition) - 1);
               }
-            } else if (liveOnRestore && Number(musicPosition) >= 1) {
-              await io.playAt(Number(musicPosition));
+            } else if (liveOnRestore && Number(liveMusicPosition) >= 1) {
+              await io.playAt(Number(liveMusicPosition));
             } else if (!liveOnRamp && !liveOnDj && !liveOnRestore) {
               await io.resume();
             }
@@ -485,7 +513,12 @@ export function createDjVolumeHandoff({
 
         // A DJ clip that has played and is now idle is complete. Never send
         // Play to it again: if advancing failed, retry Next on the next poll.
-        if (onPad && !handledPad && !(onDj && sawDjPlaying)) {
+        if (
+          onPad &&
+          !handledPad &&
+          phase !== "holding-pre-silence" &&
+          !(onDj && sawDjPlaying)
+        ) {
           await maybeResumePad(true, state);
         }
       } catch (error) {
@@ -509,11 +542,36 @@ export function createDjVolumeHandoff({
       cancelled = true;
       if (task) await task.catch(() => {});
       const restored = await restoreExact(reason);
+      // Baseline first, then let the room go: a shout that died while we were
+      // holding on the silence must never leave the party paused.
+      if (pausedByHold) {
+        pausedByHold = false;
+        try {
+          const io = await getAdapter();
+          await io.resume();
+          logger.info(`resumed playback after cancelled pre-silence hold (${reason})`);
+        } catch (error) {
+          logger.error(`could not resume after hold (${reason}): ${error.message}`);
+        }
+      }
       setPhase("cancelled");
       return restored;
     },
+    get heldPlayback() {
+      return pausedByHold;
+    },
     isVolumeLocked() {
       return volumeLocked;
+    },
+    setTtsUrl(url) {
+      ttsPublicUrl = url || ttsPublicUrl;
+    },
+    setPositions({ ttsPosition: nextTts, musicPosition: nextMusic } = {}) {
+      if (nextTts != null) liveTtsPosition = nextTts;
+      if (nextMusic != null) liveMusicPosition = nextMusic;
+    },
+    releasePreSilenceHold() {
+      preSilenceReleased = true;
     },
     snapshot,
     restoreExact,

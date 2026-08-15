@@ -471,6 +471,26 @@ test("findUpcomingTrackPositionInItems prefers URI over title", () => {
   );
 });
 
+test("findUpcomingTrackPositionInItems can include the now-playing row", () => {
+  // The ramp park needs this: the request it belongs to may have already
+  // started (the tease), and its own slot is where the ramp goes.
+  const list = [
+    { TrackUri: "spotify:track:played", Title: "Old", Artist: "A" },
+    { TrackUri: "spotify:track:tnt", Title: "T.N.T.", Artist: "AC/DC" },
+    { TrackUri: "spotify:track:next", Title: "Next", Artist: "B" },
+  ];
+  const opts = {
+    uri: "spotify:track:tnt",
+    currentTrack: 2,
+    playingFromQueue: true,
+  };
+  assert.equal(findUpcomingTrackPositionInItems(list, opts), null);
+  assert.equal(
+    findUpcomingTrackPositionInItems(list, { ...opts, includeCurrent: true }),
+    2
+  );
+});
+
 test("findInsertPosition skips announce pads between searched songs", () => {
   // [cur, s1, ramp, DJ, s2, filler] → new request after s2 (pos 6).
   const list = [

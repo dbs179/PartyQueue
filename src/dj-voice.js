@@ -45,6 +45,8 @@ import {
   IMMINENT_ANNOUNCE_PAUSE_SEC,
   shouldPauseForImminentAnnounce,
   shouldHoldAtTrackEndForAnnounce,
+  shouldParkOnRampForAnnounce,
+  shouldSeekRampNow,
 } from "./shout-lead-buffer.js";
 import {
   queueWorkGeneration,
@@ -2376,14 +2378,196 @@ export function ensureSilenceBridge(durationSec = silenceDurationSec()) {
   };
 }
 
-/** Pre-DJ quiet pad — song is over; boost volume here before TTS. */
-export function ensureSilenceRamp(durationSec = silenceDurationSec()) {
+/** Handoff phases that mean no announce owns the room right now. */
+const SETTLED_HANDOFF_PHASES = new Set([
+  "idle",
+  "complete",
+  "cancelled",
+  "restored",
+  "deferred",
+]);
+
+/**
+ * If the outgoing song will end before this shout can be built, insert the
+ * volume ramp now, freeze Never-Ending, and start a volume handoff that will
+ * pause on that silence until the DJ clip is queued.
+ */
+export async function parkRampForShortAnnounce({
+  queuePosition,
+  requestUri = null,
+  preemptGeneration = queueWorkGeneration(),
+} = {}) {
+  const pos = Number(queuePosition);
+  if (!Number.isFinite(pos) || pos < 1) return null;
+  const {
+    isAnnounceRampParkActive,
+    announceRampToken,
+    setAnnounceRampParkExpiry,
+  } = await import("./announce-ramp-park.js");
+
+  // One park at a time, and never on top of an announce that is still being
+  // inserted — a second ramp would fight the first for the playhead.
+  if (isAnnounceRampParkActive()) {
+    console.log("[dj-voice] skip ramp park — another shout is already parked");
+    return null;
+  }
+  if (isAnnounceInFlight()) {
+    console.log("[dj-voice] skip ramp park — an announce is mid-insert");
+    return null;
+  }
+  const activePhase = getDjVolumeHandoffState()?.phase;
+  if (activePhase && !SETTLED_HANDOFF_PHASES.has(activePhase)) {
+    console.log(`[dj-voice] skip ramp park — handoff busy (${activePhase})`);
+    return null;
+  }
+
+  const { getAnnouncePlaybackContext, parkAnnounceRamp, pauseQueueTrim } =
+    await import("./sonos.js");
+  const ctx = await getAnnouncePlaybackContext().catch(() => null);
+  if (
+    !shouldParkOnRampForAnnounce({
+      requestAbsPos: pos,
+      currentTrack: ctx?.track,
+      remainingSec: ctx?.remainingSec,
+      elapsedSec: ctx?.positionSec,
+      isPlaying: ctx?.isPlaying,
+      playingFromQueue: ctx?.playingFromQueue,
+    })
+  ) {
+    return null;
+  }
+
+  // Unique per-announce URI: a shared ramp URL let a played pad (or a second
+  // shout's ramp) win the lookup, so the DJ clip landed on the wrong block.
+  const ramp = ensureSilenceRamp(silenceDurationSec(), {
+    token: announceRampToken(),
+  });
+  pauseQueueTrim(90_000);
+  const inserted = await parkAnnounceRamp({
+    queuePosition: pos,
+    requestUri,
+    preemptGeneration,
+    ramp: {
+      url: ramp.publicUrl,
+      title: "PartyQueue Volume Ramp",
+      artist: "PartyQueue",
+      durationSec: ramp.durationSec,
+    },
+  });
+  if (!inserted?.ok) return null;
+
+  const livePos = Number(inserted.rampPos) || pos;
+  const parked = {
+    rampPos: livePos,
+    requestPos: Number(inserted.requestPos) || livePos + 1,
+    rampUrl: ramp.publicUrl,
+    rampSec: ramp.durationSec,
+    requestUri,
+    handoff: null,
+    seekNow: false,
+  };
+
+  const handoff = await beginDjVolumeHandoff({
+    publicUrl: null,
+    approxDurationSec: 45,
+    silenceSec: ramp.durationSec,
+    // Claim the slots this block will occupy so a later shout defers to us
+    // instead of cancelling this handoff and leaving a ramp with no clip.
+    ttsPosition: livePos + 1,
+    musicPosition: livePos + 3,
+    holdPreSilence: true,
+    takeOver: false,
+    rearmOnComplete: true,
+    calculateTarget: (baseline) =>
+      announceVolumeFromMusic(baseline, volumeBumpTiers()),
+  });
+  if (handoff?.deferred) {
+    // Nothing will hold the pad, so the ramp would just play through and the
+    // request would start ahead of the DJ. Undo rather than half-park.
+    console.log("[dj-voice] ramp park deferred to an active handoff — undoing");
+    parked.handoff = handoff;
+    await abortParkedAnnounce(parked, "handoff deferred");
+    return null;
+  }
+  parked.handoff = handoff;
+  handoff.start()?.catch((err) =>
+    console.error("[dj-volume] park handoff crashed:", err.message)
+  );
+  setAnnounceRampParkExpiry(() =>
+    abortParkedAnnounce(parked, "park watchdog expired", { endPark: false })
+  );
+
+  parked.seekNow = shouldSeekRampNow({
+    requestAbsPos: livePos,
+    currentTrack: ctx?.track,
+    remainingSec: ctx?.remainingSec,
+    isPlaying: ctx?.isPlaying,
+  });
+  if (parked.seekNow) {
+    try {
+      await startQueuePlayback(livePos);
+    } catch (err) {
+      console.warn("[dj-voice] park seek to ramp failed:", err.message);
+    }
+  }
+
+  return parked;
+}
+
+/**
+ * Unwind a park whose shout never landed: restore volume, let the room play
+ * again if we were holding it, and drop the orphaned ramp when it is still
+ * upcoming. Safe to call twice.
+ */
+export async function abortParkedAnnounce(
+  parked,
+  reason = "announce failed",
+  { endPark = true } = {}
+) {
+  if (!parked) return;
+  const held = !!parked.handoff?.heldPlayback;
+  try {
+    await parked.handoff?.cancelAndRestore?.(reason);
+  } catch {
+    /* best-effort volume restore */
+  }
+  // If we were paused on the ramp, cancelAndRestore just resumed onto it —
+  // leave it to play out (3s of silence) rather than deleting it live.
+  if (!held && parked.rampUrl) {
+    try {
+      const { releaseParkedRamp } = await import("./sonos.js");
+      await releaseParkedRamp({ rampUrl: parked.rampUrl });
+    } catch (err) {
+      console.warn("[dj-voice] parked ramp cleanup failed:", err?.message || err);
+    }
+  }
+  if (endPark) {
+    try {
+      const { endAnnounceRampPark } = await import("./announce-ramp-park.js");
+      endAnnounceRampPark();
+    } catch {
+      /* ignore */
+    }
+  }
+  console.log(`[dj-voice] parked announce aborted (${reason})`);
+}
+
+/**
+ * Pre-DJ quiet pad — song is over; boost volume here before TTS.
+ * `token` appends a unique query so each announce owns a distinct queue URI
+ * (express.static ignores it); the pad regexes still match on the filename.
+ */
+export function ensureSilenceRamp(
+  durationSec = silenceDurationSec(),
+  { token = null } = {}
+) {
   const sec = normalizeDjSilenceSec(durationSec);
   syncSilencePadFiles();
   const fileName = silenceRampFileName(sec);
+  const suffix = token ? `?a=${encodeURIComponent(token)}` : "";
   return {
     fileName,
-    publicUrl: `${getPublicBaseUrl()}/media/tts/${fileName}`,
+    publicUrl: `${getPublicBaseUrl()}/media/tts/${fileName}${suffix}`,
     durationSec: sec,
   };
 }
@@ -2992,6 +3176,12 @@ async function startQueuePlayback(trackNumber = 1) {
 // lock in one-by-one (no interleaved pads / cancelled volume handoffs).
 let announceChain = Promise.resolve();
 let announceDepth = 0;
+
+/** True while any announce is queued or being inserted. */
+export function isAnnounceInFlight() {
+  return announceDepth > 0;
+}
+
 function withAnnounceLock(fn) {
   announceDepth += 1;
   if (announceDepth > 1) {
@@ -3068,6 +3258,7 @@ export async function announceOnSonos(
     requestUri = null,
     allowImminentPause = false,
     holdAtTrackEnd = false,
+    parked = null,
   } = {}
 ) {
   return withAnnounceLock(() =>
@@ -3081,6 +3272,7 @@ export async function announceOnSonos(
       requestUri,
       allowImminentPause,
       holdAtTrackEnd,
+      parked,
     })
   );
 }
@@ -3097,6 +3289,7 @@ async function announceOnSonosUnlocked(
     requestUri = null,
     allowImminentPause = false,
     holdAtTrackEnd = false,
+    parked = null,
   } = {}
 ) {
   const preempted = () => queueWorkWasPreempted(preemptGeneration);
@@ -3187,34 +3380,64 @@ async function announceOnSonosUnlocked(
     if (preempted()) {
       return { ok: false, skipped: true, reason: "queue-preempted" };
     }
-    const ramp = ensureSilenceRamp();
+    const ramp = parked?.rampUrl
+      ? { publicUrl: parked.rampUrl, durationSec: parked.rampSec || silenceDurationSec() }
+      : ensureSilenceRamp();
     const restore = ensureSilenceBridge();
     const { djName } = getDjVoiceSettings();
-    const { insertAnnounceBlock } = await import("./sonos.js");
-    const block = await insertAnnounceBlock({
-      queuePosition,
-      preemptGeneration,
-      applyLeadBuffer: !!applyLeadBuffer && !startPlayback,
-      requestUri: requestUri || null,
-      ramp: {
-        url: ramp.publicUrl,
-        title: "PartyQueue Volume Ramp",
-        artist: "PartyQueue",
-        durationSec: ramp.durationSec,
-      },
-      tts: {
-        url: clip.publicUrl,
-        title: djName || DJ_VOICE_DEFAULTS.djName,
-        artist: "PartyQueue",
-        durationSec: clip.approxDurationSec,
-      },
-      restore: {
-        url: restore.publicUrl,
-        title: "PartyQueue Silence Bridge",
-        artist: "PartyQueue",
-        durationSec: restore.durationSec,
-      },
-    });
+    const { insertAnnounceBlock, completeParkedAnnounce } = await import("./sonos.js");
+    const ttsClip = {
+      url: clip.publicUrl,
+      title: djName || DJ_VOICE_DEFAULTS.djName,
+      artist: "PartyQueue",
+      durationSec: clip.approxDurationSec,
+    };
+    const restoreClip = {
+      url: restore.publicUrl,
+      title: "PartyQueue Silence Bridge",
+      artist: "PartyQueue",
+      durationSec: restore.durationSec,
+    };
+    let unparkedFallback = false;
+    let block = parked?.rampPos
+      ? await completeParkedAnnounce({
+          rampUrl: parked.rampUrl,
+          expectedRampPos: parked.rampPos,
+          tts: ttsClip,
+          restore: restoreClip,
+          preemptGeneration,
+        })
+      : null;
+    if (!block?.ok && parked?.rampPos && block?.reason === "parked-ramp-missing") {
+      // The ramp we parked on is gone (skip / clear / host edit). Unwind the
+      // park completely — otherwise the freeze and the volume hold outlive it —
+      // then insert a normal block with its own ramp and volume session.
+      console.warn("[dj-voice] parked ramp missing; inserting a full announce block");
+      await abortParkedAnnounce(parked, "parked ramp missing");
+      parked = null;
+      block = null;
+      // The park was our position anchor; without it we must re-resolve the
+      // request under the insert lock or the pads land wherever it used to be.
+      unparkedFallback = true;
+    }
+    if (!block) {
+      const freshRamp = parked ? ramp : ensureSilenceRamp();
+      block = await insertAnnounceBlock({
+        queuePosition,
+        preemptGeneration,
+        applyLeadBuffer:
+          (!!applyLeadBuffer || unparkedFallback) && !startPlayback && !parked,
+        requestUri: requestUri || null,
+        ramp: {
+          url: freshRamp.publicUrl,
+          title: "PartyQueue Volume Ramp",
+          artist: "PartyQueue",
+          durationSec: freshRamp.durationSec,
+        },
+        tts: ttsClip,
+        restore: restoreClip,
+      });
+    }
     if (!block?.ok) {
       if (block?.wiped?.removed > 0) {
         console.log(
@@ -3251,15 +3474,31 @@ async function announceOnSonosUnlocked(
     );
 
     // Fresh sets / empty-queue shouts: Play ramp → boost → DJ → music.
-    const vol = await beginVolumeSession({
-      publicUrl: clip.publicUrl,
-      approxDurationSec: clip.approxDurationSec,
-      silenceSec: ramp.durationSec,
-      startPlayback: !!startPlayback || heldAtTrackEnd,
-      ttsPosition: ttsPos,
-      musicPosition: restorePos + 1,
-    });
-    volHold = vol.startHold || null;
+    let vol;
+    if (parked?.handoff && !parked.handoff.deferred) {
+      parked.handoff.setTtsUrl?.(clip.publicUrl);
+      parked.handoff.setPositions?.({
+        ttsPosition: ttsPos,
+        musicPosition: restorePos + 1,
+      });
+      parked.handoff.releasePreSilenceHold?.();
+      vol = {
+        announceLevel: parked.handoff.snapshot?.()?.announceVolume ?? null,
+        tiers: volumeBumpTiers(),
+        cancelled: false,
+        startHold: null,
+      };
+    } else {
+      vol = await beginVolumeSession({
+        publicUrl: clip.publicUrl,
+        approxDurationSec: clip.approxDurationSec,
+        silenceSec: ramp.durationSec,
+        startPlayback: !!startPlayback || heldAtTrackEnd,
+        ttsPosition: ttsPos,
+        musicPosition: restorePos + 1,
+      });
+      volHold = vol.startHold || null;
+    }
     if ((startPlayback || heldAtTrackEnd) && !vol.cancelled) {
       // Arm before Play so the first pre-silence poll owns the baseline.
       // Track-end hold: do not resume the dying song — Play the announce block.
@@ -3297,6 +3536,9 @@ async function announceOnSonosUnlocked(
       volHold?.();
     } catch {
       /* ignore */
+    }
+    if (parked) {
+      await abortParkedAnnounce(parked, "announce failed");
     }
     // Only start as a recovery if we never reached Play — avoids DJ-twice.
     if (startPlayback && !didStart && !preempted()) {
