@@ -5544,12 +5544,12 @@ body.party-display-active.party-display-preview .party-display-view {
   min-height: 0;
   height: 100%;
   padding: calc(14 * var(--pd));
-  /* Fit N full rows in JS — no partial-row scroll. */
+  /* Always three full Up Next rows — no partial-row scroll. */
   overflow: hidden;
   box-sizing: border-box;
 }
 
-/* Up Next type (PC + TV shared) — ~1.5× prior TV sizes; list count fits height. */
+/* Up Next type (PC + TV shared) — three upcoming songs. */
 .party-display-side > .party-display-section-head .party-display-label,
 .party-display-queue .party-display-label {
   font-size: calc(30 * var(--pd));
@@ -5605,8 +5605,15 @@ body.party-display-active.party-display-preview .party-display-view {
 .party-display-queue-meta {
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: calc(2 * var(--pd));
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: calc(10 * var(--pd));
+  row-gap: calc(2 * var(--pd));
+}
+
+.party-display-queue-meta strong,
+.party-display-queue-meta .party-display-queue-artist {
+  flex: 1 1 100%;
 }
 
 .party-display-queue-meta strong,
@@ -5628,6 +5635,8 @@ body.party-display-active.party-display-preview .party-display-view {
 }
 
 .party-display-queue-meta .party-display-queue-source {
+  flex: 0 1 auto;
+  min-width: 0;
   color: #8ef0ae;
   font-size: calc(27 * var(--pd));
   line-height: 1.15;
@@ -5635,6 +5644,8 @@ body.party-display-active.party-display-preview .party-display-view {
 
 .party-display-queue-meta .party-display-queue-genre,
 .party-display-queue-meta .party-display-queue-playlist {
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: calc(24 * var(--pd));
   line-height: 1.15;
   font-weight: 700;

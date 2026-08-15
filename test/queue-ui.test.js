@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   mainQueueCountLabel,
   partyQueueCountLabel,
+  partyDisplayQueueSlice,
+  DISPLAY_QUEUE_VISIBLE,
   queueTrackSig,
   queueOriginBadgeHtml,
   queueGenreLabel,
@@ -16,6 +18,24 @@ test("count labels", () => {
   assert.equal(mainQueueCountLabel(3), "(3)");
   assert.equal(partyQueueCountLabel(0), "");
   assert.equal(partyQueueCountLabel(2), "2 queued");
+});
+
+test("Party Display Up Next always takes the next 3 songs", () => {
+  assert.equal(DISPLAY_QUEUE_VISIBLE, 3);
+  assert.deepEqual(partyDisplayQueueSlice(null), []);
+  assert.deepEqual(
+    partyDisplayQueueSlice([{ title: "A" }, { title: "B" }]).map((t) => t.title),
+    ["A", "B"]
+  );
+  assert.deepEqual(
+    partyDisplayQueueSlice([
+      { title: "A" },
+      { title: "B" },
+      { title: "C" },
+      { title: "D" },
+    ]).map((t) => t.title),
+    ["A", "B", "C"]
+  );
 });
 
 test("queueTrackSig ignores absolute Sonos position shifts", () => {
