@@ -703,10 +703,14 @@ export function createLyricsUi(els, deps) {
     if (displayLyrics?.classList?.contains("is-dj")) sizeDisplayDjLyrics();
   });
 
-  window.setInterval(
-    updateTrackProgress,
-    prefersReducedMotion() ? 1000 : 250
-  );
+  window.setInterval(() => {
+    // Nothing to paint for a pocketed phone, and extrapolating the playhead
+    // off an hour-old snapshot would only flash a wrong bar on the way back.
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      return;
+    }
+    updateTrackProgress();
+  }, prefersReducedMotion() ? 1000 : 250);
 
   return {
     sync,

@@ -69,6 +69,11 @@ export function bindForegroundResume({
   let lastResumeAt = 0;
 
   function resume() {
+    // pageshow (initial load in a background tab, Back into bfcache) and
+    // online can land while the document is still hidden. Reopening streams
+    // there is pointless, and spending the debounce window would swallow the
+    // visibilitychange that follows — leaving a live view with no stream.
+    if (target?.visibilityState === "hidden") return false;
     const t = now();
     if (lastResumeAt && t - lastResumeAt < debounceMs) return false;
     lastResumeAt = t;
@@ -77,6 +82,8 @@ export function bindForegroundResume({
   }
 
   function sleep() {
+    // Coming back is always worth a reconnect, however brief the trip away.
+    lastResumeAt = 0;
     onSleep?.();
   }
 
@@ -203,6 +210,14 @@ export function createLiveStreams(els, deps) {
     staleWatchTimer = setInterval(() => {
       if (!shouldPoll()) {
         stopStaleWatch();
+        return;
+      }
+      if (
+        typeof EventSourceCtor === "function" &&
+        (!nowPlayingSource || !queueSource || !partySource)
+      ) {
+        // A live view with a missing stream: reopen rather than sit stale.
+        syncPolling();
         return;
       }
       if (lastLiveEventAt && Date.now() - lastLiveEventAt > STALE_LIVE_MS) {
@@ -695,7 +710,9 @@ export function createLiveStreams(els, deps) {
     openNowPlayingStream();
     openQueueStream();
     openPartyStream();
-    if (!lastLiveEventAt) noteLiveEvent();
+    // Restart the silence clock on a reconnect: a timestamp from before the
+    // phone was pocketed would trip the stale watch on its very first tick.
+    if (forceReconnect || !lastLiveEventAt) noteLiveEvent();
     armStaleWatch();
   }
 
@@ -705,7 +722,10 @@ export function createLiveStreams(els, deps) {
         syncPolling({ forceReconnect: true });
         hooks.onResume?.();
       },
-      onSleep: () => closeAllStreams(),
+      onSleep: () => {
+        closeAllStreams();
+        hooks.onSleep?.();
+      },
       shouldResumeOnFocus: () =>
         !nowPlayingSource ||
         !lastLiveEventAt ||

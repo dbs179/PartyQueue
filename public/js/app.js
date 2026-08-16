@@ -3053,8 +3053,29 @@ liveStreams = createLiveStreams(
     loadGroups: (force) => loadGroups(force),
   }
 );
+// Streams cover Now Playing, Up Next and the party toggles. Anything a view
+// loads on entry (stats, Booth counts, Memory) has to be pulled again here, or
+// a phone that was away for an hour comes back to whatever it painted then.
+function refreshViewOnResume() {
+  if (currentView === "display") {
+    syncDisplayStatsPolling(true);
+    void loadJoinCode();
+  }
+  if (currentView === "display" || currentView === "stats") void loadStats();
+  if (currentView === "booth" && settingsGateOk()) void updateBoothHubSummaries();
+  if (currentView === "memory" && settingsGateOk()) loadMemory();
+  if (currentView === "suggestions" && settingsGateOk()) loadSuggestions();
+  if (currentView === "sonos") loadGroups(true);
+  if (isMusicMixArea(currentView)) void loadAutoFill();
+}
+
 liveStreams.bindResume({
-  onResume: () => refreshGuestFairness(),
+  onResume: () => {
+    refreshGuestFairness();
+    refreshViewOnResume();
+  },
+  // A backgrounded Party Display phone should stop its 45s stats poll too.
+  onSleep: () => syncDisplayStatsPolling(false),
 });
 
 async function postControl(btn, endpoint, onOk) {

@@ -532,6 +532,89 @@ test("bindForegroundResume debounces stacked unlock events", () => {
   unbind();
 });
 
+test("a resume event while hidden leaves the debounce for the real return", () => {
+  const listeners = new Map();
+  const target = {
+    visibilityState: "hidden",
+    addEventListener(name, fn) {
+      listeners.set(`doc:${name}`, fn);
+    },
+    removeEventListener() {},
+  };
+  const win = {
+    addEventListener(name, fn) {
+      listeners.set(`win:${name}`, fn);
+    },
+    removeEventListener() {},
+  };
+  let now = 1_000;
+  let resumes = 0;
+  bindForegroundResume({
+    onResume: () => {
+      resumes += 1;
+    },
+    target,
+    win,
+    now: () => now,
+  });
+
+  // Background tab load / Back into bfcache / WiFi returning in a pocket.
+  listeners.get("win:pageshow")();
+  listeners.get("win:online")();
+  assert.equal(resumes, 0);
+
+  // The unlock that follows within the debounce window must still reconnect.
+  now += 200;
+  target.visibilityState = "visible";
+  listeners.get("doc:visibilitychange")();
+  assert.equal(resumes, 1);
+});
+
+test("going hidden clears the debounce so a quick return reconnects", () => {
+  const listeners = new Map();
+  const target = {
+    visibilityState: "visible",
+    addEventListener(name, fn) {
+      listeners.set(`doc:${name}`, fn);
+    },
+    removeEventListener() {},
+  };
+  const win = {
+    addEventListener(name, fn) {
+      listeners.set(`win:${name}`, fn);
+    },
+    removeEventListener() {},
+  };
+  let now = 1_000;
+  let resumes = 0;
+  let sleeps = 0;
+  bindForegroundResume({
+    onResume: () => {
+      resumes += 1;
+    },
+    onSleep: () => {
+      sleeps += 1;
+    },
+    target,
+    win,
+    now: () => now,
+  });
+
+  listeners.get("doc:visibilitychange")();
+  assert.equal(resumes, 1);
+
+  // Notification shade / quick app hop: shorter than the debounce window.
+  now += 300;
+  target.visibilityState = "hidden";
+  listeners.get("doc:visibilitychange")();
+  assert.equal(sleeps, 1);
+
+  now += 300;
+  target.visibilityState = "visible";
+  listeners.get("doc:visibilitychange")();
+  assert.equal(resumes, 2);
+});
+
 test("bindForegroundResume skips a fresh focus hop", () => {
   const listeners = new Map();
   const target = {
