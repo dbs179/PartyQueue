@@ -6,7 +6,10 @@ import {
   refillAnnounceGuardTtlMs,
   buildRefillAnnounceGuard,
   clearRefillAnnounceGuard,
+  clearRefillAnnounceClipUrl,
+  getRefillAnnounceClipUrl,
   getRefillAnnounceGuard,
+  setRefillAnnounceClipUrl,
   setRefillAnnounceGuardForTests,
   isRefillAnnounceSuppressed,
   refillSetFlavorChanged,
@@ -15,6 +18,21 @@ import {
 describe("refill announce guard", () => {
   beforeEach(() => {
     clearRefillAnnounceGuard();
+    clearRefillAnnounceClipUrl();
+  });
+
+  test("refill clip URL is remembered until cleared", () => {
+    assert.equal(getRefillAnnounceClipUrl(), null);
+    assert.equal(
+      setRefillAnnounceClipUrl("http://partyqueue/media/tts/refill-abc.mp3"),
+      "http://partyqueue/media/tts/refill-abc.mp3"
+    );
+    assert.equal(
+      getRefillAnnounceClipUrl(),
+      "http://partyqueue/media/tts/refill-abc.mp3"
+    );
+    clearRefillAnnounceClipUrl();
+    assert.equal(getRefillAnnounceClipUrl(), null);
   });
 
   test("TTL is at least 20 minutes and scales with set size", () => {

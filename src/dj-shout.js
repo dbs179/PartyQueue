@@ -569,6 +569,9 @@ export async function announceRequestShout(
       applyLeadBuffer: !startPlayback && !parked,
       requestUri: uri || null,
       allowImminentPause: false,
+      // Set Request replaces a waiting Never-Ending refill intro; a regular
+      // song shout / dedication only supersedes this track's glued pads.
+      replaceWaitingRefill: kind === "setRequest",
       // Without a park, next-up still holds at the tail of the current song so
       // the request cannot start before the pads land.
       holdAtTrackEnd:

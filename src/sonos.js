@@ -15,6 +15,8 @@ export {
   findInsertPosition,
   findUpcomingAnnouncePadIndices,
   announcePadsToSupersede,
+  announcePadsForClipUrl,
+  clipUrlMatchesQueueUri,
   findUpcomingTrackPositionInItems,
   songMatchKey,
   interleave,

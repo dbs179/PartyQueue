@@ -149,9 +149,26 @@ export function buildRefillAnnounceGuard(summary, createdAt = Date.now()) {
 // that announced batch is no longer current/upcoming — unless the next batch
 // is a new set flavor (lane/mood). Silent same-set top-ups still run.
 let refillAnnounceGuard = null;
+// TTS clip URL for that waiting refill block — used to strip leftover pads
+// when a sooner set-level announce (Set Request / Random / new refill) lands.
+let refillAnnounceClipUrl = null;
 
 export function clearRefillAnnounceGuard() {
   refillAnnounceGuard = null;
+}
+
+export function setRefillAnnounceClipUrl(url) {
+  const s = String(url || "").trim();
+  refillAnnounceClipUrl = s || null;
+  return refillAnnounceClipUrl;
+}
+
+export function getRefillAnnounceClipUrl() {
+  return refillAnnounceClipUrl;
+}
+
+export function clearRefillAnnounceClipUrl() {
+  refillAnnounceClipUrl = null;
 }
 
 export function getRefillAnnounceGuard() {

@@ -13,6 +13,7 @@ import {
   findInsertPosition,
   findUpcomingAnnouncePadIndices,
   announcePadsToSupersede,
+  announcePadsForClipUrl,
   songMatchKey,
   isAnnounceQueuePad,
   isTransportPlaying,
@@ -32,6 +33,10 @@ import {
 } from "./queue-origin.js";
 import { sanitizeDisplayName } from "./display-name.js";
 import { queueWorkWasPreempted } from "./queue-preempt.js";
+import {
+  getRefillAnnounceClipUrl,
+  clearRefillAnnounceClipUrl,
+} from "./refill-announce-guard.js";
 import {
   beginAnnounceRampPark,
   endAnnounceRampPark,
@@ -637,6 +642,7 @@ async function enqueueHttpAudioUnlocked(
  *   preemptGeneration?: number,
  *   applyLeadBuffer?: boolean, // re-resolve request position; never reorders
  *   requestUri?: string|null,
+ *   replaceWaitingRefill?: boolean, // strip leftover Never-Ending refill pads
  *   ramp: { url: string, title?: string, artist?: string, durationSec?: number },
  *   tts: { url: string, title?: string, artist?: string, durationSec?: number },
  *   restore: { url: string, title?: string, artist?: string, durationSec?: number },
@@ -826,10 +832,12 @@ async function completeParkedAnnounceUnlocked({
   tts,
   restore,
   preemptGeneration,
+  replaceWaitingRefill = false,
   ops = {},
 } = {}) {
   const enqueue = ops.enqueue || enqueueHttpAudioUnlocked;
   const readItems = ops.readItems;
+  const removePads = ops.removePads || removeUpcomingAnnouncePadsUnlocked;
   const preempted = () =>
     preemptGeneration != null && queueWorkWasPreempted(preemptGeneration);
   if (preempted()) {
@@ -859,6 +867,25 @@ async function completeParkedAnnounceUnlocked({
   }
   if (preempted()) {
     return { ok: false, skipped: true, reason: "queue-preempted" };
+  }
+  if (replaceWaitingRefill) {
+    try {
+      // Only the leftover refill block — do not strip the parked ramp we
+      // are about to complete.
+      const wiped = await removePads({
+        beforePosition: rampPos,
+        replaceWaitingRefill: true,
+        refillOnly: true,
+      });
+      if (wiped.removedBefore > 0) {
+        rampPos = Math.max(1, rampPos - wiped.removedBefore);
+      }
+    } catch (err) {
+      console.warn(
+        "[announce-park] leftover refill strip failed:",
+        err?.message || err
+      );
+    }
   }
 
   const ttsPos = rampPos + 1;
@@ -938,6 +965,7 @@ async function insertAnnounceBlockUnlocked({
   restore,
   applyLeadBuffer = false,
   requestUri = null,
+  replaceWaitingRefill = false,
   ops = {},
 } = {}) {
   const removePads = ops.removePads || removeUpcomingAnnouncePadsUnlocked;
@@ -1008,7 +1036,10 @@ async function insertAnnounceBlockUnlocked({
 
   let wiped = { removed: 0, removedBefore: 0, protectedThrough: 0 };
   try {
-    wiped = await removePads({ beforePosition: rampPos });
+    wiped = await removePads({
+      beforePosition: rampPos,
+      replaceWaitingRefill,
+    });
     if (wiped.removedBefore > 0) {
       rampPos = Math.max(1, rampPos - wiped.removedBefore);
     }
@@ -1249,9 +1280,10 @@ function contiguousIndexRanges(indices) {
  * With beforePosition, only the contiguous pad run at that slot is removed
  * (this track's existing shout / dedication). Earlier request-glued shouts
  * stay. Without beforePosition, all upcoming pads are stripped (startup).
- * @param {{ beforePosition?: number }} [opts]
+ * @param {{ beforePosition?: number, replaceWaitingRefill?: boolean }} [opts]
  *   beforePosition: 1-based insert index; also used to count removed pads
  *   strictly before that index (for adjusting the insert after a wipe).
+ *   replaceWaitingRefill: also strip a leftover Never-Ending refill block.
  * @returns {Promise<{
  *   removed: number,
  *   removedBefore: number,
@@ -1262,7 +1294,11 @@ export async function removeUpcomingAnnouncePads(...args) {
   return withSonosWriteLock(() => removeUpcomingAnnouncePadsUnlocked(...args));
 }
 
-async function removeUpcomingAnnouncePadsUnlocked({ beforePosition } = {}) {
+async function removeUpcomingAnnouncePadsUnlocked({
+  beforePosition,
+  replaceWaitingRefill = false,
+  refillOnly = false,
+} = {}) {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
   const [pos, media, queue] = await Promise.all([
@@ -1309,9 +1345,20 @@ async function removeUpcomingAnnouncePadsUnlocked({ beforePosition } = {}) {
   }
 
   const before = Number(beforePosition) || 0;
-  // Keep earlier request-glued shouts. Only replace the pad run at this slot
-  // (or strip everything on startup when beforePosition is omitted).
-  const toRemove = announcePadsToSupersede(indices, before).filter((i) => {
+  // Keep earlier request-glued shouts. Replace the pad run at this slot
+  // (plus the shout glued immediately before it) — or strip everything on
+  // startup when beforePosition is omitted. `refillOnly` skips the slot
+  // wipe so a parked ramp is not deleted out from under a completing shout.
+  const slotPads = refillOnly ? [] : announcePadsToSupersede(indices, before);
+  let refillPads = [];
+  const refillClip = replaceWaitingRefill ? getRefillAnnounceClipUrl() : null;
+  if (refillClip) {
+    refillPads = announcePadsForClipUrl(items, refillClip, {
+      currentTrack: track,
+      playingFromQueue,
+    });
+  }
+  const toRemove = [...new Set([...slotPads, ...refillPads])].filter((i) => {
     if (!isAnnounceRampParkActive()) return true;
     const park = getAnnounceRampPark();
     const item = items[i - 1];
@@ -1358,6 +1405,15 @@ async function removeUpcomingAnnouncePadsUnlocked({ beforePosition } = {}) {
   if (removed) {
     invalidateSonosSnapshots();
     console.log(`[dj-voice] removed ${removed} superseded announce pad(s)`);
+  }
+  if (refillPads.length && refillPads.some((i) => toRemove.includes(i))) {
+    clearRefillAnnounceClipUrl();
+    try {
+      const voice = await import("./dj-voice.js");
+      voice.abandonPendingRefillAnnounce("superseded by later announce");
+    } catch {
+      /* pending marker is best-effort */
+    }
   }
   return { removed, removedBefore, protectedThrough };
 }

@@ -54,10 +54,13 @@ import {
 } from "./queue-preempt.js";
 import {
   clearRefillAnnounceGuard,
+  clearRefillAnnounceClipUrl,
+  getRefillAnnounceClipUrl,
   getRefillAnnounceGuard,
   installRefillAnnounceGuard,
   isRefillAnnounceSuppressed,
   refillSetFlavorChanged,
+  setRefillAnnounceClipUrl,
 } from "./refill-announce-guard.js";
 
 export {
@@ -139,6 +142,17 @@ const OPENAI_AGENT_ID = "conversation.openai_conversation";
 
 // Pending refill announce metadata (TTS already inserted into the queue).
 let pending = null;
+
+/** Drop a waiting Never-Ending refill intro (pads already stripped or gone). */
+export function abandonPendingRefillAnnounce(reason) {
+  const had = !!(pending || getRefillAnnounceClipUrl());
+  pending = null;
+  clearRefillAnnounceClipUrl();
+  if (had && reason) {
+    console.log(`[dj-voice] abandoned waiting refill announce (${reason})`);
+  }
+  return had;
+}
 let scriptVariant = 0;
 // Session announce ordinal — drives occasional character bits (Phase 3).
 let announceOrdinal = 0;
@@ -3259,6 +3273,7 @@ export async function announceOnSonos(
     allowImminentPause = false,
     holdAtTrackEnd = false,
     parked = null,
+    replaceWaitingRefill = false,
   } = {}
 ) {
   return withAnnounceLock(() =>
@@ -3273,6 +3288,7 @@ export async function announceOnSonos(
       allowImminentPause,
       holdAtTrackEnd,
       parked,
+      replaceWaitingRefill,
     })
   );
 }
@@ -3290,6 +3306,7 @@ async function announceOnSonosUnlocked(
     allowImminentPause = false,
     holdAtTrackEnd = false,
     parked = null,
+    replaceWaitingRefill = false,
   } = {}
 ) {
   const preempted = () => queueWorkWasPreempted(preemptGeneration);
@@ -3406,6 +3423,7 @@ async function announceOnSonosUnlocked(
           tts: ttsClip,
           restore: restoreClip,
           preemptGeneration,
+          replaceWaitingRefill,
         })
       : null;
     if (!block?.ok && parked?.rampPos && block?.reason === "parked-ramp-missing") {
@@ -3428,6 +3446,7 @@ async function announceOnSonosUnlocked(
         applyLeadBuffer:
           (!!applyLeadBuffer || unparkedFallback) && !startPlayback && !parked,
         requestUri: requestUri || null,
+        replaceWaitingRefill,
         ramp: {
           url: freshRamp.publicUrl,
           title: "PartyQueue Volume Ramp",
@@ -3700,20 +3719,24 @@ export async function scheduleRefillAnnounce(
       startPlayback: false,
       queuePosition: insertAt,
       preemptGeneration,
+      replaceWaitingRefill: true,
     });
     pending.enqueued = !!result?.ok;
     pending.publicUrl = result?.publicUrl || null;
     if (!result?.ok) {
       console.error("[dj-voice] refill enqueue failed:", result?.error);
       pending = null;
+      clearRefillAnnounceClipUrl();
       // Failed TTS must not block later intros.
       return null;
     }
+    setRefillAnnounceClipUrl(result.publicUrl);
     installRefillAnnounceGuard(summary);
     return pending;
   } catch (err) {
     console.error("[dj-voice] refill enqueue failed:", err.message);
     pending = null;
+    clearRefillAnnounceClipUrl();
     return null;
   }
 }
@@ -3724,12 +3747,14 @@ export async function checkPendingAnnounce(status) {
   if (!pending) return null;
   if (!getDjVoiceSettings().djVoiceEnabled) {
     pending = null;
+    clearRefillAnnounceClipUrl();
     return null;
   }
   const track = Number(status?.track) || 0;
   if (track <= pending.boundaryTrack) return null;
   const job = pending;
   pending = null;
+  clearRefillAnnounceClipUrl();
   console.log(
     `[dj-voice] crossed refill boundary at track ${track} (TTS was queued at ${job.insertAt})`
   );
@@ -3779,6 +3804,7 @@ export async function announceFreshSet(
     queuePosition: 1,
     preemptGeneration,
     clip,
+    replaceWaitingRefill: true,
   });
   if (result?.ok) clearRefillAnnounceGuard();
   return result;
@@ -3876,6 +3902,7 @@ export async function announceSetBatch(
     queuePosition: insertAt,
     preemptGeneration,
     clip,
+    replaceWaitingRefill: true,
   });
   if (result?.ok) clearRefillAnnounceGuard();
   return result;

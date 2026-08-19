@@ -9,6 +9,8 @@ import {
   findInsertPosition,
   findUpcomingAnnouncePadIndices,
   announcePadsToSupersede,
+  announcePadsForClipUrl,
+  clipUrlMatchesQueueUri,
   findUpcomingTrackPositionInItems,
   shouldClearQueueForRandomDj,
   randomDjAnnouncePlan,
@@ -451,6 +453,54 @@ test("announcePadsToSupersede keeps earlier request shouts", () => {
   assert.deepEqual(announcePadsToSupersede([5, 6, 7], 5), [5, 6, 7]);
   assert.deepEqual(announcePadsToSupersede([2, 3, 4, 6, 7, 8], 6), [6, 7, 8]);
   assert.deepEqual(announcePadsToSupersede([2, 3, 4], 0), [2, 3, 4]);
+});
+
+test("announcePadsToSupersede replaces the shout glued to this song", () => {
+  // Dedication / re-shout inserts at the song. The original shout is the
+  // contiguous pad run immediately ahead. A gap (another song) keeps an
+  // earlier request shout. No gap (stacked shouts for the same song) wipes
+  // the whole run so Dedicate does not play two Baby Got Back intros.
+  assert.deepEqual(announcePadsToSupersede([5, 6, 7], 8), [5, 6, 7]);
+  assert.deepEqual(announcePadsToSupersede([2, 3, 4, 5, 6, 7], 8), [
+    2, 3, 4, 5, 6, 7,
+  ]);
+  assert.deepEqual(announcePadsToSupersede([2, 3, 4, 6, 7, 8], 9), [6, 7, 8]);
+});
+
+test("announcePadsForClipUrl returns the waiting refill block only", () => {
+  const refillTts = "http://partyqueue/media/tts/refill-abc.mp3";
+  const list = [
+    { TrackUri: "spotify:track:now", Title: "Now", Artist: "A" },
+    { TrackUri: "http://x/media/tts/silence-ramp-3s.mp3", Title: "PartyQueue Volume Ramp" },
+    { TrackUri: refillTts, Title: "Party DJ" },
+    { TrackUri: "http://x/media/tts/silence-3s.mp3", Title: "PartyQueue Silence Bridge" },
+    { TrackUri: "spotify:track:next", Title: "Next", Artist: "B" },
+    { TrackUri: "http://x/media/tts/silence-ramp-3s.mp3", Title: "PartyQueue Volume Ramp" },
+    { TrackUri: "http://partyqueue/media/tts/other-shout.mp3", Title: "Party DJ" },
+    { TrackUri: "http://x/media/tts/silence-3s.mp3", Title: "PartyQueue Silence Bridge" },
+  ];
+  assert.deepEqual(
+    announcePadsForClipUrl(list, refillTts, {
+      currentTrack: 1,
+      playingFromQueue: true,
+    }),
+    [2, 3, 4]
+  );
+  assert.equal(
+    clipUrlMatchesQueueUri(
+      "http://10.10.1.30:8088/media/tts/refill-abc.mp3",
+      refillTts
+    ),
+    true
+  );
+  assert.deepEqual(
+    announcePadsForClipUrl(list, refillTts, {
+      currentTrack: 3,
+      playingFromQueue: true,
+    }),
+    [],
+    "do not strip a refill block that is already playing"
+  );
 });
 
 test("findUpcomingTrackPositionInItems prefers URI over title", () => {

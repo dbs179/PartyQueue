@@ -228,9 +228,10 @@ export function findInsertPosition(items, { currentTrack = 0, playingFromQueue =
 
 /**
  * Which upcoming announce pads a new insert may replace.
- * Only the contiguous pad run at the insert slot (this track's existing shout
- * or dedication). Earlier request-glued shouts stay put — wiping them caused
- * empty DJ clips and songs landing in the wrong spot.
+ * The contiguous pad run at the insert slot plus the run glued immediately
+ * before it (this track's existing shout / dedication). Earlier request
+ * shouts with music between them and the insert stay put — wiping those
+ * caused empty DJ clips and songs landing in the wrong spot.
  * No beforePosition (startup reconcile) still returns every listed index.
  */
 export function announcePadsToSupersede(indices, beforePosition) {
@@ -240,13 +241,67 @@ export function announcePadsToSupersede(indices, beforePosition) {
   const before = Number(beforePosition) || 0;
   if (before < 1) return list;
   const indexSet = new Set(list);
-  return list.filter((i) => {
+  const atOrAfter = list.filter((i) => {
     if (i < before) return false;
     for (let j = before; j <= i; j++) {
       if (!indexSet.has(j)) return false;
     }
     return true;
   });
+  // Dedication / re-shout inserts at the song. The original shout sits in
+  // the three pads immediately ahead of that song — those must go too.
+  const gluedBefore = [];
+  for (let i = before - 1; i >= 1; i--) {
+    if (!indexSet.has(i)) break;
+    gluedBefore.push(i);
+  }
+  gluedBefore.reverse();
+  return [...gluedBefore, ...atOrAfter];
+}
+
+/** Sonos may echo a clip URL escaped or with a different query; match loosely. */
+export function clipUrlMatchesQueueUri(uri, clipUrl) {
+  const want = String(clipUrl || "");
+  const value = String(uri || "");
+  if (!want || !value) return false;
+  if (value === want) return true;
+  const segment = want.split("/").pop() || "";
+  if (segment && value.includes(segment)) return true;
+  const fileName = segment.split("?")[0] || "";
+  return !!fileName && value.includes(fileName);
+}
+
+/**
+ * Contiguous upcoming announce-pad run that contains `clipUrl` (typically a
+ * waiting refill TTS). Skips a block that is already playing so Skip / restore
+ * can finish. Empty when the clip is gone or still on the playhead.
+ */
+export function announcePadsForClipUrl(
+  items,
+  clipUrl,
+  { currentTrack = 0, playingFromQueue = false } = {}
+) {
+  const list = Array.isArray(items) ? items : [];
+  if (!String(clipUrl || "").trim()) return [];
+  const upcoming = findUpcomingAnnouncePadIndices(items, {
+    currentTrack,
+    playingFromQueue,
+  });
+  const upcomingSet = new Set(upcoming);
+  let hit = 0;
+  for (const pos of upcoming) {
+    const item = list[pos - 1];
+    if (clipUrlMatchesQueueUri(item?.TrackUri ?? item?.uri ?? "", clipUrl)) {
+      hit = pos;
+      break;
+    }
+  }
+  if (!hit) return [];
+  const run = [];
+  for (let i = hit; upcomingSet.has(i); i--) run.push(i);
+  run.reverse();
+  for (let i = hit + 1; upcomingSet.has(i); i++) run.push(i);
+  return run;
 }
 
 /**
@@ -309,8 +364,8 @@ export function findUpcomingTrackPositionInItems(
 }
 
 // Pure: 1-based queue indices of unplayed DJ ramp/TTS pads (after the current
-// track when playing from the queue). Insert replaces only the pad run at the
-// target slot — earlier request-glued shouts stay. Exported for unit testing.
+// track when playing from the queue). Insert replaces the pad run at the
+// target slot plus any shout glued immediately before it. Exported for tests.
 export function findUpcomingAnnouncePadIndices(
   items,
   { currentTrack = 0, playingFromQueue = false } = {}
