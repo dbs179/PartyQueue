@@ -78,6 +78,7 @@ import {
   syncPartyDisplayViewport,
 } from "./party-display-viewport.js";
 import { createPartyDisplayIdle } from "./party-display-idle.js";
+import { createPartyDisplayClock } from "./party-display-clock.js";
 
 const searchInput = document.getElementById("search");
 const searchClear = document.getElementById("search-clear");
@@ -2041,6 +2042,9 @@ function applyPartySettings(payload) {
 }
 
 const partyDisplayIdle = createPartyDisplayIdle();
+const partyDisplayClock = createPartyDisplayClock({
+  el: document.getElementById("display-clock"),
+});
 
 function syncPartyDisplayIdleState() {
   partyDisplayIdle.setDisplayState({
@@ -2075,6 +2079,8 @@ function showView(name) {
   syncPartyDisplayViewport(target === "display");
   syncPartyDisplayIdleState();
   syncPartyDisplayBackLabel();
+  if (target === "display") partyDisplayClock.start();
+  else partyDisplayClock.stop();
   // The DJ Booth and everything behind it require the host PIN. While locked,
   // keep the view hidden and skip its data loads (they'd 401 anyway).
   const hostLocked = isHostArea(target) && !settingsGateOk();

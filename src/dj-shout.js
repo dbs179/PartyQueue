@@ -14,6 +14,7 @@ import {
   getGuestNotesList,
   getGuestProfile,
   birthdayShoutLabel,
+  attributeGuestBlurb,
 } from "./guest-profiles.js";
 import { writeRequestShoutTemplate } from "./party-recap.js";
 import {
@@ -31,6 +32,10 @@ import {
 } from "./dj-night-memory.js";
 import { dedicationOf } from "./queue-origin.js";
 import { sanitizeDedication } from "./display-name.js";
+import {
+  dedicationIsPhrased,
+  dedicationShoutInstruction,
+} from "./dedication-label.js";
 import { spotifyTrackId } from "./sampler.js";
 import { pickFlavorAnnounceLines } from "./dj-flavor-announce.js";
 
@@ -198,7 +203,7 @@ function notesMissingFromScript(script, notes, guestName) {
   );
 }
 
-function buildRequestShoutPrompt({
+export function buildRequestShoutPrompt({
   name,
   artist,
   requestedBy,
@@ -223,7 +228,8 @@ function buildRequestShoutPrompt({
   const forWho = String(dedication || "").trim();
   const dj = String(djName || "DJ").trim() || "DJ";
   const list = Array.isArray(notes) ? notes.filter(Boolean) : [];
-  const noteLines = list.map((n, i) => `${i + 1}. ${n}`).join("\n");
+  const spokenNotes = list.map((n) => attributeGuestBlurb(n, by));
+  const noteLines = spokenNotes.map((n, i) => `${i + 1}. ${n}`).join("\n");
   const ban =
     typeof banList === "string" && banList.trim()
       ? `\nNever say: ${banList.trim()}.`
@@ -234,15 +240,15 @@ function buildRequestShoutPrompt({
     count === 0
       ? `- No host blurbs on file — skip personality bits.`
       : count === 1
-        ? `- REQUIRED: use blurb #1 closely. Keep its key words (e.g. names, nouns like crayons, Gypsy). Light polish for speech is OK; do NOT replace it with a vague paraphrase that drops those words.`
-        : `- REQUIRED: use BOTH blurb #1 AND blurb #2. Each must be clearly hearable — keep the important words from settings (nouns/names). Do not drop either blurb. Do not invent different facts.`;
+        ? `- REQUIRED: use blurb #1 closely, as a fact about ${by}. Keep its key words (e.g. names, nouns like crayons, Gypsy). Light polish for speech is OK; do NOT replace it with a vague paraphrase that drops those words.`
+        : `- REQUIRED: use BOTH blurb #1 AND blurb #2 as facts about ${by}. Each must be clearly hearable — keep the important words from settings (nouns/names). Do not drop either blurb. Do not invent different facts.`;
 
   const bdayRule = isBirthday
     ? `- REQUIRED: it is ${by}'s birthday today. Wish them happy birthday and call them the ${birthdayLabel}.`
     : `- It is NOT their birthday — do not invent a birthday.`;
 
   const dedRule = forWho
-    ? `- REQUIRED: say this request goes out to ${forWho} (dedication). Keep it natural — e.g. "this one goes out to ${forWho}".`
+    ? dedicationShoutInstruction(forWho, by)
     : `- No dedication — do not invent a dedicatee.`;
 
   const setKind = kind === "setRequest";
@@ -266,7 +272,7 @@ function buildRequestShoutPrompt({
     : "";
 
   const strictExtra = stricter
-    ? `\nRETRY: Your previous draft skipped required blurb words. Say the blurbs more literally — listeners should hear the same jokes as written in settings.`
+    ? `\nRETRY: Your previous draft skipped required blurb words. Say the blurbs more literally about ${by} — listeners should hear the same jokes as written in settings. Do not say those jokes as "I".`
     : "";
 
   const hostGuidance = formatHostDjGuidance({
@@ -284,6 +290,9 @@ ${hostGuidance ? `${hostGuidance}\n\n` : ""}${formatMusicPronunciationGuide(
 Hard limits:
 - At most ${maxWords} words
 - Warm party-DJ energy, but stay faithful to the host blurbs
+- Point of view: you are the DJ talking ABOUT ${by}. Host blurbs are facts about ${by}, never about you.
+- When you use a blurb, name ${by} (or they/them only after you have named them). Never say "I", "I'm", "I've", "I'll", "my", or "me" for a guest blurb — if a note is written as "I ...", it means ${by}.
+- Booth "I" is OK only for DJ actions ("I've got this request"). Never claim ${by}'s jokes, pets, drinks, or habits as your own.
 - Do NOT read them as "blurb one, blurb two"
 - Do NOT swap in unrelated jokes
 ${blurbRule}
@@ -297,21 +306,31 @@ ${avoidRule}${ban}${strictExtra}
 Facts:
 - Shout kind: ${setKind ? "SET REQUEST (mini-set, several songs)" : "SONG REQUEST (one track)"}
 - Requester display name: ${by}
-- Dedication (goes out to): ${forWho || "(none)"}
+- Dedication: ${forWho || "(none)"}${
+  forWho && dedicationIsPhrased(forWho)
+    ? " (already phrased — do not add For/To/From)"
+    : ""
+}
 - ${setKind ? "First song in the set" : "Song title"}: ${song}
 - Artist: ${who || "(unknown)"}
 - Set track count: ${setKind ? trackCount || "a few" : "1"}
 - Birthday today: ${isBirthday ? `YES — ${birthdayLabel}` : "no"}
 
-Host blurbs (use these closely — they are the jokes):
+Host blurbs (facts about ${by} — keep the key words; speak them in third person about ${by}):
 ${noteLines || "(no blurbs)"}
 
 Must include:
 1) shout-out to ${by}
 2) ${isBirthday ? `happy birthday + "${birthdayLabel}"` : "no birthday line"}
-3) ${forWho ? `dedication line for ${forWho}` : "no dedication line"}
+3) ${
+    forWho
+      ? dedicationIsPhrased(forWho)
+        ? `the dedication as written ("${forWho}"), without extra For/To/From`
+        : `dedication line for ${forWho}`
+      : "no dedication line"
+  }
 4) ${setKind ? `Set Request / mini-set by ${who || "the artist"}, then the first song` : "the song (and artist if known)"}
-5) ${count ? `all ${count} blurb(s) above, close to the original wording` : "no blurb"}
+5) ${count ? `all ${count} blurb(s) above, about ${by} (third person, never "I"), close to the original wording` : "no blurb"}
 6) ${setKind ? 'the words "Set Request" or "mini-set"' : "that this is a song request, not a set"}
 
 Write only the spoken announcement now.`;
@@ -425,6 +444,7 @@ export async function writeRequestShoutScript({
       // Last resort: stitch any still-missing blurbs on almost literally.
       if (missing.length) {
         const stitch = missing
+          .map((n) => attributeGuestBlurb(n, by))
           .map((n) => (n.endsWith(".") ? n : `${n}.`))
           .join(" ");
         line = `${line.replace(/[.!?]*\s*$/, "")}. ${stitch}`;

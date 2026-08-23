@@ -4,6 +4,7 @@ import {
   normalizeGroupsPayload,
   ungroupAllToastMessage,
   sonosIconImgHtml,
+  isGroupTileSelectClick,
 } from "../public/js/sonos-groups.js";
 import { iconForGroupChip } from "../public/js/sonos-player-types.js";
 
@@ -49,6 +50,14 @@ test("sonosIconImgHtml escapes url and alt", () => {
   const html = sonosIconImgHtml("arc", 'Arc "bar"');
   assert.match(html, /src="\/sonos-icons\/arc\.svg\?v=/);
   assert.match(html, /alt="Arc &quot;bar&quot;"/);
+});
+
+test("isGroupTileSelectClick ignores icon button hits", () => {
+  const icon = { closest: (sel) => (sel === ".group-chip-icon-btn" ? icon : null) };
+  const label = { closest: () => null };
+  assert.equal(isGroupTileSelectClick({ target: icon }), false);
+  assert.equal(isGroupTileSelectClick({ target: label }), true);
+  assert.equal(isGroupTileSelectClick({ target: null }), true);
 });
 
 test("grouped chips prefer shared group icon over member types", () => {

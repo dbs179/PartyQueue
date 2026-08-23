@@ -6,6 +6,7 @@ import {
   formatSuggestionWhen,
   escapeHtml,
   formatTrackTime,
+  formatDisplayClock,
 } from "../public/js/format.js";
 
 test("formatDuration renders hours, minutes, and seconds", () => {
@@ -42,5 +43,17 @@ test("formatTrackTime renders mm:ss and h:mm:ss", () => {
   assert.equal(formatTrackTime(65), "1:05");
   assert.equal(formatTrackTime(3661), "1:01:01");
   assert.equal(formatTrackTime("nope"), "0:00");
+});
+
+test("formatDisplayClock uses local hours and minutes", () => {
+  assert.equal(
+    formatDisplayClock(new Date(2026, 7, 23, 15, 49, 8), "en-US"),
+    "3:49 PM"
+  );
+  assert.equal(
+    formatDisplayClock(new Date(2026, 7, 23, 0, 5, 0), "en-US"),
+    "12:05 AM"
+  );
+  assert.equal(formatDisplayClock(new Date("invalid"), "en-US"), "");
 });
 

@@ -52,6 +52,24 @@ export function escapeHtml(str) {
     .replaceAll('"', "&quot;");
 }
 
+/** Wall-clock time for Party Display (local, hours and minutes). */
+export function formatDisplayClock(now = new Date(), locale) {
+  const d = now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(d.getTime())) return "";
+  try {
+    return d.toLocaleTimeString(locale, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    const hours24 = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const hour = hours24 % 12 || 12;
+    const suffix = hours24 < 12 ? "AM" : "PM";
+    return `${hour}:${minutes} ${suffix}`;
+  }
+}
+
 /** mm:ss or h:mm:ss for Now Playing / Party Display progress. */
 export function formatTrackTime(value) {
   const total = Math.max(0, Math.floor(Number(value) || 0));

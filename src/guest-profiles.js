@@ -144,6 +144,144 @@ export function sanitizeGuestNote(value) {
   return value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, GUEST_NOTE_MAX);
 }
 
+const FIRST_PERSON_ADVERBS =
+  "really|always|just|still|never|also|even|often|sometimes|usually|probably|already";
+
+const PREDICATE_START =
+  /^(likes?|loves?|enjoys?|hates?|drinks?|brings?|keeps?|runs?|owns?|has|have|got|gets?|goes?|went|was|were|is|are|known|always|never|really|often|still|just|into|obsessed|named|calls?|collects?|sings?|dances?|plays?)\b/i;
+
+function possessiveGuestName(name) {
+  const who = String(name || "").trim();
+  if (!who) return "";
+  return `${who}'s`;
+}
+
+function matchVerbCase(sample, next) {
+  const s = String(sample || "");
+  const n = String(next || "");
+  if (!s || !n) return n;
+  if (s === s.toUpperCase()) return n.toUpperCase();
+  if (s[0] === s[0].toUpperCase()) {
+    return n.charAt(0).toUpperCase() + n.slice(1);
+  }
+  return n;
+}
+
+function thirdPersonPresent(verb) {
+  const raw = String(verb || "");
+  const lower = raw.toLowerCase();
+  const irregular = {
+    am: "is",
+    are: "is",
+    is: "is",
+    was: "was",
+    were: "was",
+    have: "has",
+    has: "has",
+    do: "does",
+    does: "does",
+    go: "goes",
+    goes: "goes",
+    "don't": "doesn't",
+    "doesn't": "doesn't",
+  };
+  if (irregular[lower]) return matchVerbCase(raw, irregular[lower]);
+  if (
+    /^(can|will|would|could|should|might|must|may|shall|can't|cannot|won't|wouldn't|couldn't|shouldn't|isn't|aren't|wasn't|weren't|didn't|hasn't|haven't|ain't)$/i.test(
+      lower
+    )
+  ) {
+    return raw;
+  }
+  if (/(?:ed)$/i.test(lower)) return raw;
+  if (/ing$/i.test(lower) && lower.length - 3 >= 3) return raw;
+  if (/s$/i.test(lower)) return raw;
+  if (/[sxz]$/i.test(lower) || /[cs]h$/i.test(lower)) {
+    return `${raw}es`;
+  }
+  if (/[^aeiou]y$/i.test(lower)) return `${raw.slice(0, -1)}ies`;
+  return `${raw}s`;
+}
+
+function uncapitalizeFirst(text) {
+  return String(text || "").replace(/^[A-Z]/, (c) => c.toLowerCase());
+}
+
+function peelAdverbs(text) {
+  const adverbRe = new RegExp(`^(${FIRST_PERSON_ADVERBS})\\b\\s*`, "i");
+  let rest = String(text || "");
+  let prefix = "";
+  for (;;) {
+    const match = rest.match(adverbRe);
+    if (!match) break;
+    prefix += match[0];
+    rest = rest.slice(match[0].length);
+  }
+  return { prefix, rest };
+}
+
+function rewriteIPredicate(afterI, name) {
+  const { prefix, rest } = peelAdverbs(afterI);
+  const verbMatch = rest.match(/^([A-Za-z']+)([\s\S]*)$/);
+  if (!verbMatch) return `${name} ${afterI}`;
+  return `${name} ${prefix}${thirdPersonPresent(verbMatch[1])}${verbMatch[2]}`;
+}
+
+function rewriteIClauses(text, name) {
+  return String(text || "")
+    .split(/(\band\s+)(?=I\b)/i)
+    .map((part) => {
+      if (/^and\s+$/i.test(part)) return part;
+      const match = part.match(/^(\s*)I\s+([\s\S]*)$/i);
+      if (!match) return part;
+      return `${match[1]}${rewriteIPredicate(match[2], name)}`;
+    })
+    .join("");
+}
+
+function rewriteEmbeddedFirstPerson(text, name) {
+  const possessive = possessiveGuestName(name);
+  return rewriteIClauses(
+    String(text || "")
+      .replace(/\bI'm\b/gi, `${name} is`)
+      .replace(/\bI've got\b/gi, `${name} has`)
+      .replace(/\bI've\b/gi, `${name} has`)
+      .replace(/\bI'll\b/gi, `${name} will`)
+      .replace(/\bI'd\b/gi, `${name} would`)
+      .replace(/\bI am\b/gi, `${name} is`)
+      .replace(/\bI was\b/gi, `${name} was`)
+      .replace(/\bI were\b/gi, `${name} was`)
+      .replace(/\bI do not\b/gi, `${name} does not`),
+    name
+  )
+    .replace(/\bmy\b/gi, possessive)
+    .replace(/\bme\b/gi, name);
+}
+
+/**
+ * Rewrite a host note so the DJ talks ABOUT the guest, not as them.
+ * "I love bourbon" → "Dave loves bourbon"; "Likes karaoke" → "Dave likes karaoke".
+ */
+export function attributeGuestBlurb(note, guestName) {
+  const name = String(guestName || "").trim();
+  const raw = String(note || "").trim();
+  if (!raw) return raw;
+  if (!name) return raw;
+
+  const nameRe = new RegExp(`^${escapeRegExp(name)}(?:'s)?\\b`, "i");
+  if (nameRe.test(raw)) return raw;
+
+  let text = rewriteEmbeddedFirstPerson(raw, name);
+
+  if (!nameRe.test(text) && PREDICATE_START.test(text)) {
+    text = `${name} ${uncapitalizeFirst(text)}`;
+  } else if (!nameRe.test(text) && /^(?:a|an)\s/i.test(text)) {
+    text = `${name} is ${uncapitalizeFirst(text)}`;
+  }
+
+  return text;
+}
+
 function normalizeNotesList(raw) {
   if (Array.isArray(raw)) {
     return raw

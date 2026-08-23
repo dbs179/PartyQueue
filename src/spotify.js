@@ -79,6 +79,8 @@ export function resetSpotifyNetworkStateForTests() {
   tokenExpiresAt = 0;
   userAccessToken = null;
   userTokenExpiresAt = 0;
+  searchCache.clear();
+  artistSearchCache.clear();
 }
 
 function isAbortOrTimeout(err) {
@@ -726,18 +728,60 @@ const SEARCH_CACHE_TTL_MS = 60_000;
 const SEARCH_CACHE_MAX = 200;
 const searchCache = new Map(); // key -> { at, tracks }
 
+function lruGet(map, key, ttlMs) {
+  const hit = map.get(key);
+  if (hit && Date.now() - hit.at < ttlMs) {
+    map.delete(key);
+    map.set(key, hit);
+    return hit;
+  }
+  return null;
+}
+
+function lruSet(map, key, entry, max) {
+  map.set(key, { at: Date.now(), ...entry });
+  if (map.size > max) {
+    map.delete(map.keys().next().value);
+  }
+}
+
+function mapTrackHits(items) {
+  return (items ?? [])
+    .filter((t) => t && typeof t.uri === "string")
+    .map((t) => ({
+      uri: t.uri, // e.g. "spotify:track:0GjEhVFGZW8afUYGChlsLT"
+      name: t.name,
+      artists: (t.artists || []).map((a) => a.name).join(", "),
+      album: t.album?.name ?? "",
+      durationMs: t.duration_ms,
+      image: pickListImage(t.album?.images),
+      explicit: !!t.explicit,
+    }));
+}
+
+function mapArtistHits(items) {
+  return (items ?? [])
+    .filter((a) => a?.id && a?.name)
+    .map((a) => ({
+      id: String(a.id),
+      name: String(a.name),
+      image: pickListImage(a.images),
+      popularity: Number(a.popularity) || 0,
+    }));
+}
+
+function trackSearchKey(market, limit, query) {
+  return `${market}|${limit}|${query.trim().toLowerCase()}`;
+}
+
 export async function searchTracks(query, limit = 20) {
   if (!query || !query.trim()) return [];
 
   const market = getSpotifyAppCredentials().market;
-  const key = `${market}|${limit}|${query.trim().toLowerCase()}`;
+  const key = trackSearchKey(market, limit, query);
 
-  const hit = searchCache.get(key);
-  if (hit && Date.now() - hit.at < SEARCH_CACHE_TTL_MS) {
-    searchCache.delete(key); // refresh LRU position
-    searchCache.set(key, hit);
-    return hit.tracks;
-  }
+  const hit = lruGet(searchCache, key, SEARCH_CACHE_TTL_MS);
+  if (hit) return hit.tracks;
 
   const token = await getAccessToken();
 
@@ -757,22 +801,8 @@ export async function searchTracks(query, limit = 20) {
   }
 
   const data = await res.json();
-  const items = data.tracks?.items ?? [];
-
-  const tracks = items.map((t) => ({
-    uri: t.uri, // e.g. "spotify:track:0GjEhVFGZW8afUYGChlsLT"
-    name: t.name,
-    artists: t.artists.map((a) => a.name).join(", "),
-    album: t.album?.name ?? "",
-    durationMs: t.duration_ms,
-    image: pickImage(t.album?.images),
-    explicit: !!t.explicit,
-  }));
-
-  searchCache.set(key, { at: Date.now(), tracks });
-  if (searchCache.size > SEARCH_CACHE_MAX) {
-    searchCache.delete(searchCache.keys().next().value); // evict oldest
-  }
+  const tracks = mapTrackHits(data.tracks?.items);
+  lruSet(searchCache, key, { tracks }, SEARCH_CACHE_MAX);
   return tracks;
 }
 
@@ -787,14 +817,10 @@ export async function searchArtists(query, limit = 10) {
 
   const market = getSpotifyAppCredentials().market;
   const capped = Math.max(1, Math.min(20, Math.floor(Number(limit) || 10)));
-  const key = `${market}|${capped}|${query.trim().toLowerCase()}`;
+  const key = trackSearchKey(market, capped, query);
 
-  const hit = artistSearchCache.get(key);
-  if (hit && Date.now() - hit.at < ARTIST_SEARCH_CACHE_TTL_MS) {
-    artistSearchCache.delete(key);
-    artistSearchCache.set(key, hit);
-    return hit.artists;
-  }
+  const hit = lruGet(artistSearchCache, key, ARTIST_SEARCH_CACHE_TTL_MS);
+  if (hit) return hit.artists;
 
   const token = await getAccessToken();
   const params = new URLSearchParams({
@@ -810,20 +836,60 @@ export async function searchArtists(query, limit = 10) {
     throw spotifyHttpError("artist search", res.status);
   }
   const data = await res.json();
-  const artists = (data.artists?.items ?? [])
-    .filter((a) => a?.id && a?.name)
-    .map((a) => ({
-      id: String(a.id),
-      name: String(a.name),
-      image: pickImage(a.images),
-      popularity: Number(a.popularity) || 0,
-    }));
-
-  artistSearchCache.set(key, { at: Date.now(), artists });
-  if (artistSearchCache.size > ARTIST_SEARCH_CACHE_MAX) {
-    artistSearchCache.delete(artistSearchCache.keys().next().value);
-  }
+  const artists = mapArtistHits(data.artists?.items);
+  lruSet(artistSearchCache, key, { artists }, ARTIST_SEARCH_CACHE_MAX);
   return artists;
+}
+
+/** One Spotify search for guest typeahead (tracks + artists). */
+export async function searchCatalog(query, { trackLimit = 20, artistLimit = 5 } = {}) {
+  if (!query || !query.trim()) return { tracks: [], artists: [] };
+
+  const market = getSpotifyAppCredentials().market;
+  const q = query.trim();
+  const tLimit = Math.max(1, Math.min(50, Math.floor(Number(trackLimit) || 20)));
+  const aLimit = Math.max(1, Math.min(20, Math.floor(Number(artistLimit) || 5)));
+  const trackKey = trackSearchKey(market, tLimit, q);
+  const artistKey = trackSearchKey(market, aLimit, q);
+
+  const trackHit = lruGet(searchCache, trackKey, SEARCH_CACHE_TTL_MS);
+  const artistHit = lruGet(artistSearchCache, artistKey, ARTIST_SEARCH_CACHE_TTL_MS);
+  if (trackHit && artistHit) {
+    return { tracks: trackHit.tracks, artists: artistHit.artists };
+  }
+  if (trackHit && !artistHit) {
+    let artists = [];
+    try {
+      artists = await searchArtists(q, aLimit);
+    } catch {
+      artists = [];
+    }
+    return { tracks: trackHit.tracks, artists };
+  }
+  if (!trackHit && artistHit) {
+    const tracks = await searchTracks(q, tLimit);
+    return { tracks, artists: artistHit.artists };
+  }
+
+  const token = await getAccessToken();
+  const params = new URLSearchParams({
+    q,
+    type: "track,artist",
+    limit: String(Math.max(tLimit, aLimit)),
+    market,
+  });
+  const res = await spotifyApiFetch(`${SEARCH_URL}?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw spotifyHttpError("search", res.status);
+  }
+  const data = await res.json();
+  const tracks = mapTrackHits(data.tracks?.items).slice(0, tLimit);
+  const artists = mapArtistHits(data.artists?.items).slice(0, aLimit);
+  lruSet(searchCache, trackKey, { tracks }, SEARCH_CACHE_MAX);
+  lruSet(artistSearchCache, artistKey, { artists }, ARTIST_SEARCH_CACHE_MAX);
+  return { tracks, artists };
 }
 
 /** Resolve a Spotify artist id to a display name (client-credentials). */
@@ -1078,9 +1144,24 @@ export async function findTrackUri(artist, title, opts = {}) {
 
 function pickImage(images) {
   if (!Array.isArray(images) || images.length === 0) return null;
-  // Spotify returns largest first. Prefer ~300px (NP + search); else largest.
+  // Spotify returns largest first. Prefer ~300px (NP + playlists); else largest.
   const mid = images.find(
     (im) => (im?.width ?? 0) >= 200 && (im?.width ?? 0) <= 400
   );
   return mid?.url ?? images[0]?.url ?? images[images.length - 1]?.url ?? null;
+}
+
+/** 54px search-row thumbs: prefer Spotify’s ~64px image over ~300px album art. */
+function pickListImage(images) {
+  if (!Array.isArray(images) || images.length === 0) return null;
+  const ranked = images
+    .filter((im) => im?.url)
+    .map((im) => ({ url: im.url, width: Number(im.width) || 0 }));
+  if (!ranked.length) return null;
+  const small = ranked.find((im) => im.width > 0 && im.width <= 80);
+  if (small) return small.url;
+  const mid = ranked.find((im) => im.width >= 200 && im.width <= 400);
+  if (mid) return mid.url;
+  ranked.sort((a, b) => a.width - b.width);
+  return ranked[0].url;
 }

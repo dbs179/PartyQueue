@@ -348,9 +348,9 @@ export function createQueueUi(els, deps) {
       guestOwnsQueueTrack(track, getGuestUser());
     const hasDedication = !!sanitizeDedication(track.dedication || "");
     const dedicate = canDedicate
-      ? `<button class="track-dedicate" type="button">${
-          hasDedication ? "Edit" : "Dedicate"
-        }</button>`
+      ? `<button class="track-dedicate subpage-head-link" type="button" title="${
+          hasDedication ? "Edit dedication" : "Dedicate this song"
+        }">${hasDedication ? "Edit" : "Dedicate"}</button>`
       : "";
     const badge = queueBadgeHtml(track, badgeOpts(track));
     li.innerHTML = `

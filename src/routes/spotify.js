@@ -9,8 +9,7 @@ import {
   getAuthorizeUrl,
   isUserConnected,
   getPlaylists,
-  searchTracks,
-  searchArtists,
+  searchCatalog,
   rewarmCaches,
   spotifyCooldownMs,
   getPoolWarmedAt,
@@ -31,13 +30,10 @@ export function registerSpotifyRoutes(app, ctx) {
     }
     try {
       const q = String(query);
-      const [trackHits, artistHits] = await Promise.all([
-        searchTracks(q, 20),
-        searchArtists(q, 5).catch((err) => {
-          console.warn("[search] artists:", err.message);
-          return [];
-        }),
-      ]);
+      const { tracks: trackHits, artists: artistHits } = await searchCatalog(q, {
+        trackLimit: 20,
+        artistLimit: 5,
+      });
       let tracks = trackHits;
       // Hide explicit results when the host's content filter is on.
       if (getContentSettings().filterExplicit) {
@@ -45,7 +41,7 @@ export function registerSpotifyRoutes(app, ctx) {
       }
       // Prefer an exact (case-insensitive) name match for Set Request.
       const needle = q.trim().toLowerCase();
-      const artists = [...artistHits].sort((a, b) => {
+      const artists = [...(artistHits || [])].sort((a, b) => {
         const aExact = a.name.toLowerCase() === needle ? 0 : 1;
         const bExact = b.name.toLowerCase() === needle ? 0 : 1;
         if (aExact !== bExact) return aExact - bExact;

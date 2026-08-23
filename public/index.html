@@ -450,7 +450,10 @@
               </h2>
               <span id="display-version" class="party-display-version" hidden></span>
             </div>
-            <a href="#/" id="display-back" class="party-display-back">Back</a>
+            <div class="party-display-topline-end">
+              <time id="display-clock" class="party-display-clock" datetime="" aria-label="Current time"></time>
+              <a href="#/" id="display-back" class="party-display-back">Back</a>
+            </div>
           </div>
 
           <p
@@ -610,7 +613,7 @@
             <div class="sonos-section-head">
               <p class="sonos-section-heading">
                 <span class="section-label">Target group:</span>
-                <span class="sonos-section-sub" id="group-intro">Songs go to this group&apos;s queue. Pick a group below. Use Edit groups to join/leave speakers or tap a speaker icon to set Arc / Play 1 / Amp / Roam / Move / Connect.</span>
+                <span class="sonos-section-sub" id="group-intro">Songs go to this group&apos;s queue. Tap a tile to target it. Tap the speaker icon to set its player type. Use Edit groups to join or leave speakers.</span>
               </p>
             </div>
             <div id="group-picker" class="group-picker">
@@ -1715,7 +1718,7 @@
           <button id="settings-user-edit-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
         <div class="settings-box settings-panel">
-          <p class="settings-intro" id="settings-user-edit-intro">Add short notes for the DJ. Set a birthday for a happy-birthday line on the day.</p>
+          <p class="settings-intro" id="settings-user-edit-intro">Add short notes about this person for the DJ (third person — "loves karaoke", not "I love karaoke"). Set a birthday for a happy-birthday line on the day.</p>
           <div class="setting-row-text">
             <label class="setting-label" for="guest-name-input">Name</label>
             <input type="text" id="guest-name-input" class="setting-input" maxlength="40" placeholder="Display name" autocomplete="off" spellcheck="false" />
@@ -1723,7 +1726,7 @@
           <div id="guest-list" class="guest-list"></div>
           <div class="setting-row-text">
             <label class="setting-label" for="guest-notes-input">Add note</label>
-            <input type="text" id="guest-notes-input" class="setting-input" maxlength="120" placeholder="One short idea for the DJ" autocomplete="off" spellcheck="true" />
+            <input type="text" id="guest-notes-input" class="setting-input" maxlength="120" placeholder="About them, e.g. loves karaoke" autocomplete="off" spellcheck="true" />
           </div>
           <div class="setting-row">
             <label class="setting-label" for="guest-bday-month">Birthday</label>
@@ -2161,14 +2164,14 @@
     <div id="dedication-overlay" class="modal-overlay" hidden>
       <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="dedication-title">
         <p id="dedication-title" class="modal-message">Dedicate this song</p>
-        <p class="modal-hint">Optional — who should this go out to?</p>
+        <p class="modal-hint">A name or a short line. We only add For/From if you leave them out.</p>
         <input
           id="dedication-input"
           class="setting-input modal-input"
           type="text"
           maxlength="60"
           autocomplete="off"
-          placeholder="e.g. Sarah"
+          placeholder="Mia — or To Mia from Davey"
           aria-label="Dedication"
         />
         <p id="dedication-error" class="modal-error" hidden></p>

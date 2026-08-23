@@ -47,6 +47,13 @@ export function sonosIconImgHtml(typeId, alt = "") {
   )}" alt="${escapeHtml(alt)}" width="52" height="52" draggable="false" />`;
 }
 
+/** Tile body/padding selects the group; the icon button is reserved for type. */
+export function isGroupTileSelectClick(event) {
+  const target = event?.target;
+  if (!target || typeof target.closest !== "function") return true;
+  return !target.closest(".group-chip-icon-btn");
+}
+
 /**
  * @param {{
  *   groupChips?: HTMLElement|null,
@@ -159,6 +166,21 @@ export function createSonosGroups(els, deps) {
     });
   }
 
+  function bindTileActivate(tile, onActivate) {
+    tile.classList.add("group-chip-tile-selectable");
+    tile.tabIndex = 0;
+    tile.addEventListener("click", (e) => {
+      if (!isGroupTileSelectClick(e)) return;
+      onActivate();
+    });
+    tile.addEventListener("keydown", (e) => {
+      if (!isGroupTileSelectClick(e)) return;
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      onActivate();
+    });
+  }
+
   async function savePlayerType(room, type) {
     try {
       const res = await hostFetch("/api/groups/player-type", {
@@ -220,25 +242,24 @@ export function createSonosGroups(els, deps) {
     iconBtn.innerHTML = sonosIconImgHtml(typeId, "");
     bindIconPicker(iconBtn, s.name, typeId);
 
-    const action = document.createElement("button");
-    action.type = "button";
+    const action = document.createElement("div");
     action.className = "group-chip-action";
     if (inGroup) {
-      action.title = s.isTargetCoordinator
-        ? `${s.name} (coordinator) — tap to leave group`
+      wrap.title = s.isTargetCoordinator
+        ? `${s.name} (coordinator) — tap tile to leave group`
         : `Remove ${s.name} from this group`;
       action.innerHTML = `<span class="group-chip-body"><span class="genre-name">${escapeHtml(
         s.name
       )}</span>${
         s.isTargetCoordinator ? '<span class="genre-cnt">lead</span>' : ""
       }</span>`;
-      action.addEventListener("click", () => leaveSpeaker(s.name));
+      bindTileActivate(wrap, () => leaveSpeaker(s.name));
     } else {
-      action.title = `Join ${s.name} to the target group`;
+      wrap.title = `Join ${s.name} to the target group`;
       action.innerHTML = `<span class="group-chip-body"><span class="genre-name">${escapeHtml(
         s.name
       )}</span><span class="genre-cnt">+</span></span>`;
-      action.addEventListener("click", () => joinSpeaker(s.name));
+      bindTileActivate(wrap, () => joinSpeaker(s.name));
     }
 
     wrap.appendChild(iconBtn);
@@ -297,13 +318,16 @@ export function createSonosGroups(els, deps) {
       const typeId = iconForGroupChip(g, speakersCache);
       const soloRoom = !multi ? members[0] || g.coordinator || g.label : null;
 
-      // Div tile (not one big button) so the icon can open the type picker.
+      // Div tile (not one big button) so the icon can open the type picker
+      // without nesting buttons. The tile surface targets the group.
       const chip = document.createElement("div");
       chip.className =
         "genre-chip group-chip group-chip-tile" + (on ? " on" : "");
       chip.setAttribute("role", "radio");
       chip.setAttribute("aria-checked", on ? "true" : "false");
-      chip.title = multi ? members.join(", ") : g.label;
+      chip.title = on
+        ? `Targeting ${g.label}`
+        : `Target ${g.label}`;
 
       const iconBtn = document.createElement("button");
       iconBtn.type = "button";
@@ -324,10 +348,8 @@ export function createSonosGroups(els, deps) {
         iconBtn.disabled = true;
       }
 
-      const action = document.createElement("button");
-      action.type = "button";
+      const action = document.createElement("div");
       action.className = "group-chip-action";
-      action.setAttribute("aria-checked", on ? "true" : "false");
       const playing = g.isPlaying
         ? '<span class="group-playing" aria-hidden="true">&#9654;</span>'
         : "";
@@ -344,11 +366,7 @@ export function createSonosGroups(els, deps) {
           : "";
       action.innerHTML = `<span class="group-chip-body">${namesHtml}</span><span class="group-chip-meta">${playing}${count}</span>`;
       if (!on) {
-        action.title = `Target ${g.label}`;
-        action.addEventListener("click", () => pickGroup(g.coordinator));
-      } else {
-        action.title = `Targeting ${g.label}`;
-        action.disabled = true;
+        bindTileActivate(chip, () => pickGroup(g.coordinator));
       }
 
       chip.appendChild(iconBtn);
@@ -369,8 +387,8 @@ export function createSonosGroups(els, deps) {
     }
     if (groupIntro) {
       groupIntro.textContent = groupEditMode
-        ? "Edit mode: tap a speaker name to join or leave. Tap the icon above the name to choose Arc, Play 1, Amp, Roam, Move, or Connect."
-        : "Songs go to this group's queue. Pick a group below. Use Edit groups to join/leave speakers or tap a speaker icon to set its player type.";
+        ? "Edit mode: tap a tile to join or leave. Tap the icon to choose Arc, Play 1, Amp, Roam, Move, or Connect."
+        : "Songs go to this group's queue. Tap a tile to target it. Tap the speaker icon to set its player type. Use Edit groups to join or leave speakers.";
     }
     renderGroups();
   }

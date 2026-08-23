@@ -1,3 +1,5 @@
+import { formatDedicationLabel } from "../../src/dedication-label.js";
+
 const DISPLAY_NAME_KEY = "pq.displayName"; // stable User (real name)
 const DISPLAY_ALIAS_KEY = "pq.displayAlias"; // mutable badge alias
 export const DISPLAY_NAME_MAX = 24;
@@ -13,13 +15,12 @@ export function sanitizeDedication(value) {
   return value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, DEDICATION_MAX);
 }
 
-/** Queue / NP label: "For Sarah from Mark" */
+/** Queue / NP label. Adds For/From only when the note does not already have them. */
 export function dedicationDisplayLabel(dedication, requester) {
   const forWho = sanitizeDedication(dedication || "");
   if (!forWho) return "";
   const by = sanitizeDisplayName(requester || "");
-  const core = /^for\s+/i.test(forWho) ? forWho : `For ${forWho}`;
-  return by ? `${core} from ${by}` : core;
+  return formatDedicationLabel(forWho, by);
 }
 
 export function getDisplayName() {

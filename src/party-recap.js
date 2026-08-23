@@ -5,10 +5,15 @@ import {
   pickGuestNotes,
   isGuestBirthdayToday,
   birthdayShoutLabel,
+  attributeGuestBlurb,
 } from "./guest-profiles.js";
 import { getDjVoiceSettings } from "./settings.js";
 import { getEndOfNightTrack } from "./closing-time.js";
 import { pickFlavorAnnounceLines } from "./dj-flavor-announce.js";
+import {
+  dedicationIsPhrased,
+  dedicationSpeakLine,
+} from "./dedication-label.js";
 
 const RECAP_WINDOW_HOURS = 12;
 
@@ -159,8 +164,11 @@ export function writeRecapScript(
   const topPerson = requesters[0];
   if (topPerson?.name) {
     const noteBits = pickGuestNotes(topPerson.name, 1);
-    const noteBit = noteBits[0]
-      ? ` ${noteBits[0].endsWith(".") ? noteBits[0] : `${noteBits[0]}.`}`
+    const spokenNote = noteBits[0]
+      ? attributeGuestBlurb(noteBits[0], topPerson.name)
+      : "";
+    const noteBit = spokenNote
+      ? ` ${spokenNote.endsWith(".") ? spokenNote : `${spokenNote}.`}`
       : "";
     bits.push(
       pick([
@@ -254,13 +262,17 @@ export function writeRequestShoutTemplate({
   }
 
   if (forWho) {
-    parts.push(
-      pick([
-        `This one goes out to ${forWho}.`,
-        `Dedicated to ${forWho}.`,
-        `Going out to ${forWho}.`,
-      ])
-    );
+    if (dedicationIsPhrased(forWho)) {
+      parts.push(dedicationSpeakLine(forWho, by));
+    } else {
+      parts.push(
+        pick([
+          `This one goes out to ${forWho}.`,
+          `Dedicated to ${forWho}.`,
+          `Going out to ${forWho}.`,
+        ])
+      );
+    }
   }
 
   if (setKind) {
@@ -286,7 +298,9 @@ export function writeRequestShoutTemplate({
   }
 
   for (const note of noteBits) {
-    parts.push(note.endsWith(".") ? note : `${note}.`);
+    const spoken = attributeGuestBlurb(note, by);
+    if (!spoken) continue;
+    parts.push(spoken.endsWith(".") ? spoken : `${spoken}.`);
   }
 
   return trimWords(parts.join(" ").replace(/\s+/g, " ").trim(), maxWords);

@@ -880,21 +880,8 @@ button.subpage-head-link:active {
     font-size: 1.05rem;
   }
 
-  /* Keep search hits in a floating panel under the input (not over it). */
   body:has(#view-main:not([hidden])) #view-main #results:not(:empty) {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
-    right: 0;
-    z-index: 40;
-    max-height: min(42vh, 360px);
-    margin-top: 0;
-    overflow-x: hidden;
-    overflow-y: auto;
-    background: var(--bg);
-    border: 1px solid var(--border, #2a2a32);
-    border-radius: var(--radius);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    max-height: var(--results-max, min(42vh, 360px));
   }
 }
 
@@ -912,6 +899,36 @@ button.subpage-head-link:active {
 .search-input-wrap {
   position: relative;
   z-index: 1;
+}
+
+.search-bar:has(#results:not(:empty)) {
+  z-index: 30;
+  overflow: visible;
+}
+
+/*
+ * Phone + PC: search hits live in a floating panel that scrolls by itself.
+ * On phones the old in-flow list forced the whole page (Now Playing, queue)
+ * to scroll, which felt like a hang — especially with the keyboard open.
+ */
+#view-main #results:not(:empty) {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  max-height: var(--results-max, min(58svh, 28rem));
+  margin-top: 0;
+  padding: 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  background: var(--bg);
+  border: 1px solid var(--border, #2a2a32);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 
 #search {
@@ -3006,6 +3023,8 @@ body:has(#view-settings-user-edit:not([hidden])) > .container {
   display: block;
 }
 .group-chip-icon-btn {
+  position: relative;
+  z-index: 1;
   margin: 0;
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -3061,6 +3080,9 @@ body:has(#view-settings-user-edit:not([hidden])) > .container {
   color: inherit;
   font: inherit;
   text-align: center;
+  pointer-events: none;
+}
+.group-chip-tile-selectable {
   cursor: pointer;
 }
 .group-chip-meta {
@@ -4255,29 +4277,34 @@ html.pq-subtitle-all-caps .subtitle {
   display: none;
 }
 
-/* Owner Dedicate / Edit on Up Next (hidden in edit mode). */
+/* Owner Dedicate / Edit on Up Next (hidden in edit mode). Text link, same as header Edit. */
 .track-dedicate {
+  appearance: none;
   flex-shrink: 0;
-  min-width: 44px;
-  min-height: 44px;
-  padding: 0 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
+  align-self: center;
+  border: 0;
   background: transparent;
+  padding: 0;
+  margin: 0;
+  display: inline-block;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
   color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 600;
-  line-height: 1;
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   white-space: nowrap;
 }
 
-.track-dedicate:hover {
-  color: var(--text);
-  border-color: rgba(255, 255, 255, 0.22);
+.track-dedicate:hover,
+.track-dedicate:focus-visible {
+  color: var(--text, #fff);
+}
+
+.track-dedicate:active {
+  opacity: 0.85;
 }
 
 /* Delete (x) button on a queue row, only shown in edit mode. */
@@ -4977,6 +5004,24 @@ body.party-display-active.party-display-preview .party-display-view {
 
 .party-display-version[hidden] {
   display: none;
+}
+
+.party-display-topline-end {
+  display: flex;
+  align-items: baseline;
+  gap: calc(20 * var(--pd));
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.party-display-clock {
+  color: var(--text);
+  font-size: calc(36 * var(--pd));
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .party-display-back {

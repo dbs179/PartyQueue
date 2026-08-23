@@ -16,6 +16,20 @@ import {
   queuedResultBadge,
 } from "./search-track.js";
 
+function isAbortError(err) {
+  return (
+    err?.name === "AbortError" ||
+    /aborted/i.test(String(err?.message || ""))
+  );
+}
+
+/** Search-row album art: fixed size so layout doesn't jump; first rows eager. */
+export function searchResultImageHtml(src, { eager = false } = {}) {
+  if (!src) return `<div class="art-fallback"></div>`;
+  const loading = eager ? "eager" : "lazy";
+  return `<img src="${escapeHtml(src)}" alt="" width="54" height="54" loading="${loading}" decoding="async" />`;
+}
+
 /**
  * @param {{
  *   searchInput?: HTMLInputElement|null,
@@ -74,6 +88,7 @@ export function createSearchUi(els, deps) {
 
   let debounceTimer = null;
   let currentQuery = "";
+  let searchAbort = null;
   let presence = {
     queuedIds: new Set(),
     searchedQueuedIds: new Set(),
@@ -136,24 +151,72 @@ export function createSearchUi(els, deps) {
     }
   }
 
+  function fitResultsToViewport() {
+    if (!resultsEl || typeof window === "undefined") return;
+    if (!resultsEl.childElementCount) {
+      resultsEl.style.removeProperty("--results-max");
+      return;
+    }
+    const wrap = resultsEl.parentElement;
+    if (!wrap) return;
+    const vv = window.visualViewport;
+    const wrapBottom = wrap.getBoundingClientRect().bottom;
+    const viewTop = vv ? vv.offsetTop : 0;
+    const viewH = vv ? vv.height : window.innerHeight;
+    const viewBottom = viewTop + viewH;
+    const space = Math.floor(viewBottom - wrapBottom - 10);
+    const desktop =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(min-width: 960px)").matches;
+    const cap = desktop
+      ? Math.min(360, Math.floor(window.innerHeight * 0.42))
+      : Math.min(Math.floor(viewH * 0.72), 560);
+    const px = Math.max(96, Math.min(Math.max(space, 96), cap));
+    resultsEl.style.setProperty("--results-max", `${px}px`);
+  }
+
+  function clearSearchPanel() {
+    searchAbort?.abort();
+    searchAbort = null;
+    currentQuery = "";
+    clearTimeout(debounceTimer);
+    if (resultsEl) {
+      resultsEl.innerHTML = "";
+      resultsEl.style.removeProperty("--results-max");
+      resultsEl.removeAttribute("aria-busy");
+    }
+    if (statusEl) statusEl.textContent = "";
+  }
+
   async function runSearch(q) {
     currentQuery = q;
+    searchAbort?.abort();
+    const ac = new AbortController();
+    searchAbort = ac;
     if (statusEl) statusEl.textContent = "Searching...";
     resultsEl?.setAttribute("aria-busy", "true");
     try {
-      const res = await fetchFn(`/api/search?q=${encodeURIComponent(q)}`);
+      const res = await fetchFn(`/api/search?q=${encodeURIComponent(q)}`, {
+        signal: ac.signal,
+      });
       const data = await res.json();
       if (q !== currentQuery) return;
 
       if (!res.ok) {
-        if (resultsEl) resultsEl.innerHTML = "";
+        if (resultsEl) {
+          resultsEl.innerHTML = "";
+          resultsEl.style.removeProperty("--results-max");
+        }
         if (statusEl) statusEl.textContent = data.error || "Search failed.";
         return;
       }
       renderResults(data.tracks || [], data.artists || [], q);
-    } catch {
-      if (q !== currentQuery) return;
-      if (resultsEl) resultsEl.innerHTML = "";
+    } catch (err) {
+      if (isAbortError(err) || q !== currentQuery) return;
+      if (resultsEl) {
+        resultsEl.innerHTML = "";
+        resultsEl.style.removeProperty("--results-max");
+      }
       if (statusEl) statusEl.textContent = "Network error. Try again.";
     } finally {
       if (q === currentQuery) resultsEl?.removeAttribute("aria-busy");
@@ -180,7 +243,7 @@ export function createSearchUi(els, deps) {
 
   function renderResults(tracks, artists, query) {
     if (!resultsEl) return;
-    resultsEl.innerHTML = "";
+    const frag = document.createDocumentFragment();
     const setArtist = pickSetRequestArtist(artists, query);
     if (statusEl) {
       statusEl.textContent =
@@ -191,11 +254,8 @@ export function createSearchUi(els, deps) {
       const li = document.createElement("li");
       li.className = "track set-request-row";
       li.dataset.artistId = setArtist.id;
-      const art = setArtist.image
-        ? `<img src="${escapeHtml(setArtist.image)}" alt="" loading="lazy" />`
-        : `<div class="art-fallback"></div>`;
       li.innerHTML = `
-      ${art}
+      ${searchResultImageHtml(setArtist.image, { eager: true })}
       <div class="meta">
         <div class="title"><span class="set-request-kicker">Artist</span>${escapeHtml(setArtist.name)}</div>
         <div class="artist">Add 5 songs as a Set Request</div>
@@ -204,34 +264,34 @@ export function createSearchUi(els, deps) {
     `;
       const btn = li.querySelector(".set-request-btn");
       btn.addEventListener("click", () => addSetRequest(setArtist, btn));
-      resultsEl.appendChild(li);
+      frag.appendChild(li);
     }
 
-    for (const track of tracks) {
+    tracks.forEach((track, i) => {
       const li = document.createElement("li");
       li.className = "track";
       li.dataset.id = trackIdFromUri(track.uri) || "";
       li.dataset.key = songMatchKey(track.name, track.artists);
-
-      const art = track.image
-        ? `<img src="${track.image}" alt="" loading="lazy" />`
-        : `<div class="art-fallback"></div>`;
-
       li.innerHTML = `
-      ${art}
+      ${searchResultImageHtml(track.image, { eager: i < 4 })}
       <div class="meta">
         <div class="title">${escapeHtml(track.name)}<span class="in-queue-badge" hidden>\u2713 In queue</span></div>
         <div class="artist">${escapeHtml(track.artists)}</div>
       </div>
       <button class="add-btn" type="button">Add</button>
     `;
-
       const btn = li.querySelector(".add-btn");
       btn.addEventListener("click", () => addToQueue(track, btn));
-      resultsEl.appendChild(li);
-    }
+      frag.appendChild(li);
+    });
 
+    resultsEl.replaceChildren(frag);
     updateResultsQueuedState();
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(fitResultsToViewport);
+    } else {
+      fitResultsToViewport();
+    }
   }
 
   async function addSetRequest(artist, btn) {
@@ -282,12 +342,9 @@ export function createSearchUi(els, deps) {
       onFairnessRefresh();
       if (getCurrentView() === "stats") loadStats();
       // Close the search panel so the floating results can't trap the bar on PC.
-      clearTimeout(debounceTimer);
-      currentQuery = "";
       if (searchInput) searchInput.value = "";
       if (searchClear) searchClear.hidden = true;
-      if (resultsEl) resultsEl.innerHTML = "";
-      if (statusEl) statusEl.textContent = "";
+      clearSearchPanel();
     } catch (err) {
       showToast(err.message, true);
       onFairnessRefresh();
@@ -468,21 +525,25 @@ export function createSearchUi(els, deps) {
     if (searchClear) searchClear.hidden = searchInput.value.length === 0;
     clearTimeout(debounceTimer);
     if (!q) {
-      if (resultsEl) resultsEl.innerHTML = "";
-      if (statusEl) statusEl.textContent = "";
+      clearSearchPanel();
       return;
     }
     debounceTimer = setTimeout(() => runSearch(q), 300);
   });
 
   searchClear?.addEventListener("click", () => {
-    clearTimeout(debounceTimer);
     if (searchInput) searchInput.value = "";
     if (searchClear) searchClear.hidden = true;
-    if (resultsEl) resultsEl.innerHTML = "";
-    if (statusEl) statusEl.textContent = "";
+    clearSearchPanel();
     searchInput?.focus();
   });
+
+  if (typeof window !== "undefined") {
+    const onViewport = () => fitResultsToViewport();
+    window.visualViewport?.addEventListener("resize", onViewport);
+    window.visualViewport?.addEventListener("scroll", onViewport);
+    window.addEventListener("resize", onViewport);
+  }
 
   return {
     setQueuedTracks,
