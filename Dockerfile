@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY public ./public
+COPY src ./src
 COPY scripts/build-client.mjs ./scripts/build-client.mjs
 RUN npm run build:client
 
