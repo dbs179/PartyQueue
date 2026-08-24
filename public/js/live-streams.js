@@ -48,8 +48,14 @@ export function shouldPollView(visibilityState, currentView) {
     visibilityState === "visible" &&
     (currentView === "main" ||
       currentView === "display" ||
+      currentView === "karaoke" ||
       currentView === "mix")
   );
+}
+
+/** Party Display / Karaoke Display are read-only TVs — skip group scans. */
+export function shouldLoadSonosGroups(currentView) {
+  return currentView !== "display" && currentView !== "karaoke";
 }
 
 /**
@@ -403,7 +409,10 @@ export function createLiveStreams(els, deps) {
 
   function openNowPlayingStream() {
     if (nowPlayingSource || !shouldPoll()) return;
-    void loadNowPlaying();
+    // Force the bootstrap HTTP paint. EventSource onopen can mark the stream
+    // "connected" before any snapshot arrives (closed Playwright fulfill,
+    // proxy blip), and a non-forced fetch would then be discarded.
+    void loadNowPlaying(true);
     if (typeof EventSourceCtor !== "function") {
       startNowPlayingFallback();
       return;
@@ -530,7 +539,7 @@ export function createLiveStreams(els, deps) {
 
   function openQueueStream() {
     if (queueSource || !shouldPoll()) return;
-    void loadQueue();
+    void loadQueue(true);
     if (typeof EventSourceCtor !== "function") {
       startQueueFallback();
       return;
@@ -726,7 +735,7 @@ export function createLiveStreams(els, deps) {
       return;
     }
     if (forceReconnect) closeAllStreams();
-    if (getCurrentView() !== "display") void loadGroups();
+    if (shouldLoadSonosGroups(getCurrentView())) void loadGroups();
     openNowPlayingStream();
     openQueueStream();
     openPartyStream();
@@ -756,7 +765,7 @@ export function createLiveStreams(els, deps) {
   function refreshSonos() {
     void loadQueue(true);
     void loadNowPlaying(true);
-    if (getCurrentView() !== "display") void loadGroups();
+    if (shouldLoadSonosGroups(getCurrentView())) void loadGroups();
   }
 
   function isQueueStreamConnected() {

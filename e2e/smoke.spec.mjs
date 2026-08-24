@@ -25,6 +25,58 @@ async function mockCover(page, pathLiteral) {
   );
 }
 
+/**
+ * Playwright `route.fulfill` closes EventSource immediately, so Chromium
+ * often fires `onopen` without `data:` frames. Inject snapshots directly.
+ */
+async function installMockedEventSource(page, { nowPlaying = [], queue = null } = {}) {
+  await page.addInitScript(({ nowPlaying, queue }) => {
+    window.EventSource = class MockEventSource {
+      constructor(url) {
+        this.url = String(url);
+        this.readyState = 1;
+        this.onopen = null;
+        this.onmessage = null;
+        this.onerror = null;
+        this._listeners = new Map();
+        queueMicrotask(() => this._start());
+      }
+      addEventListener(type, listener) {
+        const list = this._listeners.get(type) || [];
+        list.push(listener);
+        this._listeners.set(type, list);
+      }
+      close() {
+        this.readyState = 2;
+      }
+      _emit(type, payload) {
+        const event = {
+          data:
+            typeof payload === "string" ? payload : JSON.stringify(payload),
+        };
+        if (type === "message") this.onmessage?.(event);
+        for (const listener of this._listeners.get(type) || []) {
+          listener(event);
+        }
+      }
+      _start() {
+        this.onopen?.();
+        if (this.url.includes("/api/nowplaying/stream")) {
+          for (const item of nowPlaying) {
+            if (item && item.event) this._emit(item.event, item.data);
+            else this._emit("message", item);
+          }
+        } else if (this.url.includes("/api/queue/stream") && queue) {
+          this._emit("message", queue);
+        }
+      }
+    };
+    window.EventSource.CONNECTING = 0;
+    window.EventSource.OPEN = 1;
+    window.EventSource.CLOSED = 2;
+  }, { nowPlaying, queue });
+}
+
 test.describe("PartyQueue browser smoke", () => {
   test("main view loads the ESM UI and sticky search", async ({ page }) => {
     await page.goto("/");
@@ -57,6 +109,7 @@ test.describe("PartyQueue browser smoke", () => {
     await page.goto("/");
     await page.locator("#toolbar-booth").click();
     const pin = page.locator("#pin-overlay");
+    await pin.waitFor({ state: "visible", timeout: 1500 }).catch(() => {});
     if (await pin.isVisible()) {
       await page.locator("#pin-cancel").click();
     } else {
@@ -108,6 +161,33 @@ test.describe("PartyQueue browser smoke", () => {
       streamSession: "display-smoke",
       streamSequence: 1,
     };
+    const queueTracks = [
+      {
+        title: "Electric Feel",
+        artist: "MGMT",
+        position: 2,
+        requestedBy: "Alex",
+        searched: true,
+      },
+    ];
+    await installMockedEventSource(page, {
+      nowPlaying: [
+        {
+          event: "sonos-status",
+          data: {
+            status: "connected",
+            consecutiveFailures: 0,
+            lastSuccessAt: Date.now(),
+          },
+        },
+        nowPlaying,
+      ],
+      queue: {
+        tracks: queueTracks,
+        streamSession: "queue-display-smoke",
+        streamSequence: 1,
+      },
+    });
     await page.route("**/api/nowplaying/stream", (route) =>
       route.fulfill({
         status: 200,
@@ -134,15 +214,7 @@ test.describe("PartyQueue browser smoke", () => {
         status: 200,
         contentType: "text/event-stream",
         body: `data: ${JSON.stringify({
-          tracks: [
-            {
-              title: "Electric Feel",
-              artist: "MGMT",
-              position: 2,
-              requestedBy: "Alex",
-              searched: true,
-            },
-          ],
+          tracks: queueTracks,
           streamSession: "queue-display-smoke",
           streamSequence: 1,
         })}\n\n`,
@@ -151,15 +223,7 @@ test.describe("PartyQueue browser smoke", () => {
     await page.route("**/api/queue/list", (route) =>
       route.fulfill({
         status: 200,
-        json: {
-          tracks: [
-            {
-              title: "Fallback Song",
-              artist: "Fallback Artist",
-              position: 2,
-            },
-          ],
-        },
+        json: { tracks: queueTracks },
       })
     );
     await page.route("**/api/join", (route) =>
@@ -256,6 +320,33 @@ test.describe("PartyQueue browser smoke", () => {
       streamSession: "karaoke-smoke",
       streamSequence: 1,
     };
+    const queueTracks = [
+      {
+        title: "Electric Feel",
+        artist: "MGMT",
+        position: 2,
+        requestedBy: "Alex",
+        searched: true,
+      },
+    ];
+    await installMockedEventSource(page, {
+      nowPlaying: [
+        {
+          event: "sonos-status",
+          data: {
+            status: "connected",
+            consecutiveFailures: 0,
+            lastSuccessAt: Date.now(),
+          },
+        },
+        nowPlaying,
+      ],
+      queue: {
+        tracks: queueTracks,
+        streamSession: "queue-karaoke-smoke",
+        streamSequence: 1,
+      },
+    });
     await page.route("**/api/nowplaying/stream", (route) =>
       route.fulfill({
         status: 200,
@@ -276,15 +367,7 @@ test.describe("PartyQueue browser smoke", () => {
         status: 200,
         contentType: "text/event-stream",
         body: `data: ${JSON.stringify({
-          tracks: [
-            {
-              title: "Electric Feel",
-              artist: "MGMT",
-              position: 2,
-              requestedBy: "Alex",
-              searched: true,
-            },
-          ],
+          tracks: queueTracks,
           streamSession: "queue-karaoke-smoke",
           streamSequence: 1,
         })}\n\n`,
@@ -293,15 +376,7 @@ test.describe("PartyQueue browser smoke", () => {
     await page.route("**/api/queue/list", (route) =>
       route.fulfill({
         status: 200,
-        json: {
-          tracks: [
-            {
-              title: "Fallback Song",
-              artist: "Fallback Artist",
-              position: 2,
-            },
-          ],
-        },
+        json: { tracks: queueTracks },
       })
     );
     await page.route(/\/api\/lyrics\?/, (route) =>
@@ -355,6 +430,10 @@ test.describe("PartyQueue browser smoke", () => {
       streamSession: "clock-smoke",
       streamSequence: 1,
     };
+    await installMockedEventSource(page, {
+      nowPlaying: [nowPlaying],
+      queue: { tracks: [], streamSession: "clock-queue", streamSequence: 1 },
+    });
     await page.route("**/api/nowplaying/stream", (route) =>
       route.fulfill({
         status: 200,
@@ -420,14 +499,14 @@ test.describe("PartyQueue browser smoke", () => {
       return parts.reduce((total, part) => total * 60 + part, 0);
     };
     expect(seconds(after)).toBeGreaterThanOrEqual(seconds(before));
-    await expect(page.locator(".np-fs-line")).toContainText(
+    await expect(page.locator("#np-overlay .np-fs-line.is-active")).toContainText(
       "Recovered lyrics",
       { timeout: 3_000 }
     );
-    await expect(page.locator(".np-fs-lyrics-attribution a")).toHaveText(
+    await expect(page.locator("#np-overlay .np-fs-lyrics-attribution a")).toHaveText(
       "Lyrics from Unison"
     );
-    await expect(page.locator(".np-fs-lyrics-attribution a")).toHaveAttribute(
+    await expect(page.locator("#np-overlay .np-fs-lyrics-attribution a")).toHaveAttribute(
       "href",
       "https://unisonlyrics.org"
     );
@@ -460,6 +539,23 @@ test.describe("PartyQueue browser smoke", () => {
       positionSec: 0,
       streamSequence: 2,
     };
+    const queueSnapshot = {
+      tracks: [
+        {
+          position: 2,
+          title: "Next Song",
+          artist: "Next Artist",
+          albumArt: "/next-cover.jpg",
+          uri: "spotify:track:next",
+        },
+      ],
+      streamSession: "pending-queue",
+      streamSequence: 1,
+    };
+    await installMockedEventSource(page, {
+      nowPlaying: [confirmed, pending],
+      queue: queueSnapshot,
+    });
     await mockCover(page, "/live-cover.jpg");
     await mockCover(page, "/next-cover.jpg");
     await page.route("**/api/nowplaying/stream", (route) =>
@@ -539,10 +635,8 @@ test.describe("PartyQueue browser smoke", () => {
 
     await page.locator("#np-card").click();
     await expect(page.locator("#np-fs-title")).toHaveText("Live Song");
-    await expect(page.locator(".np-fs-lyrics-status")).not.toHaveText(
-      "Changing track…"
-    );
-    await expect(page.locator(".np-fs-line")).toContainText("Kept lyrics");
+    await expect(page.locator("#np-overlay")).not.toContainText("Changing track…");
+    await expect(page.locator("#np-overlay .np-fs-line.is-active")).toContainText("Kept lyrics");
     const decodedLyricsUrls = lyricsUrls.map((url) =>
       decodeURIComponent(String(url).replace(/\+/g, "%20"))
     );
@@ -591,6 +685,14 @@ test.describe("PartyQueue browser smoke", () => {
         uri: "spotify:track:queued",
       },
     ];
+    await installMockedEventSource(page, {
+      nowPlaying: [nowPlaying],
+      queue: {
+        tracks: queueTracks,
+        streamSession: "skip-queue",
+        streamSequence: 1,
+      },
+    });
     await mockCover(page, "/current-cover.jpg");
     await mockCover(page, "/queued-cover.jpg");
     await page.route("**/api/nowplaying/stream", (route) =>

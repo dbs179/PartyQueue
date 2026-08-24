@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   shouldPollView,
+  shouldLoadSonosGroups,
   createLiveStreams,
   bindForegroundResume,
   nowPlayingLooksActive,
@@ -32,13 +33,18 @@ function makeStatusEl() {
   };
 }
 
-test("shouldPollView only on visible main/display/mix", () => {
+test("shouldPollView only on visible main/display/karaoke/mix", () => {
   assert.equal(shouldPollView("visible", "main"), true);
   assert.equal(shouldPollView("visible", "display"), true);
+  assert.equal(shouldPollView("visible", "karaoke"), true);
   assert.equal(shouldPollView("visible", "mix"), true);
   assert.equal(shouldPollView("visible", "booth"), false);
   assert.equal(shouldPollView("hidden", "main"), false);
+  assert.equal(shouldPollView("hidden", "karaoke"), false);
   assert.equal(shouldPollView("visible", "settings-dj"), false);
+  assert.equal(shouldLoadSonosGroups("main"), true);
+  assert.equal(shouldLoadSonosGroups("display"), false);
+  assert.equal(shouldLoadSonosGroups("karaoke"), false);
 });
 
 test("fallback intervals stay in the expected band", () => {
@@ -112,6 +118,53 @@ test("HTTP now-playing fallback does not overwrite an active SSE paint", async (
   assert.deepEqual(paints, ["fresh-sse"]);
   live.closeNowPlayingStream?.();
   live.stopAll?.();
+});
+
+test("bootstrap HTTP now-playing paints when SSE opens without a snapshot", async () => {
+  const paints = [];
+  let resolveFetch;
+  const fetchPromise = new Promise((resolve) => {
+    resolveFetch = resolve;
+  });
+  const live = createLiveStreams(
+    {},
+    {
+      fetch: async () => {
+        await fetchPromise;
+        return {
+          ok: true,
+          async json() {
+            return { title: "http-bootstrap", artist: "X" };
+          },
+        };
+      },
+      EventSource: class {
+        constructor() {
+          queueMicrotask(() => this.onopen?.());
+        }
+        addEventListener() {}
+        close() {}
+      },
+      getVisibilityState: () => "visible",
+      getCurrentView: () => "display",
+      renderNowPlaying: (snap) => paints.push(snap.title),
+      applyQueueTracks: () => {},
+      applyPartySettings: () => {},
+      freezePlayhead: () => {},
+      isQueueEditMode: () => false,
+      setPendingStreamTracks: () => {},
+      clearPendingStreamTracks: () => {},
+      loadGroups: () => {},
+    }
+  );
+
+  live.openNowPlayingStream();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(paints, []);
+  resolveFetch();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(paints, ["http-bootstrap"]);
+  live.closeNowPlayingStream();
 });
 
 test("queue-status disconnected shows stale Up Next + Party Display banners", async () => {
