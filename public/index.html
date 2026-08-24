@@ -549,10 +549,20 @@
             </aside>
 
             <section class="party-display-join" aria-label="Join PartyQueue">
-              <div id="display-join-qr" class="party-display-qr" aria-hidden="true"></div>
+              <div class="party-display-qr-pair">
+                <div class="party-display-qr-slot">
+                  <div id="display-wifi-qr" class="party-display-qr" aria-hidden="true"></div>
+                  <p class="party-display-qr-caption">Wi-Fi</p>
+                </div>
+                <div class="party-display-qr-slot">
+                  <div id="display-join-qr" class="party-display-qr" aria-hidden="true"></div>
+                  <p class="party-display-qr-caption">PartyQueue</p>
+                </div>
+              </div>
               <div class="party-display-join-copy">
                 <p class="party-display-label">Join the Queue</p>
-                <p>Scan on the same Wi-Fi</p>
+                <p>Scan Wi-Fi, then PartyQueue</p>
+                <p id="display-wifi-ssid" class="party-display-url" hidden></p>
                 <p id="display-join-url" class="party-display-url"></p>
                 <p id="display-join-error" class="party-display-side-empty" hidden></p>
               </div>
@@ -1804,6 +1814,24 @@
             <div class="setting-row-text">
               <label class="setting-label" for="host-pin-confirm">Confirm</label>
               <input type="password" id="host-pin-confirm" class="setting-input" maxlength="32" inputmode="numeric" autocomplete="new-password" placeholder="Confirm new PIN" />
+            </div>
+          </div>
+
+          <div class="connections-section">
+            <div class="connections-section-head">
+              <p class="connections-section-heading">
+                <span class="section-label">Guest Wi-Fi:</span>
+                <span class="connections-section-sub">Party Display QR so phones can join this network first.</span>
+              </p>
+              <button id="guest-wifi-save" type="button" class="subpage-head-link">Save</button>
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-guest-wifi-ssid">Network</label>
+              <input type="text" id="set-guest-wifi-ssid" class="setting-input" maxlength="64" placeholder="Wi-Fi name" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-guest-wifi-password">Password</label>
+              <input type="password" id="set-guest-wifi-password" class="setting-input" maxlength="128" placeholder="Wi-Fi password" autocomplete="off" spellcheck="false" />
             </div>
           </div>
 

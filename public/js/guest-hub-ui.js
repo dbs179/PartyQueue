@@ -44,7 +44,7 @@ export function guestNotesList(g) {
  *   fetch?: typeof fetch,
  *   showToast: (msg: string, isError?: boolean) => void,
  *   confirmModal: (message: string, confirmLabel?: string, cancelLabel?: string) => Promise<boolean>,
- *   navigate: (name: string) => void,
+ *   navigate: (name: string, opts?: { replace?: boolean }) => void,
  * }} deps
  */
 export function createGuestHubUi(els, deps) {
@@ -333,7 +333,7 @@ export function createGuestHubUi(els, deps) {
       editingGuestName = null;
       setGuests(data.guests);
       showToast("Removed");
-      navigate("settings-users");
+      navigate("settings-users", { replace: true });
     } catch (err) {
       showToast(err.message, true);
     } finally {

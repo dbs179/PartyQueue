@@ -53,6 +53,10 @@ import {
 import { clearSuggestions } from "../suggestion-box.js";
 import { nudgeNowPlayingStream } from "../now-playing-http.js";
 import { nudgePartySettingsStream } from "../party-settings-http.js";
+import {
+  getGuestWifiSettings,
+  setGuestWifiSettings,
+} from "../guest-wifi.js";
 
 /** @param {import('express').Express} app */
 export function registerSettingsRoutes(app) {
@@ -76,6 +80,7 @@ export function registerSettingsRoutes(app) {
       ...publicContentSettings(),
       ...getDjVoiceSettings(),
       ...getBrandingSettings(),
+      ...getGuestWifiSettings(),
       ...getRitualState(),
       defaults: {
         ...RANDOMNESS_DEFAULTS,
@@ -118,6 +123,7 @@ export function registerSettingsRoutes(app) {
       setContentSettings(body);
       setDjVoiceSettings(body);
       setBrandingSettings(body);
+      setGuestWifiSettings(body);
       // Party-wide toggles/mix live on /api/party — not Now Playing.
       nudgePartySettingsStream();
       res.json({
@@ -130,6 +136,7 @@ export function registerSettingsRoutes(app) {
         ...publicContentSettings(),
         ...getDjVoiceSettings(),
         ...getBrandingSettings(),
+        ...getGuestWifiSettings(),
         ...getRitualState(),
         defaults: {
           ...RANDOMNESS_DEFAULTS,

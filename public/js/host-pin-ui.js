@@ -381,7 +381,7 @@ export function createHostPinUi(els, deps) {
     pendingPinAction = null;
     closePinGate();
     const back = getLastNonSettingsView();
-    navigate(back || "main");
+    navigate(back || "main", { replace: true });
   }
 
   function openPinGate({ title = "Locked", action = "reveal-settings" } = {}) {

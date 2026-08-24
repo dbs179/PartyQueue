@@ -169,6 +169,9 @@ describe("HTTP server harness", { concurrency: false }, () => {
     assert.match(body.url || "", /^https?:\/\//);
     assert.match(body.qrSvg || "", /<svg[\s>]/i);
     assert.match(body.qrPng || "", /^data:image\/png;base64,/);
+    assert.equal(Object.hasOwn(body, "password"), false);
+    assert.equal(Object.hasOwn(body, "guestWifiPassword"), false);
+    assert.equal(typeof body.wifiSsid, "string");
   });
 
   test("request fairness controls are present in Queue settings", async () => {

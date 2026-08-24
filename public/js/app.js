@@ -74,9 +74,13 @@ import {
   isPartyDisplayKiosk,
   isPartyDisplayPreview,
   partyDisplayFullyStartUrl,
-  partyDisplayHashView,
   syncPartyDisplayViewport,
 } from "./party-display-viewport.js";
+import {
+  hashForView,
+  resolveViewName,
+  searchBackAction,
+} from "./view-nav.js";
 import { createPartyDisplayIdle } from "./party-display-idle.js";
 import { createPartyDisplayClock } from "./party-display-clock.js";
 
@@ -147,7 +151,7 @@ const {
     },
     getLastNonSettingsView: () =>
       VIEWS[lastNonSettingsView] ? lastNonSettingsView : "main",
-    navigate: (name) => navigate(name),
+    navigate: (name, opts) => navigate(name, opts),
     showView: (name) => showView(name),
     loadSettings: () => loadSettings(),
     loadAutoFill: () => loadAutoFill(),
@@ -522,6 +526,9 @@ const djIconFileInput = document.getElementById("dj-icon-file");
 const djIconGallery = document.getElementById("dj-icon-gallery");
 const recapHintEl = document.getElementById("recap-hint");
 const eventNameInput = document.getElementById("set-event-name");
+const guestWifiSsidInput = document.getElementById("set-guest-wifi-ssid");
+const guestWifiPasswordInput = document.getElementById("set-guest-wifi-password");
+const guestWifiSaveBtn = document.getElementById("guest-wifi-save");
 const subtitleInput = document.getElementById("set-subtitle");
 const headerFontSizeInput = document.getElementById("set-header-font-size");
 const subtitleFontSizeInput = document.getElementById("set-subtitle-font-size");
@@ -822,6 +829,12 @@ function fillSettings(s) {
   }
   applyDjFromSettings(s);
   if (s.eventName != null) eventNameInput.value = s.eventName;
+  if (s.guestWifiSsid != null && guestWifiSsidInput) {
+    guestWifiSsidInput.value = s.guestWifiSsid;
+  }
+  if (s.guestWifiPassword != null && guestWifiPasswordInput) {
+    guestWifiPasswordInput.value = s.guestWifiPassword;
+  }
   if (s.subtitle != null) subtitleInput.value = s.subtitle;
   if (
     s.headerFontSize != null ||
@@ -1006,6 +1019,18 @@ function currentSettingsPayload() {
 
 settingsSaveBtn?.addEventListener("click", () => {
   saveSettings(currentSettingsPayload(), { toastMessage: "Saved" });
+});
+
+guestWifiSaveBtn?.addEventListener("click", () => {
+  saveSettings(
+    {
+      guestWifiSsid: guestWifiSsidInput?.value || "",
+      guestWifiPassword: guestWifiPasswordInput?.value || "",
+    },
+    { toastMessage: "Guest Wi-Fi saved" }
+  ).then((ok) => {
+    if (ok) loadJoinCode();
+  });
 });
 
 // Discover state is broadcast in the Now Playing payload (settings need host
@@ -1905,6 +1930,8 @@ const displayQueueStatus = document.getElementById("display-queue-status");
 const displayQueue = document.getElementById("display-queue");
 const displayQueueEmpty = document.getElementById("display-queue-empty");
 const displayJoinQr = document.getElementById("display-join-qr");
+const displayWifiQr = document.getElementById("display-wifi-qr");
+const displayWifiSsid = document.getElementById("display-wifi-ssid");
 const displayJoinUrl = document.getElementById("display-join-url");
 const displayJoinError = document.getElementById("display-join-error");
 const recapOverlay = document.getElementById("recap-overlay");
@@ -2074,6 +2101,7 @@ function showView(name) {
   const previousView = currentView;
   if (!isHostArea(target)) lastNonSettingsView = target;
   currentView = target;
+  if (target !== "main") closeSearchQuietly();
   for (const key of Object.keys(VIEWS)) VIEWS[key].hidden = key !== target;
   document.body.classList.toggle("party-display-active", target === "display");
   syncPartyDisplayViewport(target === "display");
@@ -2153,19 +2181,96 @@ function revealSettings() {
   void refreshHostPinStatus();
 }
 
-function routeFromHash() {
-  // Strip hash query (`#/display?kiosk=1`) so Fully bookmarks still route.
-  let h = partyDisplayHashView();
-  if (h === "options") h = "booth"; // old bookmark alias
-  if (h === "settings") h = "booth"; // Settings hub folded into the Booth
-  if (h === "mood") h = "mix"; // old Vibe (Music Mix) bookmark alias
-  showView(VIEWS[h] ? h : "main");
+function closeSearchQuietly() {
+  try {
+    searchUi.close({ fromPopstate: true });
+  } catch {
+    /* searchUi is declared later; hash events during boot are ignored */
+  }
 }
 
-function navigate(name) {
-  const hash = name === "main" ? "#/" : `#/${name}`;
-  if (location.hash === hash) routeFromHash();
-  else location.hash = hash;
+function scheduleRouteFromHash() {
+  if (scheduleRouteFromHash.queued) return;
+  scheduleRouteFromHash.queued = true;
+  const run = () => {
+    scheduleRouteFromHash.queued = false;
+    routeFromHash();
+  };
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+  else queueMicrotask(run);
+}
+
+function routeFromHash() {
+  if (routeFromHash.busy) return;
+  routeFromHash.busy = true;
+  try {
+    const target = resolveViewName(location.hash, VIEWS);
+    let searchOpen = false;
+    try {
+      searchOpen = !!searchUi?.isOpen?.();
+    } catch {
+      searchOpen = false;
+    }
+    const action = searchBackAction({
+      currentView,
+      nextView: target,
+      searchOpen,
+    });
+    if (action === "close-only") {
+      searchUi.close({ fromPopstate: true });
+      showView("main");
+      return;
+    }
+    if (action === "restore-main") {
+      searchUi.close({ fromPopstate: true });
+      history.replaceState({ pq: 1, view: "main" }, "", "#/");
+      showView("main");
+      return;
+    }
+    if (!history.state?.pq) {
+      history.replaceState(
+        { pq: 1, view: target },
+        "",
+        location.hash || "#/"
+      );
+    }
+    showView(target);
+  } finally {
+    queueMicrotask(() => {
+      routeFromHash.busy = false;
+    });
+  }
+}
+
+function navigate(name, { replace = false } = {}) {
+  const target = VIEWS[name] ? name : "main";
+  const hash = hashForView(target);
+  applyViewHash(hash, { replace, view: target });
+}
+
+function applyViewHash(hash, { replace = false, view = null } = {}) {
+  const target = view || resolveViewName(hash, VIEWS);
+  const url = hash || hashForView(target);
+  const state = {
+    pq: 1,
+    view: target,
+    pqFrom: replace || currentView === target ? undefined : currentView,
+  };
+  if (replace || location.hash === url) {
+    history.replaceState(state, "", url);
+    showView(target);
+    return;
+  }
+  history.pushState(state, "", url);
+  showView(target);
+}
+
+function goBack(fallback = "main") {
+  if (history.state?.pqFrom) {
+    history.back();
+    return;
+  }
+  navigate(fallback, { replace: true });
 }
 
 // Mood / Genres / Playlists Back returns here (Vibe hub, main, etc.) instead of
@@ -2195,7 +2300,7 @@ function navigateMixPanelBack() {
     mixPanelReturnView && VIEWS[mixPanelReturnView]
       ? mixPanelReturnView
       : "mix";
-  navigate(back);
+  goBack(back);
 }
 
 playlistsUi = createPlaylistsUi(
@@ -2393,37 +2498,42 @@ async function confirmAndRestart() {
 restartAppBtn?.addEventListener("click", () => {
   void confirmAndRestart();
 });
-settingsLookBackBtn?.addEventListener("click", () => navigate("booth"));
-settingsQueueBackBtn?.addEventListener("click", () => navigate("booth"));
-settingsDjBackBtn?.addEventListener("click", () => navigate("booth"));
-settingsDjBannerBackBtn?.addEventListener("click", () => navigate("settings-dj"));
-settingsDjNameBackBtn?.addEventListener("click", () => navigate("settings-dj"));
-settingsDjVoiceBackBtn?.addEventListener("click", () => navigate("settings-dj"));
-settingsDjAdvancedBackBtn?.addEventListener("click", () => navigate("settings-dj"));
-settingsDjVolumeBackBtn?.addEventListener("click", () => navigate("settings-dj"));
-settingsDjShoutsBackBtn?.addEventListener("click", () => navigate("settings-dj"));
-settingsDjLastcallBackBtn?.addEventListener("click", () => navigate("settings-dj"));
-settingsUsersBackBtn?.addEventListener("click", () => navigate("booth"));
-settingsUserEditBackBtn?.addEventListener("click", () => navigate("settings-users"));
-settingsConnectionsBackBtn?.addEventListener("click", () => navigate("booth"));
-settingsResetBackBtn?.addEventListener("click", () => navigate("booth"));
-statsBackBtn?.addEventListener("click", () => navigate("main"));
+settingsLookBackBtn?.addEventListener("click", () => goBack("booth"));
+settingsQueueBackBtn?.addEventListener("click", () => goBack("booth"));
+settingsDjBackBtn?.addEventListener("click", () => goBack("booth"));
+settingsDjBannerBackBtn?.addEventListener("click", () => goBack("settings-dj"));
+settingsDjNameBackBtn?.addEventListener("click", () => goBack("settings-dj"));
+settingsDjVoiceBackBtn?.addEventListener("click", () => goBack("settings-dj"));
+settingsDjAdvancedBackBtn?.addEventListener("click", () => goBack("settings-dj"));
+settingsDjVolumeBackBtn?.addEventListener("click", () => goBack("settings-dj"));
+settingsDjShoutsBackBtn?.addEventListener("click", () => goBack("settings-dj"));
+settingsDjLastcallBackBtn?.addEventListener("click", () => goBack("settings-dj"));
+settingsUsersBackBtn?.addEventListener("click", () => goBack("booth"));
+settingsUserEditBackBtn?.addEventListener("click", () => goBack("settings-users"));
+settingsConnectionsBackBtn?.addEventListener("click", () => goBack("booth"));
+settingsResetBackBtn?.addEventListener("click", () => goBack("booth"));
+statsBackBtn?.addEventListener("click", () => goBack("main"));
 playlistsBackBtn.addEventListener("click", () => navigateMixPanelBack());
-memoryBackBtn.addEventListener("click", () => navigate("booth"));
-suggestionsBackBtn?.addEventListener("click", () => navigate("booth"));
-sonosBackBtn?.addEventListener("click", () => navigate("main"));
-moodBackBtn?.addEventListener("click", () => navigate("main"));
+memoryBackBtn.addEventListener("click", () => goBack("booth"));
+suggestionsBackBtn?.addEventListener("click", () => goBack("booth"));
+sonosBackBtn?.addEventListener("click", () => goBack("main"));
+moodBackBtn?.addEventListener("click", () => goBack("main"));
 moodPresetsBackBtn?.addEventListener("click", () => navigateMixPanelBack());
 genresBackBtn?.addEventListener("click", () => navigateMixPanelBack());
-boothBackBtn?.addEventListener("click", () => navigate("main"));
-joinBackBtn?.addEventListener("click", () => navigate("main"));
+boothBackBtn?.addEventListener("click", () => goBack("main"));
+joinBackBtn?.addEventListener("click", () => goBack("main"));
+document.getElementById("display-back")?.addEventListener("click", (event) => {
+  event.preventDefault();
+  goBack("main");
+});
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && currentView === "display") {
     event.preventDefault();
-    navigate("main");
+    goBack("main");
   }
 });
-window.addEventListener("hashchange", routeFromHash);
+window.addEventListener("hashchange", scheduleRouteFromHash);
+window.addEventListener("popstate", scheduleRouteFromHash);
 // The initial route runs at the bottom of this file (before appReady): view
 // hooks like the Vibe summaries touch state declared later, and routing
 // here would crash module evaluation on a #/mood or #/display deep link,
@@ -2437,13 +2547,17 @@ async function loadJoinCode() {
     errorEl.hidden = true;
     errorEl.textContent = "";
   }
-  for (const qrEl of [joinQrEl, displayJoinQr]) {
+  for (const qrEl of [joinQrEl, displayJoinQr, displayWifiQr]) {
     if (!qrEl) continue;
     qrEl.innerHTML = "";
     qrEl.classList.remove("is-ready");
   }
   if (joinUrlEl) joinUrlEl.textContent = "Loading…";
   if (displayJoinUrl) displayJoinUrl.textContent = "Loading…";
+  if (displayWifiSsid) {
+    displayWifiSsid.hidden = true;
+    displayWifiSsid.textContent = "";
+  }
   try {
     const res = await fetch("/api/join");
     const data = await res.json().catch(() => ({}));
@@ -2451,14 +2565,19 @@ async function loadJoinCode() {
     joinUrlCache = data.url || "";
     if (joinUrlEl) joinUrlEl.textContent = joinUrlCache;
     if (displayJoinUrl) displayJoinUrl.textContent = joinUrlCache;
+    if (displayWifiSsid) {
+      const ssid = String(data.wifiSsid || "").trim();
+      displayWifiSsid.textContent = ssid ? `Wi-Fi: ${ssid}` : "";
+      displayWifiSsid.hidden = !ssid;
+    }
     refreshBoothTvFullyUrl();
     // Prefer PNG <img> — Fully/Android WebView often blanks stroke-based QR SVG.
-    const paintQr = (qrEl) => {
+    const paintQr = (qrEl, { png, svg, alt }) => {
       if (!qrEl) return;
-      if (data.qrPng) {
+      if (png) {
         const img = document.createElement("img");
-        img.src = data.qrPng;
-        img.alt = "Join PartyQueue QR code";
+        img.src = png;
+        img.alt = alt;
         img.width = 280;
         img.height = 280;
         img.decoding = "async";
@@ -2466,18 +2585,35 @@ async function loadJoinCode() {
         qrEl.classList.add("is-ready");
         return;
       }
-      if (data.qrSvg) {
-        qrEl.innerHTML = data.qrSvg;
+      if (svg) {
+        qrEl.innerHTML = svg;
         qrEl.classList.add("is-ready");
       }
     };
-    paintQr(joinQrEl);
-    paintQr(displayJoinQr);
+    paintQr(joinQrEl, {
+      png: data.qrPng,
+      svg: data.qrSvg,
+      alt: "Join PartyQueue QR code",
+    });
+    paintQr(displayJoinQr, {
+      png: data.qrPng,
+      svg: data.qrSvg,
+      alt: "Join PartyQueue QR code",
+    });
+    paintQr(displayWifiQr, {
+      png: data.wifiQrPng,
+      svg: data.wifiQrSvg,
+      alt: "Guest Wi-Fi QR code",
+    });
   } catch (err) {
     joinUrlCache = "";
     if (joinUrlEl) joinUrlEl.textContent = "";
     refreshBoothTvFullyUrl();
     if (displayJoinUrl) displayJoinUrl.textContent = "";
+    if (displayWifiSsid) {
+      displayWifiSsid.hidden = true;
+      displayWifiSsid.textContent = "";
+    }
     for (const errorEl of [joinErrorEl, displayJoinError]) {
       if (!errorEl) continue;
       errorEl.hidden = false;
@@ -2509,15 +2645,11 @@ const boothTvKioskBtn = document.getElementById("booth-tv-kiosk");
 const boothTvFullyCopyBtn = document.getElementById("booth-tv-fully-copy");
 
 boothTvPreviewBtn?.addEventListener("click", () => {
-  const hash = "#/display?preview=1";
-  if (location.hash === hash) routeFromHash();
-  else location.hash = hash;
+  applyViewHash("#/display?preview=1");
 });
 
 boothTvKioskBtn?.addEventListener("click", () => {
-  const hash = "#/display?kiosk=1";
-  if (location.hash === hash) routeFromHash();
-  else location.hash = hash;
+  applyViewHash("#/display?kiosk=1");
 });
 
 boothTvFullyCopyBtn?.addEventListener("click", async () => {

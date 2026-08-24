@@ -15,6 +15,10 @@ import {
   buildQueuedPresence,
   queuedResultBadge,
 } from "./search-track.js";
+import {
+  isSearchOverlayState,
+  withSearchOverlayState,
+} from "./view-nav.js";
 
 function isAbortError(err) {
   return (
@@ -89,6 +93,7 @@ export function createSearchUi(els, deps) {
   let debounceTimer = null;
   let currentQuery = "";
   let searchAbort = null;
+  let searchHistoryPushed = false;
   let presence = {
     queuedIds: new Set(),
     searchedQueuedIds: new Set(),
@@ -520,8 +525,13 @@ export function createSearchUi(els, deps) {
     });
   }
 
+  searchInput?.addEventListener("focus", () => {
+    ensureSearchHistory();
+  });
+
   searchInput?.addEventListener("input", () => {
     const q = searchInput.value.trim();
+    if (q) ensureSearchHistory();
     if (searchClear) searchClear.hidden = searchInput.value.length === 0;
     clearTimeout(debounceTimer);
     if (!q) {
@@ -545,11 +555,58 @@ export function createSearchUi(els, deps) {
     window.addEventListener("resize", onViewport);
   }
 
+  function isOpen() {
+    if (searchInput && document.activeElement === searchInput) return true;
+    if (searchInput?.value?.trim()) return true;
+    if (resultsEl?.childElementCount > 0) return true;
+    return false;
+  }
+
+  function ensureSearchHistory() {
+    if (typeof history === "undefined") return;
+    if (searchHistoryPushed || isSearchOverlayState(history.state)) {
+      searchHistoryPushed = true;
+      return;
+    }
+    try {
+      history.pushState(withSearchOverlayState(history.state), "");
+      searchHistoryPushed = true;
+    } catch {
+      searchHistoryPushed = false;
+    }
+  }
+
+  function close({ fromPopstate = false } = {}) {
+    clearTimeout(debounceTimer);
+    currentQuery = "";
+    searchAbort?.abort();
+    searchAbort = null;
+    if (searchInput) {
+      searchInput.value = "";
+      searchInput.blur();
+    }
+    if (searchClear) searchClear.hidden = true;
+    clearSearchPanel();
+    if (
+      !fromPopstate &&
+      searchHistoryPushed &&
+      typeof history !== "undefined" &&
+      isSearchOverlayState(history.state)
+    ) {
+      searchHistoryPushed = false;
+      history.back();
+    } else {
+      searchHistoryPushed = false;
+    }
+  }
+
   return {
     setQueuedTracks,
     setNowPlaying,
     getNowPlayingId,
     updateResultsQueuedState,
     openDedicationModal,
+    isOpen,
+    close,
   };
 }

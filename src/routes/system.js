@@ -5,6 +5,7 @@ import QRCode from "qrcode";
 import { asyncHandler } from "../http/async-handler.js";
 import { getSpotifyAppStatus } from "../spotify-app.js";
 import { getPublicBaseUrl } from "../dj-voice.js";
+import { getGuestWifiPublic } from "../guest-wifi.js";
 import { requireHostStrict } from "../host-auth.js";
 import { getSonosHost } from "../sonos-config.js";
 import {
@@ -59,11 +60,26 @@ export function registerSystemRoutes(app, ctx) {
         errorCorrectionLevel: "M",
       };
       // PNG data URL — stroke-based SVG from qrcode often paints blank in Fully.
-      const [qrPng, qrSvg] = await Promise.all([
+      const wifi = getGuestWifiPublic();
+      const jobs = [
         QRCode.toDataURL(url, qrOpts),
         QRCode.toString(url, { type: "svg", ...qrOpts }),
-      ]);
-      res.json({ url, qrPng, qrSvg });
+      ];
+      if (wifi?.payload) {
+        jobs.push(
+          QRCode.toDataURL(wifi.payload, qrOpts),
+          QRCode.toString(wifi.payload, { type: "svg", ...qrOpts })
+        );
+      }
+      const [qrPng, qrSvg, wifiQrPng, wifiQrSvg] = await Promise.all(jobs);
+      res.json({
+        url,
+        qrPng,
+        qrSvg,
+        wifiSsid: wifi?.ssid || "",
+        wifiQrPng: wifiQrPng || "",
+        wifiQrSvg: wifiQrSvg || "",
+      });
     } catch (err) {
       console.error("[join]", err.message);
       res.status(503).json({

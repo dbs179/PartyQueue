@@ -53,6 +53,43 @@ test.describe("PartyQueue browser smoke", () => {
     await expect(page.locator("#view-main")).toBeHidden();
   });
 
+  test("phone back from search stays on home, not DJ Booth", async ({ page }) => {
+    await page.goto("/");
+    await page.locator("#toolbar-booth").click();
+    const pin = page.locator("#pin-overlay");
+    if (await pin.isVisible()) {
+      await page.locator("#pin-cancel").click();
+    } else {
+      await expect(page.locator("#view-booth")).toBeVisible();
+      await page.locator("#booth-back").click();
+    }
+    await expect(page.locator("#view-main")).toBeVisible();
+    await expect(page.locator("#pin-overlay")).toBeHidden();
+
+    await page.locator("#search").fill("abba");
+    await page.evaluate(() => history.back());
+    await expect(page.locator("#view-main")).toBeVisible();
+    await expect(page.locator("#view-booth")).toBeHidden();
+    await expect(page.locator("#pin-overlay")).toBeHidden();
+    await expect(page.locator("#search")).toHaveValue("");
+  });
+
+  test("back from search does not resurrect a stacked Booth hash", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.evaluate(() => {
+      history.pushState({ pq: 1, view: "booth" }, "", "#/booth");
+      history.pushState({ pq: 1, view: "main" }, "", "#/");
+      const search = document.getElementById("search");
+      if (search) search.value = "abba";
+    });
+    await page.evaluate(() => history.back());
+    await expect(page.locator("#view-main")).toBeVisible();
+    await expect(page.locator("#view-booth")).toBeHidden();
+    await expect(page.locator("#pin-overlay")).toBeHidden();
+  });
+
   test("Party Display is a read-only deep-linked view", async ({ page }) => {
     const nowPlaying = {
       title: "Midnight City",
@@ -166,6 +203,7 @@ test.describe("PartyQueue browser smoke", () => {
     );
     await expect(page.locator("#display-title")).toBeAttached();
     await expect(page.locator("#display-queue")).toBeAttached();
+    await expect(page.locator("#display-wifi-qr")).toBeAttached();
     await expect(page.locator("#display-join-qr")).toBeAttached();
     await expect(page.locator("#display-title")).toHaveText("Midnight City");
     await expect(page.locator("#display-artist")).toHaveText("M83");

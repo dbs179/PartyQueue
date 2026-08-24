@@ -5793,10 +5793,37 @@ body.party-display-active.party-display-preview .party-display-view {
   gap: calc(18 * var(--pd));
 }
 
+.party-display-qr-pair {
+  display: flex;
+  align-items: flex-start;
+  gap: calc(12 * var(--pd));
+  flex: 0 0 auto;
+}
+
+.party-display-qr-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(6 * var(--pd));
+  min-width: 0;
+}
+
+.party-display-qr-slot:has(.party-display-qr:not(.is-ready)) {
+  display: none;
+}
+
+.party-display-qr-caption {
+  margin: 0;
+  color: var(--muted);
+  font-size: calc(15 * var(--pd));
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .party-display-qr {
-  flex: 0 0 calc(248 * var(--pd));
-  width: calc(248 * var(--pd));
-  padding: calc(12 * var(--pd));
+  flex: 0 0 calc(168 * var(--pd));
+  width: calc(168 * var(--pd));
+  padding: calc(10 * var(--pd));
   background: #fff;
   border-radius: calc(14 * var(--pd));
 }
