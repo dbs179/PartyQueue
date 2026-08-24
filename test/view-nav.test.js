@@ -16,13 +16,14 @@ test("hashForView uses #/ for main", () => {
 });
 
 test("resolveViewName aliases old hashes", () => {
-  const views = { main: 1, booth: 1, mix: 1, display: 1 };
+  const views = { main: 1, booth: 1, mix: 1, display: 1, karaoke: 1 };
   assert.equal(resolveViewName("#/", views), "main");
   assert.equal(resolveViewName("#/booth", views), "booth");
   assert.equal(resolveViewName("#/settings", views), "booth");
   assert.equal(resolveViewName("#/options", views), "booth");
   assert.equal(resolveViewName("#/mood", views), "mix");
   assert.equal(resolveViewName("#/display?kiosk=1", views), "display");
+  assert.equal(resolveViewName("#/karaoke?kiosk=1", views), "karaoke");
   assert.equal(resolveViewName("#/nope", views), "main");
 });
 

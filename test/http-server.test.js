@@ -162,6 +162,9 @@ describe("HTTP server harness", { concurrency: false }, () => {
     const html = await page.text();
     assert.match(html, /id="view-display"/);
     assert.match(html, /id="display-queue"/);
+    assert.match(html, /id="view-karaoke"/);
+    assert.match(html, /id="karaoke-queue"/);
+    assert.match(html, /id="karaoke-lyrics"/);
 
     const join = await fetch(`${baseUrl}/api/join`);
     assert.equal(join.status, 200);

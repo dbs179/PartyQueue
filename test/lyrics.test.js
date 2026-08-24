@@ -4,6 +4,7 @@ import {
   LyricsUnavailableError,
   lookupLyrics,
   normalizeLrc,
+  pickBestSearchHit,
   resetLyricsStateForTests,
   warmLyrics,
 } from "../src/lyrics.js";
@@ -706,4 +707,21 @@ describe("lookupOvhLyrics", () => {
       globalThis.fetch = originalFetch;
     }
   });
+});
+
+it("prefers synced lyrics that fit the playing duration over a closer duration label", () => {
+  const volume1 = {
+    trackName: "The Dreamer",
+    albumName: "Volume 1",
+    duration: 230,
+    syncedLyrics: "[00:26.28]I'm so god damn tired of whistling\n[03:59.08]And I'll lay by your side",
+  };
+  const otherMix = {
+    trackName: "The Dreamer",
+    albumName: "Diggers",
+    duration: 231,
+    syncedLyrics: "[00:21.39]I'm so god damn tired of whistling\n[03:43.85]And I'll lay by your side",
+  };
+  const picked = pickBestSearchHit([volume1, otherMix], 229);
+  assert.equal(picked, otherMix);
 });

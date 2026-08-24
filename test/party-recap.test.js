@@ -5,7 +5,9 @@ import {
   closingTimeHintText,
   closingTimeSongName,
   closingTimeToastMessage,
+  createPartyRecapUi,
   shouldAnnounceClosingTime,
+  shouldShowClosingRecapOverlay,
 } from "../public/js/party-recap.js";
 
 test("buildPartyRecapHtml renders totals and top lists", () => {
@@ -55,4 +57,54 @@ test("closing time copy names the song and drops beer emoji", () => {
   assert.equal(toast, "Last call — no more requests. Closing Time is next.");
   assert.doesNotMatch(toast, /🍺|🍻/);
   assert.equal(closingTimeHintText("Custom Nightcap"), closingTimeToastMessage("Custom Nightcap"));
+});
+
+test("Party Display does not keep the Last call recap dialog", () => {
+  assert.equal(shouldShowClosingRecapOverlay("display"), false);
+  assert.equal(shouldShowClosingRecapOverlay("karaoke"), false);
+  assert.equal(shouldShowClosingRecapOverlay("main"), true);
+  assert.equal(shouldShowClosingRecapOverlay("booth"), true);
+
+  const overlay = { hidden: false };
+  const body = { innerHTML: "stale" };
+  const toasts = [];
+  const ui = createPartyRecapUi(
+    {
+      overlay,
+      body,
+      hintEl: { textContent: "" },
+      titleEl: { textContent: "" },
+      dismissBtn: null,
+    },
+    {
+      showToast: (msg) => toasts.push(msg),
+      getCurrentView: () => "display",
+    }
+  );
+  ui.showPartyRecap({ total: 4, topSongs: [], topRequesters: [] });
+  assert.equal(overlay.hidden, true);
+  assert.equal(body.innerHTML, "stale");
+  assert.equal(toasts.length, 1);
+});
+
+test("Karaoke Display also skips the Last call recap dialog", () => {
+  const overlay = { hidden: false };
+  const body = { innerHTML: "stale" };
+  const toasts = [];
+  const ui = createPartyRecapUi(
+    {
+      overlay,
+      body,
+      hintEl: { textContent: "" },
+      titleEl: { textContent: "" },
+      dismissBtn: null,
+    },
+    {
+      showToast: (msg) => toasts.push(msg),
+      getCurrentView: () => "karaoke",
+    }
+  );
+  ui.showPartyRecap({ total: 4, topSongs: [], topRequesters: [] });
+  assert.equal(overlay.hidden, true);
+  assert.equal(toasts.length, 1);
 });

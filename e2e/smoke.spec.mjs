@@ -239,6 +239,105 @@ test.describe("PartyQueue browser smoke", () => {
     await expect(page.locator("#np-toggle")).toBeHidden();
   });
 
+  test("Karaoke Display is lyrics-first without Join QR", async ({ page }) => {
+    const nowPlaying = {
+      title: "Midnight City",
+      artist: "M83",
+      album: "Hurry Up, We're Dreaming",
+      albumArt: "",
+      uri: "spotify:track:karaoke-test",
+      state: "PLAYING",
+      isPlaying: true,
+      queuePlaying: true,
+      durationSec: 240,
+      positionSec: 60,
+      positionAgeSec: 0.25,
+      positionObservedAt: Date.now(),
+      streamSession: "karaoke-smoke",
+      streamSequence: 1,
+    };
+    await page.route("**/api/nowplaying/stream", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body:
+          `event: sonos-status\ndata: ${JSON.stringify({
+            status: "connected",
+            consecutiveFailures: 0,
+            lastSuccessAt: Date.now(),
+          })}\n\n` + `data: ${JSON.stringify(nowPlaying)}\n\n`,
+      })
+    );
+    await page.route("**/api/nowplaying", (route) =>
+      route.fulfill({ status: 200, json: nowPlaying })
+    );
+    await page.route("**/api/queue/stream", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: ${JSON.stringify({
+          tracks: [
+            {
+              title: "Electric Feel",
+              artist: "MGMT",
+              position: 2,
+              requestedBy: "Alex",
+              searched: true,
+            },
+          ],
+          streamSession: "queue-karaoke-smoke",
+          streamSequence: 1,
+        })}\n\n`,
+      })
+    );
+    await page.route("**/api/queue/list", (route) =>
+      route.fulfill({
+        status: 200,
+        json: {
+          tracks: [
+            {
+              title: "Fallback Song",
+              artist: "Fallback Artist",
+              position: 2,
+            },
+          ],
+        },
+      })
+    );
+    await page.route(/\/api\/lyrics\?/, (route) =>
+      route.fulfill({
+        status: 200,
+        json: {
+          found: true,
+          instrumental: false,
+          syncKind: "synced",
+          syncedLyrics: "[00:01.00]Waiting in the night\n[00:05.00]Midnight City lights\n",
+          plainLyrics: "Waiting in the night\nMidnight City lights",
+          provider: "lrclib",
+        },
+      })
+    );
+
+    await page.goto("/#/karaoke");
+    await expect(page.locator("#view-karaoke")).toBeVisible();
+    await expect(page.locator("#view-display")).toBeHidden();
+    await expect(page.locator("#view-main")).toBeHidden();
+    await expect(page.locator("body")).toHaveClass(/karaoke-display-active/);
+    await expect(page.locator("body")).not.toHaveClass(/party-display-active/);
+    await expect(page.locator("#karaoke-title")).toHaveText("Midnight City");
+    await expect(page.locator("#karaoke-artist")).toHaveText("M83");
+    await expect(page.locator("#karaoke-art")).toBeAttached();
+    await expect(page.locator("#karaoke-queue")).toContainText("Electric Feel");
+    await expect(page.locator("#karaoke-queue")).toContainText("Requested by Alex");
+    await expect(page.locator("#karaoke-lyrics")).toBeVisible();
+    await expect(page.locator("#karaoke-lyrics")).toContainText("Midnight City lights");
+    await expect(page.locator("#karaoke-progress")).toBeVisible();
+    await expect(page.locator("#display-join-qr")).toHaveCount(1);
+    await expect(page.locator("#view-karaoke #display-join-qr")).toHaveCount(0);
+    await expect(page.locator("#view-karaoke #display-wifi-qr")).toHaveCount(0);
+    await expect(page.locator("#view-karaoke button")).toHaveCount(0);
+  });
+
   test("album art keeps time moving and retries busy lyrics", async ({ page }) => {
     const nowPlaying = {
       title: "Clock Test",

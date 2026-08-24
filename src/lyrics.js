@@ -112,12 +112,16 @@ export class LyricsUnavailableError extends Error {
 }
 
 function cacheKey({ title, artist, album, duration, uri }) {
+  const id = String(uri || "").trim().toLowerCase();
+  // One Spotify/Sonos id = one lyrics payload. Including duration used to
+  // fetch a second LRC mid-song when TrackDuration arrived late, which
+  // swapped karaoke timing (Amigo the Devil — The Dreamer).
+  if (id) return id;
   const d =
     duration != null && Number.isFinite(Number(duration))
       ? Math.round(Number(duration))
       : "";
   return [
-    String(uri || "").trim().toLowerCase(),
     String(title || "").trim().toLowerCase(),
     String(artist || "").trim().toLowerCase(),
     String(album || "").trim().toLowerCase(),
@@ -229,7 +233,33 @@ async function lrclibFetch(urlPath, deadline) {
   return res.json();
 }
 
-function pickBestSearchHit(results, duration) {
+function parseLrcTimestamp(token) {
+  const match = String(token).match(/^(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?$/);
+  if (!match) return null;
+  const minutes = Number(match[1]);
+  const seconds = Number(match[2]);
+  if (seconds >= 60) return null;
+  const fraction = match[3] ? Number(`0.${match[3]}`) : 0;
+  return minutes * 60 + seconds + fraction;
+}
+
+/** First/last timed line in an LRC body, for karaoke duration fit. */
+export function lrcTimestampSpan(syncedLyrics) {
+  let first = Infinity;
+  let last = -Infinity;
+  for (const row of String(syncedLyrics || "").split(/\r?\n/)) {
+    for (const tag of row.matchAll(/\[(\d{1,3}:\d{2}(?:[.:]\d{1,3})?)\]/g)) {
+      const t = parseLrcTimestamp(tag[1]);
+      if (t == null) continue;
+      if (t < first) first = t;
+      if (t > last) last = t;
+    }
+  }
+  if (!Number.isFinite(first) || last < 0) return null;
+  return { first, last };
+}
+
+export function pickBestSearchHit(results, duration) {
   if (!Array.isArray(results) || !results.length) return null;
   const pool = results.filter(
     (r) => r && (r.plainLyrics || r.syncedLyrics || r.instrumental)
@@ -249,6 +279,18 @@ function pickBestSearchHit(results, duration) {
     if (target != null && Number.isFinite(Number(r.duration))) {
       const delta = Math.abs(Math.round(Number(r.duration)) - target);
       score += Math.max(0, 40 - delta * 4);
+    }
+    // Community LRCs for the "same" song often belong to another mix.
+    // Prefer timestamps that fit the playing length over a closer duration
+    // label with lines that run past the end (karaoke looks "way off").
+    if (target != null && r.syncedLyrics) {
+      const span = lrcTimestampSpan(r.syncedLyrics);
+      if (span) {
+        const overrun = span.last - target;
+        if (overrun > 3) {
+          score -= Math.min(90, Math.round((overrun - 3) * 6));
+        }
+      }
     }
     if (score > bestScore) {
       bestScore = score;

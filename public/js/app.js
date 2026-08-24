@@ -73,6 +73,8 @@ import {
 import {
   isPartyDisplayKiosk,
   isPartyDisplayPreview,
+  isTvStageView,
+  karaokeDisplayFullyStartUrl,
   partyDisplayFullyStartUrl,
   syncPartyDisplayViewport,
 } from "./party-display-viewport.js";
@@ -81,6 +83,7 @@ import {
   resolveViewName,
   searchBackAction,
 } from "./view-nav.js";
+import { blurSoftKeyboard } from "./visual-viewport-box.js";
 import { createPartyDisplayIdle } from "./party-display-idle.js";
 import { createPartyDisplayClock } from "./party-display-clock.js";
 
@@ -235,6 +238,7 @@ const npFsProgressElapsed = document.getElementById("np-fs-progress-elapsed");
 const npFsProgressDuration = document.getElementById("np-fs-progress-duration");
 const npFsLyrics = document.getElementById("np-fs-lyrics");
 const displayLyrics = document.getElementById("display-lyrics");
+const karaokeLyrics = document.getElementById("karaoke-lyrics");
 const shuffleBtn = document.getElementById("shuffle-btn");
 const prevBtn = document.getElementById("prev-btn");
 const nextBtn = document.getElementById("next-btn");
@@ -345,6 +349,7 @@ const toolbarBoothBtn = document.getElementById("toolbar-booth");
 const toolbarStatsBtn = document.getElementById("toolbar-stats");
 const toolbarJoinBtn = document.getElementById("toolbar-join");
 const toolbarDisplayBtn = document.getElementById("toolbar-display");
+const toolbarKaraokeBtn = document.getElementById("toolbar-karaoke");
 const moodNeedSpotify = document.getElementById("mood-need-spotify");
 const musicMixHub = document.getElementById("music-mix-hub");
 
@@ -413,6 +418,9 @@ if (toolbarJoinBtn) {
 }
 if (toolbarDisplayBtn) {
   toolbarDisplayBtn.addEventListener("click", () => navigate("display"));
+}
+if (toolbarKaraokeBtn) {
+  toolbarKaraokeBtn.addEventListener("click", () => navigate("karaoke"));
 }
 syncToolbarMoodVisibility();
 
@@ -1900,6 +1908,7 @@ const boothBackBtn = document.getElementById("booth-back");
 const joinBackBtn = document.getElementById("join-back");
 const viewJoin = document.getElementById("view-join");
 const viewDisplay = document.getElementById("view-display");
+const viewKaraoke = document.getElementById("view-karaoke");
 const joinQrEl = document.getElementById("join-qr");
 const joinUrlEl = document.getElementById("join-url");
 const joinErrorEl = document.getElementById("join-error");
@@ -1929,6 +1938,26 @@ const displayQueueSection = document.getElementById("display-queue-section");
 const displayQueueStatus = document.getElementById("display-queue-status");
 const displayQueue = document.getElementById("display-queue");
 const displayQueueEmpty = document.getElementById("display-queue-empty");
+const karaokeConnectionStatus = document.getElementById(
+  "karaoke-connection-status"
+);
+const karaokeArt = document.getElementById("karaoke-art");
+const karaokeEmpty = document.getElementById("karaoke-empty");
+const karaokeTitle = document.getElementById("karaoke-title");
+const karaokeArtist = document.getElementById("karaoke-artist");
+const karaokeProgress = document.getElementById("karaoke-progress");
+const karaokeProgressFill = document.getElementById("karaoke-progress-fill");
+const karaokeProgressElapsed = document.getElementById(
+  "karaoke-progress-elapsed"
+);
+const karaokeProgressDuration = document.getElementById(
+  "karaoke-progress-duration"
+);
+const karaokeQueueCount = document.getElementById("karaoke-queue-count");
+const karaokeQueueSection = document.getElementById("karaoke-queue-section");
+const karaokeQueueStatus = document.getElementById("karaoke-queue-status");
+const karaokeQueue = document.getElementById("karaoke-queue");
+const karaokeQueueEmpty = document.getElementById("karaoke-queue-empty");
 const displayJoinQr = document.getElementById("display-join-qr");
 const displayWifiQr = document.getElementById("display-wifi-qr");
 const displayWifiSsid = document.getElementById("display-wifi-ssid");
@@ -1939,6 +1968,7 @@ const recapBody = document.getElementById("recap-body");
 const recapDismissBtn = document.getElementById("recap-dismiss");
 const {
   showPartyRecap,
+  hidePartyRecap,
   maybeAnnounceClosingTime,
   markClosingShown,
 } = createPartyRecapUi(
@@ -1952,6 +1982,7 @@ const {
   {
     showToast,
     getEndOfNightName,
+    getCurrentView: () => currentView,
   }
 );
 const VIEWS = {
@@ -1981,6 +2012,7 @@ const VIEWS = {
   booth: viewBooth,
   join: viewJoin,
   display: viewDisplay,
+  karaoke: viewKaraoke,
 };
 let currentView = "main";
 /** Last non-Settings view — PIN Cancel returns here (fallback: main). */
@@ -2075,25 +2107,32 @@ const partyDisplayClock = createPartyDisplayClock({
 
 function syncPartyDisplayIdleState() {
   partyDisplayIdle.setDisplayState({
-    active: currentView === "display",
+    active: isTvStageView(currentView),
     // Phone/laptop TV preview uses kiosk padding styles but must not idle.
     kiosk: isPartyDisplayKiosk() && !isPartyDisplayPreview(),
   });
 }
 
 function syncPartyDisplayBackLabel() {
-  const back = document.getElementById("display-back");
-  if (!back) return;
-  back.textContent =
-    currentView === "display" && isPartyDisplayPreview()
-      ? "Exit TV preview"
-      : "Back";
+  const preview = isPartyDisplayPreview();
+  const displayBack = document.getElementById("display-back");
+  if (displayBack) {
+    displayBack.textContent =
+      currentView === "display" && preview ? "Exit TV preview" : "Back";
+  }
+  const karaokeBack = document.getElementById("karaoke-back");
+  if (karaokeBack) {
+    karaokeBack.textContent =
+      currentView === "karaoke" && preview ? "Exit TV preview" : "Back";
+  }
 }
 
 function refreshBoothTvFullyUrl() {
-  const input = document.getElementById("booth-tv-fully-url");
-  if (!input) return;
-  input.value = partyDisplayFullyStartUrl(joinUrlCache || location.origin);
+  const origin = joinUrlCache || location.origin;
+  const displayInput = document.getElementById("booth-tv-fully-url");
+  if (displayInput) displayInput.value = partyDisplayFullyStartUrl(origin);
+  const karaokeInput = document.getElementById("booth-karaoke-fully-url");
+  if (karaokeInput) karaokeInput.value = karaokeDisplayFullyStartUrl(origin);
 }
 
 function showView(name) {
@@ -2102,13 +2141,24 @@ function showView(name) {
   if (!isHostArea(target)) lastNonSettingsView = target;
   currentView = target;
   if (target !== "main") closeSearchQuietly();
+  // Suggestion Box (and any other field) can keep the Android keyboard up
+  // after the main view is hidden, which squeezes Karaoke/Party Display.
+  if (target !== "main") blurSoftKeyboard();
   for (const key of Object.keys(VIEWS)) VIEWS[key].hidden = key !== target;
   document.body.classList.toggle("party-display-active", target === "display");
-  syncPartyDisplayViewport(target === "display");
+  document.body.classList.toggle("karaoke-display-active", target === "karaoke");
+  syncPartyDisplayViewport(isTvStageView(target));
   syncPartyDisplayIdleState();
   syncPartyDisplayBackLabel();
-  if (target === "display") partyDisplayClock.start();
-  else partyDisplayClock.stop();
+  if (target === "display") {
+    hidePartyRecap();
+    partyDisplayClock.start();
+  } else if (target === "karaoke") {
+    hidePartyRecap();
+    partyDisplayClock.stop();
+  } else {
+    partyDisplayClock.stop();
+  }
   // The DJ Booth and everything behind it require the host PIN. While locked,
   // keep the view hidden and skip its data loads (they'd 401 anyway).
   const hostLocked = isHostArea(target) && !settingsGateOk();
@@ -2643,6 +2693,11 @@ if (joinCopyBtn) {
 const boothTvPreviewBtn = document.getElementById("booth-tv-preview");
 const boothTvKioskBtn = document.getElementById("booth-tv-kiosk");
 const boothTvFullyCopyBtn = document.getElementById("booth-tv-fully-copy");
+const boothKaraokePreviewBtn = document.getElementById("booth-karaoke-preview");
+const boothKaraokeKioskBtn = document.getElementById("booth-karaoke-kiosk");
+const boothKaraokeFullyCopyBtn = document.getElementById(
+  "booth-karaoke-fully-copy"
+);
 
 boothTvPreviewBtn?.addEventListener("click", () => {
   applyViewHash("#/display?preview=1");
@@ -2657,6 +2712,24 @@ boothTvFullyCopyBtn?.addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(url);
     showToast("Fully URL copied");
+  } catch {
+    showToast(url, false, 6000);
+  }
+});
+
+boothKaraokePreviewBtn?.addEventListener("click", () => {
+  applyViewHash("#/karaoke?preview=1");
+});
+
+boothKaraokeKioskBtn?.addEventListener("click", () => {
+  applyViewHash("#/karaoke?kiosk=1");
+});
+
+boothKaraokeFullyCopyBtn?.addEventListener("click", async () => {
+  const url = karaokeDisplayFullyStartUrl(joinUrlCache || location.origin);
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast("Karaoke Fully URL copied");
   } catch {
     showToast(url, false, 6000);
   }
@@ -2746,6 +2819,9 @@ const queueUi = createQueueUi(
     displayQueue,
     displayQueueCount,
     displayQueueEmpty,
+    karaokeQueue,
+    karaokeQueueCount,
+    karaokeQueueEmpty,
   },
   {
     hostFetch,
@@ -2911,6 +2987,7 @@ const lyricsUi = createLyricsUi(
     npFsProgressDuration,
     npFsLyrics,
     displayLyrics,
+    karaokeLyrics,
     npProgress,
     npProgressFill,
     npProgressElapsed,
@@ -2919,6 +2996,10 @@ const lyricsUi = createLyricsUi(
     displayProgressFill,
     displayProgressElapsed,
     displayProgressDuration,
+    karaokeProgress,
+    karaokeProgressFill,
+    karaokeProgressElapsed,
+    karaokeProgressDuration,
     npCard,
   },
   {
@@ -2929,7 +3010,25 @@ const lyricsUi = createLyricsUi(
   }
 );
 
+function renderKaraokeNowPlaying(np, hasTrack) {
+  if (!karaokeTitle || !karaokeEmpty || !karaokeArt) return;
+  if (!hasTrack) {
+    bindNowPlayingArtwork(karaokeArt, null);
+    karaokeEmpty.hidden = false;
+    karaokeEmpty.textContent = EMPTY_MESSAGE;
+    karaokeTitle.textContent = "";
+    if (karaokeArtist) karaokeArtist.textContent = "";
+    return;
+  }
+  karaokeEmpty.hidden = true;
+  karaokeTitle.textContent = np.title || "";
+  if (karaokeArtist) karaokeArtist.textContent = np.artist || "";
+  bindNowPlayingArtwork(karaokeArt, np);
+}
+
 function renderPartyDisplayNowPlaying(np, hasTrack) {
+  renderKaraokeNowPlaying(np, hasTrack);
+  if (!hasTrack && isTvStageView(currentView)) lyricsUi.clearDisplay();
   if (!displayTitle || !displayEmpty || !displayArt) return;
   if (!hasTrack) {
     bindNowPlayingArtwork(displayArt, null);
@@ -2941,7 +3040,6 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
     if (displayState) displayState.hidden = true;
     if (displayOriginPill) displayOriginPill.hidden = true;
     reactionsUi.setDisplayHidden(true);
-    if (currentView === "display") lyricsUi.clearDisplay();
     return;
   }
 
@@ -3174,10 +3272,13 @@ liveStreams = createLiveStreams(
     npCard,
     npConnectionStatus,
     displayConnectionStatus,
+    karaokeConnectionStatus,
     queueSection,
     queueConnectionStatus,
     displayQueueSection,
     displayQueueStatus,
+    karaokeQueueSection,
+    karaokeQueueStatus,
   },
   {
     getCurrentView: () => currentView,

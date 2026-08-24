@@ -1,4 +1,4 @@
-/** Full-screen NP overlay lyrics + Party Display karaoke window + playhead clock. */
+/** Full-screen NP overlay lyrics + Party Display 3-line window + Karaoke Display 5-line window + playhead clock. */
 
 import {
   parseSyncedLyrics,
@@ -13,6 +13,9 @@ export const LYRICS_LEAD_SEC = 0.75;
 /** Party Display karaoke: one line before, active, one after. */
 export const DISPLAY_LYRIC_WINDOW = 3;
 
+/** Karaoke Display: two lines before, active, two after. */
+export const KARAOKE_LYRIC_WINDOW = 5;
+
 /**
  * @param {number} activeIdx
  * @returns {{ i: number, cls: "is-past"|"is-active"|"is-next" }[]}
@@ -24,6 +27,22 @@ export function displayLyricWindowSlots(activeIdx) {
     { i: active - 1, cls: "is-past" },
     { i: active, cls: "is-active" },
     { i: active + 1, cls: "is-next" },
+  ];
+}
+
+/**
+ * @param {number} activeIdx
+ * @returns {{ i: number, cls: "is-past"|"is-active"|"is-next" }[]}
+ */
+export function karaokeLyricWindowSlots(activeIdx) {
+  const idx = Number(activeIdx);
+  const active = Number.isFinite(idx) ? idx : -1;
+  return [
+    { i: active - 2, cls: "is-past" },
+    { i: active - 1, cls: "is-past" },
+    { i: active, cls: "is-active" },
+    { i: active + 1, cls: "is-next" },
+    { i: active + 2, cls: "is-next" },
   ];
 }
 
@@ -77,6 +96,7 @@ export function playbackClockNow() {
  *   npFsProgressDuration?: HTMLElement|null,
  *   npFsLyrics?: HTMLElement|null,
  *   displayLyrics?: HTMLElement|null,
+ *   karaokeLyrics?: HTMLElement|null,
  *   npProgress?: HTMLElement|null,
  *   npProgressFill?: HTMLElement|null,
  *   npProgressElapsed?: HTMLElement|null,
@@ -85,6 +105,10 @@ export function playbackClockNow() {
  *   displayProgressFill?: HTMLElement|null,
  *   displayProgressElapsed?: HTMLElement|null,
  *   displayProgressDuration?: HTMLElement|null,
+ *   karaokeProgress?: HTMLElement|null,
+ *   karaokeProgressFill?: HTMLElement|null,
+ *   karaokeProgressElapsed?: HTMLElement|null,
+ *   karaokeProgressDuration?: HTMLElement|null,
  *   npCard?: HTMLElement|null,
  * }} els
  * @param {{
@@ -109,6 +133,7 @@ export function createLyricsUi(els, deps) {
     npFsProgressDuration,
     npFsLyrics,
     displayLyrics,
+    karaokeLyrics,
     npProgress,
     npProgressFill,
     npProgressElapsed,
@@ -117,6 +142,10 @@ export function createLyricsUi(els, deps) {
     displayProgressFill,
     displayProgressElapsed,
     displayProgressDuration,
+    karaokeProgress,
+    karaokeProgressFill,
+    karaokeProgressElapsed,
+    karaokeProgressDuration,
     npCard,
   } = els || {};
 
@@ -149,12 +178,16 @@ export function createLyricsUi(els, deps) {
     return overlayOpen;
   }
 
+  function isTvLyricsView(name = getCurrentView()) {
+    return name === "display" || name === "karaoke";
+  }
+
   function lyricsActive() {
-    return overlayOpen || getCurrentView() === "display";
+    return overlayOpen || isTvLyricsView();
   }
 
   function lyricsContainers() {
-    return [npFsLyrics, displayLyrics].filter(Boolean);
+    return [npFsLyrics, displayLyrics, karaokeLyrics].filter(Boolean);
   }
 
   function clearDisplayDjLyricSize() {
@@ -212,17 +245,26 @@ export function createLyricsUi(els, deps) {
     if (!source) return;
     for (const el of containers) {
       if (el === source || lyricsContainerHasPaint(el)) continue;
-      if (el === displayLyrics) continue;
+      if (el === displayLyrics || el === karaokeLyrics) continue;
       el.innerHTML = source.innerHTML;
     }
   }
 
-  function paintDisplayLyricWindow(activeIdx) {
-    if (!displayLyrics || !syncedLines) return;
-    displayLyrics.hidden = false;
+  function setKaraokeLyricsVisible(on, { dj = false } = {}) {
+    if (!karaokeLyrics) return;
+    karaokeLyrics.hidden = !on;
+    karaokeLyrics.classList?.toggle?.("is-dj", !!(on && dj));
+    if (!on) {
+      karaokeLyrics.replaceChildren();
+      karaokeLyrics.innerHTML = "";
+    }
+  }
+
+  function paintLyricWindow(host, windowClass, slots) {
+    if (!host || !syncedLines) return;
+    host.hidden = false;
     const ul = document.createElement("ul");
-    ul.className = "np-fs-lyrics-synced party-display-lyrics-window";
-    const slots = displayLyricWindowSlots(activeIdx);
+    ul.className = `np-fs-lyrics-synced ${windowClass}`;
     for (const slot of slots) {
       const li = document.createElement("li");
       li.className = "np-fs-line";
@@ -241,10 +283,26 @@ export function createLyricsUi(els, deps) {
       }
       ul.appendChild(li);
     }
-    displayLyrics.replaceChildren(ul);
+    host.replaceChildren(ul);
   }
 
-  function setNpFsLyricsStatus(msg, { showOnDisplay = false } = {}) {
+  function paintDisplayLyricWindow(activeIdx) {
+    paintLyricWindow(
+      displayLyrics,
+      "party-display-lyrics-window",
+      displayLyricWindowSlots(activeIdx)
+    );
+  }
+
+  function paintKaraokeLyricWindow(activeIdx) {
+    paintLyricWindow(
+      karaokeLyrics,
+      "karaoke-display-lyrics-window",
+      karaokeLyricWindowSlots(activeIdx)
+    );
+  }
+
+  function setNpFsLyricsStatus(msg, { showOnDisplay = false, showOnKaraoke = true } = {}) {
     syncedLines = null;
     if (npFsLyrics) {
       npFsLyrics.innerHTML = `<p class="np-fs-lyrics-status">${escapeHtml(msg)}</p>`;
@@ -254,6 +312,12 @@ export function createLyricsUi(els, deps) {
       displayLyrics.innerHTML = `<p class="np-fs-lyrics-status">${escapeHtml(msg)}</p>`;
     } else {
       setDisplayLyricsVisible(false);
+    }
+    if (showOnKaraoke && karaokeLyrics) {
+      setKaraokeLyricsVisible(true, { dj: true });
+      karaokeLyrics.innerHTML = `<p class="np-fs-lyrics-status">${escapeHtml(msg)}</p>`;
+    } else {
+      setKaraokeLyricsVisible(false);
     }
   }
 
@@ -273,11 +337,16 @@ export function createLyricsUi(els, deps) {
     } else {
       setDisplayLyricsVisible(false);
     }
+    if (karaokeLyrics) {
+      setKaraokeLyricsVisible(true, { dj: true });
+      karaokeLyrics.innerHTML = `<pre class="np-fs-lyrics-plain">${escapeHtml(text)}</pre>`;
+    }
   }
 
   function renderSyncedLyrics(lines) {
     syncedLines = lines;
     setDisplayLyricsVisible(true);
+    setKaraokeLyricsVisible(true);
     if (npFsLyrics) {
       const ul = document.createElement("ul");
       ul.className = "np-fs-lyrics-synced";
@@ -371,6 +440,14 @@ export function createLyricsUi(els, deps) {
       position,
       duration
     );
+    paintTrackProgress(
+      karaokeProgress,
+      karaokeProgressFill,
+      karaokeProgressElapsed,
+      karaokeProgressDuration,
+      position,
+      duration
+    );
   }
 
   function applyPlaybackClock(np) {
@@ -432,7 +509,8 @@ export function createLyricsUi(els, deps) {
     if (!syncedLines) return;
     const pos = estimatedPositionSec();
     const idx = activeSyncedLineIndex(syncedLines, pos);
-    if (getCurrentView() === "display") paintDisplayLyricWindow(idx);
+    paintDisplayLyricWindow(idx);
+    paintKaraokeLyricWindow(idx);
     if (!npFsLyrics) return;
     const ul = npFsLyrics.querySelector(".np-fs-lyrics-synced");
     if (!ul) return;
@@ -518,7 +596,7 @@ export function createLyricsUi(els, deps) {
       return;
     }
     if (!np || !(np.title && np.artist)) {
-      setNpFsLyricsStatus("No lyrics for this track");
+      setNpFsLyricsStatus("No lyrics for this track", { showOnKaraoke: false });
       return;
     }
     // Drop previous karaoke immediately. Otherwise Party Display keeps the
@@ -600,6 +678,11 @@ export function createLyricsUi(els, deps) {
       lyricsKey = key;
       clearLyricsRetry();
       stopLyricTicker();
+      if (!np?.djVoice && !(np?.title && np?.artist)) {
+        setNpFsLyricsStatus("No lyrics for this track", { showOnKaraoke: false });
+        loadOverlayLyrics(np);
+        return;
+      }
       // Clear paint before the async fetch so the prior track cannot linger.
       setNpFsLyricsStatus("Loading lyrics…");
       loadOverlayLyrics(np);
@@ -657,9 +740,9 @@ export function createLyricsUi(els, deps) {
   }
 
   function onViewChange({ target, previous }) {
-    if (target === "display") {
+    if (isTvLyricsView(target)) {
       sync(getLastNowPlaying());
-    } else if (previous === "display" && !overlayOpen) {
+    } else if (isTvLyricsView(previous) && !overlayOpen) {
       clearLyricsRetry();
       stopLyricTicker();
       lyricsFetchId += 1;
@@ -667,7 +750,8 @@ export function createLyricsUi(els, deps) {
   }
 
   function clearDisplay() {
-    if (displayLyrics) displayLyrics.innerHTML = "";
+    setDisplayLyricsVisible(false);
+    setKaraokeLyricsVisible(false);
   }
 
   if (npCard) {

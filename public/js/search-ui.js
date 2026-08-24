@@ -19,6 +19,11 @@ import {
   isSearchOverlayState,
   withSearchOverlayState,
 } from "./view-nav.js";
+import {
+  applyVisualViewportBox,
+  clearVisualViewportBox,
+  watchVisualViewport,
+} from "./visual-viewport-box.js";
 
 function isAbortError(err) {
   return (
@@ -462,7 +467,11 @@ export function createSearchUi(els, deps) {
     dedicationInput.value = sanitizeDedication(track.dedication || "");
 
     let session = null;
+    let stopViewport = null;
     const cleanup = () => {
+      stopViewport?.();
+      stopViewport = null;
+      clearVisualViewportBox(dedicationOverlay);
       dedicationSaveBtn?.removeEventListener("click", onSave);
       dedicationCancelBtn?.removeEventListener("click", onCancel);
       dedicationInput.removeEventListener("keydown", onKey);
@@ -523,6 +532,9 @@ export function createSearchUi(els, deps) {
       allowBackdrop: true,
       onBackdrop: onCancel,
     });
+    stopViewport = watchVisualViewport(() =>
+      applyVisualViewportBox(dedicationOverlay)
+    );
   }
 
   searchInput?.addEventListener("focus", () => {

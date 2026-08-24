@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   LYRICS_LEAD_SEC,
   DISPLAY_LYRIC_WINDOW,
+  KARAOKE_LYRIC_WINDOW,
   activeSyncedLineIndex,
   createLyricsUi,
   displayLyricWindowSlots,
+  karaokeLyricWindowSlots,
   formatDjAnnounceScript,
   lyricsMissMessage,
 } from "../public/js/lyrics-ui.js";
@@ -93,6 +95,24 @@ test("Party Display karaoke window is 3 lines around the active line", () => {
     { i: -1, cls: "is-past" },
     { i: 0, cls: "is-active" },
     { i: 1, cls: "is-next" },
+  ]);
+});
+
+test("Karaoke Display window is 5 lines around the active line", () => {
+  assert.equal(KARAOKE_LYRIC_WINDOW, 5);
+  assert.deepEqual(karaokeLyricWindowSlots(4), [
+    { i: 2, cls: "is-past" },
+    { i: 3, cls: "is-past" },
+    { i: 4, cls: "is-active" },
+    { i: 5, cls: "is-next" },
+    { i: 6, cls: "is-next" },
+  ]);
+  assert.deepEqual(karaokeLyricWindowSlots(0), [
+    { i: -2, cls: "is-past" },
+    { i: -1, cls: "is-past" },
+    { i: 0, cls: "is-active" },
+    { i: 1, cls: "is-next" },
+    { i: 2, cls: "is-next" },
   ]);
 });
 
@@ -453,6 +473,120 @@ test("Party Display shows DJ announce script and hides untimed song lyrics", asy
     assert.doesNotMatch(displayLyrics.innerHTML, /Should not appear/);
   } finally {
     ui?.onViewChange({ target: "main", previous: "display" });
+    if (prevDocument === undefined) delete globalThis.document;
+    else globalThis.document = prevDocument;
+    if (prevWindow === undefined) delete globalThis.window;
+    else globalThis.window = prevWindow;
+    if (prevMatchMedia === undefined) delete globalThis.matchMedia;
+    else globalThis.matchMedia = prevMatchMedia;
+  }
+});
+
+test("Karaoke Display shows plain lyrics and a 5-line synced window", async () => {
+  const karaokeLyrics = makeLyricsEl();
+  karaokeLyrics.hidden = true;
+  const npFsLyrics = makeLyricsEl();
+  let nowPlaying = {
+    title: "Plain Song",
+    artist: "Artist",
+    uri: "spotify:track:karaokeplain0000000000",
+    queueTrack: 1,
+    isPlaying: true,
+    durationSec: 120,
+    positionSec: 0,
+  };
+
+  const prevDocument = globalThis.document;
+  const prevWindow = globalThis.window;
+  const prevMatchMedia = globalThis.matchMedia;
+  globalThis.document = {
+    body: { classList: { add() {}, remove() {} } },
+    createElement(tag) {
+      const el = {
+        tagName: tag,
+        className: "",
+        textContent: "",
+        innerHTML: "",
+        classList: {
+          add(name) {
+            this.className = [this.className, name].filter(Boolean).join(" ");
+          },
+          contains() {
+            return false;
+          },
+        },
+        appendChild() {},
+        append() {},
+        prepend() {},
+        get outerHTML() {
+          return `<${tag} class="${this.className}">${this.textContent}</${tag}>`;
+        },
+      };
+      return el;
+    },
+  };
+  globalThis.window = {
+    addEventListener() {},
+    matchMedia: () => ({ matches: true }),
+    setInterval: () => 0,
+    setTimeout,
+    clearTimeout,
+  };
+  globalThis.matchMedia = () => ({ matches: true });
+
+  let ui;
+  try {
+    ui = createLyricsUi(
+      { karaokeLyrics, npFsLyrics },
+      {
+        fetch: async (url) => {
+          const u = String(url);
+          if (u.includes("Plain")) {
+            return {
+              ok: true,
+              json: async () => ({
+                found: true,
+                plainLyrics: "Verse one\nVerse two",
+              }),
+            };
+          }
+          return {
+            ok: true,
+            json: async () => ({
+              found: true,
+              syncedLyrics:
+                "[00:00.00] Line A1\n[00:05.00] Line A2\n[00:10.00] Line A3\n",
+            }),
+          };
+        },
+        getLastNowPlaying: () => nowPlaying,
+        getCurrentView: () => "karaoke",
+        isModalOpen: () => false,
+        bindArtwork: () => {},
+      }
+    );
+
+    ui.sync(nowPlaying);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(karaokeLyrics.hidden, false);
+    assert.match(karaokeLyrics.innerHTML, /np-fs-lyrics-plain/);
+    assert.match(karaokeLyrics.innerHTML, /Verse one/);
+
+    nowPlaying = {
+      title: "Timed Song",
+      artist: "Artist",
+      uri: "spotify:track:karaokesynced000000000",
+      queueTrack: 2,
+      isPlaying: true,
+      durationSec: 120,
+      positionSec: 0,
+    };
+    ui.sync(nowPlaying);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(karaokeLyrics.hidden, false);
+    assert.match(karaokeLyrics.innerHTML, /karaoke-display-lyrics-window/);
+  } finally {
+    ui?.onViewChange({ target: "main", previous: "karaoke" });
     if (prevDocument === undefined) delete globalThis.document;
     else globalThis.document = prevDocument;
     if (prevWindow === undefined) delete globalThis.window;

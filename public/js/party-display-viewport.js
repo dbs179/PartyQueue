@@ -3,9 +3,11 @@
  *
  * Fully start URL:
  *   http://10.10.1.30:8088/#/display?kiosk=1
+ *   http://10.10.1.30:8088/#/karaoke?kiosk=1
  *
  * Host TV preview (Booth Look):
  *   #/display?preview=1  — letterboxed 16:9 stage on this device
+ *   #/karaoke?preview=1  — Karaoke Display preview
  *
  * Fully settings for PC parity:
  *   - Web Content → Enable JavaScript interface (for window.fully)
@@ -102,11 +104,18 @@ export function fit16x9Stage(boxW, boxH) {
   return { w: stageW, h: stageW * (9 / 16) };
 }
 
+/** Party Display and Karaoke Display share --pd / kiosk / preview plumbing. */
+export function isTvStageView(name) {
+  return name === "display" || name === "karaoke";
+}
+
 /**
  * Fully Kiosk start URL from a Join / public base URL.
  * @param {string} [baseUrl]
+ * @param {"display"|"karaoke"} [view]
  */
-export function partyDisplayFullyStartUrl(baseUrl) {
+export function tvFullyStartUrl(baseUrl, view = "display") {
+  const name = view === "karaoke" ? "karaoke" : "display";
   const raw = String(baseUrl || "").trim();
   let origin = "";
   try {
@@ -117,8 +126,24 @@ export function partyDisplayFullyStartUrl(baseUrl) {
   if (!origin && typeof location !== "undefined" && location?.origin) {
     origin = location.origin;
   }
-  if (!origin) return "#/display?kiosk=1";
-  return `${origin.replace(/\/$/, "")}/#/display?kiosk=1`;
+  if (!origin) return `#/${name}?kiosk=1`;
+  return `${origin.replace(/\/$/, "")}/#/${name}?kiosk=1`;
+}
+
+/**
+ * Fully Kiosk start URL from a Join / public base URL.
+ * @param {string} [baseUrl]
+ */
+export function partyDisplayFullyStartUrl(baseUrl) {
+  return tvFullyStartUrl(baseUrl, "display");
+}
+
+/**
+ * Fully Kiosk start URL for Karaoke Display.
+ * @param {string} [baseUrl]
+ */
+export function karaokeDisplayFullyStartUrl(baseUrl) {
+  return tvFullyStartUrl(baseUrl, "karaoke");
 }
 
 function measureFromFullyCssPx() {

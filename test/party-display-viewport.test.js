@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   viewNameFromHash,
   fit16x9Stage,
+  isTvStageView,
+  karaokeDisplayFullyStartUrl,
   partyDisplayFullyStartUrl,
 } from "../public/js/party-display-viewport.js";
 
@@ -11,6 +13,8 @@ test("viewNameFromHash strips Fully kiosk query", () => {
   assert.equal(viewNameFromHash("#/display?kiosk=true"), "display");
   assert.equal(viewNameFromHash("#/display&kiosk=1"), "display");
   assert.equal(viewNameFromHash("#/display"), "display");
+  assert.equal(viewNameFromHash("#/karaoke?kiosk=1"), "karaoke");
+  assert.equal(viewNameFromHash("#/karaoke?preview=1"), "karaoke");
   assert.equal(viewNameFromHash("#/"), "");
   assert.equal(viewNameFromHash("#/booth"), "booth");
 });
@@ -57,4 +61,15 @@ test("partyDisplayFullyStartUrl appends the kiosk hash", () => {
   );
   assert.equal(partyDisplayFullyStartUrl(""), "#/display?kiosk=1");
   assert.equal(partyDisplayFullyStartUrl("not a url"), "#/display?kiosk=1");
+});
+
+test("karaokeDisplayFullyStartUrl uses the karaoke kiosk hash", () => {
+  assert.equal(isTvStageView("display"), true);
+  assert.equal(isTvStageView("karaoke"), true);
+  assert.equal(isTvStageView("main"), false);
+  assert.equal(
+    karaokeDisplayFullyStartUrl("http://10.10.1.30:8088/"),
+    "http://10.10.1.30:8088/#/karaoke?kiosk=1"
+  );
+  assert.equal(karaokeDisplayFullyStartUrl(""), "#/karaoke?kiosk=1");
 });

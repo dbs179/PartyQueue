@@ -199,6 +199,9 @@ export function queueBadgeHtml(track, opts = {}) {
  *   displayQueue?: HTMLElement|null,
  *   displayQueueCount?: HTMLElement|null,
  *   displayQueueEmpty?: HTMLElement|null,
+ *   karaokeQueue?: HTMLElement|null,
+ *   karaokeQueueCount?: HTMLElement|null,
+ *   karaokeQueueEmpty?: HTMLElement|null,
  * }} els
  * @param {{
  *   hostFetch: typeof fetch,
@@ -223,6 +226,9 @@ export function createQueueUi(els, deps) {
     displayQueue,
     displayQueueCount,
     displayQueueEmpty,
+    karaokeQueue,
+    karaokeQueueCount,
+    karaokeQueueEmpty,
   } = els || {};
 
   const hostFetch = deps.hostFetch;
@@ -243,11 +249,30 @@ export function createQueueUi(els, deps) {
   let sortable = null;
   /** @type {object[]|null} */
   let pendingStreamTracks = null;
-  let lastDisplayQueueSig = "";
   /** @type {object[]} */
   let lastDisplayTracks = [];
-  let lastDisplayFitCount = 0;
   let displayRelayoutQueued = false;
+
+  function tvQueueTarget(listEl, emptyEl, countEl) {
+    return {
+      listEl,
+      emptyEl,
+      countEl,
+      sig: "",
+      fitCount: 0,
+    };
+  }
+
+  const displayQueueTarget = tvQueueTarget(
+    displayQueue,
+    displayQueueEmpty,
+    displayQueueCount
+  );
+  const karaokeQueueTarget = tvQueueTarget(
+    karaokeQueue,
+    karaokeQueueEmpty,
+    karaokeQueueCount
+  );
 
   function badgeOpts(track) {
     const showQueueGenre = !!getShowQueueGenre();
@@ -438,117 +463,117 @@ export function createQueueUi(els, deps) {
       .join("\n");
   }
 
-  function trimDisplayQueueToFit() {
-    const fit = countFullyVisibleQueueRows(displayQueue);
+  function trimQueueToFit(target) {
+    const fit = countFullyVisibleQueueRows(target.listEl);
     if (fit <= 0) return 0;
-    lastDisplayFitCount = fit;
-    while (displayQueue.children.length > fit) {
-      displayQueue.lastElementChild?.remove();
+    target.fitCount = fit;
+    while (target.listEl.children.length > fit) {
+      target.listEl.lastElementChild?.remove();
     }
     return fit;
   }
 
-  function renderPartyDisplay(tracks, { relayout = false } = {}) {
-    if (!displayQueue || !displayQueueEmpty || !displayQueueCount) return;
-    const list = Array.isArray(tracks) ? tracks : [];
-    lastDisplayTracks = list;
+  function appendTvQueueRow(listEl, track, index, eraMood, showGenre) {
+    const row = document.createElement("li");
+    const number = document.createElement("span");
+    number.className = "party-display-queue-index";
+    number.textContent = String(index + 1);
 
-    displayQueueCount.textContent = partyQueueCountLabel(list.length);
-    displayQueueEmpty.textContent = "The queue is empty.";
+    const meta = document.createElement("div");
+    meta.className = "party-display-queue-meta";
+    const title = document.createElement("strong");
+    title.textContent = track.title || "Untitled";
+    const artist = document.createElement("span");
+    artist.className = "party-display-queue-artist";
+    artist.textContent = track.artist || "";
+    meta.append(title, artist);
+
+    if (!track.djVoice) {
+      const originText = displayOriginLabel(track, eraMood);
+      if (originText) {
+        const source = document.createElement("span");
+        source.className = partyDisplaySourceClass(track);
+        source.textContent = originText;
+        source.title = originText;
+        meta.appendChild(source);
+      }
+
+      if (showGenre) {
+        const matched = queueGenreLabel(track);
+        if (matched) {
+          const genre = document.createElement("span");
+          genre.className = "party-display-queue-genre";
+          genre.textContent = matched;
+          genre.title = "Matched song genre";
+          meta.appendChild(genre);
+        }
+        if (track.fromPlaylist) {
+          const playlist = document.createElement("span");
+          playlist.className = "party-display-queue-playlist";
+          playlist.textContent = "From Playlists";
+          playlist.title = "This song is in your Spotify playlists";
+          meta.appendChild(playlist);
+        }
+      }
+    }
+
+    row.append(number, meta);
+    listEl.appendChild(row);
+  }
+
+  function renderTvQueue(target, tracks, { relayout = false } = {}) {
+    if (!target?.listEl || !target.emptyEl || !target.countEl) return;
+    const list = Array.isArray(tracks) ? tracks : [];
+
+    target.countEl.textContent = partyQueueCountLabel(list.length);
+    target.emptyEl.textContent = "The queue is empty.";
 
     if (list.length === 0) {
-      displayQueue.innerHTML = "";
-      displayQueueEmpty.hidden = false;
-      lastDisplayQueueSig = "";
-      lastDisplayFitCount = 0;
+      target.listEl.innerHTML = "";
+      target.emptyEl.hidden = false;
+      target.sig = "";
+      target.fitCount = 0;
       return;
     }
-    displayQueueEmpty.hidden = true;
+    target.emptyEl.hidden = true;
 
     const probeLimit =
-      !relayout && lastDisplayFitCount > 0
-        ? Math.min(list.length, lastDisplayFitCount + 1)
+      !relayout && target.fitCount > 0
+        ? Math.min(list.length, target.fitCount + 1)
         : Math.min(list.length, DISPLAY_QUEUE_MAX);
     const visible = partyDisplayQueueSlice(list, probeLimit);
     const eraMood = getActiveEraMoodId();
     const showGenre = getShowQueueGenre();
     const nextSig = displayQueueSig(visible, eraMood, showGenre);
-    // Skip DOM wipe when the probed rows haven't changed.
     if (
       !relayout &&
-      nextSig === lastDisplayQueueSig &&
-      displayQueue.children.length === visible.length
+      nextSig === target.sig &&
+      target.listEl.children.length === visible.length
     ) {
-      const fit = trimDisplayQueueToFit();
+      const fit = trimQueueToFit(target);
       if (fit > 0 && fit < visible.length) {
-        lastDisplayQueueSig = displayQueueSig(
-          visible.slice(0, fit),
-          eraMood,
-          showGenre
-        );
+        target.sig = displayQueueSig(visible.slice(0, fit), eraMood, showGenre);
       }
       return;
     }
-    lastDisplayQueueSig = nextSig;
-    displayQueue.innerHTML = "";
+    target.sig = nextSig;
+    target.listEl.innerHTML = "";
 
     visible.forEach((track, index) => {
-      const row = document.createElement("li");
-      const number = document.createElement("span");
-      number.className = "party-display-queue-index";
-      number.textContent = String(index + 1);
-
-      const meta = document.createElement("div");
-      meta.className = "party-display-queue-meta";
-      const title = document.createElement("strong");
-      title.textContent = track.title || "Untitled";
-      const artist = document.createElement("span");
-      artist.className = "party-display-queue-artist";
-      artist.textContent = track.artist || "";
-      meta.append(title, artist);
-
-      if (!track.djVoice) {
-        const originText = displayOriginLabel(track, eraMood);
-        if (originText) {
-          const source = document.createElement("span");
-          source.className = partyDisplaySourceClass(track);
-          source.textContent = originText;
-          source.title = originText;
-          meta.appendChild(source);
-        }
-
-        // Same Show song genre toggle as main Up Next (genre + From Playlists).
-        if (showGenre) {
-          const matched = queueGenreLabel(track);
-          if (matched) {
-            const genre = document.createElement("span");
-            genre.className = "party-display-queue-genre";
-            genre.textContent = matched;
-            genre.title = "Matched song genre";
-            meta.appendChild(genre);
-          }
-          if (track.fromPlaylist) {
-            const playlist = document.createElement("span");
-            playlist.className = "party-display-queue-playlist";
-            playlist.textContent = "From Playlists";
-            playlist.title = "This song is in your Spotify playlists";
-            meta.appendChild(playlist);
-          }
-        }
-      }
-
-      row.append(number, meta);
-      displayQueue.appendChild(row);
+      appendTvQueueRow(target.listEl, track, index, eraMood, showGenre);
     });
 
-    const fit = trimDisplayQueueToFit();
+    const fit = trimQueueToFit(target);
     if (fit > 0 && fit < visible.length) {
-      lastDisplayQueueSig = displayQueueSig(
-        visible.slice(0, fit),
-        eraMood,
-        showGenre
-      );
+      target.sig = displayQueueSig(visible.slice(0, fit), eraMood, showGenre);
     }
+  }
+
+  function renderPartyDisplay(tracks, { relayout = false } = {}) {
+    const list = Array.isArray(tracks) ? tracks : [];
+    lastDisplayTracks = list;
+    renderTvQueue(displayQueueTarget, list, { relayout });
+    renderTvQueue(karaokeQueueTarget, list, { relayout });
   }
 
   function scheduleDisplayRelayout() {
@@ -568,6 +593,10 @@ export function createQueueUi(els, deps) {
   if (displayQueue && typeof ResizeObserver === "function") {
     const resizeObs = new ResizeObserver(() => scheduleDisplayRelayout());
     resizeObs.observe(displayQueue);
+  }
+  if (karaokeQueue && typeof ResizeObserver === "function") {
+    const karaokeResizeObs = new ResizeObserver(() => scheduleDisplayRelayout());
+    karaokeResizeObs.observe(karaokeQueue);
   }
 
   function isEditMode() {

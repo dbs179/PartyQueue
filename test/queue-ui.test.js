@@ -13,6 +13,7 @@ import {
   queuePlaylistBadgeHtml,
   queueBadgeHtml,
   partyDisplaySourceClass,
+  createQueueUi,
 } from "../public/js/queue-ui.js";
 
 test("Party Display source class marks requests and dedications", () => {
@@ -208,4 +209,92 @@ test("queueBadgeHtml concatenates origin + genre + playlist", () => {
   assert.match(html, /Requested/);
   assert.match(html, /Rock/);
   assert.match(html, /From Playlists/);
+});
+
+test("renderPartyDisplay fills Karaoke Display with the same Up Next rows", () => {
+  const prevDocument = globalThis.document;
+  globalThis.document = {
+    createElement(tag) {
+      const kids = [];
+      const el = {
+        tagName: tag,
+        className: "",
+        textContent: "",
+        title: "",
+        children: kids,
+        append(...nodes) {
+          kids.push(...nodes);
+        },
+        appendChild(node) {
+          kids.push(node);
+        },
+      };
+      return el;
+    },
+  };
+
+  function makeList() {
+    const store = [];
+    return {
+      get children() {
+        return store;
+      },
+      get lastElementChild() {
+        return store[store.length - 1] || null;
+      },
+      clientHeight: 800,
+      set innerHTML(value) {
+        if (value === "") store.length = 0;
+      },
+      appendChild(node) {
+        store.push({
+          offsetTop: store.length * 40,
+          offsetHeight: 40,
+          textContent: node?.children?.[1]?.children?.[0]?.textContent || "",
+        });
+      },
+    };
+  }
+
+  const displayQueue = makeList();
+  const karaokeQueue = makeList();
+  const displayQueueCount = { textContent: "" };
+  const karaokeQueueCount = { textContent: "" };
+  const displayQueueEmpty = { textContent: "", hidden: true };
+  const karaokeQueueEmpty = { textContent: "", hidden: true };
+
+  try {
+    const ui = createQueueUi(
+      {
+        displayQueue,
+        displayQueueCount,
+        displayQueueEmpty,
+        karaokeQueue,
+        karaokeQueueCount,
+        karaokeQueueEmpty,
+      },
+      {
+        hostFetch: async () => ({ ok: true, json: async () => ({}) }),
+        showToast: () => {},
+        getShowQueueGenre: () => false,
+        getActiveEraMoodId: () => null,
+        getLastQueueTracks: () => [],
+        applyQueueTracks: () => {},
+        loadQueue: () => {},
+      }
+    );
+    ui.renderPartyDisplay([
+      { title: "Electric Feel", artist: "MGMT", searched: true, requestedBy: "Alex" },
+      { title: "Kids", artist: "MGMT", origin: "filler" },
+    ]);
+    assert.equal(displayQueue.children.length, 2);
+    assert.equal(karaokeQueue.children.length, 2);
+    assert.equal(displayQueue.children[0].textContent, "Electric Feel");
+    assert.equal(karaokeQueue.children[0].textContent, "Electric Feel");
+    assert.equal(displayQueueCount.textContent, karaokeQueueCount.textContent);
+    assert.equal(karaokeQueueEmpty.hidden, true);
+  } finally {
+    if (prevDocument === undefined) delete globalThis.document;
+    else globalThis.document = prevDocument;
+  }
 });

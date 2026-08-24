@@ -410,6 +410,7 @@
               <button id="toolbar-booth" type="button" class="pill-btn" title="Open DJ Booth">DJ Booth</button>
               <button id="toolbar-join" type="button" class="pill-btn" title="Open Join Code QR">Join Code</button>
               <button id="toolbar-display" type="button" class="pill-btn" title="Open read-only Party Display">Party Display</button>
+              <button id="toolbar-karaoke" type="button" class="pill-btn" title="Open lyrics-first Karaoke Display">Karaoke Display</button>
             </div>
           </div>
         </section>
@@ -567,6 +568,74 @@
                 <p id="display-join-error" class="party-display-side-empty" hidden></p>
               </div>
             </section>
+          </div>
+        </div>
+      </div>
+
+      <!-- KARAOKE DISPLAY — lyrics-first TV view (Up Next, art, lyrics) -->
+      <div id="view-karaoke" class="view karaoke-display-view" hidden>
+        <div class="karaoke-display-shell">
+          <div class="karaoke-display-topline">
+            <a href="#/" id="karaoke-back" class="karaoke-display-back">Back</a>
+          </div>
+
+          <p
+            id="karaoke-connection-status"
+            class="karaoke-display-status"
+            role="status"
+            aria-live="polite"
+            hidden
+          >
+            Sonos reconnecting — showing the last update.
+          </p>
+
+          <div class="karaoke-display-layout">
+            <section class="karaoke-display-stage" aria-labelledby="karaoke-title">
+              <div class="karaoke-display-now">
+                <h3 id="karaoke-title" class="karaoke-display-title"></h3>
+                <p id="karaoke-artist" class="karaoke-display-artist"></p>
+                <div id="karaoke-progress" class="np-progress karaoke-display-progress" hidden>
+                  <div class="np-progress-track" role="progressbar" aria-label="Track progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                    <span id="karaoke-progress-fill" class="np-progress-fill"></span>
+                  </div>
+                  <div class="np-progress-times" aria-hidden="true">
+                    <span id="karaoke-progress-elapsed">0:00</span>
+                    <span id="karaoke-progress-duration">0:00</span>
+                  </div>
+                </div>
+              </div>
+              <div
+                id="karaoke-lyrics"
+                class="karaoke-display-lyrics"
+                aria-live="polite"
+                aria-label="Lyrics"
+                hidden
+              ></div>
+            </section>
+
+            <aside class="karaoke-display-rail" aria-label="Album art and upcoming songs">
+              <div class="karaoke-display-art-wrap">
+                <img id="karaoke-art" class="karaoke-display-art" alt="" />
+                <p id="karaoke-empty" class="karaoke-display-empty">Connecting…</p>
+              </div>
+              <div class="karaoke-display-section-head">
+                <p class="karaoke-display-label">Up Next</p>
+                <span id="karaoke-queue-count" class="karaoke-display-queue-count"></span>
+              </div>
+              <section id="karaoke-queue-section" class="karaoke-display-queue">
+                <p
+                  id="karaoke-queue-status"
+                  class="karaoke-display-queue-status"
+                  role="status"
+                  aria-live="polite"
+                  hidden
+                >
+                  Queue reconnecting — showing the last known list.
+                </p>
+                <ol id="karaoke-queue" class="karaoke-display-queue-list party-display-queue-list"></ol>
+                <p id="karaoke-queue-empty" class="karaoke-display-side-empty">Connecting…</p>
+              </section>
+            </aside>
           </div>
         </div>
       </div>
@@ -948,6 +1017,34 @@
                 <input
                   type="text"
                   id="booth-tv-fully-url"
+                  class="setting-input"
+                  readonly
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder="Loading…"
+                />
+              </div>
+              <p class="section-label settings-banner-label booth-toggle-group">Karaoke Display TV</p>
+              <p class="setting-hint booth-tv-preview-hint">
+                Lyrics-first TV for singing along. Fully start URL
+                <code>#/karaoke?kiosk=1</code>. Party Display stays the lobby TV.
+              </p>
+              <div class="booth-tv-preview-actions">
+                <button id="booth-karaoke-preview" type="button" class="subpage-head-link">
+                  Preview as TV
+                </button>
+                <button id="booth-karaoke-kiosk" type="button" class="subpage-head-link">
+                  Open Kiosk
+                </button>
+                <button id="booth-karaoke-fully-copy" type="button" class="subpage-head-link">
+                  Copy
+                </button>
+              </div>
+              <div class="setting-row-text booth-tv-fully-row">
+                <label class="setting-label" for="booth-karaoke-fully-url">Karaoke Fully start URL</label>
+                <input
+                  type="text"
+                  id="booth-karaoke-fully-url"
                   class="setting-input"
                   readonly
                   spellcheck="false"

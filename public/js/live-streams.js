@@ -117,10 +117,13 @@ export function bindForegroundResume({
  *   npCard?: HTMLElement|null,
  *   npConnectionStatus?: HTMLElement|null,
  *   displayConnectionStatus?: HTMLElement|null,
+ *   karaokeConnectionStatus?: HTMLElement|null,
  *   queueSection?: HTMLElement|null,
  *   queueConnectionStatus?: HTMLElement|null,
  *   displayQueueSection?: HTMLElement|null,
  *   displayQueueStatus?: HTMLElement|null,
+ *   karaokeQueueSection?: HTMLElement|null,
+ *   karaokeQueueStatus?: HTMLElement|null,
  * }} els
  * @param {{
  *   fetch?: typeof fetch,
@@ -142,10 +145,13 @@ export function createLiveStreams(els, deps) {
     npCard,
     npConnectionStatus,
     displayConnectionStatus,
+    karaokeConnectionStatus,
     queueSection,
     queueConnectionStatus,
     displayQueueSection,
     displayQueueStatus,
+    karaokeQueueSection,
+    karaokeQueueStatus,
   } = els || {};
 
   const fetchFn = deps.fetch || fetch;
@@ -332,12 +338,20 @@ export function createLiveStreams(els, deps) {
           message || NOW_PLAYING_STALE_MESSAGE;
       }
     }
+    if (karaokeConnectionStatus) {
+      karaokeConnectionStatus.hidden = !disconnected;
+      if (disconnected) {
+        karaokeConnectionStatus.textContent =
+          message || NOW_PLAYING_STALE_MESSAGE;
+      }
+    }
   }
 
   function setQueueConnectionStatus(status, message = "") {
     const disconnected = status === "disconnected";
     queueSection?.classList.toggle("is-stale", disconnected);
     displayQueueSection?.classList.toggle("is-stale", disconnected);
+    karaokeQueueSection?.classList.toggle("is-stale", disconnected);
     if (queueConnectionStatus) {
       queueConnectionStatus.hidden = !disconnected;
       if (disconnected) {
@@ -348,6 +362,12 @@ export function createLiveStreams(els, deps) {
       displayQueueStatus.hidden = !disconnected;
       if (disconnected) {
         displayQueueStatus.textContent = message || QUEUE_STALE_MESSAGE;
+      }
+    }
+    if (karaokeQueueStatus) {
+      karaokeQueueStatus.hidden = !disconnected;
+      if (disconnected) {
+        karaokeQueueStatus.textContent = message || QUEUE_STALE_MESSAGE;
       }
     }
   }

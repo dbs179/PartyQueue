@@ -35,6 +35,12 @@ export function closingTimeHintText(songName) {
   return closingTimeToastMessage(songName);
 }
 
+/** Phones get the recap dialog; TV kiosks cannot tap “Got it”. */
+export function shouldShowClosingRecapOverlay(viewName) {
+  const view = String(viewName || "");
+  return view !== "display" && view !== "karaoke";
+}
+
 /**
  * @param {object|null|undefined} recap
  * @returns {string}
@@ -93,12 +99,14 @@ export function shouldAnnounceClosingTime(ts, lastShown, now = Date.now()) {
  * @param {{
  *   showToast: (msg: string, isError?: boolean, durationMs?: number) => void,
  *   getEndOfNightName?: () => string,
+ *   getCurrentView?: () => string,
  * }} deps
  */
 export function createPartyRecapUi(els, deps) {
   const { overlay, body, hintEl, dismissBtn, titleEl } = els || {};
   const showToast = deps?.showToast || (() => {});
   const getEndOfNightName = deps?.getEndOfNightName || (() => "Closing Time");
+  const getCurrentView = deps?.getCurrentView || (() => "main");
 
   let lastClosingShown = 0;
   let lastPartyRecapPayload = null;
@@ -130,6 +138,10 @@ export function createPartyRecapUi(els, deps) {
     // that requests are closed and which song is next.
     showToast(toast, false, 5000);
 
+    if (!shouldShowClosingRecapOverlay(getCurrentView())) {
+      hidePartyRecap();
+      return;
+    }
     if (!overlay || !body || !lastPartyRecapPayload) {
       return;
     }

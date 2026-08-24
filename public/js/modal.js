@@ -50,7 +50,11 @@ export function attachModal(overlay, opts = {}) {
     const dialog = overlay.querySelector(".modal") || overlay;
     const target = opts.initialFocus || modalFocusables(dialog)[0];
     if (target?.focus) {
-      target.focus();
+      try {
+        target.focus({ preventScroll: true });
+      } catch {
+        target.focus();
+      }
       if (typeof target.select === "function") {
         try {
           target.select();
