@@ -1960,7 +1960,6 @@ const karaokeQueue = document.getElementById("karaoke-queue");
 const karaokeQueueEmpty = document.getElementById("karaoke-queue-empty");
 const displayJoinQr = document.getElementById("display-join-qr");
 const displayWifiQr = document.getElementById("display-wifi-qr");
-const displayWifiSsid = document.getElementById("display-wifi-ssid");
 const displayJoinUrl = document.getElementById("display-join-url");
 const displayJoinError = document.getElementById("display-join-error");
 const recapOverlay = document.getElementById("recap-overlay");
@@ -2604,10 +2603,6 @@ async function loadJoinCode() {
   }
   if (joinUrlEl) joinUrlEl.textContent = "Loading…";
   if (displayJoinUrl) displayJoinUrl.textContent = "Loading…";
-  if (displayWifiSsid) {
-    displayWifiSsid.hidden = true;
-    displayWifiSsid.textContent = "";
-  }
   try {
     const res = await fetch("/api/join");
     const data = await res.json().catch(() => ({}));
@@ -2615,11 +2610,6 @@ async function loadJoinCode() {
     joinUrlCache = data.url || "";
     if (joinUrlEl) joinUrlEl.textContent = joinUrlCache;
     if (displayJoinUrl) displayJoinUrl.textContent = joinUrlCache;
-    if (displayWifiSsid) {
-      const ssid = String(data.wifiSsid || "").trim();
-      displayWifiSsid.textContent = ssid ? `Wi-Fi: ${ssid}` : "";
-      displayWifiSsid.hidden = !ssid;
-    }
     refreshBoothTvFullyUrl();
     // Prefer PNG <img> — Fully/Android WebView often blanks stroke-based QR SVG.
     const paintQr = (qrEl, { png, svg, alt }) => {
@@ -2660,10 +2650,6 @@ async function loadJoinCode() {
     if (joinUrlEl) joinUrlEl.textContent = "";
     refreshBoothTvFullyUrl();
     if (displayJoinUrl) displayJoinUrl.textContent = "";
-    if (displayWifiSsid) {
-      displayWifiSsid.hidden = true;
-      displayWifiSsid.textContent = "";
-    }
     for (const errorEl of [joinErrorEl, displayJoinError]) {
       if (!errorEl) continue;
       errorEl.hidden = false;

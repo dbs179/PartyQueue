@@ -5840,17 +5840,11 @@ body.karaoke-display-active.party-display-preview .karaoke-display-view {
   flex: 0 0 auto;
   flex-shrink: 0;
   padding: calc(16 * var(--pd));
-  justify-content: flex-start;
+  /* Wi-Fi left · copy middle · PartyQueue far right. */
+  justify-content: space-between;
   align-items: center;
   min-height: 0;
   gap: calc(18 * var(--pd));
-}
-
-.party-display-qr-pair {
-  display: flex;
-  align-items: flex-start;
-  gap: calc(12 * var(--pd));
-  flex: 0 0 auto;
 }
 
 .party-display-qr-slot {
@@ -5859,6 +5853,7 @@ body.karaoke-display-active.party-display-preview .karaoke-display-view {
   align-items: center;
   gap: calc(6 * var(--pd));
   min-width: 0;
+  flex: 0 0 auto;
 }
 
 .party-display-qr-slot:has(.party-display-qr:not(.is-ready)) {
@@ -5906,6 +5901,7 @@ body.karaoke-display-active.party-display-preview .karaoke-display-view {
 .party-display-join-copy {
   min-width: 0;
   flex: 1 1 auto;
+  text-align: left;
 }
 
 .party-display-join-copy > p {

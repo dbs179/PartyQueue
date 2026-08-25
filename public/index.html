@@ -550,23 +550,21 @@
             </aside>
 
             <section class="party-display-join" aria-label="Join PartyQueue">
-              <div class="party-display-qr-pair">
-                <div class="party-display-qr-slot">
-                  <div id="display-wifi-qr" class="party-display-qr" aria-hidden="true"></div>
-                  <p class="party-display-qr-caption">Wi-Fi</p>
-                </div>
-                <div class="party-display-qr-slot">
-                  <div id="display-join-qr" class="party-display-qr" aria-hidden="true"></div>
-                  <p class="party-display-qr-caption">PartyQueue</p>
-                </div>
+              <div class="party-display-qr-slot party-display-qr-wifi">
+                <div id="display-wifi-qr" class="party-display-qr" aria-hidden="true"></div>
+                <p class="party-display-qr-caption">Wi-Fi</p>
               </div>
               <div class="party-display-join-copy">
                 <p class="party-display-label">Join the Queue</p>
-                <p>Scan Wi-Fi, then PartyQueue</p>
-                <p id="display-wifi-ssid" class="party-display-url" hidden></p>
-                <p id="display-join-url" class="party-display-url"></p>
+                <p>Scan the Wifi Code, then PartyQueue</p>
                 <p id="display-join-error" class="party-display-side-empty" hidden></p>
               </div>
+              <div class="party-display-qr-slot party-display-qr-join">
+                <div id="display-join-qr" class="party-display-qr" aria-hidden="true"></div>
+                <p class="party-display-qr-caption">PartyQueue</p>
+              </div>
+              <!-- Filled for join-code cache / smoke; not shown on the TV. -->
+              <p id="display-join-url" class="party-display-url" hidden></p>
             </section>
           </div>
         </div>
