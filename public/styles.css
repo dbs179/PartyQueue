@@ -125,7 +125,14 @@ body {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 .toolbar-grid-6 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* 7 tools: 3 across the top, 4 across the bottom (12-col math). */
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+.toolbar-grid-6 > :nth-child(-n+3) {
+  grid-column: span 4;
+}
+.toolbar-grid-6 > :nth-child(n+4) {
+  grid-column: span 3;
 }
 
 .toolbar-grid .pill-btn {

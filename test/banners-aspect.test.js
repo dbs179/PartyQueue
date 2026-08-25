@@ -11,6 +11,7 @@ import {
   bannerThemeSlug,
   compareBannerGalleryOrder,
   seedStarterBanners,
+  deleteBanner,
   DESKTOP_BANNER_MIN_RATIO,
   PHONE_BANNER_MAX_RATIO,
 } from "../src/banners.js";
@@ -117,5 +118,31 @@ test("seedStarterBanners fills missing phone starters when desktop files exist",
   } finally {
     if (backup) fs.writeFileSync(phoneData, backup);
     else seedStarterBanners();
+  }
+});
+
+test("deleteBanner keeps bundled starters from coming back on seed", () => {
+  const dataDir = path.resolve("data/banners");
+  const name = "md-banner-karaoke.jpg";
+  const file = path.join(dataDir, name);
+  const removedFile = path.join(dataDir, ".removed-starters.json");
+  assert.ok(fs.existsSync(file), "karaoke starter should be present for this test");
+  const backup = fs.readFileSync(file);
+  const removedBackup = fs.existsSync(removedFile)
+    ? fs.readFileSync(removedFile)
+    : null;
+  try {
+    assert.equal(deleteBanner(name), true);
+    assert.equal(fs.existsSync(file), false);
+    seedStarterBanners();
+    assert.equal(
+      fs.existsSync(file),
+      false,
+      "host-deleted starter must not be reseeded"
+    );
+  } finally {
+    if (removedBackup) fs.writeFileSync(removedFile, removedBackup);
+    else fs.rmSync(removedFile, { force: true });
+    fs.writeFileSync(file, backup);
   }
 });

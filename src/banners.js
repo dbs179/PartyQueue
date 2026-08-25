@@ -7,11 +7,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeFileAtomic } from "./atomic-write.js";
 import { imageMatchesMime } from "./image-signature.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BANNERS_DIR = path.join(__dirname, "..", "data", "banners");
 const STARTER_DIR = path.join(__dirname, "..", "public", "banners");
+// Host-deleted bundled starters stay gone across list/seed/restart.
+const REMOVED_STARTERS_FILE = path.join(BANNERS_DIR, ".removed-starters.json");
 
 export const MAX_BANNERS = 20;
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB decoded image cap
@@ -170,6 +173,32 @@ function isSafeName(name) {
 
 function isStarterBannerName(name) {
   return STARTER_DEST.has(name);
+}
+
+function loadRemovedStarters() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(REMOVED_STARTERS_FILE, "utf8"));
+    if (!Array.isArray(raw)) return new Set();
+    return new Set(raw.filter((name) => isStarterBannerName(name)));
+  } catch {
+    return new Set();
+  }
+}
+
+function rememberRemovedStarter(name) {
+  if (!isStarterBannerName(name)) return;
+  const next = loadRemovedStarters();
+  if (next.has(name)) return;
+  next.add(name);
+  writeFileAtomic(
+    REMOVED_STARTERS_FILE,
+    `${JSON.stringify([...next].sort(), null, 2)}\n`
+  );
+}
+
+function unlinkBannerFile(name) {
+  fs.unlinkSync(path.join(BANNERS_DIR, name));
+  rememberRemovedStarter(name);
 }
 
 /**
@@ -363,8 +392,10 @@ export function seedStarterBanners() {
   try {
     if (!fs.existsSync(STARTER_DIR)) return 0;
     ensureDir();
+    const removed = loadRemovedStarters();
     let copied = 0;
     for (const { src, dest } of STARTER_BANNERS) {
+      if (removed.has(dest)) continue;
       const from = path.join(STARTER_DIR, src);
       const to = path.join(BANNERS_DIR, dest);
       if (!fs.existsSync(from) || fs.existsSync(to)) continue;
@@ -444,7 +475,7 @@ function prune(keepName) {
   for (const name of all) {
     if (!keep.has(name)) {
       try {
-        fs.unlinkSync(path.join(BANNERS_DIR, name));
+        unlinkBannerFile(name);
       } catch (err) {
         console.error("[banners] prune failed:", err.message);
       }
@@ -481,7 +512,7 @@ export function saveBanner(dataUrl) {
 export function deleteBanner(name) {
   if (!bannerExists(name)) return false;
   try {
-    fs.unlinkSync(path.join(BANNERS_DIR, name));
+    unlinkBannerFile(name);
     return true;
   } catch (err) {
     console.error("[banners] delete failed:", err.message);
