@@ -270,16 +270,17 @@ export const DJ_BOOTH_ASIDES = Object.freeze([
   { id: "aside-050", text: "I will pretend that transition was difficult.", familySafe: false },
 ]);
 
-// Set descriptors: one gets reserved per announce and woven into the DJ's
-// set-description sentence ("a {descriptor} run through 90's rock...").
+// Set descriptors: one gets reserved per announce and translated into
+// ordinary spoken English ("a feel-good run through 90's rock...").
+// Hyphenated slogans are avoided so TTS does not say "front-porch vibes".
 // `energy` keeps the pick sensible for the mood: high-energy moods never get
 // "slow-burn", chill nights never get "full-throttle". "any" fits everywhere.
 export const DJ_SET_DESCRIPTORS = Object.freeze([
   { id: "desc-001", text: "high-octane", energy: "high" },
   { id: "desc-002", text: "floor-shaking", energy: "high" },
   { id: "desc-003", text: "full-throttle", energy: "high" },
-  { id: "desc-004", text: "hands-in-the-air", energy: "high" },
-  { id: "desc-005", text: "wall-to-wall singalong", energy: "high" },
+  { id: "desc-004", text: "hands in the air", energy: "high" },
+  { id: "desc-005", text: "full-room singalong", energy: "high" },
   { id: "desc-006", text: "turbo-charged", energy: "high" },
   { id: "desc-007", text: "bass-heavy", energy: "high" },
   { id: "desc-008", text: "pedal-down", energy: "high" },
@@ -288,11 +289,11 @@ export const DJ_SET_DESCRIPTORS = Object.freeze([
   { id: "desc-011", text: "festival-sized", energy: "high" },
   { id: "desc-012", text: "fired-up", energy: "high" },
   { id: "desc-013", text: "big-swing", energy: "high" },
-  { id: "desc-014", text: "volume-first", energy: "high" },
+  { id: "desc-014", text: "extra loud", energy: "high" },
   { id: "desc-015", text: "sprint-paced", energy: "high" },
   { id: "desc-016", text: "heart-pounding", energy: "high" },
-  { id: "desc-017", text: "shout-the-chorus", energy: "high" },
-  { id: "desc-018", text: "sweat-it-out", energy: "high" },
+  { id: "desc-017", text: "big chorus", energy: "high" },
+  { id: "desc-018", text: "sweaty", energy: "high" },
   { id: "desc-019", text: "lightning-paced", energy: "high" },
   { id: "desc-020", text: "crowd-igniting", energy: "high" },
   { id: "desc-021", text: "double-time", energy: "high" },
@@ -301,9 +302,9 @@ export const DJ_SET_DESCRIPTORS = Object.freeze([
   { id: "desc-024", text: "confetti-ready", energy: "high" },
   { id: "desc-025", text: "sky-high", energy: "high" },
   { id: "desc-026", text: "rocket-fueled", energy: "high" },
-  { id: "desc-027", text: "dance-floor-first", energy: "high" },
+  { id: "desc-027", text: "dance floor", energy: "high" },
   { id: "desc-028", text: "amps-up", energy: "high" },
-  { id: "desc-029", text: "adrenaline-first", energy: "high" },
+  { id: "desc-029", text: "amped up", energy: "high" },
   { id: "desc-030", text: "encore-worthy", energy: "high" },
   { id: "desc-031", text: "windows-down", energy: "mid" },
   { id: "desc-032", text: "feel-good", energy: "mid" },
@@ -327,18 +328,18 @@ export const DJ_SET_DESCRIPTORS = Object.freeze([
   { id: "desc-050", text: "warm-blooded", energy: "mid" },
   { id: "desc-051", text: "sing-along-friendly", energy: "mid" },
   { id: "desc-052", text: "steady-rolling", energy: "mid" },
-  { id: "desc-053", text: "bounce-in-your-step", energy: "mid" },
+  { id: "desc-053", text: "bouncy", energy: "mid" },
   { id: "desc-054", text: "summer-evening", energy: "mid" },
   { id: "desc-055", text: "bright-and-bold", energy: "mid" },
-  { id: "desc-056", text: "kitchen-dance", energy: "mid" },
-  { id: "desc-057", text: "convertible-weather", energy: "mid" },
-  { id: "desc-058", text: "story-first", energy: "mid" },
-  { id: "desc-059", text: "front-porch", energy: "mid" },
+  { id: "desc-056", text: "kitchen party", energy: "mid" },
+  { id: "desc-057", text: "convertible weather", energy: "mid" },
+  { id: "desc-058", text: "storytelling", energy: "mid" },
+  { id: "desc-059", text: "front porch", energy: "mid" },
   { id: "desc-060", text: "highway-glow", energy: "mid" },
   { id: "desc-061", text: "smile-inducing", energy: "mid" },
   { id: "desc-062", text: "throwback-flavored", energy: "mid" },
   { id: "desc-063", text: "victory-lap", energy: "mid" },
-  { id: "desc-064", text: "groove-committed", energy: "mid" },
+  { id: "desc-064", text: "groovy", energy: "mid" },
   { id: "desc-065", text: "easy-swinging", energy: "mid" },
   { id: "desc-066", text: "crowd-carrying", energy: "mid" },
   { id: "desc-067", text: "slow-burn", energy: "low" },
@@ -363,7 +364,7 @@ export const DJ_SET_DESCRIPTORS = Object.freeze([
   { id: "desc-086", text: "gentle-glide", energy: "low" },
   { id: "desc-087", text: "hand-picked", energy: "any" },
   { id: "desc-088", text: "house-favorite", energy: "any" },
-  { id: "desc-089", text: "certified-fresh", energy: "any" },
+  { id: "desc-089", text: "brand new", energy: "any" },
   { id: "desc-090", text: "no-skips", energy: "any" },
   { id: "desc-091", text: "all-killer", energy: "any" },
   { id: "desc-092", text: "dialed-in", energy: "any" },
@@ -371,7 +372,7 @@ export const DJ_SET_DESCRIPTORS = Object.freeze([
   { id: "desc-094", text: "top-shelf", energy: "any" },
   { id: "desc-095", text: "wall-to-wall", energy: "any" },
   { id: "desc-096", text: "back-to-back", energy: "any" },
-  { id: "desc-097", text: "start-to-finish", energy: "any" },
+  { id: "desc-097", text: "all the way through", energy: "any" },
   { id: "desc-098", text: "hand-built", energy: "any" },
   { id: "desc-099", text: "one-for-the-books", energy: "any" },
   { id: "desc-100", text: "crowd-tested", energy: "any" },
@@ -386,6 +387,14 @@ const DESCRIPTOR_ENERGY_EXCLUDES = Object.freeze({
   chill: ["high"],
   kids: ["high"],
 });
+
+/** Turn a reserved descriptor into ordinary spoken English. */
+export function speakableDescriptor(text) {
+  return String(text || "")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 /** Descriptors that make sense for a mood ("any" always qualifies). */
 export function filterDescriptorsForMood(mood, descriptors = DJ_SET_DESCRIPTORS) {

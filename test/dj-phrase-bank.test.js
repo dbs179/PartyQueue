@@ -9,6 +9,7 @@ import {
   filterIntrosByContext,
   filterAsidesByFamilySafety,
   filterDescriptorsForMood,
+  speakableDescriptor,
 } from "../src/dj-phrase-bank.js";
 
 const ALL_ENTRIES = [
@@ -135,5 +136,12 @@ describe("DJ phrase bank", () => {
     assert.equal(DJ_SHARED_INTROS.length, startCount);
     assert.equal(DJ_BOOTH_ASIDES.length, asideCount);
     assert.equal(DJ_SET_DESCRIPTORS.length, descriptorCount);
+  });
+
+  it("speakableDescriptor turns hyphenated labels into spoken English", () => {
+    assert.equal(speakableDescriptor("front-porch"), "front porch");
+    assert.equal(speakableDescriptor("neon-soaked"), "neon soaked");
+    assert.equal(speakableDescriptor("hand-picked"), "hand picked");
+    assert.equal(speakableDescriptor("front porch"), "front porch");
   });
 });

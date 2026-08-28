@@ -75,9 +75,11 @@ export {
 } from "./refill-announce-guard.js";
 import {
   DJ_BOOTH_ASIDES,
+  DJ_SET_DESCRIPTORS,
   DJ_SHARED_OUTROS,
   filterIntrosByContext,
   filterDescriptorsForMood,
+  speakableDescriptor,
 } from "./dj-phrase-bank.js";
 import {
   consumeDjNextSet,
@@ -496,17 +498,17 @@ export const DJ_MOOD_VOICE_PACKS = {
   party: {
     tone: "hype MC energy — playful boasts, crowd calls, celebration without sounding like a sports arena PA",
     energyWords: [
-      "floor-ready",
+      "ready for the floor",
       "crowd energy",
-      "sing-along heat",
-      "celebration mode",
-      "hands-up vibes",
-      "dance-floor momentum",
-      "big-chorus lift",
+      "sing-along",
+      "celebration",
+      "hands up",
+      "dance floor",
+      "big chorus",
       "weekend spark",
-      "full-room pulse",
-      "bright-and-loud energy",
-      "celebration lift",
+      "the whole room",
+      "bright and loud",
+      "a lift in the room",
       "a room finding its rhythm",
     ],
     openersStart: [
@@ -729,9 +731,9 @@ export const DJ_MOOD_VOICE_PACKS = {
     energyWords: [
       "night-drive heart",
       "boots-on-the-ground",
-      "front-porch energy",
+      "front porch",
       "highway glow",
-      "story-first warmth",
+      "storytelling warmth",
       "backroad momentum",
       "open-road chorus",
       "worn-in warmth",
@@ -775,7 +777,7 @@ export const DJ_MOOD_VOICE_PACKS = {
     ],
     discoveryTeaseOpeners: [
       "There's a discovery down the road — {count} total.",
-      "A story-first wildcard is riding along. {Count} on deck, including {artist}.",
+      "A storytelling wildcard is riding along. {Count} on deck, including {artist}.",
       "One you might not know yet has some heart. {Count} coming up.",
     ],
     outros: [
@@ -1328,7 +1330,7 @@ function formatVoicePackForPrompt(pack) {
       .join("\n");
   return `Mood voice pack (draw from this; paraphrase, do not copy every line):
 - Tone: ${fillEventName(pack.tone, event)}
-- Energy words to lean on:
+- Mood feel (translate into ordinary speech — never paste these as slogans or hyphenated labels):
 ${bullets(pack.energyWords, 10)}
 - Example outro styles (pick one short closer in this spirit):
 ${bullets(pack.outros, 12)}
@@ -1393,7 +1395,7 @@ function formatAnnounceStructureForPrompt(structure, djName) {
     String(djName || DJ_VOICE_DEFAULTS.djName).trim() || DJ_VOICE_DEFAULTS.djName;
   const introText = fillEventName(String(structure.intro || "").trim());
   const outroText = fillEventName(String(structure.outro || "").trim());
-  const descriptor = String(structure.descriptor || "").trim();
+  const descriptor = speakableDescriptor(structure.descriptor);
   const countLine = structure.introHasCount
     ? "- The intro already gives the track count — do NOT repeat the number."
     : "- Mention the track count once, naturally.";
@@ -1408,7 +1410,7 @@ Write ONLY the set description that goes between them — 1 to 2 short sentences
 - Do NOT greet the crowd, welcome anyone, say hello, or introduce yourself. The intro slot is taken.
 - Do NOT sign off, say goodbye, wish anyone a good night, or add a closing tagline. The outro slot is taken.
 - Do NOT repeat or paraphrase the intro or outro lines above; your sentences must flow naturally between them.
-- Work this descriptor phrase into the description naturally, verbatim or near-verbatim: "${descriptor}"
+- Vibe for this block: ${descriptor || "hand picked"}. Translate that feel into ordinary spoken English. Do not read the label aloud as a slogan or hyphenated compound.
 ${countLine}
 ${nameLine}`;
 }
@@ -1464,10 +1466,12 @@ ACCURACY AND SAFETY
 WRITE FOR SPEECH
 - Use natural contractions, short sentences, and TTS-friendly punctuation.
 - Avoid parentheses, slashes, symbols, stacked clauses, awkward abbreviations, headings, stage directions, and quotation marks.
+- Say song titles and artist names plainly, with no quotation marks.
 
 AVOID
 - Genre lists, playlist audits, scorecards, statistics, apologies, and song grading.
-- Generic filler such as "party people," "we've got," "coming up," and "in the mix" unless it genuinely fits.
+- Generic filler such as "party people," "we've got," "coming up," "in the mix," "get ready," "trust me," and "party magic."
+- Marketing slogans and hyphenated vibe-labels ("front-porch vibes," "story-first set," "celebration mode," "floor-ready energy").
 - Forced in-jokes, unsupported superlatives, preachiness, or commentary about these instructions.
 
 LENGTH AND OUTPUT
@@ -1503,6 +1507,40 @@ export function stripEdgeCourtesies(text) {
   return parts.join(" ");
 }
 
+const FORCED_SLOGAN_ALIASES = Object.freeze([
+  "start-to-finish",
+  "front-porch",
+  "story-first",
+  "floor-ready",
+  "convertible-weather",
+  "celebration-mode",
+]);
+
+function sloganLabelsToSoften() {
+  const fromBank = DJ_SET_DESCRIPTORS.map((entry) => entry.text).filter((text) =>
+    String(text).includes("-")
+  );
+  return [...new Set([...fromBank, ...FORCED_SLOGAN_ALIASES])].sort(
+    (a, b) => b.length - a.length
+  );
+}
+
+/** De-hyphenate known vibe slogans and drop "get ready" / "trust me" filler. */
+export function polishSetDescription(text) {
+  let t = String(text || "").replace(/\s+/g, " ").trim();
+  if (!t) return t;
+  for (const label of sloganLabelsToSoften()) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    t = t.replace(new RegExp(escaped, "gi"), speakableDescriptor(label));
+  }
+  t = t.replace(/\btrust me,?\s+/gi, "");
+  t = t.replace(/\bget ready(?: for| to)?\s+/gi, "");
+  t = t.replace(/\s+,/g, ",").replace(/\s+/g, " ").trim();
+  t = t.replace(/([.!?]\s+)([a-z])/g, (_, punc, letter) => punc + letter.toUpperCase());
+  if (t) t = t.charAt(0).toUpperCase() + t.slice(1);
+  return t;
+}
+
 // Final script = Intro (verbatim) + Set Description + Outro (verbatim).
 // Intro lines may carry {count}/{Count}/{event} tokens; outros only {event}.
 export function assembleAnnounceScript({
@@ -1514,7 +1552,7 @@ export function assembleAnnounceScript({
 } = {}) {
   const line = [
     fillCountTemplate(String(intro || "").trim(), howMany),
-    String(middle || "").trim(),
+    ensureSpokenEnd(String(middle || "").trim()),
     fillEventName(String(outro || "").trim()),
   ]
     .filter(Boolean)
@@ -1522,6 +1560,50 @@ export function assembleAnnounceScript({
     .replace(/\s+/g, " ")
     .trim();
   return applyDjBanList(line, banList);
+}
+
+/** Make sure a spoken fragment can stand before the scripted outro. */
+export function ensureSpokenEnd(text) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  if (!t) return t;
+  if (/[.!?]$/.test(t) || /[.!?]["'\u201d\u2019]$/.test(t)) return t;
+  return `${t.replace(/[,;:]+$/, "")}.`;
+}
+
+/** Drop a trailing incomplete sentence so a word-limit trim never glues onto the outro. */
+export function trimSpokenToWordLimit(text, limit) {
+  const cap = Math.max(1, Math.floor(Number(limit) || 0));
+  const words = String(text || "")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return "";
+  const source =
+    words.length <= cap ? words.join(" ") : words.slice(0, cap).join(" ");
+  const sentences = source.match(/[^.!?]+[.!?]+(?:["'\u201d\u2019])?/g);
+  if (sentences?.length) return sentences.join(" ").trim();
+  return ensureSpokenEnd(source);
+}
+
+export function cleanSpokenScript(text, maxWords = null, banList = null) {
+  let t = String(text || "").trim();
+  t = t.replace(/^["'`]+|["'`]+$/g, "");
+  t = t.replace(/^Announcement:\s*/i, "");
+  t = t.replace(/[\u201c\u201d"]/g, "");
+  t = t.replace(/\s+/g, " ").trim();
+  if (banList != null) t = applyDjBanList(t, banList);
+  const limit =
+    maxWords != null
+      ? Math.max(
+          8,
+          Math.min(
+            120,
+            Math.floor(Number(maxWords) || 0) ||
+              DJ_VOICE_DEFAULTS.djAnnounceMaxWords
+          )
+        )
+      : getDjVoiceSettings().djAnnounceMaxWords;
+  t = trimSpokenToWordLimit(t, limit);
+  return t;
 }
 
 // Deterministic set-description middle for the template fallback — same
@@ -1593,7 +1675,8 @@ export function buildSetDescription({
         ];
     return pick(templates, salt);
   }
-  const desc = String(descriptor || "hand-picked").trim() || "hand-picked";
+  const desc =
+    speakableDescriptor(descriptor || "hand-picked") || "hand picked";
   const article = descriptorArticle(desc);
   const Count = String(howMany).charAt(0).toUpperCase() + String(howMany).slice(1);
   const startClause = firstArtist ? `, starting with ${firstArtist}` : "";
@@ -1729,22 +1812,6 @@ export function buildSetScript({
   return line;
 }
 
-export function cleanSpokenScript(text, maxWords = null, banList = null) {
-  let t = String(text || "").trim();
-  t = t.replace(/^["'`]+|["'`]+$/g, "");
-  t = t.replace(/^Announcement:\s*/i, "");
-  t = t.replace(/\s+/g, " ").trim();
-  if (banList != null) t = applyDjBanList(t, banList);
-  const limit =
-    maxWords != null
-      ? Math.max(28, Math.min(120, Math.floor(Number(maxWords) || 0) || DJ_VOICE_DEFAULTS.djAnnounceMaxWords))
-      : getDjVoiceSettings().djAnnounceMaxWords;
-  // Soft length guard for TTS.
-  const words = t.split(/\s+/).filter(Boolean);
-  if (words.length > limit) t = words.slice(0, limit).join(" ");
-  return t;
-}
-
 export function buildLlmPrompt(summary) {
   const {
     event = "session_start",
@@ -1868,9 +1935,11 @@ export function buildDjEffectivePromptPreview() {
 // Returns the AI-written MIDDLE (set description) only; the scripted
 // intro/outro are assembled around it by writeSetScript.
 async function generateScriptWithLlm(summary) {
-  const prompt = buildLlmPrompt(summary);
+  const hardMax = summary.middleMaxWords ?? summary.djAnnounceMaxWords;
+  const promptMax = Math.max(12, Number(hardMax || 0) - 4);
+  const prompt = buildLlmPrompt({ ...summary, middleMaxWords: promptMax });
   return generateDjSpeechFromPrompt(prompt, {
-    maxWords: summary.middleMaxWords ?? summary.djAnnounceMaxWords,
+    maxWords: hardMax,
     banList: summary.characterKnobs?.banList,
   });
 }
@@ -2262,11 +2331,13 @@ export async function writeSetScript(summary = {}) {
 
   try {
     try {
-      const middle = stripEdgeCourtesies(
-        await withTimeout(
-          generateScriptWithLlm(payload),
-          LLM_SCRIPT_TIMEOUT_MS,
-          "LLM script timed out"
+      const middle = polishSetDescription(
+        stripEdgeCourtesies(
+          await withTimeout(
+            generateScriptWithLlm(payload),
+            LLM_SCRIPT_TIMEOUT_MS,
+            "LLM script timed out"
+          )
         )
       );
       const line = assembleAnnounceScript({

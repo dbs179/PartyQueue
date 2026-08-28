@@ -5,6 +5,7 @@ import {
   buildSetDescription,
   assembleAnnounceScript,
   stripEdgeCourtesies,
+  polishSetDescription,
   nameIntrosFor,
   cleanSpokenScript,
   roomToSonosEntity,
@@ -36,6 +37,7 @@ import {
 import {
   DJ_SET_DESCRIPTORS,
   filterIntrosByContext,
+  speakableDescriptor,
 } from "../src/dj-phrase-bank.js";
 import {
   normalizeDjSilenceSec,
@@ -185,12 +187,30 @@ describe("cleanSpokenScript", () => {
     const words = Array.from({ length: 80 }, (_, i) => `w${i}`).join(" ");
     const trimmed = cleanSpokenScript(words, 40);
     assert.equal(trimmed.split(/\s+/).length, 40);
+    assert.match(trimmed, /\.$/);
   });
 
   it("strips wrapping quotes and Announcement: prefix", () => {
     assert.equal(
       cleanSpokenScript('"Announcement: Hello there friends"'),
-      "Hello there friends"
+      "Hello there friends."
+    );
+  });
+
+  it("drops a truncated last sentence instead of gluing a fragment", () => {
+    const cleaned = cleanSpokenScript(
+      'Get ready for a fresh mix that captures those front-porch vibes over five tracks of party magic. We\'re diving in with Charlie Puth\'s "Marvin Gaye," and trust me, there\'s a couple of fun discoveries waiting for you tonight.',
+      35
+    );
+    assert.match(cleaned, /party magic\.$/);
+    assert.doesNotMatch(cleaned, /waiting for/i);
+    assert.doesNotMatch(cleaned, /"/);
+  });
+
+  it("strips quotation marks around titles", () => {
+    assert.equal(
+      cleanSpokenScript('Starting with Charlie Puth\'s "Marvin Gaye."'),
+      "Starting with Charlie Puth's Marvin Gaye."
     );
   });
 });
@@ -211,7 +231,7 @@ describe("buildSetScript (template fallback)", () => {
       line
     );
     assert.ok(line.endsWith("Let the melody set the pace."), line);
-    assert.match(line, /windows-down/);
+    assert.match(line, /windows down/);
     assert.match(line, /five/i);
     assert.match(line, /starting with Prince/i);
   });
@@ -274,7 +294,9 @@ describe("buildSetScript (template fallback)", () => {
       `expected a refill-bank intro at the start of: ${line}`
     );
     assert.ok(
-      DJ_SET_DESCRIPTORS.some((entry) => line.includes(entry.text)),
+      DJ_SET_DESCRIPTORS.some((entry) =>
+        line.includes(speakableDescriptor(entry.text))
+      ),
       `expected a bank descriptor in: ${line}`
     );
   });
@@ -338,7 +360,7 @@ describe("set description + assembly helpers", () => {
       introHasCount: false,
       salt: 0,
     });
-    assert.match(middle, /neon-soaked/);
+    assert.match(middle, /neon soaked/);
     assert.match(middle, /five/i);
     assert.match(middle, /80's mostly Pop/);
     assert.match(middle, /starting with Prince/);
@@ -355,7 +377,7 @@ describe("set description + assembly helpers", () => {
         salt,
       });
       assert.doesNotMatch(middle, /five/i);
-      assert.match(middle, /slow-burn/);
+      assert.match(middle, /slow burn/);
       assert.doesNotMatch(middle, /starting with/);
     }
   });
@@ -367,8 +389,8 @@ describe("set description + assembly helpers", () => {
       energyLabel: "mixed energy",
       salt: 0,
     });
-    assert.match(middle, /an all-killer/);
-    assert.doesNotMatch(middle, /\ba all-killer/);
+    assert.match(middle, /an all killer/);
+    assert.doesNotMatch(middle, /\ba all killer/);
   });
 
   it("assembleAnnounceScript joins the three parts, fills tokens, applies ban-list", () => {
@@ -382,6 +404,64 @@ describe("set description + assembly helpers", () => {
     assert.equal(
       line,
       "The queue is back in business, carrying Six selections. A crowd-tested run. Stay on this frequency."
+    );
+  });
+
+  it("assembleAnnounceScript ends the middle before the outro", () => {
+    const line = assembleAnnounceScript({
+      intro: "You bring the energy, I'll bring the tracks.",
+      middle: "There's a couple of fun discoveries waiting for",
+      outro: "That's all from the booth — the music has it covered.",
+    });
+    assert.equal(
+      line,
+      "You bring the energy, I'll bring the tracks. There's a couple of fun discoveries waiting for. That's all from the booth — the music has it covered."
+    );
+  });
+
+  it("replays the Shinedown refill without gluing the outro or slogan labels", () => {
+    const intro = "The queue found its second wind. Back to the music.";
+    const outro = "Keep the good mood exactly where it is.";
+    const middleMax = Math.max(
+      16,
+      55 - `${intro} ${outro}`.split(/\s+/).filter(Boolean).length
+    );
+    const llmMiddle =
+      'Get ready for a wild ride start-to-finish with five tracks that pack a punch, blending that epic rock energy and pop heat. We\'re diving right in with Shinedown\'s "Fly from the Inside" — it\'s gonna be a good one.';
+    const cleaned = polishSetDescription(
+      stripEdgeCourtesies(cleanSpokenScript(llmMiddle, middleMax))
+    );
+    const line = assembleAnnounceScript({
+      intro,
+      middle: cleaned,
+      outro,
+      howMany: "five",
+    });
+    assert.equal(
+      line,
+      "The queue found its second wind. Back to the music. A wild ride start to finish with five tracks that pack a punch, blending that epic rock energy and pop heat. Keep the good mood exactly where it is."
+    );
+    assert.doesNotMatch(line, /gonna be a Keep/i);
+    assert.doesNotMatch(line, /start-to-finish/i);
+    assert.doesNotMatch(line, /Get ready/i);
+    assert.doesNotMatch(line, /"/);
+  });
+
+  it("polishSetDescription strips trust-me filler in the middle of a sentence", () => {
+    assert.equal(
+      polishSetDescription(
+        "We're diving in with The Weeknd's Blinding Lights and trust me, you won't want to miss the groove."
+      ),
+      "We're diving in with The Weeknd's Blinding Lights and you won't want to miss the groove."
+    );
+  });
+
+  it("polishSetDescription strips Get ready after a sentence break", () => {
+    assert.equal(
+      polishSetDescription(
+        "We're about to unleash a powerful blend. Get ready for some major sing-along moments, starting with The Weeknd."
+      ),
+      "We're about to unleash a powerful blend. Some major sing-along moments, starting with The Weeknd."
     );
   });
 
@@ -733,7 +813,9 @@ describe("three-part announce prompt", () => {
     });
     assert.match(prompt, /Fresh signal from the booth/);
     assert.match(prompt, /Give the rhythm some road/);
-    assert.match(prompt, /"neon-soaked"/);
+    assert.match(prompt, /neon soaked/);
+    assert.match(prompt, /Translate that feel into ordinary spoken English/i);
+    assert.doesNotMatch(prompt, /verbatim or near-verbatim/i);
     assert.match(prompt, /Do NOT greet the crowd/i);
     assert.match(prompt, /Do NOT sign off/i);
     assert.match(prompt, /Mention the track count once/i);
@@ -929,6 +1011,6 @@ describe("Phase 6 character knobs", () => {
       95,
       "party people"
     );
-    assert.equal(cleaned, "Hello tonight");
+    assert.equal(cleaned, "Hello tonight.");
   });
 });
