@@ -19,6 +19,7 @@ import {
   spendArtistBudget,
 } from "./sampler.js";
 import { isClosingTime } from "./closing-time.js";
+import { isOutOfSeasonHolidayTrack } from "./holiday-tracks.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -279,6 +280,7 @@ export async function getLaneHits(
     if (!found?.uri || !found.id) return false;
     if (filterExplicit && found.explicit) return false;
     if (isClosingTime(found.name, found.artist, found.uri)) return false;
+    if (isOutOfSeasonHolidayTrack(found)) return false;
     if (exclude.has(found.id) || chosenIds.has(found.id)) return false;
     const artist = primaryArtist(found.artist);
     if (blocked && artist && blocked.has(artist)) return false;

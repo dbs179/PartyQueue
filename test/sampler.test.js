@@ -332,3 +332,34 @@ test("cloneArtistCountMap re-keys featured artists", () => {
   assert.equal(seed.get(primaryArtist("Tyga")), 1);
   assert.equal(seed.get("paramore"), 2);
 });
+
+test("sampleSongs skips Christmas tracks outside the holiday window", () => {
+  const playlists = [
+    {
+      id: "p1",
+      name: "p1",
+      tracks: [
+        {
+          uri: "spotify:track:tree",
+          name: "Underneath the Tree",
+          artist: "Kelly Clarkson",
+        },
+        {
+          uri: "spotify:track:gone",
+          name: "Since U Been Gone",
+          artist: "Kelly Clarkson",
+        },
+      ],
+    },
+  ];
+  const august = sampleSongs(playlists, new Set(), 5, {
+    now: new Date("2026-08-28T12:00:00"),
+  });
+  assert.deepEqual(idsOf(august), ["gone"]);
+
+  const december = sampleSongs(playlists, new Set(), 5, {
+    now: new Date("2026-12-20T12:00:00"),
+  });
+  assert.ok(idsOf(december).includes("tree"));
+  assert.ok(idsOf(december).includes("gone"));
+});

@@ -85,7 +85,9 @@ async function defaultAdapter() {
     getNowPlaying: sonos.getNowPlayingFresh,
     getVolume: sonos.getGroupVolume,
     setVolume: sonos.setGroupVolume,
-    pause: sonos.pause,
+    // Raw Pause — never host Pause (that cancels this handoff, then leaves
+    // the first music track paused after the DJ). Same rule as next.
+    pause: sonos.pausePlayback,
     resume: sonos.resumeQueuePlayback,
     playAt: (trackNumber) => sonos.play({ trackNumber }),
     // Raw Next — never host announce-aware Skip (that cancels this handoff).
@@ -260,6 +262,7 @@ export function createDjVolumeHandoff({
     try {
       const io = await getAdapter();
       await io.pause();
+      pausedByHold = true;
       logger.info("held post-silence while volume settles");
     } catch (error) {
       logger.warn(`could not hold post-silence: ${error.message}`);
@@ -297,6 +300,7 @@ export function createDjVolumeHandoff({
     if (liveUri && !liveIsAnnouncePad(liveUri)) {
       try {
         await io.resume();
+        pausedByHold = false;
       } catch (error) {
         logger.warn(`music resume after ${label} failed: ${error.message}`);
       }
@@ -308,16 +312,19 @@ export function createDjVolumeHandoff({
     if (nextTransition && typeof io.next === "function") {
       await io.next();
       await io.resume();
+      pausedByHold = false;
       logger.info(`advanced from ${label} with Next after ${silenceSec}s`);
       return;
     }
     if (Number(position) >= 1 && typeof io.playAt === "function") {
       await io.playAt(Number(position));
+      pausedByHold = false;
       logger.info(`advanced from ${label} after ${silenceSec}s`);
       return;
     }
     try {
       await io.resume();
+      pausedByHold = false;
       logger.info(`resumed ${label} after volume settled`);
     } catch (error) {
       logger.warn(`could not resume ${label}: ${error.message}`);

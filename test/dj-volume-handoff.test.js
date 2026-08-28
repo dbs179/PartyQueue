@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -136,6 +139,20 @@ function fakeHandoff({
     getVolume: () => volume,
   };
 }
+
+test("DJ volume adapter uses raw pause, not host Pause", () => {
+  const src = readFileSync(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../src/dj-volume-handoff.js"
+    ),
+    "utf8"
+  );
+  const adapter = src.match(/async function defaultAdapter\(\) \{[\s\S]*?\n\}/);
+  assert.ok(adapter, "defaultAdapter should exist");
+  assert.match(adapter[0], /pause:\s*sonos\.pausePlayback/);
+  assert.doesNotMatch(adapter[0], /pause:\s*sonos\.pause,/);
+});
 
 test("classifies pre-silence, DJ, and post-silence URIs", () => {
   assert.equal(isRampSilenceUri(PRE), true);

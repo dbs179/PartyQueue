@@ -330,7 +330,7 @@ export async function getPlaylistTracks(playlistId) {
   const token = await getUserAccessToken();
   const out = [];
   const fields = encodeURIComponent(
-    "items(track(uri,name,is_local,type,explicit,artists(name),album(release_date))),next"
+    "items(track(uri,name,is_local,type,explicit,artists(name),album(name,release_date))),next"
   );
   let url = `${API_BASE}/playlists/${playlistId}/tracks?limit=100&fields=${fields}`;
 
@@ -351,6 +351,7 @@ export async function getPlaylistTracks(playlistId) {
           uri: t.uri,
           name: t.name ?? "",
           artist: t.artists?.[0]?.name ?? "",
+          album: t.album?.name ?? "",
           explicit: !!t.explicit,
           // Release year for era Moods (album release_date is "YYYY[-MM-DD]").
           year: releaseYear(t.album?.release_date),
@@ -940,6 +941,7 @@ export async function getArtistTopTracks(artistId, { filterExplicit = false } = 
       uri: t.uri,
       name: t.name ?? "",
       artist: t.artists?.map((a) => a.name).join(", ") ?? "",
+      album: t.album?.name ?? "",
       explicit: !!t.explicit,
       year: releaseYear(t.album?.release_date),
     }));
@@ -982,6 +984,7 @@ export async function searchTracksPage(
     id: t.id,
     name: t.name ?? "",
     artist: t.artists?.map((a) => a.name).join(", ") ?? "",
+    album: t.album?.name ?? "",
     explicit: !!t.explicit,
     year: releaseYear(t.album?.release_date),
   }));
@@ -1129,6 +1132,7 @@ export async function findTrackUri(artist, title, opts = {}) {
           id: match.id,
           name: match.name,
           artist: match.artists?.map((x) => x.name).join(", ") ?? a,
+          album: match.album?.name ?? "",
           explicit: !!match.explicit,
         };
       }

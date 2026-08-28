@@ -8,6 +8,7 @@
  */
 
 import { primaryArtist } from "./sampler.js";
+import { isOutOfSeasonHolidayTrack } from "./holiday-tracks.js";
 import { getRandomnessSettings } from "./settings.js";
 import { buildPlaylistPool } from "./spotify.js";
 import { artistMatchesGenres } from "./genres.js";
@@ -141,6 +142,12 @@ export function filterSameArtistUsable(playlists, opts = {}) {
       }))
       .filter((p) => p.tracks.length > 0);
   }
+  usable = usable
+    .map((p) => ({
+      ...p,
+      tracks: (p.tracks || []).filter((t) => !isOutOfSeasonHolidayTrack(t)),
+    }))
+    .filter((p) => p.tracks.length > 0);
   const activeMoodPack = eraMoodPack(opts.mood);
   if (activeMoodPack) {
     usable = usable

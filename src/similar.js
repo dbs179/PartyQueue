@@ -21,6 +21,7 @@ import {
 } from "./sampler.js";
 import { getLastfmApiKey } from "./lastfm.js";
 import { isClosingTime } from "./closing-time.js";
+import { isOutOfSeasonHolidayTrack } from "./holiday-tracks.js";
 
 // Re-exported from sampler.js (moved there so era Moods can share them without
 // an import cycle); kept here for existing consumers and unit tests.
@@ -236,6 +237,7 @@ export async function getSimilarUris({
       if (!found) continue;
       if (filterExplicit && found.explicit) continue;
       if (isClosingTime(found.name, found.artist, found.uri)) continue;
+      if (isOutOfSeasonHolidayTrack(found)) continue;
       if (exclude.has(found.id) || chosenIds.has(found.id)) continue;
       const artist = primaryArtist(found.artist);
       if (blocked && artist && blocked.has(artist)) continue;

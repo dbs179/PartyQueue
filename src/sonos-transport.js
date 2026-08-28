@@ -190,6 +190,15 @@ async function pauseUnlocked() {
   // or the loop keeps SOAP-polling (and sometimes Play/Next) after the room
   // is supposed to be stopped.
   await cancelActiveDjVolumeHandoff("host pause");
+  return pausePlaybackUnlocked();
+}
+
+/** Raw Pause for DJ volume handoff pad holds (must not cancel that handoff). */
+export async function pausePlayback() {
+  return withSonosTransportLane(() => pausePlaybackUnlocked());
+}
+
+async function pausePlaybackUnlocked() {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
   await coordinator.Pause();

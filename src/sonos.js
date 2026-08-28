@@ -58,6 +58,7 @@ export {
 export {
   play,
   pause,
+  pausePlayback,
   resumeQueuePlayback,
   next,
   advanceQueueTrack,

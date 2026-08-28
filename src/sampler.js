@@ -9,6 +9,7 @@
 // doesn't keep leaning on the same songs and artists.
 
 import { isClosingTime } from "./closing-time.js";
+import { isOutOfSeasonHolidayTrack } from "./holiday-tracks.js";
 import { fitsExactLane, genreFlowScore } from "./genre-flow.js";
 
 // Pull the bare spotify:track:<id> out of whatever URI form Sonos stores in the
@@ -208,6 +209,7 @@ export function sampleSongs(playlists, exclude, want, opts = {}) {
   const flowState =
     opts.flowState && typeof opts.flowState === "object" ? opts.flowState : null;
   const useFlow = !!(flowState?.lane && bucketsFor);
+  const now = opts.now instanceof Date ? opts.now : new Date();
 
   const chosenIds = new Set();
   const chosen = [];
@@ -229,6 +231,7 @@ export function sampleSongs(playlists, exclude, want, opts = {}) {
           const id = spotifyTrackId(t.uri);
           if (!id) return false;
           if (isClosingTime(t.name, t.artist, t.uri)) return false;
+          if (isOutOfSeasonHolidayTrack(t, now)) return false;
           if (exclude.has(id) || chosenIds.has(id)) return false;
           const artist = primaryArtist(t.artist);
           if (blockedArtists && artist && blockedArtists.has(artist)) return false;
@@ -284,6 +287,7 @@ export function sampleSongs(playlists, exclude, want, opts = {}) {
           if (!id) return false;
           // Never let the app auto-add the party-ending anthem.
           if (isClosingTime(t.name, t.artist, t.uri)) return false;
+          if (isOutOfSeasonHolidayTrack(t, now)) return false;
           if (exclude.has(id) || chosenIds.has(id)) return false;
           const artist = primaryArtist(t.artist);
           if (blockedArtists && artist && blockedArtists.has(artist)) return false;
@@ -390,6 +394,7 @@ export function pickWithRelaxation(
     bucketsFor: cfg.bucketsFor,
     lastArtist,
     flowState: cfg.flowState || null,
+    now: cfg.now,
     ...extra,
   });
 
