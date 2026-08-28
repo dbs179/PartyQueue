@@ -249,6 +249,8 @@ test("Holy Roller aliases stay at the top level and Sister Static seeds separate
   assert.equal(dj.djSisterStatic.djName, SISTER_STATIC_NAME);
   assert.deepEqual(dj.djSisterStatic.djTaglines, SISTER_STATIC_TAGLINES);
   assert.equal(dj.djSisterStatic.djTtsVoiceOpenAi, "nova");
+  assert.equal(dj.djSisterStatic.djTtsProvider, "elevenlabs_ha");
+  assert.equal(dj.djSisterStatic.djTtsVoiceElevenlabs, "71VXFlEFJncdDB3DpaP9");
 
   const hr = settings.getDjPersona("holy-roller");
   assert.equal(hr.djName, "DJ Holy Roller");
@@ -256,15 +258,19 @@ test("Holy Roller aliases stay at the top level and Sister Static seeds separate
   assert.equal(ss.djName, SISTER_STATIC_NAME);
 });
 
-test("Sister Static empty ElevenLabs ID falls back to OpenAI nova", () => {
+test("Sister Static empty ElevenLabs ID uses her default voice", () => {
   const saved = settings.setDjVoiceSettings({
     djSisterStatic: {
       djTtsProvider: "elevenlabs_ha",
       djTtsVoiceElevenlabs: "",
     },
   });
-  assert.equal(saved.djSisterStatic.djTtsProvider, "openai_ha");
-  assert.equal(saved.djSisterStatic.djTtsVoice, "nova");
+  assert.equal(saved.djSisterStatic.djTtsProvider, "elevenlabs_ha");
+  assert.equal(
+    saved.djSisterStatic.djTtsVoiceElevenlabs,
+    "71VXFlEFJncdDB3DpaP9"
+  );
+  assert.equal(saved.djSisterStatic.djTtsVoice, "71VXFlEFJncdDB3DpaP9");
 });
 
 test("roster mix settings persist without wiping Holy Roller", () => {
@@ -280,4 +286,22 @@ test("roster mix settings persist without wiping Holy Roller", () => {
   assert.equal(saved.djMixHolyRollerPercent, 55);
   assert.equal(saved.djBanterPercent, 20);
   assert.equal(saved.djSisterStatic.djName, "Sister Static");
+});
+
+test("Sister Static name intro percent and max words persist", () => {
+  const saved = settings.setDjVoiceSettings({
+    djNameIntroPercent: 40,
+    djAnnounceMaxWords: 70,
+    djSisterStatic: {
+      djNameIntroPercent: 10,
+      djAnnounceMaxWords: 40,
+    },
+  });
+  assert.equal(saved.djNameIntroPercent, 40);
+  assert.equal(saved.djAnnounceMaxWords, 70);
+  assert.equal(saved.djSisterStatic.djNameIntroPercent, 10);
+  assert.equal(saved.djSisterStatic.djAnnounceMaxWords, 40);
+  const ss = settings.getDjPersona("sister-static");
+  assert.equal(ss.djNameIntroPercent, 10);
+  assert.equal(ss.djAnnounceMaxWords, 40);
 });

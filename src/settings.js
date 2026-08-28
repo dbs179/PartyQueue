@@ -739,6 +739,7 @@ export function normalizeDjTtsSpeed(
 
 /** Public fallback art when the seeded gallery default is missing. */
 export const DJ_ICON_DEFAULT_URL = "/dj-icons/headphones.png";
+export const DJ_ICON_SS_DEFAULT_URL = "/dj-icons/ss-headphones.png";
 const DJ_NAME_MAXLEN = 40;
 const DJ_NAME_INTRO_BOUNDS = { min: 0, max: 100 };
 const DJ_ANNOUNCE_WORDS_BOUNDS = { min: 28, max: 120 };
@@ -903,9 +904,9 @@ function cleanDjIcon(value) {
   return value;
 }
 
-export function djIconUrl(iconName) {
+export function djIconUrl(iconName, fallbackUrl = DJ_ICON_DEFAULT_URL) {
   const name = cleanDjIcon(iconName);
-  return name ? `/dj-icon/${name}` : DJ_ICON_DEFAULT_URL;
+  return name ? `/dj-icon/${name}` : fallbackUrl;
 }
 
 function resolvePersonaIcon(iconRaw, migrated) {
@@ -954,7 +955,7 @@ export function normalizeSisterStaticPersona(
     id: DJ_PERSONA_SISTER_STATIC,
     djName: name,
     djIcon: icon,
-    djIconUrl: djIconUrl(icon),
+    djIconUrl: djIconUrl(icon, DJ_ICON_SS_DEFAULT_URL),
     djTtsProvider,
     djTtsEngine: djTtsEngineForProvider(djTtsProvider),
     djTtsVoiceOpenAi,
@@ -998,6 +999,16 @@ export function normalizeSisterStaticPersona(
         ? fb.djTaglines
         : SISTER_STATIC_TAGLINES
     ),
+    djNameIntroPercent: clampInt(
+      src.djNameIntroPercent ?? fb.djNameIntroPercent,
+      fb.djNameIntroPercent ?? DJ_VOICE_DEFAULTS.djNameIntroPercent,
+      DJ_NAME_INTRO_BOUNDS
+    ),
+    djAnnounceMaxWords: clampInt(
+      src.djAnnounceMaxWords ?? fb.djAnnounceMaxWords,
+      fb.djAnnounceMaxWords ?? DJ_VOICE_DEFAULTS.djAnnounceMaxWords,
+      DJ_ANNOUNCE_WORDS_BOUNDS
+    ),
   };
 }
 
@@ -1021,6 +1032,8 @@ function holyRollerPersonaFromVoice(dj) {
     djNeverInstructions: dj.djNeverInstructions,
     djPronunciations: dj.djPronunciations,
     djTaglines: dj.djTaglines,
+    djNameIntroPercent: dj.djNameIntroPercent,
+    djAnnounceMaxWords: dj.djAnnounceMaxWords,
   };
 }
 
@@ -1485,6 +1498,8 @@ export function setDjVoiceSettings(partial = {}) {
         djNeverInstructions: resolved.djNeverInstructions,
         djPronunciations: resolved.djPronunciations,
         djTaglines: resolved.djTaglines,
+        djNameIntroPercent: resolved.djNameIntroPercent,
+        djAnnounceMaxWords: resolved.djAnnounceMaxWords,
       },
     };
   }

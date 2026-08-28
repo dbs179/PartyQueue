@@ -296,8 +296,10 @@ export function persistBrandingCache(partial = {}, opts = {}) {
  *   bannerMobileFileInput?: HTMLInputElement|null,
  *   bannerMobileGallery?: HTMLElement|null,
  *   djIconUploadBtn?: HTMLElement|null,
+ *   djIconUploadBtnSs?: HTMLElement|null,
  *   djIconFileInput?: HTMLInputElement|null,
  *   djIconGallery?: HTMLElement|null,
+ *   djIconGallerySs?: HTMLElement|null,
  * }} els
  * @param {{
  *   hostFetch: typeof fetch,
@@ -305,8 +307,7 @@ export function persistBrandingCache(partial = {}, opts = {}) {
  *   showToast: (msg: string, isError?: boolean) => void,
  *   saveSettings: (patch: object, opts?: object) => void,
  *   getDefaultDjIconName?: () => string,
- *   getEditingPersona?: () => string,
- *   onDjIconChange?: (name: string|null) => void,
+ *   onDjIconChange?: (name: string|null, persona?: string) => void,
  *   onShowQueueGenreChange?: (enabled: boolean) => void,
  * }} deps
  */
@@ -340,6 +341,8 @@ export function createBrandingUi(els, deps) {
     djIconUploadBtn,
     djIconFileInput,
     djIconGallery,
+    djIconUploadBtnSs,
+    djIconGallerySs,
   } = els || {};
   const hostFetch = deps.hostFetch;
   const fetchFn = deps.fetch || fetch;
@@ -347,9 +350,11 @@ export function createBrandingUi(els, deps) {
   const saveSettings = deps.saveSettings;
   const getDefaultDjIconName =
     deps.getDefaultDjIconName || (() => "dj-icon-headphones.png");
-  const getEditingPersona = deps.getEditingPersona || (() => "holy-roller");
   const onDjIconChange = deps.onDjIconChange || (() => {});
   const onShowQueueGenreChange = deps.onShowQueueGenreChange || (() => {});
+  const PERSONA_HR = "holy-roller";
+  const PERSONA_SS = "sister-static";
+  let pendingDjIconPersona = PERSONA_HR;
 
   /** @type {string|null} */
   let desktopBanner = null;
@@ -448,30 +453,49 @@ export function createBrandingUi(els, deps) {
     }
   }
 
-  function editingPersona() {
-    return getEditingPersona() === "sister-static"
-      ? "sister-static"
-      : "holy-roller";
-  }
-
   function renderDjIcons(data) {
-    if (!djIconGallery) return;
-    const { active, items } = buildDjIconGalleryItems(data, {
-      defaultIconName: getDefaultDjIconName(),
+    const defaultIconName = getDefaultDjIconName();
+    const hrData = {
+      ...data,
+      icons: (data?.icons || []).filter((icon) => {
+        const persona = icon.persona || "holy-roller";
+        return persona === "holy-roller" || persona === "shared";
+      }),
+    };
+    const ssData = {
+      ...data,
+      active: data?.sisterStaticActive ?? null,
+      defaultUrl: data?.sisterStaticDefaultUrl || "/dj-icons/ss-headphones.png",
+      icons: (data?.icons || []).filter((icon) => {
+        const persona = icon.persona || "holy-roller";
+        return persona === "sister-static" || persona === "shared";
+      }),
+    };
+    const hr = buildDjIconGalleryItems(hrData, { defaultIconName });
+    const ss = buildDjIconGalleryItems(ssData, {
+      defaultIconName: "dj-icon-ssheadphones.png",
     });
-    onDjIconChange(active);
-    mountThumbGallery(djIconGallery, items, {
-      deleteAriaLabel: "Delete DJ icon",
-      onSelect: selectDjIcon,
-      onDelete: deleteDjIcon,
-    });
+    onDjIconChange(hr.active, PERSONA_HR);
+    onDjIconChange(ss.active, PERSONA_SS);
+    if (djIconGallery) {
+      mountThumbGallery(djIconGallery, hr.items, {
+        deleteAriaLabel: "Delete DJ icon",
+        onSelect: (name) => selectDjIcon(name, PERSONA_HR),
+        onDelete: deleteDjIcon,
+      });
+    }
+    if (djIconGallerySs) {
+      mountThumbGallery(djIconGallerySs, ss.items, {
+        deleteAriaLabel: "Delete DJ icon",
+        onSelect: (name) => selectDjIcon(name, PERSONA_SS),
+        onDelete: deleteDjIcon,
+      });
+    }
   }
 
   async function loadDjIcons() {
     try {
-      const res = await fetchFn(
-        `/api/dj-icon?persona=${encodeURIComponent(editingPersona())}`
-      );
+      const res = await fetchFn("/api/dj-icon");
       if (!res.ok) return;
       renderDjIcons(await res.json());
     } catch {
@@ -479,12 +503,12 @@ export function createBrandingUi(els, deps) {
     }
   }
 
-  async function selectDjIcon(name) {
+  async function selectDjIcon(name, persona = PERSONA_HR) {
     try {
       const res = await hostFetch("/api/dj-icon/select", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, persona: editingPersona() }),
+        body: JSON.stringify({ name, persona }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not switch DJ icon.");
@@ -496,10 +520,9 @@ export function createBrandingUi(els, deps) {
 
   async function deleteDjIcon(name) {
     try {
-      const res = await hostFetch(
-        `/api/dj-icon/${encodeURIComponent(name)}?persona=${encodeURIComponent(editingPersona())}`,
-        { method: "DELETE" }
-      );
+      const res = await hostFetch(`/api/dj-icon/${encodeURIComponent(name)}`, {
+        method: "DELETE",
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not delete DJ icon.");
       renderDjIcons(data);
@@ -630,42 +653,49 @@ export function createBrandingUi(els, deps) {
     });
   }
 
-  if (djIconUploadBtn && djIconFileInput) {
-    djIconUploadBtn.addEventListener("click", () => djIconFileInput.click());
-    djIconFileInput.addEventListener("change", () => {
-      const file = djIconFileInput.files && djIconFileInput.files[0];
-      if (!file) return;
-      if (file.size > MAX_DJ_ICON_BYTES) {
-        showToast("Image is too large (2 MB max).", true);
-        djIconFileInput.value = "";
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = async () => {
-        djIconUploadBtn.disabled = true;
-        try {
-          const res = await hostFetch("/api/dj-icon", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              image: reader.result,
-              persona: editingPersona(),
-            }),
-          });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || "Upload failed.");
-          renderDjIcons(data);
-          showToast("DJ Icon updated");
-        } catch (err) {
-          showToast(err.message, true);
-        } finally {
-          djIconUploadBtn.disabled = false;
-          djIconFileInput.value = "";
-        }
-      };
-      reader.readAsDataURL(file);
-    });
+  function openDjIconPicker(persona) {
+    pendingDjIconPersona = persona === PERSONA_SS ? PERSONA_SS : PERSONA_HR;
+    djIconFileInput?.click();
   }
+
+  djIconUploadBtn?.addEventListener("click", () => openDjIconPicker(PERSONA_HR));
+  (djIconUploadBtnSs || document.getElementById("dj-icon-upload-btn-ss"))
+    ?.addEventListener("click", () => openDjIconPicker(PERSONA_SS));
+
+  djIconFileInput?.addEventListener("change", () => {
+    const file = djIconFileInput.files && djIconFileInput.files[0];
+    if (!file) return;
+    if (file.size > MAX_DJ_ICON_BYTES) {
+      showToast("Image is too large (2 MB max).", true);
+      djIconFileInput.value = "";
+      return;
+    }
+    const persona = pendingDjIconPersona;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      if (djIconUploadBtn) djIconUploadBtn.disabled = true;
+      try {
+        const res = await hostFetch("/api/dj-icon", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            image: reader.result,
+            persona,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Upload failed.");
+        renderDjIcons(data);
+        showToast("DJ Icon updated");
+      } catch (err) {
+        showToast(err.message, true);
+      } finally {
+        if (djIconUploadBtn) djIconUploadBtn.disabled = false;
+        djIconFileInput.value = "";
+      }
+    };
+    reader.readAsDataURL(file);
+  });
 
   wireBannerUpload(bannerUploadBtn, bannerFileInput, "desktop");
   wireBannerUpload(bannerMobileUploadBtn, bannerMobileFileInput, "mobile");

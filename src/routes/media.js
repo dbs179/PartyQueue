@@ -63,17 +63,17 @@ function applyDjIcon(name, personaId) {
   return setDjVoiceSettings({ djIcon: name });
 }
 
-function djIconListPayload(personaId) {
+function djIconListPayload(_personaId) {
   const hr = getDjVoiceSettings();
   const ss = getDjPersona(DJ_PERSONA_SISTER_STATIC);
-  const activePersona =
-    personaId === DJ_PERSONA_SISTER_STATIC ? ss : hr;
   return {
     ok: true,
-    active: activePersona.djIcon,
-    djIcon: activePersona.djIcon,
-    djIconUrl: activePersona.djIconUrl,
+    active: hr.djIcon,
+    djIcon: hr.djIcon,
+    djIconUrl: hr.djIconUrl,
     sisterStaticActive: ss.djIcon,
+    sisterStaticIconUrl: ss.djIconUrl,
+    sisterStaticDefaultUrl: "/dj-icons/ss-headphones.png",
     defaultUrl: "/dj-icons/headphones.png",
     icons: listDjIcons(),
   };

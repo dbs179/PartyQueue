@@ -113,6 +113,7 @@ import {
 } from "./dj-roster.js";
 import {
   SISTER_STATIC_BIBLE,
+  SISTER_STATIC_BOOTH_ASIDES,
   sisterStaticNameIntrosFor,
   buildSisterStaticPunchlinePrompt,
   BANTER_PUNCHLINE_MAX_WORDS,
@@ -281,6 +282,7 @@ export function pickDjCharacterBit({
   catchphrase = "",
   intensity = "classic",
   reserve = false,
+  personaId = DJ_PERSONA_HOLY_ROLLER,
 } = {}) {
   if (!includeBit) return null;
   const kids = String(mood || "").toLowerCase() === "kids";
@@ -295,16 +297,22 @@ export function pickDjCharacterBit({
   ) {
     return phrase;
   }
-  const bank = DJ_CHARACTER_BIBLE.recurringBits.filter((b) =>
-    kids ? b.familySafe : true
-  );
+  const sourceBits =
+    personaId === DJ_PERSONA_SISTER_STATIC
+      ? SISTER_STATIC_BOOTH_ASIDES.map((entry) => ({
+          id: entry.id,
+          line: entry.text,
+          familySafe: entry.familySafe,
+        }))
+      : DJ_CHARACTER_BIBLE.recurringBits;
+  const bank = sourceBits.filter((b) => (kids ? b.familySafe : true));
   if (!bank.length) return null;
   const selected = reserve
-    ? reserveDjPhrase(
-        "aside",
-        bank.map((item) => ({ id: item.id, text: item.line })),
-        { salt: salt + 11 }
-      )
+      ? reserveDjPhrase(
+          personaId === DJ_PERSONA_SISTER_STATIC ? "ss-aside" : "aside",
+          bank.map((item) => ({ id: item.id, text: item.line })),
+          { salt: salt + 11 }
+        )
     : pick(bank, salt + 11);
   return fillEventName(selected?.text || selected?.line || "");
 }
@@ -317,6 +325,7 @@ export function resolveCharacterMoment({
   intensity = "classic",
   catchphrase = "",
   reserve = false,
+  personaId = DJ_PERSONA_HOLY_ROLLER,
 } = {}) {
   const include =
     forceBit != null
@@ -335,6 +344,7 @@ export function resolveCharacterMoment({
       catchphrase,
       intensity,
       reserve,
+      personaId,
     }),
   };
 }
@@ -1452,11 +1462,16 @@ function formatAnnounceStructureForPrompt(structure, djName) {
     const nameLine = structure.nameMention
       ? `- You may mention your DJ name (${name}) once if it fits.`
       : `- Do not say your own DJ name ("${name}").`;
+    const frame = String(structure.setFrame || "").trim();
+    const frameLine = frame
+      ? `- This block is ${frame}. Name that once in your voice. Do not use a canned "Up next:" slogan.`
+      : "";
     return `STRUCTURE — FULL SHORT CLIP
 You own this entire spoken clip (no scripted intro or outro around it).
 Write 1 to 3 short sentences. Keep it punchy.
 - Do not list genres. Mention at most one artist or song.
-${nameLine}`;
+${nameLine}
+${frameLine}`.trim();
   }
   const descriptor = speakableDescriptor(structure.descriptor);
   const countLine = structure.introHasCount
@@ -1499,16 +1514,24 @@ function buildDjSystemPrompt(
   const structureBlock = formatAnnounceStructureForPrompt(structure, name);
   const hostGuidanceBlock = formatHostDjGuidance(characterKnobs);
   const moodLabel = moodContext?.moodLabel || "All genres";
+  const introText = String(structure?.intro || "").trim();
+  const outroText = String(structure?.outro || "").trim();
+  const fullClip =
+    characterKnobs?.personaId === DJ_PERSONA_SISTER_STATIC ||
+    (!introText && !outroText && Boolean(structure));
+  const taskLine = fullClip
+    ? "Write the entire spoken DJ clip for the upcoming music block. There is no scripted intro or outro — you own the whole line."
+    : "Write the set-description middle of a three-part DJ announce (scripted intro and outro surround it) for the upcoming music block.";
   return `You are ${name}, ${
     characterKnobs?.personaId === DJ_PERSONA_SISTER_STATIC
-      ? `the co-host and sidekick to DJ Holy Roller for ${event}`
+      ? `the female sarcastic co-host and sidekick to DJ Holy Roller for ${event}`
       : `the recurring host and DJ for ${event}`
   }. You are a real DJ in the room — not a playlist narrator, automated assistant, radio lecturer, or year-in-review host.
 
 ${bibleBlock}
 
 ${hostGuidanceBlock ? `${hostGuidanceBlock}\n\n` : ""}TASK
-Write the set-description middle of a three-part DJ announce (scripted intro and outro surround it) for the upcoming music block.
+${taskLine}
 
 ${formatMusicPronunciationGuide(characterKnobs?.pronunciations)}
 
@@ -1923,6 +1946,7 @@ export function buildLlmPrompt(summary) {
     introHasCount = false,
     sameArtistName = "",
     rotation = null,
+    setFrame = "",
   } = summary;
   const name = String(djName || DJ_VOICE_DEFAULTS.djName).trim() || DJ_VOICE_DEFAULTS.djName;
   const highlightList = Array.isArray(highlights) ? highlights : [];
@@ -1964,7 +1988,7 @@ export function buildLlmPrompt(summary) {
     middleMaxWords ?? djAnnounceMaxWords,
     moodContext,
     characterMoment,
-    { intro, outro, descriptor, nameMention, introHasCount },
+    { intro, outro, descriptor, nameMention, introHasCount, setFrame },
     characterKnobs
   )}
 
@@ -2322,6 +2346,7 @@ export async function writeSetScript(summary = {}) {
       intensity: characterKnobs.intensity,
       catchphrase: characterKnobs.catchphrase,
       reserve: true,
+      personaId: characterKnobs.personaId,
     });
   const pack = getDjMoodVoicePack(moodContext.mood);
 
@@ -2361,28 +2386,57 @@ export async function writeSetScript(summary = {}) {
       `[dj-voice] using one-shot next-set pack "${nextPack.id}" for this announce`
     );
   }
+  let setFrame = "";
   if (skipScriptedEdges) {
-    if (intro == null) intro = "";
-    if (outro == null) outro = "";
-  }
-  if (intro == null) {
     if (reactionSetKind === "loved") {
-      intro = "Up next: the room's most loved songs.";
+      setFrame = "the room's most loved songs";
     } else if (reactionSetKind === "hated") {
-      intro = "Up next: the room's most hated songs.";
+      setFrame = "the room's most hated songs";
     } else if (reactionSetKind === "requested") {
-      intro = "Up next: the room's most requested songs.";
-    } else if (sameArtistLines?.intro) {
-      intro = sameArtistLines.intro;
-    } else if (rotationLines?.intro) {
-      intro = rotationLines.intro;
-    } else {
-      intro = reserveIntroPhrase(event, saltHint + 19)?.text || "";
+      setFrame = "the room's most requested songs";
+    } else if (sameArtistLines?.artist) {
+      setFrame = `a same-artist showcase for ${sameArtistLines.artist}`;
+    } else if (rotation?.decade) {
+      setFrame = `a decade rotation into the ${rotation.decade}`;
+    } else if (rotation?.mood) {
+      setFrame = `a mood rotation into ${rotation.mood}`;
     }
-  }
-  if (outro == null) {
-    const outroPhrase = reserveOutroPhrase(pack, moodContext.mood, saltHint + 23);
-    outro = outroPhrase ? fillEventName(outroPhrase.text) : "";
+    const leftover = [intro, outro]
+      .map((line) => String(line || "").trim())
+      .filter(Boolean);
+    intro = "";
+    outro = "";
+    if (leftover.length) {
+      characterKnobs = {
+        ...characterKnobs,
+        alwaysInstructions: [
+          characterKnobs.alwaysInstructions,
+          `Honor this one-shot set beat in your own voice (do not read it as a scripted intro or outro): ${leftover.join(" ")}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      };
+    }
+  } else {
+    if (intro == null) {
+      if (reactionSetKind === "loved") {
+        intro = "Up next: the room's most loved songs.";
+      } else if (reactionSetKind === "hated") {
+        intro = "Up next: the room's most hated songs.";
+      } else if (reactionSetKind === "requested") {
+        intro = "Up next: the room's most requested songs.";
+      } else if (sameArtistLines?.intro) {
+        intro = sameArtistLines.intro;
+      } else if (rotationLines?.intro) {
+        intro = rotationLines.intro;
+      } else {
+        intro = reserveIntroPhrase(event, saltHint + 19)?.text || "";
+      }
+    }
+    if (outro == null) {
+      const outroPhrase = reserveOutroPhrase(pack, moodContext.mood, saltHint + 23);
+      outro = outroPhrase ? fillEventName(outroPhrase.text) : "";
+    }
   }
   const descriptor =
     summary.descriptor != null && String(summary.descriptor).trim()
@@ -2452,6 +2506,7 @@ export async function writeSetScript(summary = {}) {
     recentAnnounceScripts: getRecentDjAnnounceScripts(5),
     sameArtistName: sameArtistLines?.artist || "",
     rotation,
+    setFrame,
   };
 
   try {
@@ -3417,7 +3472,7 @@ function withAnnounceLock(fn) {
   return run;
 }
 
-export async function writeBanterPunchline(leadScript, _summary = {}) {
+export async function writeBanterPunchline(leadScript, summary = {}) {
   const persona = getDjPersona(DJ_PERSONA_SISTER_STATIC);
   const last = getLastDjAnnounce();
   const event = eventDisplayName();
@@ -3425,6 +3480,7 @@ export async function writeBanterPunchline(leadScript, _summary = {}) {
     name: persona.djName,
     event,
     lastSpeakerScript: last?.script || null,
+    setContext: summary,
   });
   try {
     const line = await withTimeout(

@@ -1437,13 +1437,16 @@
         </div>
         <div class="hub-sections">
           <div class="settings-hub">
-          <div class="settings-hub-grid" role="navigation" aria-label="DJ sections">
-            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-cohosts">
+          <div class="dj-split" role="navigation" aria-label="DJ and co-host sections">
+            <section class="dj-split-col">
+              <h3 class="dj-split-heading">DJ</h3>
+              <div class="settings-hub-grid dj-hub-persona-grid">
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-name">
               <p class="settings-hub-heading">
-                <span class="settings-hub-title">Co-hosts:</span>
-                <span class="settings-hub-desc">Who speaks set announces and shout-outs.</span>
+                <span class="settings-hub-title">Name:</span>
+                <span class="settings-hub-desc">Name used in announcements.</span>
               </p>
-              <span class="settings-hub-stat" id="dj-stat-cohosts">Holy Roller</span>
+              <span class="settings-hub-stat" id="dj-stat-name">—</span>
             </button>
             <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-banner">
               <p class="settings-hub-heading">
@@ -1451,13 +1454,6 @@
                 <span class="settings-hub-desc">DJ icon shown on Now Playing.</span>
               </p>
               <span class="settings-hub-stat" id="dj-stat-banner">—</span>
-            </button>
-            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-name">
-              <p class="settings-hub-heading">
-                <span class="settings-hub-title">Name:</span>
-                <span class="settings-hub-desc">Name used in announcements.</span>
-              </p>
-              <span class="settings-hub-stat" id="dj-stat-name">—</span>
             </button>
             <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-taglines">
               <p class="settings-hub-heading">
@@ -1479,6 +1475,59 @@
                 <span class="settings-hub-desc">Persona, guidance, pronunciation, prompt.</span>
               </p>
               <span class="settings-hub-stat" id="dj-stat-advanced">Core locked</span>
+            </button>
+              </div>
+            </section>
+            <section class="dj-split-col">
+              <h3 class="dj-split-heading">Co-host</h3>
+              <div class="settings-hub-grid dj-hub-persona-grid">
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-name">
+              <p class="settings-hub-heading">
+                <span class="settings-hub-title">Name:</span>
+                <span class="settings-hub-desc">Name used in announcements.</span>
+              </p>
+              <span class="settings-hub-stat" id="dj-stat-name-ss">Sister Static</span>
+            </button>
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-banner">
+              <p class="settings-hub-heading">
+                <span class="settings-hub-title">Banner:</span>
+                <span class="settings-hub-desc">Co-host icon shown on Now Playing.</span>
+              </p>
+              <span class="settings-hub-stat" id="dj-stat-banner-ss">—</span>
+            </button>
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-taglines">
+              <p class="settings-hub-heading">
+                <span class="settings-hub-title">Tag Lines:</span>
+                <span class="settings-hub-desc">Quotes under the co-host on Now Playing and Up Next.</span>
+              </p>
+              <span class="settings-hub-stat" id="dj-stat-taglines-ss">—</span>
+            </button>
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-voice">
+              <p class="settings-hub-heading">
+                <span class="settings-hub-title">Voice &amp; character:</span>
+                <span class="settings-hub-desc">TTS, intensity, intros, length.</span>
+              </p>
+              <span class="settings-hub-stat" id="dj-stat-voice-ss">—</span>
+            </button>
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-advanced">
+              <p class="settings-hub-heading">
+                <span class="settings-hub-title">Advanced DJ:</span>
+                <span class="settings-hub-desc">Persona, guidance, pronunciation, prompt.</span>
+              </p>
+              <span class="settings-hub-stat" id="dj-stat-advanced-ss">Core locked</span>
+            </button>
+              </div>
+            </section>
+          </div>
+          <section class="dj-split-col dj-hub-shared-box">
+          <h3 class="dj-split-heading">Shared</h3>
+          <div class="settings-hub-grid dj-hub-shared" role="navigation" aria-label="Shared DJ settings">
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-cohosts">
+              <p class="settings-hub-heading">
+                <span class="settings-hub-title">Who speaks:</span>
+                <span class="settings-hub-desc">Holy Roller, Sister Static, or Mix for announces and shout-outs.</span>
+              </p>
+              <span class="settings-hub-stat" id="dj-stat-cohosts">Holy Roller</span>
             </button>
             <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-volume">
               <p class="settings-hub-heading">
@@ -1502,7 +1551,7 @@
               <span class="settings-hub-stat" id="dj-stat-lastcall">—</span>
             </button>
             <div
-              class="settings-hub-card settings-hub-card-static"
+              class="settings-hub-card settings-hub-card-static settings-hub-card-full"
               role="status"
               aria-label="Sonos media URL"
             >
@@ -1516,6 +1565,7 @@
               <span class="settings-hub-stat booth-media-url" id="booth-stat-media-url">—</span>
             </div>
           </div>
+          </section>
           </div>
         </div>
       </div>
@@ -1562,105 +1612,121 @@
       <div id="view-settings-dj-banner" class="view" hidden>
         <div class="subpage-head dj-subpage-head">
           <h2 class="section-label subpage-title">Banner</h2>
-          <button type="button" class="subpage-head-link dj-voice-reset-btn">Defaults</button>
           <button id="settings-dj-banner-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <div class="dj-persona-switch" role="group" aria-label="Editing DJ">
-          <span class="dj-persona-switch-label">Editing:</span>
-          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="holy-roller">Holy Roller</button>
-          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="sister-static">Sister Static</button>
-        </div>
-        <div class="booth-sections">
-          <div class="booth-section">
-            <div class="booth-section-head">
-              <p class="booth-section-heading">
-                <span class="section-label">DJ icon:</span>
-                <span class="booth-section-sub">PNG, JPG, WEBP, GIF or SVG, 2&nbsp;MB max. Keeps the newest five.</span>
-              </p>
-              <button id="dj-icon-upload-btn" type="button" class="subpage-head-link">Upload</button>
+        <input id="dj-icon-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" hidden />
+        <p class="booth-section-sub booth-field-note">PNG, JPG, WEBP, GIF or SVG, 2&nbsp;MB max. Uploads are shared; each column picks its own icon. Keeps the newest five.</p>
+        <div class="dj-split">
+          <section class="dj-split-col">
+            <div class="dj-split-col-head">
+              <h3 class="dj-split-heading">DJ</h3>
+              <div class="dj-split-col-actions">
+                <button id="dj-icon-upload-btn" type="button" class="subpage-head-link">Upload</button>
+                <button id="dj-icon-default-hr" type="button" class="subpage-head-link">Default icon</button>
+              </div>
             </div>
-            <input id="dj-icon-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" hidden />
             <div id="dj-icon-gallery" class="banner-gallery"></div>
-          </div>
+          </section>
+          <section class="dj-split-col">
+            <div class="dj-split-col-head">
+              <h3 class="dj-split-heading">Co-host</h3>
+              <div class="dj-split-col-actions">
+                <button id="dj-icon-upload-btn-ss" type="button" class="subpage-head-link">Upload</button>
+                <button id="dj-icon-default-ss" type="button" class="subpage-head-link">Default icon</button>
+              </div>
+            </div>
+            <div id="dj-icon-gallery-ss" class="banner-gallery"></div>
+          </section>
         </div>
       </div>
 
       <div id="view-settings-dj-name" class="view" hidden>
         <div class="subpage-head dj-subpage-head">
           <h2 class="section-label subpage-title">Name</h2>
-          <button type="button" class="subpage-head-link dj-voice-save-btn">Save</button>
-          <button type="button" class="subpage-head-link dj-voice-reset-btn">Defaults</button>
           <button id="settings-dj-name-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <div class="dj-persona-switch" role="group" aria-label="Editing DJ">
-          <span class="dj-persona-switch-label">Editing:</span>
-          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="holy-roller">Holy Roller</button>
-          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="sister-static">Sister Static</button>
-        </div>
-        <div class="booth-sections">
-          <div class="booth-section">
-            <div class="booth-section-head">
-              <p class="booth-section-heading">
-                <span class="section-label">Name:</span>
-                <span class="booth-section-sub">Used in announcements and on Now Playing.</span>
-              </p>
+        <div class="dj-split">
+          <section class="dj-split-col">
+            <div class="dj-split-col-head">
+              <h3 class="dj-split-heading">DJ</h3>
+              <div class="dj-split-col-actions">
+                <button id="dj-name-save" type="button" class="subpage-head-link">Save</button>
+                <button id="dj-name-reset" type="button" class="subpage-head-link">Defaults</button>
+              </div>
             </div>
             <div class="setting-row-text">
               <label class="setting-label" for="set-dj-name">Name</label>
               <input type="text" id="set-dj-name" class="setting-input" maxlength="40" placeholder="Party DJ" autocomplete="off" spellcheck="false" />
             </div>
-          </div>
+            <p class="booth-section-sub booth-field-note">Used in announcements and on Now Playing.</p>
+          </section>
+          <section class="dj-split-col">
+            <div class="dj-split-col-head">
+              <h3 class="dj-split-heading">Co-host</h3>
+              <div class="dj-split-col-actions">
+                <button id="dj-ss-name-save" type="button" class="subpage-head-link">Save</button>
+                <button id="dj-ss-name-reset" type="button" class="subpage-head-link">Defaults</button>
+              </div>
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-ss-name">Name</label>
+              <input type="text" id="set-ss-name" class="setting-input" maxlength="40" placeholder="Sister Static" autocomplete="off" spellcheck="false" />
+            </div>
+            <p class="booth-section-sub booth-field-note">Used in announcements and on Now Playing.</p>
+          </section>
         </div>
       </div>
 
       <div id="view-settings-dj-taglines" class="view" hidden>
         <div class="subpage-head dj-subpage-head">
           <h2 class="section-label subpage-title">Tag Lines</h2>
-          <button id="dj-taglines-save" type="button" class="subpage-head-link">Save</button>
-          <button id="dj-taglines-reset" type="button" class="subpage-head-link">Defaults</button>
           <button id="settings-dj-taglines-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <div class="dj-persona-switch" role="group" aria-label="Editing DJ">
-          <span class="dj-persona-switch-label">Editing:</span>
-          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="holy-roller">Holy Roller</button>
-          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="sister-static">Sister Static</button>
-        </div>
-        <div class="booth-sections">
-          <div class="booth-section">
-            <div class="booth-section-head">
-              <p class="booth-section-heading">
-                <span class="section-label">Tag Lines:</span>
-                <span class="booth-section-sub">One quote per line. Shown as the artist line under the DJ name.</span>
-              </p>
+        <div class="dj-split">
+          <section class="dj-split-col">
+            <div class="dj-split-col-head">
+              <h3 class="dj-split-heading">DJ</h3>
+              <div class="dj-split-col-actions">
+                <button id="dj-taglines-save" type="button" class="subpage-head-link">Save</button>
+                <button id="dj-taglines-reset" type="button" class="subpage-head-link">Defaults</button>
+              </div>
             </div>
             <div class="setting-row-text">
               <label class="setting-label" for="set-dj-taglines">Lines</label>
               <textarea id="set-dj-taglines" class="setting-input dj-taglines-input" rows="18" maxlength="5000" placeholder="Rocking from the Pulpit" spellcheck="true"></textarea>
             </div>
-            <p class="booth-section-sub booth-field-note">Blank lines and duplicates are ignored. Empty save restores the built-in pack.</p>
-          </div>
+            <p class="booth-section-sub booth-field-note">One quote per line. Blank lines and duplicates are ignored. Empty save restores the built-in pack.</p>
+          </section>
+          <section class="dj-split-col">
+            <div class="dj-split-col-head">
+              <h3 class="dj-split-heading">Co-host</h3>
+              <div class="dj-split-col-actions">
+                <button id="dj-ss-taglines-save" type="button" class="subpage-head-link">Save</button>
+                <button id="dj-ss-taglines-reset" type="button" class="subpage-head-link">Defaults</button>
+              </div>
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-ss-taglines">Lines</label>
+              <textarea id="set-ss-taglines" class="setting-input dj-taglines-input" rows="18" maxlength="5000" placeholder="Static on the wire" spellcheck="true"></textarea>
+            </div>
+            <p class="booth-section-sub booth-field-note">One quote per line. Blank lines and duplicates are ignored. Empty save restores the built-in pack.</p>
+          </section>
         </div>
       </div>
 
       <div id="view-settings-dj-voice" class="view" hidden>
         <div class="subpage-head dj-subpage-head">
           <h2 class="section-label subpage-title">Voice &amp; character</h2>
-          <button type="button" class="subpage-head-link dj-voice-save-btn">Save</button>
-          <button type="button" class="subpage-head-link dj-voice-reset-btn">Defaults</button>
           <button id="settings-dj-voice-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <div class="dj-persona-switch" role="group" aria-label="Editing DJ">
-          <span class="dj-persona-switch-label">Editing:</span>
-          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="holy-roller">Holy Roller</button>
-          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="sister-static">Sister Static</button>
-        </div>
-        <div class="booth-sections">
-          <div class="booth-section">
-            <div class="booth-section-head">
-              <p class="booth-section-heading">
-                <span class="section-label">Character:</span>
-                <span class="booth-section-sub">How much personality shows up in announcements.</span>
-              </p>
+        <div class="dj-split">
+          <section class="dj-split-col">
+            <div class="dj-split-col-head">
+              <h3 class="dj-split-heading">DJ</h3>
+              <div class="dj-split-col-actions">
+                <button id="dj-hr-voice-save" type="button" class="subpage-head-link">Save</button>
+                <button id="dj-hr-voice-reset" type="button" class="subpage-head-link">Defaults</button>
+              </div>
             </div>
             <div class="setting-row">
               <label class="setting-label" for="set-dj-intensity">Intensity</label>
@@ -1681,15 +1747,6 @@
               <input type="text" id="set-dj-ban-list" class="setting-input" maxlength="240" placeholder="party people, crank it up" autocomplete="off" spellcheck="true" />
             </div>
             <p class="booth-section-sub booth-field-note">Comma-separated phrases the DJ should never say.</p>
-          </div>
-
-          <div class="booth-section">
-            <div class="booth-section-head">
-              <p class="booth-section-heading">
-                <span class="section-label">Voice:</span>
-                <span class="booth-section-sub">TTS engine, voice, speed, intros, and length.</span>
-              </p>
-            </div>
             <div class="setting-row setting-row-tts">
               <label class="setting-label" for="set-dj-tts-provider">TTS</label>
               <select id="set-dj-tts-provider" class="setting-input">
@@ -1745,63 +1802,174 @@
               <input type="number" id="set-dj-max-words" class="setting-input" min="28" max="120" step="1" inputmode="numeric" />
               <span class="setting-hint">words (soft trim; default 55 — DJ X short drops)</span>
             </div>
-          </div>
+          </section>
+          <section class="dj-split-col">
+            <div class="dj-split-col-head">
+              <h3 class="dj-split-heading">Co-host</h3>
+              <div class="dj-split-col-actions">
+                <button id="dj-ss-voice-save" type="button" class="subpage-head-link">Save</button>
+                <button id="dj-ss-voice-reset" type="button" class="subpage-head-link">Defaults</button>
+              </div>
+            </div>
+            <div class="setting-row">
+              <label class="setting-label" for="set-ss-intensity">Intensity</label>
+              <select id="set-ss-intensity" class="setting-input">
+                <option value="subtle">Subtle — quieter personality</option>
+                <option value="classic">Classic — balanced host personality</option>
+                <option value="extra">Extra — bigger personality</option>
+              </select>
+              <span class="setting-hint">how much character shows up in announcements</span>
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-ss-catchphrase">Catchphrase</label>
+              <input type="text" id="set-ss-catchphrase" class="setting-input" maxlength="80" placeholder="optional favorite line" autocomplete="off" spellcheck="true" />
+            </div>
+            <p class="booth-section-sub booth-field-note">Used sparingly as a booth aside (skipped for Kids mood).</p>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-ss-ban-list">Ban list</label>
+              <input type="text" id="set-ss-ban-list" class="setting-input" maxlength="240" placeholder="party people, crank it up" autocomplete="off" spellcheck="true" />
+            </div>
+            <p class="booth-section-sub booth-field-note">Comma-separated phrases the co-host should never say.</p>
+            <div class="setting-row setting-row-tts">
+              <label class="setting-label" for="set-ss-tts-provider">TTS</label>
+              <select id="set-ss-tts-provider" class="setting-input">
+                <option value="elevenlabs_ha">ElevenLabs (Home Assistant)</option>
+                <option value="openai_ha">OpenAI (Home Assistant)</option>
+              </select>
+              <span class="setting-hint">voice engine for co-host announcements</span>
+            </div>
+            <div class="setting-row setting-row-voice" id="dj-ss-tts-voice-openai-row">
+              <label class="setting-label" for="set-ss-tts-voice">Voice</label>
+              <select id="set-ss-tts-voice" class="setting-input">
+                <option value="onyx">Onyx — deep, authoritative</option>
+                <option value="alloy">Alloy — neutral, balanced</option>
+                <option value="ash">Ash — clear, articulate</option>
+                <option value="coral">Coral — warm, friendly</option>
+                <option value="echo">Echo — resonant, clear</option>
+                <option value="fable">Fable — expressive, storyteller</option>
+                <option value="nova">Nova — energetic, bright</option>
+                <option value="sage">Sage — calm, measured</option>
+                <option value="shimmer">Shimmer — light, cheerful</option>
+              </select>
+              <button id="dj-ss-voice-test" type="button" class="subpage-head-link">Test</button>
+              <span class="setting-hint">OpenAI TTS voice</span>
+            </div>
+            <div class="setting-row setting-row-voice" id="dj-ss-tts-voice-elevenlabs-row" hidden>
+              <label class="setting-label" for="set-ss-tts-voice-elevenlabs">Voice ID</label>
+              <input type="text" id="set-ss-tts-voice-elevenlabs" class="setting-input" maxlength="64" placeholder="Paste an ElevenLabs voice ID" autocomplete="off" spellcheck="false" />
+              <button id="dj-ss-voice-test-elevenlabs" type="button" class="subpage-head-link">Test</button>
+              <span class="setting-hint">ElevenLabs voice ID from VoiceLab / HA</span>
+            </div>
+            <audio id="dj-ss-voice-preview-player" class="dj-voice-preview-player" controls preload="none" hidden></audio>
+            <div class="setting-row">
+              <label class="setting-label" for="set-ss-tts-speed">Speed</label>
+              <select id="set-ss-tts-speed" class="setting-input">
+                <option value="0.85">0.85×</option>
+                <option value="0.9">0.9×</option>
+                <option value="0.95">0.95×</option>
+                <option value="1">1×</option>
+                <option value="1.05">1.05×</option>
+                <option value="1.1">1.1×</option>
+                <option value="1.15">1.15×</option>
+                <option value="1.25">1.25×</option>
+              </select>
+              <span class="setting-hint">how fast the co-host talks (Test uses this too)</span>
+            </div>
+            <div class="setting-row">
+              <label class="setting-label" for="set-ss-intro-percent">Name intro</label>
+              <input type="number" id="set-ss-intro-percent" class="setting-input" min="0" max="100" step="1" inputmode="numeric" />
+              <span class="setting-hint">% of announcements that open with the co-host name</span>
+            </div>
+            <div class="setting-row">
+              <label class="setting-label" for="set-ss-max-words">Max length</label>
+              <input type="number" id="set-ss-max-words" class="setting-input" min="28" max="120" step="1" inputmode="numeric" />
+              <span class="setting-hint">words (soft trim; default 55 — DJ X short drops)</span>
+            </div>
+          </section>
         </div>
       </div>
-
       <div id="view-settings-dj-advanced" class="view" hidden>
         <div class="subpage-head dj-subpage-head">
           <h2 class="section-label subpage-title">Advanced DJ</h2>
-          <button id="dj-advanced-save" type="button" class="subpage-head-link">Save &amp; preview</button>
-          <button id="dj-advanced-preview-refresh" type="button" class="subpage-head-link">Refresh</button>
-          <button id="dj-advanced-reset" type="button" class="subpage-head-link">Defaults</button>
           <button id="settings-dj-advanced-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
-        <div class="dj-persona-switch" role="group" aria-label="Editing DJ">
-          <span class="dj-persona-switch-label">Editing:</span>
-          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="holy-roller">Holy Roller</button>
-          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="sister-static">Sister Static</button>
-        </div>
-        <div class="booth-sections">
-          <div class="booth-section">
-            <div class="booth-section-head">
-              <p class="booth-section-heading">
-                <span class="section-label">Customization:</span>
-                <span class="booth-section-sub">Persona and guidance without weakening locked safety, privacy, length, and output rules.</span>
-              </p>
+        <div class="dj-split">
+          <section class="dj-split-col">
+            <div class="dj-split-col-head">
+              <h3 class="dj-split-heading">DJ</h3>
+              <div class="dj-split-col-actions">
+                <button id="dj-advanced-save" type="button" class="subpage-head-link">Save &amp; preview</button>
+                <button id="dj-advanced-preview-refresh" type="button" class="subpage-head-link">Refresh</button>
+                <button id="dj-advanced-reset" type="button" class="subpage-head-link">Defaults</button>
+              </div>
             </div>
-            <div class="setting-row-text">
-              <label class="setting-label" for="set-dj-persona-notes">Persona notes</label>
-              <textarea id="set-dj-persona-notes" class="setting-input dj-advanced-input" rows="4" maxlength="800" placeholder="Optional details about the DJ's personality, tone, or local style." spellcheck="true"></textarea>
+            <div class="booth-sections">
+              <div class="booth-section">
+                <div class="setting-row-text">
+                  <label class="setting-label" for="set-dj-persona-notes">Persona notes</label>
+                  <textarea id="set-dj-persona-notes" class="setting-input dj-advanced-input" rows="4" maxlength="800" placeholder="Optional details about the DJ's personality, tone, or local style." spellcheck="true"></textarea>
+                </div>
+                <div class="setting-row-text">
+                  <label class="setting-label" for="set-dj-always-instructions">Always do</label>
+                  <textarea id="set-dj-always-instructions" class="setting-input dj-advanced-input" rows="4" maxlength="800" placeholder="Optional habits or content to favor." spellcheck="true"></textarea>
+                </div>
+                <div class="setting-row-text">
+                  <label class="setting-label" for="set-dj-never-instructions">Never do</label>
+                  <textarea id="set-dj-never-instructions" class="setting-input dj-advanced-input" rows="4" maxlength="800" placeholder="Optional style or content to avoid." spellcheck="true"></textarea>
+                </div>
+                <div class="setting-row-text">
+                  <label class="setting-label" for="set-dj-pronunciations">Pronunciation dictionary</label>
+                  <textarea id="set-dj-pronunciations" class="setting-input dj-advanced-input" rows="6" maxlength="2400" placeholder="Deftones = Deaf-tones" spellcheck="false"></textarea>
+                </div>
+                <p class="booth-section-sub booth-field-note">One case-sensitive mapping per line: written name = TTS-friendly spoken form. Invalid lines are ignored.</p>
+              </div>
+              <div class="booth-section">
+                <div class="setting-row-text">
+                  <label class="setting-label" for="dj-effective-prompt">Effective prompt</label>
+                  <textarea id="dj-effective-prompt" class="setting-input dj-prompt-preview" rows="18" readonly spellcheck="false" aria-describedby="dj-effective-prompt-note"></textarea>
+                </div>
+                <p id="dj-effective-prompt-note" class="booth-section-sub booth-field-note">Read-only preview of the saved prompt.</p>
+              </div>
             </div>
-            <div class="setting-row-text">
-              <label class="setting-label" for="set-dj-always-instructions">Always do</label>
-              <textarea id="set-dj-always-instructions" class="setting-input dj-advanced-input" rows="4" maxlength="800" placeholder="Optional habits or content to favor." spellcheck="true"></textarea>
+          </section>
+          <section class="dj-split-col">
+            <div class="dj-split-col-head">
+              <h3 class="dj-split-heading">Co-host</h3>
+              <div class="dj-split-col-actions">
+                <button id="dj-ss-advanced-save" type="button" class="subpage-head-link">Save &amp; preview</button>
+                <button id="dj-ss-advanced-preview-refresh" type="button" class="subpage-head-link">Refresh</button>
+                <button id="dj-ss-advanced-reset" type="button" class="subpage-head-link">Defaults</button>
+              </div>
             </div>
-            <div class="setting-row-text">
-              <label class="setting-label" for="set-dj-never-instructions">Never do</label>
-              <textarea id="set-dj-never-instructions" class="setting-input dj-advanced-input" rows="4" maxlength="800" placeholder="Optional style or content to avoid." spellcheck="true"></textarea>
+            <div class="booth-sections">
+              <div class="booth-section">
+                <div class="setting-row-text">
+                  <label class="setting-label" for="set-ss-persona-notes">Persona notes</label>
+                  <textarea id="set-ss-persona-notes" class="setting-input dj-advanced-input" rows="4" maxlength="800" placeholder="Optional details about the co-host's personality, tone, or local style." spellcheck="true"></textarea>
+                </div>
+                <div class="setting-row-text">
+                  <label class="setting-label" for="set-ss-always-instructions">Always do</label>
+                  <textarea id="set-ss-always-instructions" class="setting-input dj-advanced-input" rows="4" maxlength="800" placeholder="Optional habits or content to favor." spellcheck="true"></textarea>
+                </div>
+                <div class="setting-row-text">
+                  <label class="setting-label" for="set-ss-never-instructions">Never do</label>
+                  <textarea id="set-ss-never-instructions" class="setting-input dj-advanced-input" rows="4" maxlength="800" placeholder="Optional style or content to avoid." spellcheck="true"></textarea>
+                </div>
+                <div class="setting-row-text">
+                  <label class="setting-label" for="set-ss-pronunciations">Pronunciation dictionary</label>
+                  <textarea id="set-ss-pronunciations" class="setting-input dj-advanced-input" rows="6" maxlength="2400" placeholder="Deftones = Deaf-tones" spellcheck="false"></textarea>
+                </div>
+                <p class="booth-section-sub booth-field-note">One case-sensitive mapping per line: written name = TTS-friendly spoken form. Invalid lines are ignored.</p>
+              </div>
+              <div class="booth-section">
+                <div class="setting-row-text">
+                  <label class="setting-label" for="ss-effective-prompt">Effective prompt</label>
+                  <textarea id="ss-effective-prompt" class="setting-input dj-prompt-preview" rows="18" readonly spellcheck="false" aria-describedby="ss-effective-prompt-note"></textarea>
+                </div>
+                <p id="ss-effective-prompt-note" class="booth-section-sub booth-field-note">Read-only preview of the saved prompt.</p>
+              </div>
             </div>
-            <div class="setting-row-text">
-              <label class="setting-label" for="set-dj-pronunciations">Pronunciation dictionary</label>
-              <textarea id="set-dj-pronunciations" class="setting-input dj-advanced-input" rows="6" maxlength="2400" placeholder="Deftones = Deaf-tones" spellcheck="false"></textarea>
-            </div>
-            <p class="booth-section-sub booth-field-note">One case-sensitive mapping per line: written name = TTS-friendly spoken form. Invalid lines are ignored.</p>
-          </div>
-
-          <div class="booth-section">
-            <div class="booth-section-head">
-              <p class="booth-section-heading">
-                <span class="section-label">Prompt preview:</span>
-                <span class="booth-section-sub">Read-only representative set prompt using saved settings. Placeholder track names are used; core rules remain code-controlled.</span>
-              </p>
-            </div>
-            <div class="setting-row-text">
-              <label class="setting-label" for="dj-effective-prompt">Effective prompt</label>
-              <textarea id="dj-effective-prompt" class="setting-input dj-prompt-preview" rows="24" readonly spellcheck="false" aria-describedby="dj-effective-prompt-note"></textarea>
-            </div>
-            <p id="dj-effective-prompt-note" class="booth-section-sub booth-field-note">Read-only preview of the saved prompt.</p>
-          </div>
+          </section>
         </div>
       </div>
 

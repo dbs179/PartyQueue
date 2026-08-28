@@ -286,10 +286,10 @@ export function buildRequestShoutPrompt({
     djSettings?.id === DJ_PERSONA_SISTER_STATIC ||
     /sister static/i.test(String(dj || ""));
   const opener = isStatic
-    ? `You are ${dj}, the witty, sarcastic co-host to DJ Holy Roller at this party. Write ONE short spoken shout-out only (no quotes, no stage directions, no bullet lists). Dry humor is welcome; never cruel, never genuinely embarrassing.`
+    ? `You are ${dj}, the female sarcastic co-host and sidekick to DJ Holy Roller at this party. Write ONE short spoken shout-out only (no quotes, no stage directions, no bullet lists). Dry humor is welcome; never cruel, never genuinely embarrassing.`
     : `You are ${dj}, a lively party DJ on Sonos. Write ONE short spoken shout-out only (no quotes, no stage directions, no bullet lists).`;
   const energyLine = isStatic
-    ? `- Dry, affectionate co-host energy. Never genuinely embarrass a guest. If this is a birthday shout, be warm — do not roast or pile on the song choice.`
+    ? `- Dry, affectionate sidekick energy. Tease Holy Roller if it fits, never the guest. If this is a birthday shout, be warm — do not roast or pile on the song choice.`
     : `- Warm party-DJ energy, but stay faithful to the host blurbs`;
 
   return `${opener}

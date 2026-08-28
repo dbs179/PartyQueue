@@ -30,7 +30,7 @@ export const DEFAULT_END_OF_NIGHT = {
  *   fetch?: typeof fetch,
  *   showToast: (msg: string, isError?: boolean, durationMs?: number) => void,
  *   saveSettings: (values: object, opts?: object) => Promise<boolean>|boolean,
- *   selectDjIcon: (name: string|null) => Promise<void>,
+ *   selectDjIcon: (name: string|null, persona?: string) => Promise<void>,
  *   getSettingsDefaults: () => object,
  *   refreshBoothMediaUrl?: () => void|Promise<void>,
  * }} deps
@@ -90,6 +90,42 @@ export function createDjBoothUi(els, deps) {
     djRosterResetBtn,
   } = els || {};
 
+  const ssNameInput = document.getElementById("set-ss-name");
+  const ssTaglinesInput = document.getElementById("set-ss-taglines");
+  const ssIntroPercentInput = document.getElementById("set-ss-intro-percent");
+  const ssMaxWordsInput = document.getElementById("set-ss-max-words");
+  const ssTtsProviderInput = document.getElementById("set-ss-tts-provider");
+  const ssTtsVoiceInput = document.getElementById("set-ss-tts-voice");
+  const ssTtsVoiceElevenlabsInput = document.getElementById(
+    "set-ss-tts-voice-elevenlabs"
+  );
+  const ssTtsVoiceOpenaiRow = document.getElementById(
+    "dj-ss-tts-voice-openai-row"
+  );
+  const ssTtsVoiceElevenlabsRow = document.getElementById(
+    "dj-ss-tts-voice-elevenlabs-row"
+  );
+  const ssTtsSpeedInput = document.getElementById("set-ss-tts-speed");
+  const ssIntensityInput = document.getElementById("set-ss-intensity");
+  const ssCatchphraseInput = document.getElementById("set-ss-catchphrase");
+  const ssBanListInput = document.getElementById("set-ss-ban-list");
+  const ssPersonaNotesInput = document.getElementById("set-ss-persona-notes");
+  const ssAlwaysInstructionsInput = document.getElementById(
+    "set-ss-always-instructions"
+  );
+  const ssNeverInstructionsInput = document.getElementById(
+    "set-ss-never-instructions"
+  );
+  const ssPronunciationsInput = document.getElementById("set-ss-pronunciations");
+  const ssEffectivePromptInput = document.getElementById("ss-effective-prompt");
+  const ssVoiceTestBtn = document.getElementById("dj-ss-voice-test");
+  const ssVoiceTestElevenlabsBtn = document.getElementById(
+    "dj-ss-voice-test-elevenlabs"
+  );
+  const ssVoicePreviewPlayer = document.getElementById(
+    "dj-ss-voice-preview-player"
+  );
+
   const hostFetch = deps.hostFetch;
   const fetchFn = deps.fetch || fetch;
   const showToast = deps.showToast;
@@ -97,36 +133,57 @@ export function createDjBoothUi(els, deps) {
   const selectDjIcon = deps.selectDjIcon;
   const getSettingsDefaults = deps.getSettingsDefaults || (() => ({}));
   const refreshBoothMediaUrl = deps.refreshBoothMediaUrl || (() => {});
-  const loadDjIcons = deps.loadDjIcons || (() => {});
 
   const PERSONA_HR = "holy-roller";
   const PERSONA_SS = "sister-static";
-  const PERSONA_KEYS = [
-    "djName",
-    "djTaglines",
-    "djTtsProvider",
-    "djTtsVoiceOpenAi",
-    "djTtsVoiceElevenlabs",
-    "djTtsVoice",
-    "djTtsSpeed",
-    "djCharacterIntensity",
-    "djCatchphrase",
-    "djBanList",
-    "djPersonaNotes",
-    "djAlwaysInstructions",
-    "djNeverInstructions",
-    "djPronunciations",
-  ];
 
   /** @type {{ uri: string|null, name: string, artist: string }} */
   let endOfNightTrack = { ...DEFAULT_END_OF_NIGHT };
   let endOfNightSearchTimer = 0;
   /** @type {object} */
   let lastDjSettings = {};
-  let editingPersona = PERSONA_HR;
 
-  function setActiveDjIconName(name) {
-    if (editingPersona === PERSONA_SS) {
+  const hrMap = {
+    name: djNameInput,
+    taglines: djTaglinesInput,
+    intro: djIntroPercentInput,
+    maxWords: djMaxWordsInput,
+    provider: djTtsProviderInput,
+    voiceOpenAi: djTtsVoiceInput,
+    voiceEleven: djTtsVoiceElevenlabsInput,
+    openaiRow: djTtsVoiceOpenaiRow,
+    elevenRow: djTtsVoiceElevenlabsRow,
+    speed: djTtsSpeedInput,
+    intensity: djIntensityInput,
+    catchphrase: djCatchphraseInput,
+    banList: djBanListInput,
+    notes: djPersonaNotesInput,
+    always: djAlwaysInstructionsInput,
+    never: djNeverInstructionsInput,
+    pronunciations: djPronunciationsInput,
+  };
+  const ssMap = {
+    name: ssNameInput,
+    taglines: ssTaglinesInput,
+    intro: ssIntroPercentInput,
+    maxWords: ssMaxWordsInput,
+    provider: ssTtsProviderInput,
+    voiceOpenAi: ssTtsVoiceInput,
+    voiceEleven: ssTtsVoiceElevenlabsInput,
+    openaiRow: ssTtsVoiceOpenaiRow,
+    elevenRow: ssTtsVoiceElevenlabsRow,
+    speed: ssTtsSpeedInput,
+    intensity: ssIntensityInput,
+    catchphrase: ssCatchphraseInput,
+    banList: ssBanListInput,
+    notes: ssPersonaNotesInput,
+    always: ssAlwaysInstructionsInput,
+    never: ssNeverInstructionsInput,
+    pronunciations: ssPronunciationsInput,
+  };
+
+  function setActiveDjIconName(name, persona = PERSONA_HR) {
+    if (persona === PERSONA_SS) {
       lastDjSettings.djSisterStatic = {
         ...(lastDjSettings.djSisterStatic || {}),
         djIcon: name || null,
@@ -137,30 +194,15 @@ export function createDjBoothUi(els, deps) {
   }
 
   function getEditingPersona() {
-    return editingPersona;
+    return PERSONA_HR;
   }
 
   function sisterStaticFrom(s) {
     return (s && s.djSisterStatic) || {};
   }
 
-  function identitySource() {
-    if (editingPersona === PERSONA_SS) return sisterStaticFrom(lastDjSettings);
-    return lastDjSettings;
-  }
-
-  function payloadForSave(partial) {
-    if (editingPersona !== PERSONA_SS) return partial;
-    const nested = {};
-    const rest = { ...partial };
-    for (const key of PERSONA_KEYS) {
-      if (Object.prototype.hasOwnProperty.call(partial, key)) {
-        nested[key] = partial[key];
-        delete rest[key];
-      }
-    }
-    if (Object.keys(nested).length) rest.djSisterStatic = nested;
-    return rest;
+  function wrapSs(partial) {
+    return { djSisterStatic: partial };
   }
 
   function syncDjRosterUi() {
@@ -169,105 +211,146 @@ export function createDjBoothUi(els, deps) {
     if (djBanterRow) djBanterRow.hidden = !mix;
   }
 
-  function paintPersonaSwitcher() {
-    document.querySelectorAll(".dj-persona-btn").forEach((btn) => {
-      const id = btn.getAttribute("data-dj-persona");
-      const on = id === editingPersona;
-      btn.classList.toggle("accent", on);
-      btn.setAttribute("aria-pressed", on ? "true" : "false");
-    });
+  function paintTaglinesEl(input, lines) {
+    if (!input) return;
+    const pack = Array.isArray(lines)
+      ? lines
+      : String(lines || "").split(/\r?\n/);
+    input.value = pack
+      .map((line) => String(line || "").trim())
+      .filter(Boolean)
+      .join("\n");
   }
 
-  function paintIdentityFields(src) {
-    if (!src || typeof src !== "object") return;
-    if (src.djName != null && djNameInput) djNameInput.value = src.djName;
-    if (src.djTaglines != null) paintTaglines(src.djTaglines);
-    if (src.djTtsProvider != null && djTtsProviderInput) {
-      djTtsProviderInput.value = String(src.djTtsProvider);
+  function taglinesFromEl(input) {
+    return String(input?.value || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+
+  function syncTtsRows(map) {
+    paintDjTtsProviderRows(
+      { openaiRow: map.openaiRow, elevenlabsRow: map.elevenRow },
+      map.provider?.value
+    );
+  }
+
+  function paintPersonaFields(src, map) {
+    if (!src || typeof src !== "object" || !map) return;
+    if (src.djName != null && map.name) map.name.value = src.djName;
+    if (src.djTaglines != null) paintTaglinesEl(map.taglines, src.djTaglines);
+    if (src.djTtsProvider != null && map.provider) {
+      map.provider.value = String(src.djTtsProvider);
     }
-    if (src.djTtsVoiceOpenAi != null && djTtsVoiceInput) {
-      djTtsVoiceInput.value = String(src.djTtsVoiceOpenAi);
+    if (src.djTtsVoiceOpenAi != null && map.voiceOpenAi) {
+      map.voiceOpenAi.value = String(src.djTtsVoiceOpenAi);
     } else if (
       src.djTtsVoice != null &&
-      djTtsVoiceInput &&
+      map.voiceOpenAi &&
       src.djTtsProvider === "openai_ha"
     ) {
-      djTtsVoiceInput.value = String(src.djTtsVoice);
+      map.voiceOpenAi.value = String(src.djTtsVoice);
     }
-    if (src.djTtsVoiceElevenlabs != null && djTtsVoiceElevenlabsInput) {
-      djTtsVoiceElevenlabsInput.value = String(src.djTtsVoiceElevenlabs);
+    if (src.djTtsVoiceElevenlabs != null && map.voiceEleven) {
+      map.voiceEleven.value = String(src.djTtsVoiceElevenlabs);
     } else if (
       src.djTtsVoice != null &&
-      djTtsVoiceElevenlabsInput &&
+      map.voiceEleven &&
       src.djTtsProvider === "elevenlabs_ha"
     ) {
-      djTtsVoiceElevenlabsInput.value = String(src.djTtsVoice);
+      map.voiceEleven.value = String(src.djTtsVoice);
     }
-    syncDjTtsProviderUi();
-    if (src.djTtsSpeed != null && djTtsSpeedInput) {
-      djTtsSpeedInput.value = String(src.djTtsSpeed);
+    syncTtsRows(map);
+    if (src.djTtsSpeed != null && map.speed) {
+      map.speed.value = String(src.djTtsSpeed);
     }
-    if (src.djCharacterIntensity != null && djIntensityInput) {
-      djIntensityInput.value = String(src.djCharacterIntensity);
+    if (src.djCharacterIntensity != null && map.intensity) {
+      map.intensity.value = String(src.djCharacterIntensity);
     }
-    if (src.djCatchphrase != null && djCatchphraseInput) {
-      djCatchphraseInput.value = String(src.djCatchphrase);
+    if (src.djCatchphrase != null && map.catchphrase) {
+      map.catchphrase.value = String(src.djCatchphrase);
     }
-    if (src.djBanList != null && djBanListInput) {
-      djBanListInput.value = String(src.djBanList);
+    if (src.djBanList != null && map.banList) {
+      map.banList.value = String(src.djBanList);
     }
-    if (src.djPersonaNotes != null && djPersonaNotesInput) {
-      djPersonaNotesInput.value = String(src.djPersonaNotes);
+    if (src.djPersonaNotes != null && map.notes) {
+      map.notes.value = String(src.djPersonaNotes);
     }
-    if (src.djAlwaysInstructions != null && djAlwaysInstructionsInput) {
-      djAlwaysInstructionsInput.value = String(src.djAlwaysInstructions);
+    if (src.djAlwaysInstructions != null && map.always) {
+      map.always.value = String(src.djAlwaysInstructions);
     }
-    if (src.djNeverInstructions != null && djNeverInstructionsInput) {
-      djNeverInstructionsInput.value = String(src.djNeverInstructions);
+    if (src.djNeverInstructions != null && map.never) {
+      map.never.value = String(src.djNeverInstructions);
     }
-    if (src.djPronunciations != null && djPronunciationsInput) {
-      djPronunciationsInput.value = String(src.djPronunciations);
+    if (src.djPronunciations != null && map.pronunciations) {
+      map.pronunciations.value = String(src.djPronunciations);
+    }
+    if (src.djNameIntroPercent != null && map.intro) {
+      map.intro.value = src.djNameIntroPercent;
+    }
+    if (src.djAnnounceMaxWords != null && map.maxWords) {
+      map.maxWords.value = src.djAnnounceMaxWords;
     }
   }
 
-  function setEditingPersona(id) {
-    editingPersona = id === PERSONA_SS ? PERSONA_SS : PERSONA_HR;
-    paintPersonaSwitcher();
-    paintIdentityFields(identitySource());
-    updateDjHubSummaries();
-    void loadDjIcons();
+  function identityPayloadFrom(map) {
+    const provider = map.provider?.value || "elevenlabs_ha";
+    return {
+      djName: map.name?.value ?? "",
+      djTaglines: taglinesFromEl(map.taglines),
+      djNameIntroPercent: Number(map.intro?.value),
+      djAnnounceMaxWords: Number(map.maxWords?.value),
+      djTtsProvider: provider,
+      djTtsVoiceOpenAi: map.voiceOpenAi?.value ?? "onyx",
+      djTtsVoiceElevenlabs: map.voiceEleven?.value?.trim() || "",
+      djTtsVoice:
+        provider === "openai_ha"
+          ? map.voiceOpenAi?.value ?? "onyx"
+          : map.voiceEleven?.value?.trim() || "",
+      djTtsSpeed: Number(map.speed?.value ?? 1),
+      djCharacterIntensity: map.intensity?.value ?? "classic",
+      djCatchphrase: map.catchphrase?.value ?? "",
+      djBanList: map.banList?.value ?? "",
+      djPersonaNotes: map.notes?.value ?? "",
+      djAlwaysInstructions: map.always?.value ?? "",
+      djNeverInstructions: map.never?.value ?? "",
+      djPronunciations: map.pronunciations?.value ?? "",
+    };
+  }
+
+  function voiceOnlyPayloadFrom(map) {
+    const all = identityPayloadFrom(map);
+    return {
+      djNameIntroPercent: all.djNameIntroPercent,
+      djAnnounceMaxWords: all.djAnnounceMaxWords,
+      djTtsProvider: all.djTtsProvider,
+      djTtsVoiceOpenAi: all.djTtsVoiceOpenAi,
+      djTtsVoiceElevenlabs: all.djTtsVoiceElevenlabs,
+      djTtsVoice: all.djTtsVoice,
+      djTtsSpeed: all.djTtsSpeed,
+      djCharacterIntensity: all.djCharacterIntensity,
+      djCatchphrase: all.djCatchphrase,
+      djBanList: all.djBanList,
+    };
+  }
+
+  function advancedPayloadFrom(map) {
+    return {
+      djPersonaNotes: map.notes?.value ?? "",
+      djAlwaysInstructions: map.always?.value ?? "",
+      djNeverInstructions: map.never?.value ?? "",
+      djPronunciations: map.pronunciations?.value ?? "",
+    };
   }
 
   function getEndOfNightName() {
     return endOfNightTrack.name;
   }
 
-  function taglinesFromInput() {
-    return String(djTaglinesInput?.value || "")
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-  }
-
-  function paintTaglines(lines) {
-    if (!djTaglinesInput) return;
-    const pack = Array.isArray(lines)
-      ? lines
-      : String(lines || "").split(/\r?\n/);
-    djTaglinesInput.value = pack
-      .map((line) => String(line || "").trim())
-      .filter(Boolean)
-      .join("\n");
-  }
-
   function syncDjTtsProviderUi() {
-    paintDjTtsProviderRows(
-      {
-        openaiRow: djTtsVoiceOpenaiRow,
-        elevenlabsRow: djTtsVoiceElevenlabsRow,
-      },
-      djTtsProviderInput?.value
-    );
+    syncTtsRows(hrMap);
+    syncTtsRows(ssMap);
   }
 
   function syncDjShoutModeUi() {
@@ -280,53 +363,61 @@ export function createDjBoothUi(els, deps) {
     );
   }
 
-  function updateDjHubSummaries() {
-    void refreshBoothMediaUrl();
-    const bannerEl = document.getElementById("dj-stat-banner");
-    const nameEl = document.getElementById("dj-stat-name");
-    const taglinesEl = document.getElementById("dj-stat-taglines");
-    const voiceEl = document.getElementById("dj-stat-voice");
-    const advancedEl = document.getElementById("dj-stat-advanced");
-    const volumeEl = document.getElementById("dj-stat-volume");
-    const shoutsEl = document.getElementById("dj-stat-shouts");
-    const cohostsEl = document.getElementById("dj-stat-cohosts");
-
-    if (bannerEl) bannerEl.textContent = formatDjIconLabel(lastDjSettings.djIcon);
-
+  function paintPersonaHubStats(suffix, src, fallback) {
+    const bannerEl = document.getElementById(`dj-stat-banner${suffix}`);
+    const nameEl = document.getElementById(`dj-stat-name${suffix}`);
+    const taglinesEl = document.getElementById(`dj-stat-taglines${suffix}`);
+    const voiceEl = document.getElementById(`dj-stat-voice${suffix}`);
+    const advancedEl = document.getElementById(`dj-stat-advanced${suffix}`);
+    if (bannerEl) bannerEl.textContent = formatDjIconLabel(src?.djIcon);
     if (nameEl) {
-      const name = String(lastDjSettings.djName || "").trim() || "Party DJ";
-      nameEl.textContent = name;
+      nameEl.textContent =
+        String(src?.djName || "").trim() ||
+        String(fallback?.djName || "").trim() ||
+        "—";
     }
-
     if (taglinesEl) {
-      const raw = lastDjSettings.djTaglines;
+      const raw = src?.djTaglines;
       if (Array.isArray(raw) ? raw.length : String(raw || "").trim()) {
         taglinesEl.textContent = formatDjTaglinesHubLine(raw);
       } else {
-        const fallback = getSettingsDefaults()?.djTaglines;
+        const pack = fallback?.djTaglines;
         taglinesEl.textContent =
-          Array.isArray(fallback) && fallback.length
-            ? formatDjTaglinesHubLine(fallback)
+          Array.isArray(pack) && pack.length
+            ? formatDjTaglinesHubLine(pack)
             : "—";
       }
     }
-
     if (voiceEl) {
       voiceEl.textContent = formatDjVoiceHubLine({
-        intensity: lastDjSettings.djCharacterIntensity,
-        provider: lastDjSettings.djTtsProvider,
-        speed: lastDjSettings.djTtsSpeed ?? 1,
+        intensity: src?.djCharacterIntensity,
+        provider: src?.djTtsProvider,
+        speed: src?.djTtsSpeed ?? 1,
       });
     }
-
     if (advancedEl) {
       advancedEl.textContent = formatDjAdvancedHubLine({
-        personaNotes: lastDjSettings.djPersonaNotes,
-        alwaysInstructions: lastDjSettings.djAlwaysInstructions,
-        neverInstructions: lastDjSettings.djNeverInstructions,
-        pronunciations: lastDjSettings.djPronunciations,
+        personaNotes: src?.djPersonaNotes,
+        alwaysInstructions: src?.djAlwaysInstructions,
+        neverInstructions: src?.djNeverInstructions,
+        pronunciations: src?.djPronunciations,
       });
     }
+  }
+
+  function updateDjHubSummaries() {
+    void refreshBoothMediaUrl();
+    const defaults = getSettingsDefaults() || {};
+    paintPersonaHubStats("", lastDjSettings, defaults);
+    paintPersonaHubStats(
+      "-ss",
+      sisterStaticFrom(lastDjSettings),
+      defaults.djSisterStatic || {}
+    );
+
+    const volumeEl = document.getElementById("dj-stat-volume");
+    const shoutsEl = document.getElementById("dj-stat-shouts");
+    const cohostsEl = document.getElementById("dj-stat-cohosts");
 
     if (volumeEl) {
       volumeEl.textContent = formatDjVolumeHubLine({
@@ -378,13 +469,8 @@ export function createDjBoothUi(els, deps) {
     if (s.djVoiceEnabled != null && djVoiceToggle) {
       djVoiceToggle.checked = !!s.djVoiceEnabled;
     }
-    paintIdentityFields(identitySource());
-    if (s.djNameIntroPercent != null && djIntroPercentInput) {
-      djIntroPercentInput.value = s.djNameIntroPercent;
-    }
-    if (s.djAnnounceMaxWords != null && djMaxWordsInput) {
-      djMaxWordsInput.value = s.djAnnounceMaxWords;
-    }
+    paintPersonaFields(lastDjSettings, hrMap);
+    paintPersonaFields(sisterStaticFrom(lastDjSettings), ssMap);
     if (s.djVolumeBumpLowPct != null && djVolumeLowInput) {
       djVolumeLowInput.value = s.djVolumeBumpLowPct;
     }
@@ -442,36 +528,20 @@ export function createDjBoothUi(els, deps) {
     if (Object.prototype.hasOwnProperty.call(s, "djIcon")) {
       lastDjSettings.djIcon = s.djIcon || null;
     }
-    paintPersonaSwitcher();
     updateDjHubSummaries();
   }
 
-  function currentDjVoicePayload() {
-    const provider = djTtsProviderInput?.value || "elevenlabs_ha";
+  function volumePayload() {
     return {
-      djName: djNameInput?.value ?? "",
-      djTaglines: taglinesFromInput(),
-      djNameIntroPercent: Number(djIntroPercentInput?.value),
-      djAnnounceMaxWords: Number(djMaxWordsInput?.value),
       djVolumeBumpLowPct: Number(djVolumeLowInput?.value),
       djVolumeBumpMidPct: Number(djVolumeMidInput?.value),
       djVolumeBumpHighPct: Number(djVolumeHighInput?.value),
       djHandoffSilenceSec: Number(djSilenceInput?.value),
-      djTtsProvider: provider,
-      djTtsVoiceOpenAi: djTtsVoiceInput?.value ?? "onyx",
-      djTtsVoiceElevenlabs: djTtsVoiceElevenlabsInput?.value?.trim() || "",
-      djTtsVoice:
-        provider === "openai_ha"
-          ? djTtsVoiceInput?.value ?? "onyx"
-          : djTtsVoiceElevenlabsInput?.value?.trim() || "",
-      djTtsSpeed: Number(djTtsSpeedInput?.value ?? 1),
-      djCharacterIntensity: djIntensityInput?.value ?? "classic",
-      djCatchphrase: djCatchphraseInput?.value ?? "",
-      djBanList: djBanListInput?.value ?? "",
-      djPersonaNotes: djPersonaNotesInput?.value ?? "",
-      djAlwaysInstructions: djAlwaysInstructionsInput?.value ?? "",
-      djNeverInstructions: djNeverInstructionsInput?.value ?? "",
-      djPronunciations: djPronunciationsInput?.value ?? "",
+    };
+  }
+
+  function shoutsPayload() {
+    return {
       djShoutEnabled: !!djShoutEnabledInput?.checked,
       djShoutMode: djShoutModeInput?.value || "every",
       djShoutPercent: Number(djShoutPercentInput?.value),
@@ -479,13 +549,13 @@ export function createDjBoothUi(els, deps) {
     };
   }
 
-  async function runDjVoicePreview(btn) {
-    const provider = djTtsProviderInput?.value || "elevenlabs_ha";
+  async function runDjVoicePreview(btn, map, player) {
+    const provider = map.provider?.value || "elevenlabs_ha";
     const voice =
       provider === "openai_ha"
-        ? djTtsVoiceInput?.value || "onyx"
-        : djTtsVoiceElevenlabsInput?.value?.trim() || "";
-    const speed = Number(djTtsSpeedInput?.value || 1);
+        ? map.voiceOpenAi?.value || "onyx"
+        : map.voiceEleven?.value?.trim() || "";
+    const speed = Number(map.speed?.value || 1);
     if (btn) btn.disabled = true;
     const prevLabel = btn?.textContent;
     if (btn) btn.textContent = "…";
@@ -500,12 +570,12 @@ export function createDjBoothUi(els, deps) {
       if (!res.ok) throw new Error(data.error || "Could not preview voice.");
       if (!data.url) throw new Error("Preview returned no audio URL.");
 
-      if (djVoicePreviewPlayer) {
-        djVoicePreviewPlayer.hidden = false;
-        djVoicePreviewPlayer.src = data.url;
-        djVoicePreviewPlayer.load();
+      if (player) {
+        player.hidden = false;
+        player.src = data.url;
+        player.load();
         try {
-          await djVoicePreviewPlayer.play();
+          await player.play();
           showToast(
             `Playing ${data.provider || provider} · ${data.voice || voice} @ ${data.speed ?? speed}×`
           );
@@ -531,38 +601,46 @@ export function createDjBoothUi(els, deps) {
     }
   }
 
-  async function loadDjEffectivePrompt() {
-    if (!djEffectivePromptInput) return;
-    const btn = djAdvancedPreviewRefreshBtn;
+  async function loadPromptForPersona(personaId, input, btn) {
+    if (!input) return;
     if (btn) btn.disabled = true;
-    djEffectivePromptInput.value = "Loading effective prompt…";
+    input.value = "Loading effective prompt…";
     try {
       const res = await hostFetch(
-        `/api/dj-voice/prompt-preview?persona=${encodeURIComponent(editingPersona)}`,
+        `/api/dj-voice/prompt-preview?persona=${encodeURIComponent(personaId)}`,
         { cache: "no-store" }
       );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not load prompt preview.");
-      djEffectivePromptInput.value = data.prompt || "(No prompt returned.)";
+      input.value = data.prompt || "(No prompt returned.)";
     } catch (err) {
-      djEffectivePromptInput.value = "";
+      input.value = "";
       showToast(err.message || "Could not load prompt preview.", true);
     } finally {
       if (btn) btn.disabled = false;
     }
   }
 
-  async function resetDjVoiceDefaults() {
+  async function loadDjEffectivePrompt() {
+    await Promise.all([
+      loadPromptForPersona(
+        PERSONA_HR,
+        djEffectivePromptInput,
+        djAdvancedPreviewRefreshBtn
+      ),
+      loadPromptForPersona(
+        PERSONA_SS,
+        ssEffectivePromptInput,
+        document.getElementById("dj-ss-advanced-preview-refresh")
+      ),
+    ]);
+  }
+
+  function defaultHrVoice() {
     const d = getSettingsDefaults() || {};
-    const values = {
-      djName: d.djName ?? "Party DJ",
-      djTaglines: Array.isArray(d.djTaglines) ? d.djTaglines : [],
+    return {
       djNameIntroPercent: d.djNameIntroPercent ?? 25,
       djAnnounceMaxWords: d.djAnnounceMaxWords ?? 55,
-      djVolumeBumpLowPct: d.djVolumeBumpLowPct ?? 20,
-      djVolumeBumpMidPct: d.djVolumeBumpMidPct ?? 8,
-      djVolumeBumpHighPct: d.djVolumeBumpHighPct ?? 4,
-      djHandoffSilenceSec: d.djHandoffSilenceSec ?? 3,
       djTtsProvider: d.djTtsProvider ?? "elevenlabs_ha",
       djTtsVoiceOpenAi: d.djTtsVoiceOpenAi ?? "onyx",
       djTtsVoiceElevenlabs: d.djTtsVoiceElevenlabs ?? "",
@@ -570,71 +648,52 @@ export function createDjBoothUi(els, deps) {
       djCharacterIntensity: d.djCharacterIntensity ?? "extra",
       djCatchphrase: d.djCatchphrase ?? "",
       djBanList: d.djBanList ?? "",
-      djPersonaNotes: d.djPersonaNotes ?? "",
-      djAlwaysInstructions: d.djAlwaysInstructions ?? "",
-      djNeverInstructions: d.djNeverInstructions ?? "",
-      djPronunciations: d.djPronunciations ?? "",
+    };
+  }
+
+  function defaultSsIdentity() {
+    const ss = getSettingsDefaults()?.djSisterStatic || {};
+    return {
+      djName: ss.djName ?? "Sister Static",
+      djTaglines: Array.isArray(ss.djTaglines) ? ss.djTaglines : [],
+      djNameIntroPercent: ss.djNameIntroPercent ?? 25,
+      djAnnounceMaxWords: ss.djAnnounceMaxWords ?? 55,
+      djTtsProvider: ss.djTtsProvider ?? "openai_ha",
+      djTtsVoiceOpenAi: ss.djTtsVoiceOpenAi ?? "nova",
+      djTtsVoiceElevenlabs: ss.djTtsVoiceElevenlabs ?? "",
+      djTtsSpeed: ss.djTtsSpeed ?? 1,
+      djCharacterIntensity: ss.djCharacterIntensity ?? "extra",
+      djCatchphrase: ss.djCatchphrase ?? "",
+      djBanList: ss.djBanList ?? "",
+      djPersonaNotes: ss.djPersonaNotes ?? "",
+      djAlwaysInstructions: ss.djAlwaysInstructions ?? "",
+      djNeverInstructions: ss.djNeverInstructions ?? "",
+      djPronunciations: ss.djPronunciations ?? "",
+    };
+  }
+
+  function resetVolumeDefaults() {
+    const d = getSettingsDefaults() || {};
+    const values = {
+      djVolumeBumpLowPct: d.djVolumeBumpLowPct ?? 20,
+      djVolumeBumpMidPct: d.djVolumeBumpMidPct ?? 8,
+      djVolumeBumpHighPct: d.djVolumeBumpHighPct ?? 4,
+      djHandoffSilenceSec: d.djHandoffSilenceSec ?? 3,
+    };
+    applyFromSettings(values);
+    saveSettings(values, { toastMessage: "Set to Default" });
+  }
+
+  function resetShoutDefaults() {
+    const d = getSettingsDefaults() || {};
+    const values = {
       djShoutEnabled: d.djShoutEnabled ?? true,
       djShoutMode: d.djShoutMode ?? "every",
       djShoutPercent: d.djShoutPercent ?? 25,
       djShoutEveryN: d.djShoutEveryN ?? 5,
-      djPartyRecapEnabled: d.djPartyRecapEnabled ?? true,
-      endOfNightTrackUri: null,
-      endOfNightTrackName: null,
-      endOfNightTrackArtist: null,
     };
-    if (editingPersona === PERSONA_SS) {
-      const ss = d.djSisterStatic || {};
-      const ssValues = {
-        djName: ss.djName ?? "Sister Static",
-        djTaglines: Array.isArray(ss.djTaglines) ? ss.djTaglines : [],
-        djTtsProvider: ss.djTtsProvider ?? "openai_ha",
-        djTtsVoiceOpenAi: ss.djTtsVoiceOpenAi ?? "nova",
-        djTtsVoiceElevenlabs: ss.djTtsVoiceElevenlabs ?? "",
-        djTtsSpeed: ss.djTtsSpeed ?? 1,
-        djCharacterIntensity: ss.djCharacterIntensity ?? "extra",
-        djCatchphrase: ss.djCatchphrase ?? "",
-        djBanList: ss.djBanList ?? "",
-        djPersonaNotes: ss.djPersonaNotes ?? "",
-        djAlwaysInstructions: ss.djAlwaysInstructions ?? "",
-        djNeverInstructions: ss.djNeverInstructions ?? "",
-        djPronunciations: ss.djPronunciations ?? "",
-      };
-      lastDjSettings.djSisterStatic = {
-        ...(lastDjSettings.djSisterStatic || {}),
-        ...ssValues,
-        djIcon: null,
-      };
-      paintIdentityFields(ssValues);
-      try {
-        await selectDjIcon(null);
-      } catch {
-        /* icon select is best-effort; text defaults still save */
-      }
-      saveSettings(payloadForSave({ ...ssValues, djIcon: null }), {
-        toastMessage: "Set to Default",
-      });
-      updateDjHubSummaries();
-      return;
-    }
     applyFromSettings(values);
-    endOfNightTrack = { ...DEFAULT_END_OF_NIGHT };
-    paintEndOfNightLabel();
-    if (djPartyRecapEnabledInput) {
-      djPartyRecapEnabledInput.checked = d.djPartyRecapEnabled ?? true;
-    }
-    try {
-      await selectDjIcon(null);
-    } catch {
-      /* icon select is best-effort; text defaults still save */
-    }
-    saveSettings(
-      {
-        ...values,
-        djIcon: null,
-      },
-      { toastMessage: "Set to Default" }
-    );
+    saveSettings(values, { toastMessage: "Set to Default" });
   }
 
   async function searchEndOfNightTracks(q) {
@@ -713,30 +772,150 @@ export function createDjBoothUi(els, deps) {
     saveSettings({ djVoiceEnabled: djVoiceToggle.checked });
   });
 
-  djTtsProviderInput?.addEventListener("change", syncDjTtsProviderUi);
+  djTtsProviderInput?.addEventListener("change", () => syncTtsRows(hrMap));
+  ssTtsProviderInput?.addEventListener("change", () => syncTtsRows(ssMap));
+
+  function viewIdFor(btn) {
+    return btn?.closest(".view")?.id || "";
+  }
 
   (djVoiceSaveBtns || []).forEach((btn) => {
     btn.addEventListener("click", () => {
-      saveSettings(payloadForSave(currentDjVoicePayload()), {
-        toastMessage: "Saved",
-      });
+      const viewId = viewIdFor(btn);
+      if (viewId === "view-settings-dj-shouts") {
+        saveSettings(shoutsPayload(), { toastMessage: "Saved" });
+        return;
+      }
+      saveSettings(volumePayload(), { toastMessage: "Saved" });
     });
   });
+
+  (djVoiceResetBtns || []).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const viewId = viewIdFor(btn);
+      if (viewId === "view-settings-dj-shouts") {
+        resetShoutDefaults();
+        return;
+      }
+      resetVolumeDefaults();
+    });
+  });
+
+  document.getElementById("dj-name-save")?.addEventListener("click", () => {
+    const values = { djName: djNameInput?.value ?? "" };
+    lastDjSettings = { ...lastDjSettings, ...values };
+    saveSettings(values, { toastMessage: "Saved" });
+    updateDjHubSummaries();
+  });
+  document.getElementById("dj-name-reset")?.addEventListener("click", () => {
+    const values = { djName: getSettingsDefaults()?.djName ?? "Party DJ" };
+    paintPersonaFields(values, hrMap);
+    lastDjSettings = { ...lastDjSettings, ...values };
+    saveSettings(values, { toastMessage: "Set to Default" });
+    updateDjHubSummaries();
+  });
+  document.getElementById("dj-ss-name-save")?.addEventListener("click", () => {
+    const values = { djName: ssNameInput?.value ?? "" };
+    lastDjSettings.djSisterStatic = {
+      ...(lastDjSettings.djSisterStatic || {}),
+      ...values,
+    };
+    saveSettings(wrapSs(values), { toastMessage: "Saved" });
+    updateDjHubSummaries();
+  });
+  document.getElementById("dj-ss-name-reset")?.addEventListener("click", () => {
+    const values = { djName: defaultSsIdentity().djName };
+    paintPersonaFields(values, ssMap);
+    lastDjSettings.djSisterStatic = {
+      ...(lastDjSettings.djSisterStatic || {}),
+      ...values,
+    };
+    saveSettings(wrapSs(values), { toastMessage: "Set to Default" });
+    updateDjHubSummaries();
+  });
+
+  document.getElementById("dj-hr-voice-save")?.addEventListener("click", () => {
+    const values = voiceOnlyPayloadFrom(hrMap);
+    lastDjSettings = { ...lastDjSettings, ...values };
+    saveSettings(values, { toastMessage: "Saved" });
+    updateDjHubSummaries();
+  });
+  document.getElementById("dj-hr-voice-reset")?.addEventListener("click", () => {
+    const values = defaultHrVoice();
+    paintPersonaFields(values, hrMap);
+    lastDjSettings = { ...lastDjSettings, ...values };
+    saveSettings(values, { toastMessage: "Set to Default" });
+    updateDjHubSummaries();
+  });
+  document.getElementById("dj-ss-voice-save")?.addEventListener("click", () => {
+    const values = voiceOnlyPayloadFrom(ssMap);
+    lastDjSettings.djSisterStatic = {
+      ...(lastDjSettings.djSisterStatic || {}),
+      ...values,
+    };
+    saveSettings(wrapSs(values), { toastMessage: "Saved" });
+    updateDjHubSummaries();
+  });
+  document.getElementById("dj-ss-voice-reset")?.addEventListener("click", () => {
+    const ss = defaultSsIdentity();
+    const values = {
+      djNameIntroPercent: ss.djNameIntroPercent,
+      djAnnounceMaxWords: ss.djAnnounceMaxWords,
+      djTtsProvider: ss.djTtsProvider,
+      djTtsVoiceOpenAi: ss.djTtsVoiceOpenAi,
+      djTtsVoiceElevenlabs: ss.djTtsVoiceElevenlabs,
+      djTtsSpeed: ss.djTtsSpeed,
+      djCharacterIntensity: ss.djCharacterIntensity,
+      djCatchphrase: ss.djCatchphrase,
+      djBanList: ss.djBanList,
+    };
+    paintPersonaFields(values, ssMap);
+    lastDjSettings.djSisterStatic = {
+      ...(lastDjSettings.djSisterStatic || {}),
+      ...values,
+    };
+    saveSettings(wrapSs(values), { toastMessage: "Set to Default" });
+    updateDjHubSummaries();
+  });
+
+  async function saveAdvanced(map, wrap, personaId, input, refreshBtn) {
+    const values = advancedPayloadFrom(map);
+    if (wrap) {
+      lastDjSettings.djSisterStatic = {
+        ...(lastDjSettings.djSisterStatic || {}),
+        ...values,
+      };
+    } else {
+      lastDjSettings = { ...lastDjSettings, ...values };
+    }
+    const saved = await saveSettings(wrap ? wrapSs(values) : values, {
+      toastMessage: "Advanced DJ saved",
+    });
+    if (saved) await loadPromptForPersona(personaId, input, refreshBtn);
+    updateDjHubSummaries();
+  }
 
   djAdvancedSaveBtn?.addEventListener("click", async () => {
     djAdvancedSaveBtn.disabled = true;
     try {
-      const saved = await saveSettings(payloadForSave(currentDjVoicePayload()), {
-        toastMessage: "Advanced DJ saved",
-      });
-      if (saved) await loadDjEffectivePrompt();
+      await saveAdvanced(
+        hrMap,
+        false,
+        PERSONA_HR,
+        djEffectivePromptInput,
+        djAdvancedPreviewRefreshBtn
+      );
     } finally {
       djAdvancedSaveBtn.disabled = false;
     }
   });
 
   djAdvancedPreviewRefreshBtn?.addEventListener("click", () => {
-    void loadDjEffectivePrompt();
+    void loadPromptForPersona(
+      PERSONA_HR,
+      djEffectivePromptInput,
+      djAdvancedPreviewRefreshBtn
+    );
   });
 
   djAdvancedResetBtn?.addEventListener("click", async () => {
@@ -747,55 +926,136 @@ export function createDjBoothUi(els, deps) {
       djNeverInstructions: d.djNeverInstructions ?? "",
       djPronunciations: d.djPronunciations ?? "",
     };
-    paintIdentityFields({ ...identitySource(), ...values });
-    if (editingPersona === PERSONA_SS) {
-      lastDjSettings.djSisterStatic = {
-        ...(lastDjSettings.djSisterStatic || {}),
-        ...values,
-      };
-    } else {
-      lastDjSettings = { ...lastDjSettings, ...values };
-    }
-    const saved = await saveSettings(payloadForSave(values), {
+    paintPersonaFields(values, hrMap);
+    lastDjSettings = { ...lastDjSettings, ...values };
+    const saved = await saveSettings(values, {
       toastMessage: "Advanced DJ set to defaults",
     });
-    if (saved) await loadDjEffectivePrompt();
+    if (saved) {
+      await loadPromptForPersona(
+        PERSONA_HR,
+        djEffectivePromptInput,
+        djAdvancedPreviewRefreshBtn
+      );
+    }
+    updateDjHubSummaries();
+  });
+
+  const ssAdvancedSaveBtn = document.getElementById("dj-ss-advanced-save");
+  const ssAdvancedResetBtn = document.getElementById("dj-ss-advanced-reset");
+  const ssAdvancedPreviewRefreshBtn = document.getElementById(
+    "dj-ss-advanced-preview-refresh"
+  );
+
+  ssAdvancedSaveBtn?.addEventListener("click", async () => {
+    ssAdvancedSaveBtn.disabled = true;
+    try {
+      await saveAdvanced(
+        ssMap,
+        true,
+        PERSONA_SS,
+        ssEffectivePromptInput,
+        ssAdvancedPreviewRefreshBtn
+      );
+    } finally {
+      ssAdvancedSaveBtn.disabled = false;
+    }
+  });
+  ssAdvancedPreviewRefreshBtn?.addEventListener("click", () => {
+    void loadPromptForPersona(
+      PERSONA_SS,
+      ssEffectivePromptInput,
+      ssAdvancedPreviewRefreshBtn
+    );
+  });
+  ssAdvancedResetBtn?.addEventListener("click", async () => {
+    const ss = defaultSsIdentity();
+    const values = {
+      djPersonaNotes: ss.djPersonaNotes,
+      djAlwaysInstructions: ss.djAlwaysInstructions,
+      djNeverInstructions: ss.djNeverInstructions,
+      djPronunciations: ss.djPronunciations,
+    };
+    paintPersonaFields(values, ssMap);
+    lastDjSettings.djSisterStatic = {
+      ...(lastDjSettings.djSisterStatic || {}),
+      ...values,
+    };
+    const saved = await saveSettings(wrapSs(values), {
+      toastMessage: "Advanced DJ set to defaults",
+    });
+    if (saved) {
+      await loadPromptForPersona(
+        PERSONA_SS,
+        ssEffectivePromptInput,
+        ssAdvancedPreviewRefreshBtn
+      );
+    }
+    updateDjHubSummaries();
   });
 
   djVoiceTestBtn?.addEventListener("click", () =>
-    runDjVoicePreview(djVoiceTestBtn)
+    runDjVoicePreview(djVoiceTestBtn, hrMap, djVoicePreviewPlayer)
   );
   djVoiceTestElevenlabsBtn?.addEventListener("click", () =>
-    runDjVoicePreview(djVoiceTestElevenlabsBtn)
+    runDjVoicePreview(djVoiceTestElevenlabsBtn, hrMap, djVoicePreviewPlayer)
+  );
+  ssVoiceTestBtn?.addEventListener("click", () =>
+    runDjVoicePreview(ssVoiceTestBtn, ssMap, ssVoicePreviewPlayer)
+  );
+  ssVoiceTestElevenlabsBtn?.addEventListener("click", () =>
+    runDjVoicePreview(ssVoiceTestElevenlabsBtn, ssMap, ssVoicePreviewPlayer)
   );
 
-  (djVoiceResetBtns || []).forEach((btn) => {
-    btn.addEventListener("click", () => {
-      void resetDjVoiceDefaults();
-    });
-  });
-
   djTaglinesSaveBtn?.addEventListener("click", () => {
-    saveSettings(payloadForSave({ djTaglines: taglinesFromInput() }), {
-      toastMessage: "Saved",
-    });
+    const values = { djTaglines: taglinesFromEl(djTaglinesInput) };
+    lastDjSettings = { ...lastDjSettings, ...values };
+    saveSettings(values, { toastMessage: "Saved" });
+    updateDjHubSummaries();
   });
 
   djTaglinesResetBtn?.addEventListener("click", () => {
-    const d = getSettingsDefaults() || {};
-    const pack =
-      editingPersona === PERSONA_SS
-        ? d.djSisterStatic?.djTaglines
-        : d.djTaglines;
+    const pack = getSettingsDefaults()?.djTaglines;
     const lines = Array.isArray(pack) ? pack : [];
-    paintTaglines(lines);
-    saveSettings(payloadForSave({ djTaglines: lines }), {
-      toastMessage: "Set to Default",
-    });
+    paintTaglinesEl(djTaglinesInput, lines);
+    lastDjSettings = { ...lastDjSettings, djTaglines: lines };
+    saveSettings({ djTaglines: lines }, { toastMessage: "Set to Default" });
     updateDjHubSummaries();
   });
 
   djTaglinesInput?.addEventListener("input", updateDjHubSummaries);
+  ssTaglinesInput?.addEventListener("input", updateDjHubSummaries);
+
+  document.getElementById("dj-ss-taglines-save")?.addEventListener("click", () => {
+    const values = { djTaglines: taglinesFromEl(ssTaglinesInput) };
+    lastDjSettings.djSisterStatic = {
+      ...(lastDjSettings.djSisterStatic || {}),
+      ...values,
+    };
+    saveSettings(wrapSs(values), { toastMessage: "Saved" });
+    updateDjHubSummaries();
+  });
+  document
+    .getElementById("dj-ss-taglines-reset")
+    ?.addEventListener("click", () => {
+      const lines = defaultSsIdentity().djTaglines;
+      paintTaglinesEl(ssTaglinesInput, lines);
+      lastDjSettings.djSisterStatic = {
+        ...(lastDjSettings.djSisterStatic || {}),
+        djTaglines: lines,
+      };
+      saveSettings(wrapSs({ djTaglines: lines }), {
+        toastMessage: "Set to Default",
+      });
+      updateDjHubSummaries();
+    });
+
+  document.getElementById("dj-icon-default-hr")?.addEventListener("click", () => {
+    void selectDjIcon(null, PERSONA_HR);
+  });
+  document.getElementById("dj-icon-default-ss")?.addEventListener("click", () => {
+    void selectDjIcon(null, PERSONA_SS);
+  });
 
   function currentRosterPayload() {
     return {
@@ -829,12 +1089,6 @@ export function createDjBoothUi(els, deps) {
     syncDjRosterUi();
     saveSettings(values, { toastMessage: "Set to Default" });
     updateDjHubSummaries();
-  });
-
-  document.querySelectorAll(".dj-persona-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      setEditingPersona(btn.getAttribute("data-dj-persona"));
-    });
   });
 
   djShoutModeInput?.addEventListener("change", syncDjShoutModeUi);
@@ -879,7 +1133,6 @@ export function createDjBoothUi(els, deps) {
   syncDjTtsProviderUi();
   syncDjShoutModeUi();
   syncDjRosterUi();
-  paintPersonaSwitcher();
 
   return {
     applyFromSettings,

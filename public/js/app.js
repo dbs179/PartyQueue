@@ -533,7 +533,6 @@ let updateDjHubSummaries = () => {};
 let setActiveDjIconName = () => {};
 let applyDjFromSettings = () => {};
 let loadDjEffectivePrompt = async () => {};
-let getDjBoothEditingPersona = () => "holy-roller";
 let getEndOfNightName = () => "Last call";
 const djIconUploadBtn = document.getElementById("dj-icon-upload-btn");
 const djIconFileInput = document.getElementById("dj-icon-file");
@@ -654,15 +653,16 @@ const {
     djIconUploadBtn,
     djIconFileInput,
     djIconGallery,
+    djIconGallerySs: document.getElementById("dj-icon-gallery-ss"),
+    djIconUploadBtnSs: document.getElementById("dj-icon-upload-btn-ss"),
   },
   {
     hostFetch,
     showToast,
     saveSettings,
     getDefaultDjIconName: () => settingsDefaults?.djIcon || "dj-icon-headphones.png",
-    getEditingPersona: () => getDjBoothEditingPersona(),
-    onDjIconChange: (name) => {
-      setActiveDjIconName(name);
+    onDjIconChange: (name, persona) => {
+      setActiveDjIconName(name, persona);
       updateDjHubSummaries();
     },
     onShowQueueGenreChange: (enabled) => {
@@ -754,7 +754,6 @@ setActiveDjIconName = djBooth.setActiveDjIconName;
 applyDjFromSettings = djBooth.applyFromSettings;
 loadDjEffectivePrompt = djBooth.loadDjEffectivePrompt;
 getEndOfNightName = djBooth.getEndOfNightName;
-getDjBoothEditingPersona = djBooth.getEditingPersona;
 
 function fillSettings(s) {
   if (s.songMemory != null) songMemoryInput.value = s.songMemory;

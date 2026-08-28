@@ -45,18 +45,50 @@ const STARTER_ICONS = [
   { src: "notes.png", dest: "dj-icon-notes.png" },
   { src: "spotlight.png", dest: "dj-icon-spotlight.png" },
 ];
-const STARTER_DEST = new Set(STARTER_ICONS.map((s) => s.dest));
+const SS_STARTER_ICONS = [
+  { src: "ss-headphones.png", dest: "dj-icon-ssheadphones.png" },
+  { src: "ss-cartoon.png", dest: "dj-icon-sscartoon.png" },
+  { src: "ss-retro.png", dest: "dj-icon-ssretro.png" },
+  { src: "ss-neon.png", dest: "dj-icon-ssneon.png" },
+  { src: "ss-boombox.png", dest: "dj-icon-ssboombox.png" },
+  { src: "ss-cassette.png", dest: "dj-icon-sscassette.png" },
+  { src: "ss-disco.png", dest: "dj-icon-ssdisco.png" },
+  { src: "ss-mixer.png", dest: "dj-icon-ssmixer.png" },
+  { src: "ss-turntable.png", dest: "dj-icon-ssturntable.png" },
+  { src: "ss-vinyl.png", dest: "dj-icon-ssvinyl.png" },
+  { src: "ss-mic.png", dest: "dj-icon-ssmic.png" },
+  { src: "ss-speaker.png", dest: "dj-icon-ssspeaker.png" },
+  { src: "ss-waveform.png", dest: "dj-icon-sswaveform.png" },
+  { src: "ss-equalizer.png", dest: "dj-icon-ssequalizer.png" },
+  { src: "ss-laser.png", dest: "dj-icon-sslaser.png" },
+  { src: "ss-deck.png", dest: "dj-icon-ssdeck.png" },
+  { src: "ss-controller.png", dest: "dj-icon-sscontroller.png" },
+  { src: "ss-radio.png", dest: "dj-icon-ssradio.png" },
+  { src: "ss-amp.png", dest: "dj-icon-ssamp.png" },
+  { src: "ss-party.png", dest: "dj-icon-ssparty.png" },
+  { src: "ss-notes.png", dest: "dj-icon-ssnotes.png" },
+  { src: "ss-spotlight.png", dest: "dj-icon-ssspotlight.png" },
+];
+const ALL_STARTER_ICONS = [...STARTER_ICONS, ...SS_STARTER_ICONS];
+const STARTER_DEST = new Set(ALL_STARTER_ICONS.map((s) => s.dest));
+const HR_STARTER_DEST = new Set(STARTER_ICONS.map((s) => s.dest));
+const SS_STARTER_DEST = new Set(SS_STARTER_ICONS.map((s) => s.dest));
 const STARTER_ORDER = new Map(
-  STARTER_ICONS.map((s, i) => [s.dest, i])
+  ALL_STARTER_ICONS.map((s, i) => [s.dest, i])
 );
-// Event-specific locals: keep in data/, show last in the gallery.
+// Event-specific locals: keep in data/, show last in the matching gallery.
 const LOCAL_TRAILER_ICONS = [
   "dj-icon-holyroller.png",
   "dj-icon-flat.png",
 ];
+const SS_TRAILER_ICONS = [
+  "dj-icon-sisterstatic.png",
+  "dj-icon-ssflat.png",
+];
 const LOCAL_TRAILER_SET = new Set(LOCAL_TRAILER_ICONS);
+const SS_TRAILER_SET = new Set(SS_TRAILER_ICONS);
 const LOCAL_TRAILER_ORDER = new Map(
-  LOCAL_TRAILER_ICONS.map((name, i) => [name, i])
+  [...LOCAL_TRAILER_ICONS, ...SS_TRAILER_ICONS].map((name, i) => [name, i])
 );
 const MAX_BYTES = 2 * 1024 * 1024; // 2 MB decoded image cap
 
@@ -92,6 +124,19 @@ function isLegacyDjIconName(name) {
 
 function isStarterDjIconName(name) {
   return STARTER_DEST.has(name);
+}
+
+export const DJ_ICON_PERSONA_SHARED = "shared";
+export const DJ_ICON_PERSONA_HR = "holy-roller";
+export const DJ_ICON_PERSONA_SS = "sister-static";
+
+/** @param {string} name */
+export function djIconPersona(name) {
+  if (isRandomUploadName(name)) return DJ_ICON_PERSONA_SHARED;
+  if (SS_STARTER_DEST.has(name) || SS_TRAILER_SET.has(name)) {
+    return DJ_ICON_PERSONA_SS;
+  }
+  return DJ_ICON_PERSONA_HR;
 }
 
 /** Host uploads use an 8-char base36 id: dj-icon-1d0ti9t4.png */
@@ -172,7 +217,7 @@ export function seedStarterDjIcons() {
     if (!fs.existsSync(STARTER_DIR)) return 0;
     ensureDir();
     let copied = 0;
-    for (const { src, dest } of STARTER_ICONS) {
+    for (const { src, dest } of ALL_STARTER_ICONS) {
       const from = path.join(STARTER_DIR, src);
       const to = path.join(ICONS_DIR, dest);
       if (!fs.existsSync(from) || fs.existsSync(to)) continue;
@@ -204,7 +249,7 @@ export function listDjIcons() {
       .sort((a, b) => {
         // Shared starters (pack order) → other named → uploads → trailer locals.
         const rank = (name) => {
-          if (LOCAL_TRAILER_SET.has(name)) return 3;
+          if (LOCAL_TRAILER_SET.has(name) || SS_TRAILER_SET.has(name)) return 3;
           if (isStarterDjIconName(name)) return 0;
           if (isRandomUploadName(name)) return 2;
           return 1;
@@ -229,6 +274,7 @@ export function listDjIcons() {
         name,
         url: `/dj-icon/${name}`,
         starter: isStarterDjIconName(name),
+        persona: djIconPersona(name),
       }));
   } catch (err) {
     console.error("[dj-icon] list failed:", err.message);

@@ -145,6 +145,33 @@ describe("music pronunciation", () => {
       prompt,
       /discovery or wildcard is in this block, then give the track count/i
     );
+    assert.match(prompt, /three-part DJ announce/i);
+  });
+
+  it("Sister Static preview owns a full clip and skips Holy Roller asides", () => {
+    const prompt = buildDjEffectivePromptPreview("sister-static");
+    assert.match(prompt, /entire spoken DJ clip/i);
+    assert.match(prompt, /STRUCTURE — FULL SHORT CLIP/);
+    assert.match(prompt, /Sister Static/);
+    assert.match(prompt, /co-host and sidekick/i);
+    assert.doesNotMatch(prompt, /three-part DJ announce/i);
+    assert.doesNotMatch(prompt, /Spotify DJ X/);
+    assert.doesNotMatch(prompt, /scripted intro line — reserved/);
+  });
+
+  it("Sister Static full clip names special-set framing", () => {
+    const prompt = buildLlmPrompt({
+      djName: "Sister Static",
+      count: 4,
+      intro: "",
+      outro: "",
+      setFrame: "the room's most loved songs",
+      characterKnobs: { personaId: "sister-static", intensity: "extra" },
+      highlights: [{ artist: "Prince", name: "Kiss" }],
+    });
+    assert.match(prompt, /entire spoken DJ clip/i);
+    assert.match(prompt, /the room's most loved songs/);
+    assert.doesNotMatch(prompt, /three-part DJ announce/i);
   });
 });
 
@@ -788,6 +815,18 @@ describe("DJ character bible", () => {
       .filter((b) => !b.familySafe)
       .map((b) => b.line);
     assert.ok(!unsafe.includes(bit), bit);
+  });
+
+  it("Sister Static bits come from her aside pack, not Holy Roller's", () => {
+    const hrLines = new Set(DJ_CHARACTER_BIBLE.recurringBits.map((b) => b.line));
+    const bit = pickDjCharacterBit({
+      mood: "party",
+      salt: 1,
+      includeBit: true,
+      personaId: "sister-static",
+    });
+    assert.ok(bit);
+    assert.equal(hrLines.has(bit), false, bit);
   });
 
   it("template can weave a forced character bit", () => {

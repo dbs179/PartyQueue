@@ -2619,15 +2619,12 @@ body:has(#view-settings-user-edit:not([hidden])) > .container {
     visibility: visible;
   }
 
-  /* Advanced DJ PC: Customization | Prompt preview side by side.
-     Prompt box fills the right column so its load height matches
-     the Customization column (flex on the textarea alone was ignored
-     inside .setting-row-text’s grid). */
+  /* Advanced DJ PC: DJ | Co-host columns. Customization stacks above
+     prompt preview inside each persona column. */
   #view-settings-dj-advanced .booth-sections {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
     gap: 10px;
-    align-items: stretch;
   }
 
   #view-settings-dj-advanced .booth-section {
@@ -3956,16 +3953,19 @@ html.pq-subtitle-all-caps .subtitle {
 }
 
 /* DJ icons are square — larger tiles + contain so the full art shows. */
-#dj-icon-gallery.banner-gallery {
+#dj-icon-gallery.banner-gallery,
+#dj-icon-gallery-ss.banner-gallery {
   grid-template-columns: repeat(auto-fill, minmax(152px, 1fr));
   gap: 12px;
 }
 
-#dj-icon-gallery .banner-thumb {
+#dj-icon-gallery .banner-thumb,
+#dj-icon-gallery-ss .banner-thumb {
   aspect-ratio: 1 / 1;
 }
 
-#dj-icon-gallery .banner-thumb img {
+#dj-icon-gallery .banner-thumb img,
+#dj-icon-gallery-ss .banner-thumb img {
   object-fit: contain;
 }
 
@@ -4055,22 +4055,76 @@ html.pq-subtitle-all-caps .subtitle {
   margin-bottom: 2px;
 }
 
-.dj-persona-switch {
+.dj-split {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .dj-split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.dj-split-col {
+  min-width: 0;
+  padding: 12px 12px 16px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.dj-split-heading {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.dj-split-col-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 8px;
-  padding: 0 4px 12px;
+  margin-bottom: 10px;
 }
 
-.dj-persona-switch-label {
-  color: var(--muted);
-  font-size: 0.85rem;
-  margin-right: 4px;
+.dj-split-col-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
-.dj-persona-btn.accent {
-  border-color: var(--accent, #8b5cf6);
+.dj-hub-persona-grid {
+  grid-template-columns: 1fr;
+}
+
+.dj-hub-shared-box {
+  margin-top: 16px;
+}
+
+.dj-hub-shared-box .dj-split-heading {
+  margin-bottom: 10px;
+}
+
+#view-settings-dj .dj-hub-shared {
+  margin-top: 0;
+}
+
+@media (min-width: 560px) {
+  #view-settings-dj .dj-hub-shared {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #view-settings-dj .dj-hub-shared .settings-hub-card-full {
+    grid-column: 1 / -1;
+  }
 }
 
 .dj-prompt-preview {
