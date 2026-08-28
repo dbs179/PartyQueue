@@ -1040,7 +1040,7 @@ button.subpage-head-link:active {
   margin: 20px 0 10px;
 }
 
-/* Now Playing header row: Mood left, active Genre lane right. */
+/* Now Playing header row: Mood left, Volume center (PC), Genre right. */
 .np-head-row {
   display: flex;
   align-items: baseline;
@@ -1048,8 +1048,13 @@ button.subpage-head-link:active {
   gap: 12px;
 }
 
+.np-head-row > .section-label {
+  margin: 0;
+}
+
 .np-mood-label,
-.np-genre-label {
+.np-genre-label,
+.np-volume-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1060,8 +1065,20 @@ button.subpage-head-link:active {
   text-align: left;
 }
 
+.np-volume-label {
+  display: none;
+  flex: 1 1 auto;
+  text-align: center;
+}
+
 .np-genre-label {
   text-align: right;
+}
+
+@media (min-width: 960px) {
+  .np-volume-label:not([hidden]) {
+    display: block;
+  }
 }
 
 button.np-vibe-link {
@@ -1094,7 +1111,8 @@ button.np-vibe-link:focus-visible {
 }
 
 .np-mood-label[hidden],
-.np-genre-label[hidden] {
+.np-genre-label[hidden],
+.np-volume-label[hidden] {
   display: none;
 }
 

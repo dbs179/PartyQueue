@@ -74,6 +74,8 @@ export {
   setGroupVolume,
   volumeUp,
   volumeDown,
+  getCachedGroupVolume,
+  resolveVolumeForDisplay,
 } from "./sonos-volume.js";
 
 export {

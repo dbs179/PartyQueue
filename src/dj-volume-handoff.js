@@ -136,6 +136,7 @@ export function createDjVolumeHandoff({
   let liveMusicPosition = musicPosition;
   let preSilenceReleased = !holdPreSilence;
   let pausedByHold = false;
+  let currentVolume = null;
   const preservedBaseline =
     baselineOverride == null ? null : clampVolume(baselineOverride);
 
@@ -154,6 +155,7 @@ export function createDjVolumeHandoff({
     deadlineAt,
     ttsPosition: liveTtsPosition,
     musicPosition: liveMusicPosition,
+    currentVolume,
   });
 
   const setPhase = (next) => {
@@ -170,6 +172,7 @@ export function createDjVolumeHandoff({
         ? clampVolume(await io.getVolume())
         : preservedBaseline;
     announceVolume = clampVolume(calculateTarget(baselineVolume));
+    currentVolume = baselineVolume;
     volumeLocked = true;
     syncHandoffActiveFlag();
     deadlineAt =
@@ -187,10 +190,12 @@ export function createDjVolumeHandoff({
 
   const setAndCheck = async (target) => {
     const io = await getAdapter();
-    await io.setVolume(clampVolume(target));
+    const want = clampVolume(target);
+    await io.setVolume(want);
+    currentVolume = want;
     // Trust the live read. A false `locked: false` (SOAP string vs number)
     // must not abort restore while the room is already at the baseline.
-    return clampVolume(await io.getVolume()) === clampVolume(target);
+    return clampVolume(await io.getVolume()) === want;
   };
 
   const ramp = async (from, to) => {
@@ -198,12 +203,14 @@ export function createDjVolumeHandoff({
     const end = clampVolume(to);
     const steps = Math.max(1, Math.floor(Number(rampSteps) || 1));
     let previous = start;
+    currentVolume = start;
     for (let index = 1; index <= steps; index++) {
       if (cancelled) return false;
       const next = clampVolume(start + ((end - start) * index) / steps);
       if (next === previous && index < steps) continue;
       const io = await getAdapter();
       await io.setVolume(next);
+      currentVolume = next;
       previous = next;
     }
     return true;
@@ -645,6 +652,7 @@ function createDeferredHandoff() {
       musicPosition: null,
       baselineVolume: null,
       announceVolume: null,
+      currentVolume: null,
     }),
     cancelAndRestore: async () => true,
     isVolumeLocked: () => false,
@@ -658,6 +666,7 @@ function createDeferredHandoff() {
       deadlineAt: null,
       ttsPosition: null,
       musicPosition: null,
+      currentVolume: null,
       deferred: true,
     }),
     restoreExact: async () => true,
@@ -750,5 +759,6 @@ export function getDjVolumeHandoffState() {
     started: false,
     volumeLocked: false,
     deadlineAt: null,
+    currentVolume: null,
   };
 }

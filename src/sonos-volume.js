@@ -27,6 +27,50 @@ export function resetVolumeReachabilityForTests() {
   playerVolumeTimeoutMs = PLAYER_VOLUME_TIMEOUT_MS;
   skipUnreachableMs = SKIP_UNREACHABLE_MS;
   unreachableUntil.clear();
+  cachedGroupVolume = null;
+}
+
+/** Last commanded/read group volume (0–100), or null. */
+let cachedGroupVolume = null;
+
+export function noteGroupVolume(level) {
+  const n = Math.round(Number(level));
+  if (!Number.isFinite(n)) return;
+  cachedGroupVolume = Math.max(0, Math.min(100, n));
+}
+
+export function getCachedGroupVolume() {
+  return cachedGroupVolume;
+}
+
+/**
+ * Prefer the DJ handoff's commanded level while a ramp is active so the PC
+ * Volume header can tick without extra Sonos SOAP.
+ */
+export function resolveVolumeForDisplay({ handoff = null, cached = null } = {}) {
+  const phase = String(handoff?.phase || "idle");
+  const active =
+    phase !== "idle" &&
+    phase !== "complete" &&
+    phase !== "cancelled" &&
+    phase !== "deferred";
+  const commanded = Number(handoff?.currentVolume);
+  const ramping = active && !!handoff?.volumeLocked;
+  if (active && Number.isFinite(commanded)) {
+    return {
+      volume: Math.max(0, Math.min(100, Math.round(commanded))),
+      ramping,
+      phase,
+    };
+  }
+  if (cached != null && Number.isFinite(Number(cached))) {
+    return {
+      volume: Math.max(0, Math.min(100, Math.round(Number(cached)))),
+      ramping: false,
+      phase: active ? phase : "idle",
+    };
+  }
+  return null;
 }
 
 function playerKey(device) {
@@ -188,6 +232,7 @@ async function adjustGroupVolume(delta) {
   const target = Math.max(0, Math.min(100, reference + delta));
 
   const locked = await lockGroupVolume(members, target);
+  noteGroupVolume(target);
   return { volume: target, players: liveMembers(members).length, locked };
 }
 
@@ -219,7 +264,9 @@ export async function getGroupVolume() {
   if (!ok.length) {
     throw new Error("Could not read volume from any Sonos player.");
   }
-  return Math.max(0, ...ok.map((r) => r.volume || 0));
+  const volume = Math.max(0, ...ok.map((r) => r.volume || 0));
+  noteGroupVolume(volume);
+  return volume;
 }
 
 export async function setGroupVolume(level) {
@@ -231,6 +278,7 @@ async function setGroupVolumeUnlocked(level) {
   const { members } = await resolveGroup(m);
   const target = Math.max(0, Math.min(100, Math.round(Number(level) || 0)));
   const locked = await lockGroupVolume(members, target);
+  noteGroupVolume(target);
   invalidateSonosSnapshots();
   return { volume: target, players: members.length, locked };
 }

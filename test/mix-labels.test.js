@@ -4,6 +4,9 @@ import {
   resolveActiveEraMoodId,
   formatMoodMixText,
   formatGenreHeaderText,
+  formatVolumeHeaderText,
+  volumePollMs,
+  paintVolumeLabel,
   genreHeaderHasKnownValue,
   UNKNOWN_GENRE_DISPLAY,
   buildMixLabelTexts,
@@ -31,6 +34,22 @@ test("formatMoodMixText and formatGenreHeaderText", () => {
   assert.equal(genreHeaderHasKnownValue("Genre: Rock"), true);
   assert.equal(genreHeaderHasKnownValue(`Genre: ${UNKNOWN_GENRE_DISPLAY}`), false);
   assert.equal(genreHeaderHasKnownValue("Genre:"), false);
+});
+
+test("formatVolumeHeaderText and paintVolumeLabel", () => {
+  assert.equal(formatVolumeHeaderText(15), "Volume: 15");
+  assert.equal(formatVolumeHeaderText(0), "Volume: 0");
+  assert.equal(formatVolumeHeaderText(100.4), "Volume: 100");
+  assert.equal(formatVolumeHeaderText(null), "");
+  assert.equal(formatVolumeHeaderText(undefined), "");
+  assert.equal(volumePollMs(true), 250);
+  assert.equal(volumePollMs(false), 2500);
+  const el = { textContent: "", hidden: true };
+  paintVolumeLabel(el, 32);
+  assert.equal(el.textContent, "Volume: 32");
+  assert.equal(el.hidden, false);
+  paintVolumeLabel(el, null);
+  assert.equal(el.hidden, true);
 });
 
 test("buildMixLabelTexts uses local genres/mood when server unset", () => {

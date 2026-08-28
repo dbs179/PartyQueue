@@ -4,6 +4,19 @@ Ideas parked for later — not scheduled work unless pulled into a release.
 
 ## Playback / Sonos
 
+- **Paused Now Playing: wake instead of 5s poll**  
+  Keep today’s cadences until we pull this (1.5s while playing, 5s paused; queue 3s / 15s). Extra phones and TVs already share one server poller.
+
+  PartyQueue Play/Skip/Random already **nudge** immediately. The 5s paused tick is only to notice playback that PartyQueue did not start (Sonos app, speaker button, Alexa, HA). Progress bars do not need it while paused.
+
+  **Do not** zero-poll while paused with no external wake — TVs would sit stale.
+
+  **Later options**
+  1. Cheap: stretch paused NP to 30–60s. In-app controls stay instant; Sonos-app Play lags up to that window.
+  2. Real wake: subscribe to Kitchen AVTransport GENA/`LastChange`, then run the 1.5s playing poll until paused again. Keep a 60s heartbeat — subscriptions expire and can die across VLAN/restart. Unused in `@svrooij/sonos` today; host networking + `PUBLIC_BASE_URL` make it feasible.
+
+  Leave playing at 1.5s (track-end, DJ pads, karaoke).
+
 - **Volume normalization (party helper)**  
   Quiet Spotify masters still play quiet on Sonos because PartyQueue doesn’t process audio. True stream-level ReplayGain is out of scope on the current Spotify path (Sonos owns decode/playback).
 
@@ -23,6 +36,18 @@ Ideas parked for later — not scheduled work unless pulled into a release.
 
   **If we moved to Apple Music**
   Native Sonos AM playback would likely give real stream-level normalization for free — better match than Spotify-in-the-queue. Would not replace a host boost for outliers. Not a settings switch: PartyQueue is Spotify-shaped (search, playlists, URIs, guest search, Random/Never-Ending); AM would be new catalog, MusicKit auth, and Sonos URI scheme.
+
+## Lyrics / Karaoke
+
+- **Slightly late community LRC (per-file, not a global lead bump)**  
+  *Number 3 and Number 7* (Morgan Wallen) and *Must've Never Met You* (Luke Combs) sat a hair behind the vocal. Another song the same night was spot on, so do **not** raise `LYRICS_LEAD_SEC` (0.75) — that would pull good files early.
+
+  Not a wrong-mix pick. Wallen: every LRClib copy used the same timestamps. Combs: two community timings; equal scores keep search order, and we cached the later family. Neither file had `[offset:]`.
+
+  **Later**
+  1. Tie-break in `pickBestSearchHit`: when duration/span scores match, prefer the file whose first vocal line is slightly earlier (cap ~2–4s; skip bogus `0:00` intros).
+  2. Apply LRC `[offset:±ms]` in `normalizeLrc` and Unison `cleanEnhancedLrc` (`t' = t + offset/1000`, clamp about ±10s, then strip the tag). Files without a tag stay unchanged.
+  3. Bump the lyrics cache key/version so the 24h cache re-fetches after the change.
 
 ## Look / banners
 

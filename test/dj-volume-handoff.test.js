@@ -170,6 +170,7 @@ test("runs pre-silence → DJ → post-silence → music and restores exactly", 
 
   assert.equal(result.phase, "complete");
   assert.equal(result.baselineVolume, 10);
+  assert.equal(result.currentVolume, 10);
   assert.equal(run.getVolume(), 10);
   assert.deepEqual(run.phases, [
     "waiting-pre-silence",

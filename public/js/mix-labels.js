@@ -30,6 +30,35 @@ export function formatMoodMixText(presetName, eraLabel) {
 /** Stable label when a track has no matched genre yet. */
 export const UNKNOWN_GENRE_DISPLAY = "Unknown";
 
+/** @param {unknown} volume */
+export function formatVolumeHeaderText(volume) {
+  if (volume == null || volume === "") return "";
+  const n = Math.round(Number(volume));
+  if (!Number.isFinite(n)) return "";
+  return `Volume: ${Math.max(0, Math.min(100, n))}`;
+}
+
+/** Fast while the DJ is ramping; slower for a live group read. */
+export function volumePollMs(ramping) {
+  return ramping ? 250 : 2500;
+}
+
+/**
+ * @param {HTMLElement|null|undefined} el
+ * @param {unknown} volume
+ */
+export function paintVolumeLabel(el, volume) {
+  if (!el) return;
+  const text = formatVolumeHeaderText(volume);
+  if (!text) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  el.hidden = false;
+  el.textContent = text;
+}
+
 /** @param {string|null|undefined} genreLabel */
 export function formatGenreHeaderText(genreLabel) {
   const label = String(genreLabel || "").trim();

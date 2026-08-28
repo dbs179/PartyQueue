@@ -23,6 +23,7 @@ import {
   persistBrandingCache,
   applyBrandTypeForViewport,
   normalizeBrandFontSize,
+  DESKTOP_BANNER_MQ,
 } from "./branding-ui.js";
 import {
   nowPlayingOriginLabel,
@@ -37,6 +38,10 @@ import { createQueueUi } from "./queue-ui.js";
 import { createLyricsUi } from "./lyrics-ui.js";
 import { createLiveStreams } from "./live-streams.js";
 import { createMusicMixUi } from "./music-mix-ui.js";
+import {
+  paintVolumeLabel,
+  volumePollMs,
+} from "./mix-labels.js";
 import { createPlaylistsUi } from "./playlists-ui.js";
 import {
   SUGGESTION_TEXT_MAX,
@@ -3368,33 +3373,92 @@ muteBtn.addEventListener("click", () => {
   );
 });
 
+const npVolumeLabel = document.getElementById("np-volume-label");
+const desktopVolumeMq =
+  typeof window.matchMedia === "function"
+    ? window.matchMedia(DESKTOP_BANNER_MQ)
+    : null;
+let volumeWatchTimer = null;
+let volumeWatchRamping = false;
+let volumeWatchInFlight = false;
+
+function noteDisplayedVolume(volume, ramping = volumeWatchRamping) {
+  paintVolumeLabel(npVolumeLabel, volume);
+  volumeWatchRamping = !!ramping;
+}
+
+async function pollNpVolume() {
+  if (volumeWatchInFlight) return;
+  if (document.visibilityState === "hidden") return;
+  if (desktopVolumeMq && !desktopVolumeMq.matches) return;
+  volumeWatchInFlight = true;
+  try {
+    const res = await fetch("/api/volume");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data?.ok && data.volume != null) {
+      noteDisplayedVolume(data.volume, !!data.ramping);
+    }
+  } catch {
+    /* keep the last painted value */
+  } finally {
+    volumeWatchInFlight = false;
+  }
+}
+
+function scheduleNpVolumeWatch() {
+  if (volumeWatchTimer) clearTimeout(volumeWatchTimer);
+  volumeWatchTimer = setTimeout(() => {
+    void pollNpVolume().finally(() => scheduleNpVolumeWatch());
+  }, volumePollMs(volumeWatchRamping));
+}
+
+function startNpVolumeWatch() {
+  void pollNpVolume().finally(() => scheduleNpVolumeWatch());
+}
+
+desktopVolumeMq?.addEventListener?.("change", (event) => {
+  if (event.matches) startNpVolumeWatch();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && desktopVolumeMq?.matches) {
+    void pollNpVolume();
+  }
+});
+if (!desktopVolumeMq || desktopVolumeMq.matches) startNpVolumeWatch();
+
 volDownBtn.addEventListener("click", () => {
-  postControl(volDownBtn, "/api/volume/down", (d) =>
-    showToast(`Volume: ${d.volume}`)
-  );
+  postControl(volDownBtn, "/api/volume/down", (d) => {
+    noteDisplayedVolume(d.volume, false);
+    showToast(`Volume: ${d.volume}`);
+  });
 });
 
 volUpBtn.addEventListener("click", () => {
-  postControl(volUpBtn, "/api/volume/up", (d) =>
-    showToast(`Volume: ${d.volume}`)
-  );
+  postControl(volUpBtn, "/api/volume/up", (d) => {
+    noteDisplayedVolume(d.volume, false);
+    showToast(`Volume: ${d.volume}`);
+  });
 });
 
 volDown10Btn.addEventListener("click", () => {
-  postControl(volDown10Btn, "/api/volume/down?step=10", (d) =>
-    showToast(`Volume: ${d.volume}`)
-  );
+  postControl(volDown10Btn, "/api/volume/down?step=10", (d) => {
+    noteDisplayedVolume(d.volume, false);
+    showToast(`Volume: ${d.volume}`);
+  });
 });
 
 volUp10Btn.addEventListener("click", () => {
-  postControl(volUp10Btn, "/api/volume/up?step=10", (d) =>
-    showToast(`Volume: ${d.volume}`)
-  );
+  postControl(volUp10Btn, "/api/volume/up?step=10", (d) => {
+    noteDisplayedVolume(d.volume, false);
+    showToast(`Volume: ${d.volume}`);
+  });
 });
 
 groupAllBtn.addEventListener("click", () => {
   postControl(groupAllBtn, "/api/group-all", (d) => {
     reloadGroupsAfterTopology();
+    if (d.volume != null) noteDisplayedVolume(d.volume, false);
     showToast(`Grouped ${d.players} speakers · Volume ${d.volume}`);
   });
 });

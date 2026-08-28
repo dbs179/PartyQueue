@@ -6,6 +6,9 @@ import {
   setPlayerVolumeTimeoutForTests,
   setSkipUnreachableMsForTests,
   SETTLE_MS,
+  resolveVolumeForDisplay,
+  noteGroupVolume,
+  getCachedGroupVolume,
 } from "../src/sonos-volume.js";
 
 afterEach(() => {
@@ -93,4 +96,31 @@ test("lockGroupVolume times out a hung player instead of waiting forever", async
   assert.equal(locked, true);
   assert.ok(Date.now() - started < 2_000 + SETTLE_MS * 2);
   assert.equal(kitchen.volume, 12);
+});
+
+test("resolveVolumeForDisplay prefers the DJ ramp commanded level", () => {
+  const ramping = resolveVolumeForDisplay({
+    handoff: {
+      phase: "ramping-up",
+      volumeLocked: true,
+      currentVolume: 27,
+    },
+    cached: 15,
+  });
+  assert.deepEqual(ramping, {
+    volume: 27,
+    ramping: true,
+    phase: "ramping-up",
+  });
+
+  const idle = resolveVolumeForDisplay({
+    handoff: { phase: "idle", volumeLocked: false, currentVolume: null },
+    cached: 15,
+  });
+  assert.deepEqual(idle, { volume: 15, ramping: false, phase: "idle" });
+});
+
+test("noteGroupVolume caches a 0–100 reading", () => {
+  noteGroupVolume(32.4);
+  assert.equal(getCachedGroupVolume(), 32);
 });
