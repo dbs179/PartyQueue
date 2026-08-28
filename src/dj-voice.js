@@ -406,11 +406,22 @@ export function applyMusicPronunciations(
   for (const { written, spoken } of parseDjPronunciations(pronunciations)) {
     text = text.split(written).join(spoken);
   }
-  return text
-    .replace(/\bAC\/DC\b/gi, "A C D C")
-    .replace(/\bU2\b/g, "U Two")
-    .replace(/\bR\.?E\.?M\.?(?=\W|$)/gi, "R E M")
-    .trim();
+  return speakNameSuffixes(
+    text
+      .replace(/\bAC\/DC\b/gi, "A C D C")
+      .replace(/\bU2\b/g, "U Two")
+      .replace(/\bR\.?E\.?M\.?(?=\W|$)/gi, "R E M")
+      .trim()
+  );
+}
+
+/** Jr./Sr. periods look like sentence stops to TTS ("JR … S"). */
+export function speakNameSuffixes(text) {
+  return String(text || "")
+    .replace(/\bJr\.?\s*[\u2018\u2019']\s*s\b/gi, "Junior's")
+    .replace(/\bSr\.?\s*[\u2018\u2019']\s*s\b/gi, "Senior's")
+    .replace(/\bJr\./gi, "Junior")
+    .replace(/\bSr\./gi, "Senior");
 }
 
 export function formatMusicPronunciationGuide(
@@ -427,7 +438,8 @@ export function formatMusicPronunciationGuide(
 - Before using a music name, silently determine its standard spoken pronunciation from context.
 - If uncertain, omit the name instead of guessing.
 - When a name is included, make the spoken output TTS-friendly. Use a natural phonetic respelling only when needed; never explain the pronunciation to listeners.
-- AC/DC is spoken "A C D C"; U2 is "U Two"; R.E.M. is "R E M".${customBlock}`;
+- AC/DC is spoken "A C D C"; U2 is "U Two"; R.E.M. is "R E M".
+- Write "Junior" / "Junior's" instead of "Jr." / "Jr.'s" (same for Senior / Sr.). A period after Jr. makes TTS pause, then spell the possessive S.${customBlock}`;
 }
 
 export function formatHostDjGuidance(characterKnobs = null) {
@@ -1493,9 +1505,29 @@ const LEADING_GREETING_SENTENCE =
 const TRAILING_SENDOFF_SENTENCE =
   /^(?:enjoy|let'?s go|here we go|take it away|good ?night|goodbye|see you|have (?:fun|a (?:good|great)))\b/i;
 
+/** Protect Jr./Mr./Dr. periods so they are not treated as sentence stops. */
+function protectSpokenAbbrevs(text) {
+  return String(text || "").replace(
+    /\b(Jr|Sr|Mr|Mrs|Ms|Dr|Prof|St|vs|etc|feat|ft)\./gi,
+    "$1\u2024"
+  );
+}
+
+function restoreSpokenAbbrevs(text) {
+  return String(text || "").replace(/\u2024/g, ".");
+}
+
+function splitSpokenSentences(text) {
+  const protectedText = protectSpokenAbbrevs(text);
+  const parts = protectedText
+    .match(/[^.!?]+[.!?]+(?:["'\u201d\u2019])?/g)
+    ?.map((s) => restoreSpokenAbbrevs(s).trim());
+  return parts?.filter(Boolean) || null;
+}
+
 export function stripEdgeCourtesies(text) {
   const t = String(text || "").replace(/\s+/g, " ").trim();
-  let parts = t.match(/[^.!?]+[.!?]+["']?/g)?.map((s) => s.trim());
+  let parts = splitSpokenSentences(t);
   if (!parts || parts.length < 2) return t;
   if (LEADING_GREETING_SENTENCE.test(parts[0])) parts = parts.slice(1);
   if (
@@ -1535,6 +1567,7 @@ export function polishSetDescription(text) {
   }
   t = t.replace(/\btrust me,?\s+/gi, "");
   t = t.replace(/\bget ready(?: for| to)?\s+/gi, "");
+  t = speakNameSuffixes(t);
   t = t.replace(/\s+,/g, ",").replace(/\s+/g, " ").trim();
   t = t.replace(/([.!?]\s+)([a-z])/g, (_, punc, letter) => punc + letter.toUpperCase());
   if (t) t = t.charAt(0).toUpperCase() + t.slice(1);
@@ -1579,9 +1612,9 @@ export function trimSpokenToWordLimit(text, limit) {
   if (!words.length) return "";
   const source =
     words.length <= cap ? words.join(" ") : words.slice(0, cap).join(" ");
-  const sentences = source.match(/[^.!?]+[.!?]+(?:["'\u201d\u2019])?/g);
+  const sentences = splitSpokenSentences(source);
   if (sentences?.length) return sentences.join(" ").trim();
-  return ensureSpokenEnd(source);
+  return ensureSpokenEnd(restoreSpokenAbbrevs(protectSpokenAbbrevs(source)));
 }
 
 export function cleanSpokenScript(text, maxWords = null, banList = null) {

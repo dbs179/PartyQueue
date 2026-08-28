@@ -87,6 +87,38 @@ describe("music pronunciation", () => {
     assert.match(formatMusicPronunciationGuide(raw), /Xylo.*Zye-lo/);
   });
 
+  it("speaks Jr.'s as Junior's instead of JR pause S", () => {
+    assert.equal(
+      applyMusicPronunciations(
+        "You'll want to catch Stephen Wilson Jr. ’ s American Gothic as we ride this wave."
+      ),
+      "You'll want to catch Stephen Wilson Junior's American Gothic as we ride this wave."
+    );
+    assert.equal(
+      applyMusicPronunciations("Stephen Wilson Jr.'s American Gothic"),
+      "Stephen Wilson Junior's American Gothic"
+    );
+    assert.equal(
+      applyMusicPronunciations("A set with Wilson Jr. and friends"),
+      "A set with Wilson Junior and friends"
+    );
+  });
+
+  it("does not treat Jr.'s as the end of a sentence", () => {
+    const kept = cleanSpokenScript(
+      "You'll want to catch Stephen Wilson Jr.'s American Gothic as we ride this wave.",
+      80
+    );
+    assert.match(kept, /Jr\.'s American Gothic/i);
+    assert.doesNotMatch(kept, /Jr\.\s+[’']\s*s/i);
+    assert.equal(
+      polishSetDescription(
+        "You'll want to catch Stephen Wilson Jr. ’ s American Gothic as we ride this wave."
+      ),
+      "You'll want to catch Stephen Wilson Junior's American Gothic as we ride this wave."
+    );
+  });
+
   it("normalizes advanced guidance and clearly marks it supplemental", () => {
     assert.equal(normalizeDjPersonaNotes("  Local host\u0000  "), "Local host");
     assert.equal(normalizeDjPronunciations(null), "");
