@@ -186,6 +186,10 @@ export async function pause(...args) {
 }
 
 async function pauseUnlocked() {
+  // Host Skip already cancels the 150ms DJ volume watcher; Pause must too,
+  // or the loop keeps SOAP-polling (and sometimes Play/Next) after the room
+  // is supposed to be stopped.
+  await cancelActiveDjVolumeHandoff("host pause");
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
   await coordinator.Pause();
@@ -399,6 +403,7 @@ export async function previous(...args) {
 }
 
 async function previousUnlocked() {
+  await cancelActiveDjVolumeHandoff("host previous");
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
   await coordinator.Previous();

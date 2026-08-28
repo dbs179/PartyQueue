@@ -89,6 +89,7 @@ let stopping = false;
 let activeTick = null;
 let queueClearPauseCount = 0;
 let idleStreak = 0; // consecutive not-playing ticks, drives the idle decay
+let errorStreak = 0;
 
 function clearTimer() {
   if (timer) {
@@ -310,6 +311,7 @@ async function tick() {
   const workGeneration = queueWorkGeneration();
   try {
     const status = await getQueueStatus();
+    errorStreak = 0;
     if (queueWorkWasPreempted(workGeneration)) return;
 
     // Fire a scheduled set-boundary announce when playback crosses into the
@@ -387,8 +389,13 @@ async function tick() {
     else idleStreak += 1;
     schedule(delay);
   } catch (err) {
+    errorStreak += 1;
+    const errorDelay = Math.min(
+      ERROR_MS * 2 ** Math.min(errorStreak - 1, 3),
+      2 * 60_000
+    );
     console.error("[autofill] check failed:", err.message);
-    schedule(ERROR_MS);
+    schedule(errorDelay);
   }
 }
 

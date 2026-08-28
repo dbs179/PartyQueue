@@ -8,6 +8,16 @@ const DEFAULT_CLOCK_SYNC_MS = 10_000;
  * slow down when paused or idle so overnight SSE subscribers are cheaper.
  * Transport nudges still force an immediate poll.
  */
+export function snapshotErrorDelayMs(
+  consecutiveFailures,
+  errorIntervalMs,
+  capMs = 30_000
+) {
+  const base = Math.max(0, Number(errorIntervalMs) || 0);
+  const n = Math.max(1, Number(consecutiveFailures) || 1);
+  return Math.min(base * 2 ** Math.min(n - 1, 4), capMs);
+}
+
 export function nowPlayingPollIntervalMs(
   snapshot,
   {
@@ -284,14 +294,14 @@ export function createSnapshotMonitor({
         return snapshot;
       })
       .catch((err) => {
-        nextDelay = errorIntervalMs;
         consecutiveFailures += 1;
+        nextDelay = snapshotErrorDelayMs(consecutiveFailures, errorIntervalMs);
         if (consecutiveFailures >= Math.max(1, failureThreshold)) {
           updateHealth({
             status: "disconnected",
             consecutiveFailures,
             lastFailureAt: now(),
-            retryMs: errorIntervalMs,
+            retryMs: nextDelay,
           });
         }
         logger.warn?.("poll failed", { err: err.message });

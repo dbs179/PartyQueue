@@ -34,6 +34,8 @@ let writeTimeoutMs = SONOS_WRITE_TIMEOUT_MS;
 let transportTimeoutMs = SONOS_TRANSPORT_TIMEOUT_MS;
 /** @type {null | (() => void | Promise<void>)} */
 let onLaneTimeoutHook = null;
+let lastLaneResetAt = 0;
+export const LANE_RESET_DEBOUNCE_MS = 30_000;
 
 /** @param {{ writeMs?: number, transportMs?: number }} [opts] */
 export function setSonosLaneTimeoutsForTests(opts = {}) {
@@ -50,6 +52,7 @@ export function resetSonosLaneTimeoutsForTests() {
   writeTimeoutMs = SONOS_WRITE_TIMEOUT_MS;
   transportTimeoutMs = SONOS_TRANSPORT_TIMEOUT_MS;
   onLaneTimeoutHook = null;
+  lastLaneResetAt = 0;
 }
 
 function isTimeoutError(err) {
@@ -58,6 +61,11 @@ function isTimeoutError(err) {
 
 /** Drop stale Sonos sockets after a hung lane op (lazy to avoid import cycles). */
 async function resetManagerAfterTimeout() {
+  const t = Date.now();
+  if (lastLaneResetAt && t - lastLaneResetAt < LANE_RESET_DEBOUNCE_MS) {
+    return;
+  }
+  lastLaneResetAt = t;
   if (onLaneTimeoutHook) {
     try {
       await onLaneTimeoutHook();

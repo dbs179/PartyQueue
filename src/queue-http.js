@@ -1,6 +1,7 @@
 import { createLogger } from "./logger.js";
 import { admitSseClient } from "./http/sse-limits.js";
 import { createSnapshotMonitor } from "./now-playing-stream.js";
+import { nowPlayingMonitor } from "./now-playing-http.js";
 import {
   getQueueList,
   onSonosSnapshotsInvalidated,
@@ -69,12 +70,23 @@ function broadcastQueueStatus(health) {
   }
 }
 
+function queuePollIntervalMs() {
+  const np = nowPlayingMonitor.latest;
+  if (!np) return 3000;
+  const playing =
+    np.isPlaying === true ||
+    np.state === "PLAYING" ||
+    np.state === "TRANSITIONING";
+  return playing ? 3000 : 15_000;
+}
+
 export const queueMonitor = createSnapshotMonitor({
   monitorName: "queue",
   readSnapshot: readQueuePayload,
   signatureFor: queueSignature,
   intervalMs: 3000,
   errorIntervalMs: 5000,
+  intervalFor: queuePollIntervalMs,
   failureThreshold: 2,
   onStatusChange: broadcastQueueStatus,
   logger: createLogger("queue-stream"),

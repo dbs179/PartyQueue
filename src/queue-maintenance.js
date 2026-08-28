@@ -19,6 +19,7 @@ const START_DELAY_MS = 15_000; // wait after boot (let things settle)
 let timer = null;
 let stopping = false;
 let activeTick = null;
+let errorStreak = 0;
 
 function clearTimer() {
   if (timer) {
@@ -51,9 +52,11 @@ async function tick() {
     } else {
       delay = IDLE_MS;
     }
+    errorStreak = 0;
   } catch (err) {
+    errorStreak += 1;
+    delay = Math.min(ERROR_MS * 2 ** Math.min(errorStreak - 1, 2), 5 * 60_000);
     console.error("[maintenance] tick failed:", err.message);
-    delay = ERROR_MS;
   }
   schedule(delay);
 }

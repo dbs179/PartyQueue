@@ -43,3 +43,36 @@ test("clearZoneCache drops in-flight coalescing and bumps generation", async () 
   assert.deepEqual(fresh, [{ label: "fresh" }]);
   assert.equal(zoneCacheInfoForTests().hasCache, true);
 });
+
+test("getZoneGroups fails over from a dead Devices[0] to the next speaker", async () => {
+  clearZoneCache();
+  let firstCalls = 0;
+  let secondCalls = 0;
+  const m = {
+    Devices: [
+      {
+        Name: "Office",
+        Host: "10.10.20.196",
+        GetZoneGroupState: async () => {
+          firstCalls += 1;
+          const err = new Error("connect EHOSTUNREACH");
+          err.code = "EHOSTUNREACH";
+          throw err;
+        },
+      },
+      {
+        Name: "Kitchen",
+        Host: "10.10.20.190",
+        GetZoneGroupState: async () => {
+          secondCalls += 1;
+          return [{ id: "kitchen-group" }];
+        },
+      },
+    ],
+  };
+
+  const groups = await getZoneGroups(m, { fresh: true });
+  assert.deepEqual(groups, [{ id: "kitchen-group" }]);
+  assert.equal(firstCalls, 1);
+  assert.equal(secondCalls, 1);
+});

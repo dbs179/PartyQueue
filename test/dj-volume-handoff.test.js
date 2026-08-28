@@ -4,6 +4,8 @@ import {
   beginDjVolumeHandoff,
   createDjVolumeHandoff,
   getDjVolumeHandoffState,
+  handoffWatchSleepMs,
+  HANDOFF_WATCH_MAX_FAILURES,
   isDjClipUri,
   isRampSilenceUri,
   isRestoreSilenceUri,
@@ -693,4 +695,55 @@ test("terminal handoff releases global ownership", async () => {
   await handoff.start();
 
   assert.equal(getDjVolumeHandoffState().phase, "idle");
+});
+
+test("handoffWatchSleepMs doubles until the cap", () => {
+  assert.equal(handoffWatchSleepMs(0, 150), 150);
+  assert.equal(handoffWatchSleepMs(1, 150), 300);
+  assert.equal(handoffWatchSleepMs(2, 150), 600);
+  assert.equal(handoffWatchSleepMs(5, 200), 5000);
+});
+
+test("handoff aborts after repeated watch failures instead of hammering", async () => {
+  let polls = 0;
+  const adapter = {
+    async getNowPlaying() {
+      polls += 1;
+      const err = new Error("connect EHOSTUNREACH");
+      err.code = "EHOSTUNREACH";
+      throw err;
+    },
+    async getVolume() {
+      return 10;
+    },
+    async setVolume() {
+      return { locked: true };
+    },
+    async pause() {},
+    async resume() {},
+    async playAt() {},
+    async next() {},
+  };
+  const errors = [];
+  const handoff = createDjVolumeHandoff({
+    publicUrl: DJ,
+    calculateTarget: () => 30,
+    adapter,
+    sleep: async () => {},
+    now: () => 0,
+    pollMs: 0,
+    logger: {
+      info() {},
+      warn() {},
+      error(message) {
+        errors.push(String(message));
+      },
+    },
+  });
+
+  const snap = await handoff.start();
+
+  assert.equal(polls, HANDOFF_WATCH_MAX_FAILURES);
+  assert.equal(snap.phase, "cancelled");
+  assert.ok(errors.some((message) => /aborting volume handoff/.test(message)));
 });

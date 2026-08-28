@@ -14,6 +14,12 @@ const SONOS_CONNECT_TIMEOUT_MS = envTimeoutMs(
   "PARTYQUEUE_SONOS_CONNECT_TIMEOUT_MS",
   15_000
 );
+/** Per-device topology budget so a wedged SONOS_HOST can fail over. */
+const ZONE_DEVICE_TIMEOUT_MS = envTimeoutMs(
+  "PARTYQUEUE_ZONE_DEVICE_TIMEOUT_MS",
+  4_000
+);
+const ZONE_DEVICE_FAILOVER_LIMIT = 3;
 
 // Sonos Spotify "region" codes used when building track metadata.
 // These map to the SA_RINCON<region> service id the library embeds.
@@ -112,6 +118,37 @@ let zoneInFlight = null;
 let zoneGeneration = 0;
 const ZONE_TTL_MS = 2000;
 
+async function getZoneGroupStateFromHousehold(m) {
+  const devices = Array.isArray(m?.Devices) ? m.Devices : [];
+  if (!devices.length) {
+    throw new Error("No Sonos devices available for topology.");
+  }
+  const toTry = devices.slice(0, ZONE_DEVICE_FAILOVER_LIMIT);
+  let lastErr;
+  for (let i = 0; i < toTry.length; i++) {
+    const device = toTry[i];
+    if (typeof device?.GetZoneGroupState !== "function") continue;
+    try {
+      return await withTimeout(
+        device.GetZoneGroupState(),
+        ZONE_DEVICE_TIMEOUT_MS,
+        `Sonos topology timed out after ${Math.ceil(ZONE_DEVICE_TIMEOUT_MS / 1000)}s`
+      );
+    } catch (err) {
+      lastErr = err;
+      const next = toTry[i + 1];
+      if (next) {
+        const from = device.Name || device.Host || `device[${i}]`;
+        const toward = next.Name || next.Host || `device[${i + 1}]`;
+        console.warn(
+          `[sonos] topology via ${from} failed (${err?.message || err}); trying ${toward}`
+        );
+      }
+    }
+  }
+  throw lastErr || new Error("Sonos topology query failed.");
+}
+
 export async function getZoneGroups(m, { fresh = false } = {}) {
   const now = Date.now();
   if (!fresh && zoneCache.groups && now - zoneCache.at < ZONE_TTL_MS) {
@@ -124,7 +161,7 @@ export async function getZoneGroups(m, { fresh = false } = {}) {
   const readGeneration = zoneGeneration;
   const request = (async () => {
     try {
-      const groups = await m.Devices[0].GetZoneGroupState();
+      const groups = await getZoneGroupStateFromHousehold(m);
       // clearZoneCache() bumps generation; never let a superseded read refill.
       if (readGeneration === zoneGeneration) {
         zoneCache = { at: Date.now(), groups };

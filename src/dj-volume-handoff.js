@@ -15,6 +15,20 @@ function syncHandoffActiveFlag() {
 
 const DEFAULT_POLL_MS = 150;
 const DEFAULT_RAMP_STEPS = 6;
+/** Instant EHOSTUNREACH used to hammer a dying NIC every 150ms. Back off, then abort. */
+export const HANDOFF_WATCH_MAX_FAILURES = 6;
+export const HANDOFF_WATCH_FAILURE_STREAK_MS = 8_000;
+export const HANDOFF_WATCH_BACKOFF_CAP_MS = 5_000;
+
+export function handoffWatchSleepMs(
+  consecutiveFailures,
+  pollMs,
+  capMs = HANDOFF_WATCH_BACKOFF_CAP_MS
+) {
+  const base = Math.max(0, Number(pollMs) || 0);
+  if (consecutiveFailures <= 0) return base;
+  return Math.min(base * 2 ** Math.min(consecutiveFailures, 5), capMs);
+}
 const RESTORE_RETRIES = 3;
 const RESTORE_RETRY_MS = 250;
 const PAD_RESUME_MS = 1200;
@@ -312,6 +326,8 @@ export function createDjVolumeHandoff({
 
   const run = async () => {
     setPhase("waiting-pre-silence");
+    let consecutiveWatchFailures = 0;
+    let watchFailureSince = 0;
     while (!cancelled) {
       try {
         const io = await getAdapter();
@@ -521,11 +537,32 @@ export function createDjVolumeHandoff({
         ) {
           await maybeResumePad(true, state);
         }
+        consecutiveWatchFailures = 0;
+        watchFailureSince = 0;
       } catch (error) {
+        consecutiveWatchFailures += 1;
+        if (!watchFailureSince) watchFailureSince = now();
         logger.error(`watch failed: ${error.message}`);
+        const streakMs = now() - watchFailureSince;
+        if (
+          consecutiveWatchFailures >= HANDOFF_WATCH_MAX_FAILURES ||
+          streakMs >= HANDOFF_WATCH_FAILURE_STREAK_MS
+        ) {
+          logger.error(
+            `aborting volume handoff after ${consecutiveWatchFailures} failed polls (${streakMs}ms)`
+          );
+          cancelled = true;
+          try {
+            await restoreExact("sonos unreachable");
+          } catch {
+            /* best-effort — the speaker may already be gone */
+          }
+          setPhase("cancelled");
+          break;
+        }
       }
       if (cancelled) break;
-      await sleep(pollMs);
+      await sleep(handoffWatchSleepMs(consecutiveWatchFailures, pollMs));
     }
     return snapshot();
   };

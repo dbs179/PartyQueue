@@ -2,8 +2,69 @@ import { withSonosTransportLane } from "./sonos-lock.js";
 import { getManager, resolveGroup } from "./sonos-core.js";
 import { invalidateSonosSnapshots } from "./sonos-snapshots.js";
 import { isDjVolumeHandoffActive } from "./dj-volume-handoff-state.js";
+import { envTimeoutMs, withTimeout } from "./with-timeout.js";
+import { isSonosUnreachableError } from "./sonos-reachability.js";
 
 const VOLUME_STEP = 1;
+const PLAYER_VOLUME_TIMEOUT_MS = envTimeoutMs(
+  "PARTYQUEUE_PLAYER_VOLUME_TIMEOUT_MS",
+  2_000
+);
+const SKIP_UNREACHABLE_MS = 60_000;
+
+let playerVolumeTimeoutMs = PLAYER_VOLUME_TIMEOUT_MS;
+let skipUnreachableMs = SKIP_UNREACHABLE_MS;
+/** @type {Map<string, number>} host -> skip-until epoch ms */
+const unreachableUntil = new Map();
+
+export function setPlayerVolumeTimeoutForTests(ms) {
+  if (ms != null) playerVolumeTimeoutMs = Number(ms);
+}
+export function setSkipUnreachableMsForTests(ms) {
+  if (ms != null) skipUnreachableMs = Number(ms);
+}
+export function resetVolumeReachabilityForTests() {
+  playerVolumeTimeoutMs = PLAYER_VOLUME_TIMEOUT_MS;
+  skipUnreachableMs = SKIP_UNREACHABLE_MS;
+  unreachableUntil.clear();
+}
+
+function playerKey(device) {
+  return String(device?.Host || device?.Uuid || device?.Name || "");
+}
+
+function isPlayerSkipped(device, now = Date.now()) {
+  const key = playerKey(device);
+  if (!key) return false;
+  const until = unreachableUntil.get(key);
+  if (!until) return false;
+  if (now >= until) {
+    unreachableUntil.delete(key);
+    return false;
+  }
+  return true;
+}
+
+function markPlayerUnreachable(device, now = Date.now()) {
+  const key = playerKey(device);
+  if (!key) return;
+  const already = unreachableUntil.has(key);
+  unreachableUntil.set(key, now + skipUnreachableMs);
+  if (!already) {
+    console.warn(
+      `[sonos] skipping unreachable player ${key} for ${Math.round(skipUnreachableMs / 1000)}s`
+    );
+  }
+}
+
+function markPlayerReachable(device) {
+  const key = playerKey(device);
+  if (key) unreachableUntil.delete(key);
+}
+
+function liveMembers(members, now = Date.now()) {
+  return (members || []).filter((device) => !isPlayerSkipped(device, now));
+}
 
 export function assertManualVolumeAvailable() {
   if (!isDjVolumeHandoffActive()) return;
@@ -36,6 +97,42 @@ const setPlayerVolume = (device, volume) =>
     DesiredVolume: volume,
   });
 
+async function readPlayerVolumeSafe(device) {
+  try {
+    const volume = Number(
+      await withTimeout(
+        readPlayerVolume(device),
+        playerVolumeTimeoutMs,
+        "Sonos volume read timed out"
+      )
+    );
+    markPlayerReachable(device);
+    return { device, volume, ok: true };
+  } catch (err) {
+    if (isSonosUnreachableError(err) || /timed out/i.test(String(err?.message || ""))) {
+      markPlayerUnreachable(device);
+    }
+    return { device, volume: null, ok: false };
+  }
+}
+
+async function setPlayerVolumeSafe(device, volume) {
+  try {
+    await withTimeout(
+      setPlayerVolume(device, volume),
+      playerVolumeTimeoutMs,
+      "Sonos volume write timed out"
+    );
+    markPlayerReachable(device);
+    return true;
+  } catch (err) {
+    if (isSonosUnreachableError(err) || /timed out/i.test(String(err?.message || ""))) {
+      markPlayerUnreachable(device);
+    }
+    return false;
+  }
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // How long to wait for speakers to finish ramping before re-checking, and how
@@ -53,39 +150,45 @@ export { sleep, SETTLE_MS };
 // This guarantees the whole group ends locked to the same exact level.
 export async function lockGroupVolume(members, target) {
   const want = Math.max(0, Math.min(100, Math.round(Number(target) || 0)));
-  let toSet = members;
+  let active = liveMembers(members);
+  if (!active.length) {
+    throw new Error("No reachable Sonos players for group volume.");
+  }
+  let toSet = active;
   for (let pass = 0; pass < MAX_PASSES; pass++) {
-    await Promise.all(toSet.map((device) => setPlayerVolume(device, want)));
+    if (!toSet.length) break;
+    await Promise.all(toSet.map((device) => setPlayerVolumeSafe(device, want)));
+    active = liveMembers(active);
     await sleep(SETTLE_MS);
 
-    const after = await Promise.all(
-      members.map(async (device) => ({
-        device,
-        volume: Number(await readPlayerVolume(device)),
-      }))
-    );
-    // Sonos CurrentVolume is often a string ("20"); strict !== against a
-    // number falsely failed restore and left announce volume sticky/loud.
-    toSet = after.filter((r) => r.volume !== want).map((r) => r.device);
+    const after = await Promise.all(active.map((device) => readPlayerVolumeSafe(device)));
+    active = after.filter((r) => r.ok).map((r) => r.device);
+    toSet = after.filter((r) => r.ok && r.volume !== want).map((r) => r.device);
     if (toSet.length === 0) break;
   }
-  return toSet.length === 0;
+  return toSet.length === 0 && active.length > 0;
 }
 
 async function adjustGroupVolume(delta) {
   const m = await getManager();
   const { members } = await resolveGroup(m);
+  const active = liveMembers(members);
+  if (!active.length) {
+    throw new Error("No reachable Sonos players for group volume.");
+  }
 
-  // Read every player's CURRENT volume live, then sync the whole group to the
-  // LOUDEST one before applying the step. Example: [12, 8, 8] with +1 -> all 13.
-  const volumes = await Promise.all(
-    members.map((device) => readPlayerVolume(device))
-  );
-  const reference = Math.max(...volumes);
+  // Read every reachable player's CURRENT volume live, then sync the whole
+  // group to the LOUDEST one before applying the step.
+  const reads = await Promise.all(active.map((device) => readPlayerVolumeSafe(device)));
+  const ok = reads.filter((r) => r.ok);
+  if (!ok.length) {
+    throw new Error("Could not read volume from any Sonos player.");
+  }
+  const reference = Math.max(...ok.map((r) => r.volume));
   const target = Math.max(0, Math.min(100, reference + delta));
 
   const locked = await lockGroupVolume(members, target);
-  return { volume: target, players: members.length, locked };
+  return { volume: target, players: liveMembers(members).length, locked };
 }
 
 export async function volumeUp(step = VOLUME_STEP) {
@@ -107,10 +210,16 @@ export async function volumeDown(step = VOLUME_STEP) {
 export async function getGroupVolume() {
   const m = await getManager();
   const { members } = await resolveGroup(m);
-  const volumes = await Promise.all(
-    members.map((device) => readPlayerVolume(device))
-  );
-  return Math.max(0, ...volumes.map((v) => Number(v) || 0));
+  const active = liveMembers(members);
+  if (!active.length) {
+    throw new Error("No reachable Sonos players for group volume.");
+  }
+  const reads = await Promise.all(active.map((device) => readPlayerVolumeSafe(device)));
+  const ok = reads.filter((r) => r.ok);
+  if (!ok.length) {
+    throw new Error("Could not read volume from any Sonos player.");
+  }
+  return Math.max(0, ...ok.map((r) => r.volume || 0));
 }
 
 export async function setGroupVolume(level) {

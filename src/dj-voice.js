@@ -2734,13 +2734,16 @@ async function holdAtTrackEndWhile(work) {
   };
 
   const poller = (async () => {
+    let delay = TRACK_END_HOLD_POLL_MS;
     while (!stopped && !held) {
-      await new Promise((resolve) => setTimeout(resolve, TRACK_END_HOLD_POLL_MS));
+      await new Promise((resolve) => setTimeout(resolve, delay));
       if (stopped || held) break;
       try {
         await maybeHold();
+        delay = TRACK_END_HOLD_POLL_MS;
       } catch (err) {
         console.warn("[dj-voice] track-end hold poll skipped:", err.message);
+        delay = Math.min(delay * 2, 5_000);
       }
     }
   })();

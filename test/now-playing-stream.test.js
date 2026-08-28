@@ -6,6 +6,7 @@ import {
   nowPlayingClockDiscontinuous,
   nowPlayingPollIntervalMs,
   nowPlayingSignature,
+  snapshotErrorDelayMs,
 } from "../src/now-playing-stream.js";
 import {
   NOW_PLAYING_TTL_MS,
@@ -35,6 +36,14 @@ test("nowPlayingPollIntervalMs slows down when paused or idle", () => {
   );
   assert.equal(nowPlayingPollIntervalMs({ isPlaying: false, state: "STOPPED" }), 5000);
   assert.equal(nowPlayingPollIntervalMs(null), 5000);
+});
+
+test("snapshotErrorDelayMs backs off consecutive Sonos poll failures", () => {
+  assert.equal(snapshotErrorDelayMs(1, 3000), 3000);
+  assert.equal(snapshotErrorDelayMs(2, 3000), 6000);
+  assert.equal(snapshotErrorDelayMs(3, 3000), 12000);
+  assert.equal(snapshotErrorDelayMs(5, 3000), 30000);
+  assert.equal(snapshotErrorDelayMs(8, 5000), 30000);
 });
 
 test("NP monitor schedules a longer delay after a paused snapshot", async () => {

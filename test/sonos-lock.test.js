@@ -87,3 +87,21 @@ test("transport lane times out a hung command and unblocks the next caller", asy
   );
   assert.equal(await withSonosTransportLane(() => "ok"), "ok");
 });
+
+test("lane timeout manager reset is debounced", async () => {
+  setSonosLaneTimeoutsForTests({ transportMs: 30 });
+  let resets = 0;
+  setSonosLaneTimeoutHookForTests(() => {
+    resets += 1;
+  });
+  await assert.rejects(
+    withSonosTransportLane(() => new Promise(() => {})),
+    /timed out/
+  );
+  await assert.rejects(
+    withSonosTransportLane(() => new Promise(() => {})),
+    /timed out/
+  );
+  await sleep(20);
+  assert.equal(resets, 1);
+});

@@ -1,6 +1,6 @@
 # PartyQueue
 
-**Version 10.11.7**
+**Version 10.11.8**
 
 PartyQueue lets everyone at your party help choose the music. Guests open a
 web page on their phones, search Spotify, and add songs to your Sonos queue.
@@ -395,7 +395,7 @@ SETTINGS_PIN=
 ```
 
 - `SONOS_ROOM` chooses a room or group coordinator.
-- `SONOS_HOST` pins discovery to one speaker IP.
+- `SONOS_HOST` pins discovery to one speaker IP (the SOAP gateway). Prefer a stable speaker.
 - `PUBLIC_BASE_URL` is the address Sonos uses to reach PartyQueue media, and
   enables Origin checks on mutating requests.
 - `PARTYQUEUE_ALLOWED_HOSTS` lists extra dotted hostnames the API may accept

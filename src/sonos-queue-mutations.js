@@ -1569,6 +1569,14 @@ async function clearQueueUnlocked() {
   // A parked shout has nothing left to glue to — drop the freeze so
   // Never-Ending is not stuck waiting on an announce that will never land.
   forceEndAnnounceRampPark();
+  try {
+    const { cancelActiveDjVolumeHandoff } = await import(
+      "./dj-volume-handoff.js"
+    );
+    await cancelActiveDjVolumeHandoff("queue cleared");
+  } catch {
+    /* best-effort */
+  }
   const m = await getManager();
   let coordinator = await resolveCoordinator(m);
 
