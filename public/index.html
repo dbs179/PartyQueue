@@ -1438,6 +1438,13 @@
         <div class="hub-sections">
           <div class="settings-hub">
           <div class="settings-hub-grid" role="navigation" aria-label="DJ sections">
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-cohosts">
+              <p class="settings-hub-heading">
+                <span class="settings-hub-title">Co-hosts:</span>
+                <span class="settings-hub-desc">Who speaks set announces and shout-outs.</span>
+              </p>
+              <span class="settings-hub-stat" id="dj-stat-cohosts">Holy Roller</span>
+            </button>
             <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-banner">
               <p class="settings-hub-heading">
                 <span class="settings-hub-title">Banner:</span>
@@ -1451,6 +1458,13 @@
                 <span class="settings-hub-desc">Name used in announcements.</span>
               </p>
               <span class="settings-hub-stat" id="dj-stat-name">—</span>
+            </button>
+            <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-taglines">
+              <p class="settings-hub-heading">
+                <span class="settings-hub-title">Tag Lines:</span>
+                <span class="settings-hub-desc">Quotes under the DJ on Now Playing and Up Next.</span>
+              </p>
+              <span class="settings-hub-stat" id="dj-stat-taglines">—</span>
             </button>
             <button type="button" class="settings-hub-card" data-dj-panel="settings-dj-voice">
               <p class="settings-hub-heading">
@@ -1506,11 +1520,55 @@
         </div>
       </div>
 
+      <div id="view-settings-dj-cohosts" class="view" hidden>
+        <div class="subpage-head dj-subpage-head">
+          <h2 class="section-label subpage-title">Co-hosts</h2>
+          <button id="dj-roster-save" type="button" class="subpage-head-link">Save</button>
+          <button id="dj-roster-reset" type="button" class="subpage-head-link">Defaults</button>
+          <button id="settings-dj-cohosts-back" type="button" class="subpage-head-link subpage-back">Back</button>
+        </div>
+        <div class="booth-sections">
+          <div class="booth-section">
+            <div class="booth-section-head">
+              <p class="booth-section-heading">
+                <span class="section-label">Booth:</span>
+                <span class="booth-section-sub">Holy Roller, Sister Static, or Mix. Last-call recap always stays Holy Roller.</span>
+              </p>
+            </div>
+            <div class="setting-row">
+              <label class="setting-label" for="set-dj-roster-mode">Who speaks</label>
+              <select id="set-dj-roster-mode" class="setting-input">
+                <option value="holy-roller">Holy Roller</option>
+                <option value="sister-static">Sister Static</option>
+                <option value="mix">Mix</option>
+              </select>
+              <span class="setting-hint">set announces and guest shout-outs</span>
+            </div>
+            <div class="setting-row" id="dj-mix-row" hidden>
+              <label class="setting-label" for="set-dj-mix-percent">Holy Roller mix %</label>
+              <input type="number" id="set-dj-mix-percent" class="setting-input" min="0" max="100" step="1" inputmode="numeric" />
+              <span class="setting-hint">chance he is the solo speaker when Mix is on</span>
+            </div>
+            <div class="setting-row" id="dj-banter-row" hidden>
+              <label class="setting-label" for="set-dj-banter-percent">Banter %</label>
+              <input type="number" id="set-dj-banter-percent" class="setting-input" min="0" max="100" step="1" inputmode="numeric" />
+              <span class="setting-hint">Mix set announces only — Holy Roller then Sister Static</span>
+            </div>
+            <p class="booth-section-sub booth-field-note">Shout-outs stay one DJ. Banter never fires on birthday or dedication shouts.</p>
+          </div>
+        </div>
+      </div>
+
       <div id="view-settings-dj-banner" class="view" hidden>
         <div class="subpage-head dj-subpage-head">
           <h2 class="section-label subpage-title">Banner</h2>
           <button type="button" class="subpage-head-link dj-voice-reset-btn">Defaults</button>
           <button id="settings-dj-banner-back" type="button" class="subpage-head-link subpage-back">Back</button>
+        </div>
+        <div class="dj-persona-switch" role="group" aria-label="Editing DJ">
+          <span class="dj-persona-switch-label">Editing:</span>
+          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="holy-roller">Holy Roller</button>
+          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="sister-static">Sister Static</button>
         </div>
         <div class="booth-sections">
           <div class="booth-section">
@@ -1534,6 +1592,11 @@
           <button type="button" class="subpage-head-link dj-voice-reset-btn">Defaults</button>
           <button id="settings-dj-name-back" type="button" class="subpage-head-link subpage-back">Back</button>
         </div>
+        <div class="dj-persona-switch" role="group" aria-label="Editing DJ">
+          <span class="dj-persona-switch-label">Editing:</span>
+          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="holy-roller">Holy Roller</button>
+          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="sister-static">Sister Static</button>
+        </div>
         <div class="booth-sections">
           <div class="booth-section">
             <div class="booth-section-head">
@@ -1550,12 +1613,46 @@
         </div>
       </div>
 
+      <div id="view-settings-dj-taglines" class="view" hidden>
+        <div class="subpage-head dj-subpage-head">
+          <h2 class="section-label subpage-title">Tag Lines</h2>
+          <button id="dj-taglines-save" type="button" class="subpage-head-link">Save</button>
+          <button id="dj-taglines-reset" type="button" class="subpage-head-link">Defaults</button>
+          <button id="settings-dj-taglines-back" type="button" class="subpage-head-link subpage-back">Back</button>
+        </div>
+        <div class="dj-persona-switch" role="group" aria-label="Editing DJ">
+          <span class="dj-persona-switch-label">Editing:</span>
+          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="holy-roller">Holy Roller</button>
+          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="sister-static">Sister Static</button>
+        </div>
+        <div class="booth-sections">
+          <div class="booth-section">
+            <div class="booth-section-head">
+              <p class="booth-section-heading">
+                <span class="section-label">Tag Lines:</span>
+                <span class="booth-section-sub">One quote per line. Shown as the artist line under the DJ name.</span>
+              </p>
+            </div>
+            <div class="setting-row-text">
+              <label class="setting-label" for="set-dj-taglines">Lines</label>
+              <textarea id="set-dj-taglines" class="setting-input dj-taglines-input" rows="18" maxlength="5000" placeholder="Rocking from the Pulpit" spellcheck="true"></textarea>
+            </div>
+            <p class="booth-section-sub booth-field-note">Blank lines and duplicates are ignored. Empty save restores the built-in pack.</p>
+          </div>
+        </div>
+      </div>
+
       <div id="view-settings-dj-voice" class="view" hidden>
         <div class="subpage-head dj-subpage-head">
           <h2 class="section-label subpage-title">Voice &amp; character</h2>
           <button type="button" class="subpage-head-link dj-voice-save-btn">Save</button>
           <button type="button" class="subpage-head-link dj-voice-reset-btn">Defaults</button>
           <button id="settings-dj-voice-back" type="button" class="subpage-head-link subpage-back">Back</button>
+        </div>
+        <div class="dj-persona-switch" role="group" aria-label="Editing DJ">
+          <span class="dj-persona-switch-label">Editing:</span>
+          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="holy-roller">Holy Roller</button>
+          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="sister-static">Sister Static</button>
         </div>
         <div class="booth-sections">
           <div class="booth-section">
@@ -1659,6 +1756,11 @@
           <button id="dj-advanced-preview-refresh" type="button" class="subpage-head-link">Refresh</button>
           <button id="dj-advanced-reset" type="button" class="subpage-head-link">Defaults</button>
           <button id="settings-dj-advanced-back" type="button" class="subpage-head-link subpage-back">Back</button>
+        </div>
+        <div class="dj-persona-switch" role="group" aria-label="Editing DJ">
+          <span class="dj-persona-switch-label">Editing:</span>
+          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="holy-roller">Holy Roller</button>
+          <button type="button" class="pill-btn dj-persona-btn" data-dj-persona="sister-static">Sister Static</button>
         </div>
         <div class="booth-sections">
           <div class="booth-section">

@@ -13,6 +13,9 @@ import {
   setBrandingSettings,
   getDjVoiceSettings,
   setDjVoiceSettings,
+  getDjPersona,
+  normalizeDjPersonaId,
+  DJ_PERSONA_SISTER_STATIC,
 } from "../settings.js";
 import {
   listBanners,
@@ -46,6 +49,33 @@ function bannersResponse() {
     banners: all,
     bannersDesktop: listBannersForSlot("desktop"),
     bannersMobile: listBannersForSlot("mobile"),
+  };
+}
+
+function personaIdFromReq(req) {
+  return normalizeDjPersonaId(req.body?.persona ?? req.query?.persona);
+}
+
+function applyDjIcon(name, personaId) {
+  if (personaId === DJ_PERSONA_SISTER_STATIC) {
+    return setDjVoiceSettings({ djSisterStatic: { djIcon: name } });
+  }
+  return setDjVoiceSettings({ djIcon: name });
+}
+
+function djIconListPayload(personaId) {
+  const hr = getDjVoiceSettings();
+  const ss = getDjPersona(DJ_PERSONA_SISTER_STATIC);
+  const activePersona =
+    personaId === DJ_PERSONA_SISTER_STATIC ? ss : hr;
+  return {
+    ok: true,
+    active: activePersona.djIcon,
+    djIcon: activePersona.djIcon,
+    djIconUrl: activePersona.djIconUrl,
+    sisterStaticActive: ss.djIcon,
+    defaultUrl: "/dj-icons/headphones.png",
+    icons: listDjIcons(),
   };
 }
 
@@ -109,29 +139,15 @@ export function registerMediaRoutes(app) {
   });
 
   // DJ Voice icons: list + active, upload (newest becomes active), select, delete.
-  app.get("/api/dj-icon", requireHost, (_req, res) => {
-    const dj = getDjVoiceSettings();
-    res.json({
-      ok: true,
-      active: dj.djIcon,
-      djIcon: dj.djIcon,
-      djIconUrl: dj.djIconUrl,
-      defaultUrl: "/dj-icons/headphones.png",
-      icons: listDjIcons(),
-    });
+  app.get("/api/dj-icon", requireHost, (req, res) => {
+    res.json(djIconListPayload(personaIdFromReq(req)));
   });
 
   app.post("/api/dj-icon", requireHost, express.json({ limit: "4mb" }), (req, res) => {
     try {
       const name = saveDjIcon(req.body?.image);
-      const dj = setDjVoiceSettings({ djIcon: name });
-      res.json({
-        ok: true,
-        active: dj.djIcon,
-        djIcon: dj.djIcon,
-        djIconUrl: dj.djIconUrl,
-        icons: listDjIcons(),
-      });
+      applyDjIcon(name, personaIdFromReq(req));
+      res.json(djIconListPayload(personaIdFromReq(req)));
     } catch (err) {
       console.error("[dj-icon] upload:", err.message);
       res.status(400).json({ error: err.message || "Could not save DJ icon." });
@@ -143,31 +159,22 @@ export function registerMediaRoutes(app) {
     if (name !== null && !djIconExists(name)) {
       return res.status(404).json({ error: "DJ icon not found." });
     }
-    const dj = setDjVoiceSettings({ djIcon: name }); // null = bundled default
-    res.json({
-      ok: true,
-      active: dj.djIcon,
-      djIcon: dj.djIcon,
-      djIconUrl: dj.djIconUrl,
-      icons: listDjIcons(),
-    });
+    applyDjIcon(name, personaIdFromReq(req));
+    res.json(djIconListPayload(personaIdFromReq(req)));
   });
 
   app.delete("/api/dj-icon/:name", requireHost, (req, res) => {
     try {
       const { name } = req.params;
       const existed = deleteDjIcon(name);
-      if (existed && getDjVoiceSettings().djIcon === name) {
-        setDjVoiceSettings({ djIcon: null });
+      if (existed) {
+        const hr = getDjVoiceSettings();
+        if (hr.djIcon === name) setDjVoiceSettings({ djIcon: null });
+        if (hr.djSisterStatic?.djIcon === name) {
+          setDjVoiceSettings({ djSisterStatic: { djIcon: null } });
+        }
       }
-      const dj = getDjVoiceSettings();
-      res.json({
-        ok: true,
-        active: dj.djIcon,
-        djIcon: dj.djIcon,
-        djIconUrl: dj.djIconUrl,
-        icons: listDjIcons(),
-      });
+      res.json(djIconListPayload(personaIdFromReq(req)));
     } catch (err) {
       res.status(400).json({ error: err.message || "Could not delete DJ icon." });
     }

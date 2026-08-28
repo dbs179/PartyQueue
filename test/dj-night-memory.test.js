@@ -181,6 +181,22 @@ test("clip scripts bind spoken copy to TTS URLs for lyrics display", () => {
   assert.equal(mem.scriptForClip("http://other/missing.mp3"), null);
 });
 
+test("clip memory stores personaId for display remap", () => {
+  const uri = "http://ha.local:8123/api/tts_proxy/sister.mp3";
+  mem.rememberDjClipScript(uri, "I'll keep this short.", {
+    personaId: "sister-static",
+  });
+  assert.equal(mem.personaForClip(uri), "sister-static");
+  mem.rememberLastDjSpeaker({
+    personaId: "sister-static",
+    script: "I'll keep this short.",
+    kind: "set",
+    solo: true,
+  });
+  assert.equal(mem.getLastSoloDjSpeaker()?.personaId, "sister-static");
+  assert.equal(mem.getLastDjAnnounce()?.personaId, "sister-static");
+});
+
 test("old DJ memory files load without global announce history", () => {
   mem.clearDjNightMemory();
   fs.writeFileSync(

@@ -62,12 +62,53 @@ export const DJ_TAGLINES = [
   "Hydrated and Ready to Spin",
 ];
 
+export const DJ_TAGLINE_MAX_LEN = 60;
+export const DJ_TAGLINE_MAX_COUNT = 80;
+
+/**
+ * Normalize a host-edited pack (array or newline-separated text). Empty or
+ * invalid input falls back to the built-in list so Now Playing always has a
+ * line to show.
+ * @param {unknown} value
+ * @param {string[]} [fallback]
+ * @returns {string[]}
+ */
+export function normalizeDjTaglines(value, fallback = DJ_TAGLINES) {
+  const fallbackPack = (
+    Array.isArray(fallback) && fallback.length ? fallback : DJ_TAGLINES
+  ).map((line) => String(line || "").trim()).filter(Boolean);
+
+  let rawLines;
+  if (value == null) return [...fallbackPack];
+  if (typeof value === "string") rawLines = value.split(/\r?\n/);
+  else if (Array.isArray(value)) rawLines = value;
+  else return [...fallbackPack];
+
+  const seen = new Set();
+  const out = [];
+  for (const raw of rawLines) {
+    const line = String(raw || "")
+      .replace(/[\u0000-\u001f\u007f]/g, "")
+      .trim()
+      .slice(0, DJ_TAGLINE_MAX_LEN);
+    if (!line) continue;
+    const key = line.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(line);
+    if (out.length >= DJ_TAGLINE_MAX_COUNT) break;
+  }
+  return out.length ? out : [...fallbackPack];
+}
+
 /**
  * Tagline for a DJ clip URL. Stable for the same clip within the night
  * window; new clips avoid taglines already used tonight until the pack
  * is exhausted, then recycle least-recently used.
+ * @param {string|null|undefined} uri
+ * @param {string[]|string|null|undefined} [pack]
  * @returns {string}
  */
-export function taglineForClip(uri) {
-  return reserveClipTagline(uri, DJ_TAGLINES);
+export function taglineForClip(uri, pack) {
+  return reserveClipTagline(uri, normalizeDjTaglines(pack, DJ_TAGLINES));
 }

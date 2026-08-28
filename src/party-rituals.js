@@ -69,6 +69,8 @@ export function setKidsLock(enabled) {
     const snapshot = {
       genres: Array.isArray(s.genres) ? [...s.genres] : null,
       djCharacterIntensity: dj.djCharacterIntensity || "classic",
+      sisterStaticIntensity:
+        dj.djSisterStatic?.djCharacterIntensity || "classic",
       filterExplicit: cur.filterExplicit,
     };
     setContentSettings({
@@ -76,7 +78,10 @@ export function setKidsLock(enabled) {
       kidsLockSnapshot: snapshot,
       filterExplicit: true,
     });
-    setDjVoiceSettings({ djCharacterIntensity: "subtle" });
+    setDjVoiceSettings({
+      djCharacterIntensity: "subtle",
+      djSisterStatic: { djCharacterIntensity: "subtle" },
+    });
     savePickerSelection(undefined, [...KIDS_GENRES]);
     return getRitualState();
   }
@@ -90,6 +95,11 @@ export function setKidsLock(enabled) {
     }
     if (snap.djCharacterIntensity) {
       setDjVoiceSettings({ djCharacterIntensity: snap.djCharacterIntensity });
+    }
+    if (snap.sisterStaticIntensity) {
+      setDjVoiceSettings({
+        djSisterStatic: { djCharacterIntensity: snap.sisterStaticIntensity },
+      });
     }
     if (Array.isArray(snap.genres)) {
       savePickerSelection(undefined, snap.genres);

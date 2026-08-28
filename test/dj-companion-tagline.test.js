@@ -38,6 +38,16 @@ test("returns null when no TTS sits next to the pad", () => {
   assert.equal(findCompanionDjTtsUri([], 0), null);
 });
 
+test("duet restore pad companions the punch TTS, ramp companions the lead", () => {
+  const punch = {
+    TrackUri: "http://ha.local:8123/api/tts_proxy/sister-static.mp3",
+    Title: "tts",
+  };
+  const items = [song, ramp, tts, punch, restore, song2];
+  assert.equal(findCompanionDjTtsUri(items, 1), tts.TrackUri);
+  assert.equal(findCompanionDjTtsUri(items, 4), punch.TrackUri);
+});
+
 const song2 = {
   TrackUri: "spotify:track:def",
   Title: "Closer",

@@ -305,6 +305,7 @@ export function persistBrandingCache(partial = {}, opts = {}) {
  *   showToast: (msg: string, isError?: boolean) => void,
  *   saveSettings: (patch: object, opts?: object) => void,
  *   getDefaultDjIconName?: () => string,
+ *   getEditingPersona?: () => string,
  *   onDjIconChange?: (name: string|null) => void,
  *   onShowQueueGenreChange?: (enabled: boolean) => void,
  * }} deps
@@ -346,6 +347,7 @@ export function createBrandingUi(els, deps) {
   const saveSettings = deps.saveSettings;
   const getDefaultDjIconName =
     deps.getDefaultDjIconName || (() => "dj-icon-headphones.png");
+  const getEditingPersona = deps.getEditingPersona || (() => "holy-roller");
   const onDjIconChange = deps.onDjIconChange || (() => {});
   const onShowQueueGenreChange = deps.onShowQueueGenreChange || (() => {});
 
@@ -446,6 +448,12 @@ export function createBrandingUi(els, deps) {
     }
   }
 
+  function editingPersona() {
+    return getEditingPersona() === "sister-static"
+      ? "sister-static"
+      : "holy-roller";
+  }
+
   function renderDjIcons(data) {
     if (!djIconGallery) return;
     const { active, items } = buildDjIconGalleryItems(data, {
@@ -461,7 +469,9 @@ export function createBrandingUi(els, deps) {
 
   async function loadDjIcons() {
     try {
-      const res = await fetchFn("/api/dj-icon");
+      const res = await fetchFn(
+        `/api/dj-icon?persona=${encodeURIComponent(editingPersona())}`
+      );
       if (!res.ok) return;
       renderDjIcons(await res.json());
     } catch {
@@ -474,7 +484,7 @@ export function createBrandingUi(els, deps) {
       const res = await hostFetch("/api/dj-icon/select", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, persona: editingPersona() }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not switch DJ icon.");
@@ -486,9 +496,10 @@ export function createBrandingUi(els, deps) {
 
   async function deleteDjIcon(name) {
     try {
-      const res = await hostFetch(`/api/dj-icon/${encodeURIComponent(name)}`, {
-        method: "DELETE",
-      });
+      const res = await hostFetch(
+        `/api/dj-icon/${encodeURIComponent(name)}?persona=${encodeURIComponent(editingPersona())}`,
+        { method: "DELETE" }
+      );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not delete DJ icon.");
       renderDjIcons(data);
@@ -636,7 +647,10 @@ export function createBrandingUi(els, deps) {
           const res = await hostFetch("/api/dj-icon", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ image: reader.result }),
+            body: JSON.stringify({
+              image: reader.result,
+              persona: editingPersona(),
+            }),
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || "Upload failed.");

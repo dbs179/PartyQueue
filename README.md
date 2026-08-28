@@ -1,6 +1,6 @@
 # PartyQueue
 
-**Version 10.12.0**
+**Version 11.0.0**
 
 PartyQueue lets everyone at your party help choose the music. Guests open a
 web page on their phones, search Spotify, and add songs to your Sonos queue.
@@ -284,6 +284,9 @@ ElevenLabs or OpenAI TTS.
    The URL must be a private LAN / `.local` address, localhost, or HTTPS
    Nabu Casa unless you explicitly allow another public HTTPS host.
 5. Open **DJ Booth → DJ**, choose the provider and voice, and test it.
+   **Co-hosts** picks Holy Roller, Sister Static, or Mix. **Tag Lines** (and
+   Banner / Name / Voice / Advanced) can be edited per DJ; the quotes appear
+   beneath that DJ on Now Playing and Up Next.
 6. Enable **DJ Voice** (and shout-outs / party summary if you want them) on the
    Booth home page.
 

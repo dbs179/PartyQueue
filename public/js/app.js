@@ -533,6 +533,7 @@ let updateDjHubSummaries = () => {};
 let setActiveDjIconName = () => {};
 let applyDjFromSettings = () => {};
 let loadDjEffectivePrompt = async () => {};
+let getDjBoothEditingPersona = () => "holy-roller";
 let getEndOfNightName = () => "Last call";
 const djIconUploadBtn = document.getElementById("dj-icon-upload-btn");
 const djIconFileInput = document.getElementById("dj-icon-file");
@@ -659,6 +660,7 @@ const {
     showToast,
     saveSettings,
     getDefaultDjIconName: () => settingsDefaults?.djIcon || "dj-icon-headphones.png",
+    getEditingPersona: () => getDjBoothEditingPersona(),
     onDjIconChange: (name) => {
       setActiveDjIconName(name);
       updateDjHubSummaries();
@@ -673,6 +675,9 @@ const djBooth = createDjBoothUi(
   {
     djVoiceToggle: document.getElementById("dj-voice-toggle"),
     djNameInput: document.getElementById("set-dj-name"),
+    djTaglinesInput: document.getElementById("set-dj-taglines"),
+    djTaglinesSaveBtn: document.getElementById("dj-taglines-save"),
+    djTaglinesResetBtn: document.getElementById("dj-taglines-reset"),
     djIntroPercentInput: document.getElementById("set-dj-intro-percent"),
     djMaxWordsInput: document.getElementById("set-dj-max-words"),
     djVolumeLowInput: document.getElementById("set-dj-vol-low"),
@@ -726,6 +731,13 @@ const djBooth = createDjBoothUi(
     djVoicePreviewPlayer: document.getElementById("dj-voice-preview-player"),
     djVoiceSaveBtns: document.querySelectorAll(".dj-voice-save-btn"),
     djVoiceResetBtns: document.querySelectorAll(".dj-voice-reset-btn"),
+    djRosterModeInput: document.getElementById("set-dj-roster-mode"),
+    djMixPercentInput: document.getElementById("set-dj-mix-percent"),
+    djBanterPercentInput: document.getElementById("set-dj-banter-percent"),
+    djMixRow: document.getElementById("dj-mix-row"),
+    djBanterRow: document.getElementById("dj-banter-row"),
+    djRosterSaveBtn: document.getElementById("dj-roster-save"),
+    djRosterResetBtn: document.getElementById("dj-roster-reset"),
   },
   {
     hostFetch,
@@ -734,6 +746,7 @@ const djBooth = createDjBoothUi(
     selectDjIcon,
     getSettingsDefaults: () => settingsDefaults,
     refreshBoothMediaUrl,
+    loadDjIcons,
   }
 );
 updateDjHubSummaries = djBooth.updateDjHubSummaries;
@@ -741,6 +754,7 @@ setActiveDjIconName = djBooth.setActiveDjIconName;
 applyDjFromSettings = djBooth.applyFromSettings;
 loadDjEffectivePrompt = djBooth.loadDjEffectivePrompt;
 getEndOfNightName = djBooth.getEndOfNightName;
+getDjBoothEditingPersona = djBooth.getEditingPersona;
 
 function fillSettings(s) {
   if (s.songMemory != null) songMemoryInput.value = s.songMemory;
@@ -1370,6 +1384,7 @@ settingsResetBtn?.addEventListener("click", () => {
   delete rest.kidsLock;
   delete rest.djVoiceEnabled;
   delete rest.djName;
+  delete rest.djTaglines;
   delete rest.djIcon;
   delete rest.djNameIntroPercent;
   delete rest.djAnnounceMaxWords;
@@ -1388,6 +1403,11 @@ settingsResetBtn?.addEventListener("click", () => {
   delete rest.djCharacterIntensity;
   delete rest.djCatchphrase;
   delete rest.djBanList;
+  delete rest.djRosterMode;
+  delete rest.djMixHolyRollerPercent;
+  delete rest.djBanterPercent;
+  delete rest.djSisterStatic;
+  delete rest.djPersonas;
   delete rest.eventName;
   delete rest.subtitle;
   delete rest.headerFontSize;
@@ -1861,8 +1881,10 @@ const viewMain = document.getElementById("view-main");
 const viewSettingsLook = document.getElementById("view-settings-look");
 const viewSettingsQueue = document.getElementById("view-settings-queue");
 const viewSettingsDj = document.getElementById("view-settings-dj");
+const viewSettingsDjCohosts = document.getElementById("view-settings-dj-cohosts");
 const viewSettingsDjBanner = document.getElementById("view-settings-dj-banner");
 const viewSettingsDjName = document.getElementById("view-settings-dj-name");
+const viewSettingsDjTaglines = document.getElementById("view-settings-dj-taglines");
 const viewSettingsDjVoice = document.getElementById("view-settings-dj-voice");
 const viewSettingsDjAdvanced = document.getElementById("view-settings-dj-advanced");
 const viewSettingsDjVolume = document.getElementById("view-settings-dj-volume");
@@ -1888,8 +1910,10 @@ const restartAppBtn = document.getElementById("restart-app");
 const settingsLookBackBtn = document.getElementById("settings-look-back");
 const settingsQueueBackBtn = document.getElementById("settings-queue-back");
 const settingsDjBackBtn = document.getElementById("settings-dj-back");
+const settingsDjCohostsBackBtn = document.getElementById("settings-dj-cohosts-back");
 const settingsDjBannerBackBtn = document.getElementById("settings-dj-banner-back");
 const settingsDjNameBackBtn = document.getElementById("settings-dj-name-back");
+const settingsDjTaglinesBackBtn = document.getElementById("settings-dj-taglines-back");
 const settingsDjVoiceBackBtn = document.getElementById("settings-dj-voice-back");
 const settingsDjAdvancedBackBtn = document.getElementById(
   "settings-dj-advanced-back"
@@ -1994,8 +2018,10 @@ const VIEWS = {
   "settings-look": viewSettingsLook,
   "settings-queue": viewSettingsQueue,
   "settings-dj": viewSettingsDj,
+  "settings-dj-cohosts": viewSettingsDjCohosts,
   "settings-dj-banner": viewSettingsDjBanner,
   "settings-dj-name": viewSettingsDjName,
+  "settings-dj-taglines": viewSettingsDjTaglines,
   "settings-dj-voice": viewSettingsDjVoice,
   "settings-dj-advanced": viewSettingsDjAdvanced,
   "settings-dj-volume": viewSettingsDjVolume,
@@ -2555,8 +2581,10 @@ restartAppBtn?.addEventListener("click", () => {
 settingsLookBackBtn?.addEventListener("click", () => goBack("booth"));
 settingsQueueBackBtn?.addEventListener("click", () => goBack("booth"));
 settingsDjBackBtn?.addEventListener("click", () => goBack("booth"));
+settingsDjCohostsBackBtn?.addEventListener("click", () => goBack("settings-dj"));
 settingsDjBannerBackBtn?.addEventListener("click", () => goBack("settings-dj"));
 settingsDjNameBackBtn?.addEventListener("click", () => goBack("settings-dj"));
+settingsDjTaglinesBackBtn?.addEventListener("click", () => goBack("settings-dj"));
 settingsDjVoiceBackBtn?.addEventListener("click", () => goBack("settings-dj"));
 settingsDjAdvancedBackBtn?.addEventListener("click", () => goBack("settings-dj"));
 settingsDjVolumeBackBtn?.addEventListener("click", () => goBack("settings-dj"));

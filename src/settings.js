@@ -20,6 +20,11 @@ import {
   normalizeSonosPlayerType,
   lookupSonosPlayerType,
 } from "./sonos-player-types.js";
+import { DJ_TAGLINES, normalizeDjTaglines } from "./dj-taglines.js";
+import {
+  SISTER_STATIC_PERSONA_DEFAULTS,
+  SISTER_STATIC_TAGLINES,
+} from "./dj-sister-static.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SETTINGS_FILE =
@@ -500,6 +505,8 @@ export const DJ_VOICE_DEFAULTS = {
   djNeverInstructions: "",
   // One literal mapping per line: Written name = TTS-friendly pronunciation.
   djPronunciations: "",
+  // Artist-line quotes under the DJ name on Now Playing / Up Next / queue.
+  djTaglines: [...DJ_TAGLINES],
   // Mood Pulse / DJ shout-outs on searched adds.
   djShoutEnabled: true,
   djShoutMode: "every", // "percent" | "every"
@@ -511,7 +518,49 @@ export const DJ_VOICE_DEFAULTS = {
   endOfNightTrackArtist: null,
   // Spoken party recap TTS before the end-of-night song (needs DJ Voice).
   djPartyRecapEnabled: true,
+  // Co-host roster. Default Holy Roller only so existing parties are unchanged.
+  djRosterMode: "holy-roller",
+  djMixHolyRollerPercent: 70,
+  djBanterPercent: 15,
+  djSisterStatic: {
+    ...SISTER_STATIC_PERSONA_DEFAULTS,
+    djTaglines: [...SISTER_STATIC_TAGLINES],
+  },
 };
+
+export const DJ_PERSONA_HOLY_ROLLER = "holy-roller";
+export const DJ_PERSONA_SISTER_STATIC = "sister-static";
+export const DJ_PERSONA_IDS = [
+  DJ_PERSONA_HOLY_ROLLER,
+  DJ_PERSONA_SISTER_STATIC,
+];
+export const DJ_ROSTER_MODES = [
+  DJ_PERSONA_HOLY_ROLLER,
+  DJ_PERSONA_SISTER_STATIC,
+  "mix",
+];
+export const DJ_MIX_PERCENT_BOUNDS = { min: 0, max: 100 };
+export const DJ_BANTER_PERCENT_BOUNDS = { min: 0, max: 100 };
+
+export function normalizeDjPersonaId(
+  value,
+  fallback = DJ_PERSONA_HOLY_ROLLER
+) {
+  const id = String(value || "")
+    .trim()
+    .toLowerCase();
+  return DJ_PERSONA_IDS.includes(id) ? id : fallback;
+}
+
+export function normalizeDjRosterMode(
+  value,
+  fallback = DJ_VOICE_DEFAULTS.djRosterMode
+) {
+  const id = String(value || "")
+    .trim()
+    .toLowerCase();
+  return DJ_ROSTER_MODES.includes(id) ? id : fallback;
+}
 
 export const DEFAULT_END_OF_NIGHT = {
   name: "Closing Time",
@@ -859,6 +908,153 @@ export function djIconUrl(iconName) {
   return name ? `/dj-icon/${name}` : DJ_ICON_DEFAULT_URL;
 }
 
+function resolvePersonaIcon(iconRaw, migrated) {
+  let raw = cleanDjIcon(iconRaw);
+  if (raw && migrated?.has(raw)) raw = migrated.get(raw);
+  if (!raw) return null;
+  return djIconExists(raw) ? raw : null;
+}
+
+/**
+ * Normalize a Sister Static (or generic nested) persona patch.
+ * @param {object|null|undefined} raw
+ * @param {object} [fallback]
+ */
+export function normalizeSisterStaticPersona(
+  raw,
+  fallback = SISTER_STATIC_PERSONA_DEFAULTS
+) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const fb = fallback && typeof fallback === "object"
+    ? fallback
+    : SISTER_STATIC_PERSONA_DEFAULTS;
+  let djTtsProvider = normalizeDjTtsProvider(
+    src.djTtsProvider ?? fb.djTtsProvider,
+    fb.djTtsProvider || "openai_ha"
+  );
+  const djTtsVoiceOpenAi = normalizeDjTtsVoiceOpenAi(
+    src.djTtsVoiceOpenAi ?? fb.djTtsVoiceOpenAi,
+    fb.djTtsVoiceOpenAi || "nova"
+  );
+  const djTtsVoiceElevenlabs = normalizeDjTtsVoiceElevenlabs(
+    src.djTtsVoiceElevenlabs ?? fb.djTtsVoiceElevenlabs,
+    fb.djTtsVoiceElevenlabs || ""
+  );
+  if (djTtsProvider === "elevenlabs_ha" && !djTtsVoiceElevenlabs) {
+    djTtsProvider = "openai_ha";
+  }
+  const djTtsVoice =
+    djTtsProvider === "openai_ha" ? djTtsVoiceOpenAi : djTtsVoiceElevenlabs;
+  const migrated = ensureDjIconHousekeeping();
+  const icon = resolvePersonaIcon(src.djIcon !== undefined ? src.djIcon : fb.djIcon, migrated);
+  const name =
+    cleanDjName(src.djName ?? fb.djName) ||
+    SISTER_STATIC_PERSONA_DEFAULTS.djName;
+  return {
+    id: DJ_PERSONA_SISTER_STATIC,
+    djName: name,
+    djIcon: icon,
+    djIconUrl: djIconUrl(icon),
+    djTtsProvider,
+    djTtsEngine: djTtsEngineForProvider(djTtsProvider),
+    djTtsVoiceOpenAi,
+    djTtsVoiceElevenlabs,
+    djTtsVoice,
+    djTtsSpeed: normalizeDjTtsSpeed(
+      src.djTtsSpeed ?? fb.djTtsSpeed,
+      fb.djTtsSpeed ?? 1
+    ),
+    djCharacterIntensity: normalizeDjCharacterIntensity(
+      src.djCharacterIntensity ?? fb.djCharacterIntensity,
+      fb.djCharacterIntensity || "extra"
+    ),
+    djCatchphrase: normalizeDjCatchphrase(
+      src.djCatchphrase ?? fb.djCatchphrase,
+      fb.djCatchphrase ?? ""
+    ),
+    djBanList: normalizeDjBanList(
+      src.djBanList ?? fb.djBanList,
+      fb.djBanList ?? ""
+    ),
+    djPersonaNotes: normalizeDjPersonaNotes(
+      src.djPersonaNotes ?? fb.djPersonaNotes,
+      fb.djPersonaNotes ?? ""
+    ),
+    djAlwaysInstructions: normalizeDjAlwaysInstructions(
+      src.djAlwaysInstructions ?? fb.djAlwaysInstructions,
+      fb.djAlwaysInstructions ?? ""
+    ),
+    djNeverInstructions: normalizeDjNeverInstructions(
+      src.djNeverInstructions ?? fb.djNeverInstructions,
+      fb.djNeverInstructions ?? ""
+    ),
+    djPronunciations: normalizeDjPronunciations(
+      src.djPronunciations ?? fb.djPronunciations,
+      fb.djPronunciations ?? ""
+    ),
+    djTaglines: normalizeDjTaglines(
+      src.djTaglines ?? fb.djTaglines,
+      Array.isArray(fb.djTaglines) && fb.djTaglines.length
+        ? fb.djTaglines
+        : SISTER_STATIC_TAGLINES
+    ),
+  };
+}
+
+function holyRollerPersonaFromVoice(dj) {
+  return {
+    id: DJ_PERSONA_HOLY_ROLLER,
+    djName: dj.djName,
+    djIcon: dj.djIcon,
+    djIconUrl: dj.djIconUrl,
+    djTtsProvider: dj.djTtsProvider,
+    djTtsEngine: dj.djTtsEngine,
+    djTtsVoiceOpenAi: dj.djTtsVoiceOpenAi,
+    djTtsVoiceElevenlabs: dj.djTtsVoiceElevenlabs,
+    djTtsVoice: dj.djTtsVoice,
+    djTtsSpeed: dj.djTtsSpeed,
+    djCharacterIntensity: dj.djCharacterIntensity,
+    djCatchphrase: dj.djCatchphrase,
+    djBanList: dj.djBanList,
+    djPersonaNotes: dj.djPersonaNotes,
+    djAlwaysInstructions: dj.djAlwaysInstructions,
+    djNeverInstructions: dj.djNeverInstructions,
+    djPronunciations: dj.djPronunciations,
+    djTaglines: dj.djTaglines,
+  };
+}
+
+/** Resolved persona profile. Holy Roller is the flat DJ Voice settings. */
+export function getDjPersona(id = DJ_PERSONA_HOLY_ROLLER) {
+  const personaId = normalizeDjPersonaId(id);
+  const dj = getDjVoiceSettings();
+  if (personaId === DJ_PERSONA_HOLY_ROLLER) {
+    return holyRollerPersonaFromVoice(dj);
+  }
+  const stored = loadSettings()?.djPersonas?.[DJ_PERSONA_SISTER_STATIC];
+  return normalizeSisterStaticPersona(stored, SISTER_STATIC_PERSONA_DEFAULTS);
+}
+
+export function getDjRosterSettings() {
+  const s = loadSettings();
+  return {
+    djRosterMode: normalizeDjRosterMode(
+      s.djRosterMode,
+      DJ_VOICE_DEFAULTS.djRosterMode
+    ),
+    djMixHolyRollerPercent: clampInt(
+      s.djMixHolyRollerPercent,
+      DJ_VOICE_DEFAULTS.djMixHolyRollerPercent,
+      DJ_MIX_PERCENT_BOUNDS
+    ),
+    djBanterPercent: clampInt(
+      s.djBanterPercent,
+      DJ_VOICE_DEFAULTS.djBanterPercent,
+      DJ_BANTER_PERCENT_BOUNDS
+    ),
+  };
+}
+
 // Icon seed/migrate touches the filesystem (readdir/rename). Run once per
 // process — never on every getDjVoiceSettings() call (Random sampling used to
 // invoke that per track via isClosingTime and stall Add Random for minutes).
@@ -1001,6 +1197,10 @@ export function getDjVoiceSettings() {
       s.djPronunciations,
       DJ_VOICE_DEFAULTS.djPronunciations
     ),
+    djTaglines: normalizeDjTaglines(
+      s.djTaglines,
+      DJ_VOICE_DEFAULTS.djTaglines
+    ),
     djShoutEnabled:
       typeof s.djShoutEnabled === "boolean"
         ? s.djShoutEnabled
@@ -1032,6 +1232,23 @@ export function getDjVoiceSettings() {
       typeof s.djPartyRecapEnabled === "boolean"
         ? s.djPartyRecapEnabled
         : DJ_VOICE_DEFAULTS.djPartyRecapEnabled,
+    djRosterMode: normalizeDjRosterMode(
+      s.djRosterMode,
+      DJ_VOICE_DEFAULTS.djRosterMode
+    ),
+    djMixHolyRollerPercent: clampInt(
+      s.djMixHolyRollerPercent,
+      DJ_VOICE_DEFAULTS.djMixHolyRollerPercent,
+      DJ_MIX_PERCENT_BOUNDS
+    ),
+    djBanterPercent: clampInt(
+      s.djBanterPercent,
+      DJ_VOICE_DEFAULTS.djBanterPercent,
+      DJ_BANTER_PERCENT_BOUNDS
+    ),
+    djSisterStatic: normalizeSisterStaticPersona(
+      s.djPersonas?.[DJ_PERSONA_SISTER_STATIC]
+    ),
   };
 }
 
@@ -1153,6 +1370,12 @@ export function setDjVoiceSettings(partial = {}) {
       ""
     );
   }
+  if (partial.djTaglines != null) {
+    next.djTaglines = normalizeDjTaglines(
+      partial.djTaglines,
+      DJ_VOICE_DEFAULTS.djTaglines
+    );
+  }
   if (partial.djShoutEnabled != null) {
     next.djShoutEnabled = !!partial.djShoutEnabled;
   }
@@ -1212,6 +1435,58 @@ export function setDjVoiceSettings(partial = {}) {
   }
   if (partial.djPartyRecapEnabled != null) {
     next.djPartyRecapEnabled = !!partial.djPartyRecapEnabled;
+  }
+  if (partial.djRosterMode != null) {
+    next.djRosterMode = normalizeDjRosterMode(
+      partial.djRosterMode,
+      next.djRosterMode ?? DJ_VOICE_DEFAULTS.djRosterMode
+    );
+  }
+  if (partial.djMixHolyRollerPercent != null) {
+    next.djMixHolyRollerPercent = clampInt(
+      partial.djMixHolyRollerPercent,
+      next.djMixHolyRollerPercent ?? DJ_VOICE_DEFAULTS.djMixHolyRollerPercent,
+      DJ_MIX_PERCENT_BOUNDS
+    );
+  }
+  if (partial.djBanterPercent != null) {
+    next.djBanterPercent = clampInt(
+      partial.djBanterPercent,
+      next.djBanterPercent ?? DJ_VOICE_DEFAULTS.djBanterPercent,
+      DJ_BANTER_PERCENT_BOUNDS
+    );
+  }
+  const sisterPatch =
+    partial.djSisterStatic != null
+      ? partial.djSisterStatic
+      : partial.djPersonas?.[DJ_PERSONA_SISTER_STATIC];
+  if (sisterPatch != null && typeof sisterPatch === "object") {
+    const current = next.djPersonas?.[DJ_PERSONA_SISTER_STATIC] || {};
+    const resolved = normalizeSisterStaticPersona(
+      { ...current, ...sisterPatch },
+      SISTER_STATIC_PERSONA_DEFAULTS
+    );
+    next.djPersonas = {
+      ...(next.djPersonas && typeof next.djPersonas === "object"
+        ? next.djPersonas
+        : {}),
+      [DJ_PERSONA_SISTER_STATIC]: {
+        djName: resolved.djName,
+        djIcon: resolved.djIcon,
+        djTtsProvider: resolved.djTtsProvider,
+        djTtsVoiceOpenAi: resolved.djTtsVoiceOpenAi,
+        djTtsVoiceElevenlabs: resolved.djTtsVoiceElevenlabs,
+        djTtsSpeed: resolved.djTtsSpeed,
+        djCharacterIntensity: resolved.djCharacterIntensity,
+        djCatchphrase: resolved.djCatchphrase,
+        djBanList: resolved.djBanList,
+        djPersonaNotes: resolved.djPersonaNotes,
+        djAlwaysInstructions: resolved.djAlwaysInstructions,
+        djNeverInstructions: resolved.djNeverInstructions,
+        djPronunciations: resolved.djPronunciations,
+        djTaglines: resolved.djTaglines,
+      },
+    };
   }
   saveSettings(next);
   return getDjVoiceSettings();

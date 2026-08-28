@@ -99,6 +99,46 @@ export function formatDjShoutsHubLine({
 }
 
 /**
+ * @param {string[]|string|null|undefined} lines
+ */
+export function formatDjTaglinesHubLine(lines) {
+  let n = 0;
+  if (Array.isArray(lines)) {
+    n = lines.filter((line) => String(line || "").trim()).length;
+  } else {
+    n = String(lines || "")
+      .split(/\r?\n/)
+      .filter((line) => line.trim()).length;
+  }
+  return n === 1 ? "1 line" : `${n} lines`;
+}
+
+/**
+ * @param {{
+ *   mode?: string|null,
+ *   mixHr?: string|number|null,
+ *   banter?: string|number|null,
+ * }} [opts]
+ */
+export function formatDjRosterHubLine({
+  mode = "holy-roller",
+  mixHr = 70,
+  banter = 15,
+} = {}) {
+  const id = String(mode || "holy-roller").trim().toLowerCase();
+  if (id === "sister-static") return "Sister Static";
+  if (id === "mix") {
+    const hr = Number(mixHr);
+    const hrPct = Number.isFinite(hr) ? Math.max(0, Math.min(100, Math.round(hr))) : 70;
+    const ssPct = 100 - hrPct;
+    const b = Number(banter);
+    const bPct = Number.isFinite(b) ? Math.max(0, Math.min(100, Math.round(b))) : 15;
+    return `Mix · ${hrPct}/${ssPct} · Banter ${bPct}%`;
+  }
+  return "Holy Roller";
+}
+
+/**
  * @param {string|null|undefined} title
  * @param {number} [maxLen]
  */

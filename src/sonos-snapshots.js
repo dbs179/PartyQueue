@@ -27,9 +27,10 @@ import { memoryRequesterIdentityOf } from "./memory-requester.js";
 import {
   getSonosTargetRoom,
   getSonosPlayerTypes,
-  getDjVoiceSettings,
+  getDjPersona,
   DJ_VOICE_DEFAULTS,
   DJ_ICON_DEFAULT_URL,
+  DJ_PERSONA_HOLY_ROLLER,
 } from "./settings.js";
 import {
   iconForSonosGroup,
@@ -37,7 +38,7 @@ import {
   DEFAULT_SONOS_PLAYER_TYPE,
 } from "./sonos-player-types.js";
 import { taglineForClip } from "./dj-taglines.js";
-import { scriptForClip } from "./dj-night-memory.js";
+import { scriptForClip, personaForClip } from "./dj-night-memory.js";
 import {
   originOf,
   moodOf,
@@ -156,7 +157,10 @@ function djVoiceDisplay(
   uri = null,
   { silence = false, remember = false, companionUri = null } = {}
 ) {
-  const dj = getDjVoiceSettings();
+  const personaId =
+    personaForClip(silence ? companionUri : uri) || DJ_PERSONA_HOLY_ROLLER;
+  const persona = getDjPersona(personaId);
+  const pack = persona.djTaglines;
   let tagline;
   if (silence) {
     // Never taglineForClip(silenceUri) — that burns a pack slot and drifts
@@ -164,18 +168,18 @@ function djVoiceDisplay(
     // tagline wins (stable per clip per night); the last remembered one is
     // only a fallback, otherwise the intro pad shows the PREVIOUS announce's
     // line while Up Next shows the new one.
-    const companion = companionUri ? taglineForClip(companionUri) : null;
+    const companion = companionUri ? taglineForClip(companionUri, pack) : null;
     tagline = companion || lastNowPlayingDjTagline || "Live from the Booth";
     if (companion && remember) lastNowPlayingDjTagline = companion;
   } else {
-    tagline = taglineForClip(uri);
+    tagline = taglineForClip(uri, pack);
     if (remember) lastNowPlayingDjTagline = tagline;
   }
   return {
-    title: dj.djName || DJ_VOICE_DEFAULTS.djName,
+    title: persona.djName || DJ_VOICE_DEFAULTS.djName,
     artist: tagline,
     album: "DJ Voice",
-    albumArt: dj.djIconUrl || DJ_ICON_DEFAULT_URL,
+    albumArt: persona.djIconUrl || DJ_ICON_DEFAULT_URL,
   };
 }
 

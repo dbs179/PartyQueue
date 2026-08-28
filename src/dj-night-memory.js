@@ -51,6 +51,8 @@ function emptyStore() {
       recentAnnounceScripts: [],
       taglineClips: [],
       clipScripts: [],
+      lastSoloSpeaker: null,
+      lastAnnounce: null,
     },
   };
 }
@@ -161,10 +163,34 @@ function normalizeGlobal(global) {
           uri: String(item.uri).trim(),
           text: String(item.text).trim(),
           ts: Number(item.ts) || 0,
+          personaId: item.personaId ? String(item.personaId).trim() : null,
         }))
         .slice(-MAX_CLIP_SCRIPTS)
     : [];
-  return { phraseUses, recentAnnounceScripts, taglineClips, clipScripts };
+  const lastSoloSpeaker =
+    global?.lastSoloSpeaker && typeof global.lastSoloSpeaker === "object"
+      ? {
+          personaId: String(global.lastSoloSpeaker.personaId || "").trim() || null,
+          streak: Math.max(0, Math.floor(Number(global.lastSoloSpeaker.streak) || 0)),
+          ts: Number(global.lastSoloSpeaker.ts) || 0,
+        }
+      : null;
+  const lastAnnounce =
+    global?.lastAnnounce && typeof global.lastAnnounce === "object"
+      ? {
+          personaId: String(global.lastAnnounce.personaId || "").trim() || null,
+          script: String(global.lastAnnounce.script || "").trim() || "",
+          ts: Number(global.lastAnnounce.ts) || 0,
+        }
+      : null;
+  return {
+    phraseUses,
+    recentAnnounceScripts,
+    taglineClips,
+    clipScripts,
+    lastSoloSpeaker,
+    lastAnnounce,
+  };
 }
 
 function persist() {
@@ -222,6 +248,12 @@ function pruneStore(now = Date.now()) {
     clipScripts: (store.global?.clipScripts || [])
       .filter((item) => item.ts >= since)
       .slice(-MAX_CLIP_SCRIPTS),
+    lastSoloSpeaker:
+      store.global?.lastSoloSpeaker?.ts >= since
+        ? store.global.lastSoloSpeaker
+        : null,
+    lastAnnounce:
+      store.global?.lastAnnounce?.ts >= since ? store.global.lastAnnounce : null,
   };
   cache = next;
   return cache;
@@ -252,7 +284,7 @@ function clipUriLookupKeys(uri) {
  * @param {string|null|undefined} script
  * @param {{ alsoUris?: Array<string|null|undefined>, now?: number }} [opts]
  */
-export function rememberDjClipScript(uri, script, { alsoUris = [], now = Date.now() } = {}) {
+export function rememberDjClipScript(uri, script, { alsoUris = [], now = Date.now(), personaId = null } = {}) {
   const text = String(script || "").trim();
   if (!text) return;
   const uris = [uri, ...(Array.isArray(alsoUris) ? alsoUris : [])]
@@ -263,13 +295,15 @@ export function rememberDjClipScript(uri, script, { alsoUris = [], now = Date.no
   const ts = Number(now) || Date.now();
   const store = pruneStore(ts);
   const clips = store.global.clipScripts || [];
+  const persona = personaId ? String(personaId).trim() : null;
   for (const uriKey of uris) {
     const existing = clips.find((item) => item.uri === uriKey);
     if (existing) {
       existing.text = text;
       existing.ts = ts;
+      if (persona) existing.personaId = persona;
     } else {
-      clips.push({ uri: uriKey, text, ts });
+      clips.push({ uri: uriKey, text, ts, personaId: persona });
     }
   }
   while (clips.length > MAX_CLIP_SCRIPTS) clips.shift();
@@ -300,6 +334,68 @@ export function scriptForClip(uri) {
     }
   }
   return null;
+}
+
+/**
+ * @param {string|null|undefined} uri
+ * @returns {string|null}
+ */
+export function personaForClip(uri) {
+  const keys = clipUriLookupKeys(uri);
+  if (!keys.length) return null;
+  const store = pruneStore();
+  const clips = store.global.clipScripts || [];
+  for (const key of keys) {
+    const hit = clips.find((item) => item.uri === key);
+    if (hit?.personaId) return hit.personaId;
+  }
+  const keySet = new Set(keys);
+  for (const item of clips) {
+    for (const itemKey of clipUriLookupKeys(item.uri)) {
+      if (keySet.has(itemKey) && item.personaId) return item.personaId;
+    }
+  }
+  return null;
+}
+
+/**
+ * @param {{
+ *   personaId?: string,
+ *   script?: string,
+ *   kind?: string,
+ *   solo?: boolean,
+ *   now?: number,
+ * }} opts
+ */
+export function rememberLastDjSpeaker({
+  personaId = null,
+  script = "",
+  kind = "set",
+  solo = true,
+  now = Date.now(),
+} = {}) {
+  const id = String(personaId || "").trim();
+  if (!id) return;
+  const ts = Number(now) || Date.now();
+  const store = pruneStore(ts);
+  const text = String(script || "").trim();
+  store.global.lastAnnounce = { personaId: id, script: text, ts, kind };
+  if (solo) {
+    const prev = store.global.lastSoloSpeaker;
+    const streak = prev?.personaId === id ? (Number(prev.streak) || 0) + 1 : 1;
+    store.global.lastSoloSpeaker = { personaId: id, streak, ts };
+  }
+  persist();
+}
+
+export function getLastSoloDjSpeaker() {
+  const store = pruneStore();
+  return store.global.lastSoloSpeaker || null;
+}
+
+export function getLastDjAnnounce() {
+  const store = pruneStore();
+  return store.global.lastAnnounce || null;
 }
 
 function guestKey(name) {

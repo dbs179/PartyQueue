@@ -57,15 +57,26 @@ test("host-only controls are opt-in and persist independently", () => {
 });
 
 test("setKidsLock pins Kids mood + subtle DJ and restores on unlock", () => {
+  settings.setDjVoiceSettings({
+    djSisterStatic: { djCharacterIntensity: "extra" },
+  });
   const on = rituals.setKidsLock(true);
   assert.equal(on.kidsLock, true);
   assert.deepEqual(on.genres, ["kids", "soundtrack"]);
   assert.equal(on.djCharacterIntensity, "subtle");
   assert.equal(on.filterExplicit, true);
+  assert.equal(
+    settings.getDjPersona("sister-static").djCharacterIntensity,
+    "subtle"
+  );
 
   const off = rituals.setKidsLock(false);
   assert.equal(off.kidsLock, false);
   assert.deepEqual(off.genres, ["party", "rock"]);
   assert.equal(off.djCharacterIntensity, "extra");
   assert.equal(off.filterExplicit, false);
+  assert.equal(
+    settings.getDjPersona("sister-static").djCharacterIntensity,
+    "extra"
+  );
 });

@@ -830,6 +830,7 @@ async function completeParkedAnnounceUnlocked({
   rampUrl,
   expectedRampPos,
   tts,
+  tts2 = null,
   restore,
   preemptGeneration,
   replaceWaitingRefill = false,
@@ -889,7 +890,8 @@ async function completeParkedAnnounceUnlocked({
   }
 
   const ttsPos = rampPos + 1;
-  const restorePos = ttsPos + 1;
+  const tts2Pos = tts2?.url ? ttsPos + 1 : null;
+  const restorePos = (tts2Pos || ttsPos) + 1;
   await enqueue(tts.url, clipEnqueueOpts(tts, ttsPos));
   if (preempted()) {
     return {
@@ -899,14 +901,31 @@ async function completeParkedAnnounceUnlocked({
       partial: true,
       rampPos,
       ttsPos,
+      tts2Pos,
     };
+  }
+  if (tts2?.url) {
+    await enqueue(tts2.url, clipEnqueueOpts(tts2, tts2Pos));
+    if (preempted()) {
+      return {
+        ok: false,
+        skipped: true,
+        reason: "queue-preempted",
+        partial: true,
+        rampPos,
+        ttsPos,
+        tts2Pos,
+      };
+    }
   }
   await enqueue(restore.url, clipEnqueueOpts(restore, restorePos));
   endAnnounceRampPark();
   console.log(
-    `[dj-voice] completed parked announce ramp@${rampPos} TTS@${ttsPos} restore@${restorePos}`
+    `[dj-voice] completed parked announce ramp@${rampPos} TTS@${ttsPos}` +
+      (tts2Pos ? ` TTS2@${tts2Pos}` : "") +
+      ` restore@${restorePos}`
   );
-  return { ok: true, inserted: true, rampPos, ttsPos, restorePos };
+  return { ok: true, inserted: true, rampPos, ttsPos, tts2Pos, restorePos };
 }
 
 /**
@@ -962,6 +981,7 @@ async function insertAnnounceBlockUnlocked({
   preemptGeneration,
   ramp,
   tts,
+  tts2 = null,
   restore,
   applyLeadBuffer = false,
   requestUri = null,
@@ -1058,7 +1078,8 @@ async function insertAnnounceBlockUnlocked({
   }
 
   const ttsPos = rampPos + 1;
-  const restorePos = ttsPos + 1;
+  const tts2Pos = tts2?.url ? ttsPos + 1 : null;
+  const restorePos = (tts2Pos || ttsPos) + 1;
   const clipOpts = (clip, position) => ({
     title: clip.title,
     artist: clip.artist,
@@ -1086,6 +1107,7 @@ async function insertAnnounceBlockUnlocked({
       wiped,
       rampPos,
       ttsPos,
+      tts2Pos,
       restorePos,
     };
   };
@@ -1100,6 +1122,13 @@ async function insertAnnounceBlockUnlocked({
     return abortPartial();
   }
 
+  if (tts2?.url) {
+    await enqueue(tts2.url, clipOpts(tts2, tts2Pos));
+    if (preempted()) {
+      return abortPartial();
+    }
+  }
+
   await enqueue(restore.url, clipOpts(restore, restorePos));
   if (preempted()) {
     // Complete block is in; skip handoff/Play so Clear can own the room.
@@ -1112,6 +1141,7 @@ async function insertAnnounceBlockUnlocked({
       wiped,
       rampPos,
       ttsPos,
+      tts2Pos,
       restorePos,
     };
   }
@@ -1121,6 +1151,7 @@ async function insertAnnounceBlockUnlocked({
     inserted: true,
     rampPos,
     ttsPos,
+    tts2Pos,
     restorePos,
     wiped,
   };

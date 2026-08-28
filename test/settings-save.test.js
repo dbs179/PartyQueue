@@ -222,3 +222,62 @@ test("setSonosPlayerType persists known types and rejects junk", () => {
   assert.throws(() => settings.setSonosPlayerType("Den", "boombox"), /Unknown/);
   assert.throws(() => settings.setSonosPlayerType("", "arc"), /Missing/);
 });
+
+test("djTaglines default to the built-in pack and persist edits", async () => {
+  const { DJ_TAGLINES } = await import("../src/dj-taglines.js");
+  assert.deepEqual(settings.getDjVoiceSettings().djTaglines, DJ_TAGLINES);
+
+  const custom = ["Rocking from the Pulpit", "Custom Booth Line"];
+  const saved = settings.setDjVoiceSettings({ djTaglines: custom });
+  assert.deepEqual(saved.djTaglines, custom);
+  assert.deepEqual(settings.getDjVoiceSettings().djTaglines, custom);
+
+  const restored = settings.setDjVoiceSettings({ djTaglines: [] });
+  assert.deepEqual(restored.djTaglines, DJ_TAGLINES);
+});
+
+test("Holy Roller aliases stay at the top level and Sister Static seeds separately", async () => {
+  const { SISTER_STATIC_NAME, SISTER_STATIC_TAGLINES } = await import(
+    "../src/dj-sister-static.js"
+  );
+  settings.setDjVoiceSettings({ djName: "DJ Holy Roller" });
+  const dj = settings.getDjVoiceSettings();
+  assert.equal(dj.djName, "DJ Holy Roller");
+  assert.equal(dj.djRosterMode, "holy-roller");
+  assert.equal(dj.djMixHolyRollerPercent, 70);
+  assert.equal(dj.djBanterPercent, 15);
+  assert.equal(dj.djSisterStatic.djName, SISTER_STATIC_NAME);
+  assert.deepEqual(dj.djSisterStatic.djTaglines, SISTER_STATIC_TAGLINES);
+  assert.equal(dj.djSisterStatic.djTtsVoiceOpenAi, "nova");
+
+  const hr = settings.getDjPersona("holy-roller");
+  assert.equal(hr.djName, "DJ Holy Roller");
+  const ss = settings.getDjPersona("sister-static");
+  assert.equal(ss.djName, SISTER_STATIC_NAME);
+});
+
+test("Sister Static empty ElevenLabs ID falls back to OpenAI nova", () => {
+  const saved = settings.setDjVoiceSettings({
+    djSisterStatic: {
+      djTtsProvider: "elevenlabs_ha",
+      djTtsVoiceElevenlabs: "",
+    },
+  });
+  assert.equal(saved.djSisterStatic.djTtsProvider, "openai_ha");
+  assert.equal(saved.djSisterStatic.djTtsVoice, "nova");
+});
+
+test("roster mix settings persist without wiping Holy Roller", () => {
+  settings.setDjVoiceSettings({ djName: "DJ Holy Roller" });
+  const saved = settings.setDjVoiceSettings({
+    djRosterMode: "mix",
+    djMixHolyRollerPercent: 55,
+    djBanterPercent: 20,
+    djSisterStatic: { djName: "Sister Static" },
+  });
+  assert.equal(saved.djName, "DJ Holy Roller");
+  assert.equal(saved.djRosterMode, "mix");
+  assert.equal(saved.djMixHolyRollerPercent, 55);
+  assert.equal(saved.djBanterPercent, 20);
+  assert.equal(saved.djSisterStatic.djName, "Sister Static");
+});

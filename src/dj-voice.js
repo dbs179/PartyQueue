@@ -12,11 +12,14 @@ import { getHaCredentials, isHaConfigured } from "./home-assistant.js";
 import {
   getSonosTargetRoom,
   getDjVoiceSettings,
+  getDjPersona,
   getDiscoverySettings,
   getBrandingSettings,
   BRANDING_DEFAULTS,
   loadSettings,
   DJ_VOICE_DEFAULTS,
+  DJ_PERSONA_HOLY_ROLLER,
+  DJ_PERSONA_SISTER_STATIC,
   DJ_SILENCE_OPTIONS,
   DJ_VOLUME_TIER,
   normalizeDjSilenceSec,
@@ -99,9 +102,21 @@ import {
   getRecentDjAnnounceScripts,
   rememberDjAnnounceScript,
   rememberDjClipScript,
+  rememberLastDjSpeaker,
+  getLastDjAnnounce,
   reserveDjPhrase,
 } from "./dj-night-memory.js";
 import { withTimeout } from "./with-timeout.js";
+import {
+  resolveDjForAnnounce,
+  personaFromAssignment,
+} from "./dj-roster.js";
+import {
+  SISTER_STATIC_BIBLE,
+  sisterStaticNameIntrosFor,
+  buildSisterStaticPunchlinePrompt,
+  BANTER_PUNCHLINE_MAX_WORDS,
+} from "./dj-sister-static.js";
 
 export { withTimeout };
 
@@ -127,6 +142,16 @@ function ttsVoice() {
 
 function ttsSpeed() {
   return normalizeDjTtsSpeed(ttsSettings().djTtsSpeed);
+}
+
+function ttsOptsForPersona(persona) {
+  if (!persona) return {};
+  return {
+    voice: persona.djTtsVoice,
+    speed: persona.djTtsSpeed,
+    provider: persona.djTtsProvider,
+    pronunciations: persona.djPronunciations,
+  };
 }
 const TTS_MAX_FILES = 40;
 // Fallback when settings can't be read; live values come from Settings.
@@ -358,6 +383,7 @@ export function resolveDjCharacterKnobs(summary = {}, dj = null) {
       summary.djPronunciations ?? settings.djPronunciations,
       DJ_VOICE_DEFAULTS.djPronunciations
     ),
+    personaId: summary.personaId || settings.id || DJ_PERSONA_HOLY_ROLLER,
   };
 }
 
@@ -1322,8 +1348,11 @@ function setEnergyLabel(moodContext) {
 }
 
 // Five fixed phrasings with the configured DJ name substituted in.
-export function nameIntrosFor(djName) {
+export function nameIntrosFor(djName, personaId = DJ_PERSONA_HOLY_ROLLER) {
   const name = String(djName || DJ_VOICE_DEFAULTS.djName).trim() || DJ_VOICE_DEFAULTS.djName;
+  if (personaId === DJ_PERSONA_SISTER_STATIC) {
+    return sisterStaticNameIntrosFor(name);
+  }
   return [
     `It's your boy ${name}.`,
     `${name} back at you.`,
@@ -1385,6 +1414,18 @@ export function formatCharacterBibleForPrompt(
   const banLine = banned.length
     ? `Never say these phrases (ban-list):\n${banned.map((p) => `  - ${p}`).join("\n")}`
     : "Ban-list: none.";
+  const personaId = characterKnobs?.personaId || DJ_PERSONA_HOLY_ROLLER;
+  if (personaId === DJ_PERSONA_SISTER_STATIC) {
+    const quirks = SISTER_STATIC_BIBLE.quirks.map((q) => `- ${q}`).join("\n");
+    return `Personality:
+- ${fillEventName(SISTER_STATIC_BIBLE.identity, event)}
+${quirks}
+- Treat the configured DJ name as a stage name. Never preachy, never cruel, never explain the joke.
+Intensity: ${intensity.label} — ${intensity.prompt}
+${catchLine}
+${banLine}
+${bitLine}`;
+  }
   return `Personality:
 - ${fillEventName(DJ_CHARACTER_BIBLE.identity, event)}
 - Capture the feel of Spotify DJ X: concise, musically informed, conversational, and effortlessly confident. Use it as a stylistic reference without impersonating DJ X or claiming Spotify affiliation.
@@ -1407,6 +1448,16 @@ function formatAnnounceStructureForPrompt(structure, djName) {
     String(djName || DJ_VOICE_DEFAULTS.djName).trim() || DJ_VOICE_DEFAULTS.djName;
   const introText = fillEventName(String(structure.intro || "").trim());
   const outroText = fillEventName(String(structure.outro || "").trim());
+  if (!introText && !outroText) {
+    const nameLine = structure.nameMention
+      ? `- You may mention your DJ name (${name}) once if it fits.`
+      : `- Do not say your own DJ name ("${name}").`;
+    return `STRUCTURE — FULL SHORT CLIP
+You own this entire spoken clip (no scripted intro or outro around it).
+Write 1 to 3 short sentences. Keep it punchy.
+- Do not list genres. Mention at most one artist or song.
+${nameLine}`;
+  }
   const descriptor = speakableDescriptor(structure.descriptor);
   const countLine = structure.introHasCount
     ? "- The intro already gives the track count — do NOT repeat the number."
@@ -1448,7 +1499,11 @@ function buildDjSystemPrompt(
   const structureBlock = formatAnnounceStructureForPrompt(structure, name);
   const hostGuidanceBlock = formatHostDjGuidance(characterKnobs);
   const moodLabel = moodContext?.moodLabel || "All genres";
-  return `You are ${name}, the recurring host and DJ for ${event}. You are a real DJ in the room — not a playlist narrator, automated assistant, radio lecturer, or year-in-review host.
+  return `You are ${name}, ${
+    characterKnobs?.personaId === DJ_PERSONA_SISTER_STATIC
+      ? `the co-host and sidekick to DJ Holy Roller for ${event}`
+      : `the recurring host and DJ for ${event}`
+  }. You are a real DJ in the room — not a playlist narrator, automated assistant, radio lecturer, or year-in-review host.
 
 ${bibleBlock}
 
@@ -1815,7 +1870,9 @@ export function buildSetScript({
         { artist: discArtist }
       )
     : "";
-  const nameLine = nameMention ? pick(nameIntrosFor(name), salt + 5) : "";
+  const nameLine = nameMention
+    ? pick(nameIntrosFor(name, knobs.personaId), salt + 5)
+    : "";
   const description = buildSetDescription({
     howMany,
     descriptor: descText,
@@ -1935,14 +1992,21 @@ ${tracks || "(no track titles available)"}
 ${recentBlock ? `Already said during this party — do not reuse their wording, images, or punchlines:\n${recentBlock}\n\n` : ""}Write only the spoken set description now — the middle sentences between the scripted intro and outro. No greeting, no sign-off.`;
 }
 
-export function buildDjEffectivePromptPreview() {
-  const dj = getDjVoiceSettings();
-  const characterKnobs = resolveDjCharacterKnobs({}, dj);
+export function buildDjEffectivePromptPreview(
+  personaId = DJ_PERSONA_HOLY_ROLLER
+) {
+  const persona = getDjPersona(personaId);
+  const dj = { ...getDjVoiceSettings(), ...persona, id: persona.id };
+  const characterKnobs = resolveDjCharacterKnobs(
+    { personaId: persona.id },
+    dj
+  );
   const moodContext = resolveDjMoodContext({
     genres: enabledGenresFromSettings(),
     highlights: [],
     eraMood: loadSettings()?.mood ?? null,
   });
+  const skipScriptedEdges = persona.id === DJ_PERSONA_SISTER_STATIC;
   return buildLlmPrompt({
     event: "session_start",
     count: 4,
@@ -1957,8 +2021,12 @@ export function buildDjEffectivePromptPreview() {
     moodContext,
     characterMoment: null,
     characterKnobs,
-    intro: "[scripted intro line — reserved from the intro bank]",
-    outro: "[scripted outro line — reserved from the outro bank]",
+    intro: skipScriptedEdges
+      ? ""
+      : "[scripted intro line — reserved from the intro bank]",
+    outro: skipScriptedEdges
+      ? ""
+      : "[scripted outro line — reserved from the outro bank]",
     descriptor: "[reserved set descriptor]",
     nameMention: false,
     introHasCount: false,
@@ -2033,7 +2101,11 @@ export async function generateDjSpeechFromPrompt(
 
 // Prefer LLM-written DJ copy; fall back to varied templates.
 export async function writeSetScript(summary = {}) {
-  const dj = getDjVoiceSettings();
+  const assignmentPersonaId =
+    summary.personaId || DJ_PERSONA_HOLY_ROLLER;
+  const persona = getDjPersona(assignmentPersonaId);
+  const dj = { ...getDjVoiceSettings(), ...persona, id: assignmentPersonaId };
+  const skipScriptedEdges = assignmentPersonaId === DJ_PERSONA_SISTER_STATIC;
   const event =
     summary.event === "session_refill" ? "session_refill" : "session_start";
   const reactionSetKind =
@@ -2289,6 +2361,10 @@ export async function writeSetScript(summary = {}) {
       `[dj-voice] using one-shot next-set pack "${nextPack.id}" for this announce`
     );
   }
+  if (skipScriptedEdges) {
+    if (intro == null) intro = "";
+    if (outro == null) outro = "";
+  }
   if (intro == null) {
     if (reactionSetKind === "loved") {
       intro = "Up next: the room's most loved songs.";
@@ -2338,6 +2414,22 @@ export async function writeSetScript(summary = {}) {
     summary.djAnnounceMaxWords ?? dj.djAnnounceMaxWords;
   const edgeWords = `${intro} ${outro}`.split(/\s+/).filter(Boolean).length;
   const middleMaxWords = Math.max(16, Number(totalBudget || 0) - edgeWords);
+
+  if (skipScriptedEdges) {
+    const last = getLastDjAnnounce();
+    if (last?.script) {
+      const other =
+        last.personaId && last.personaId !== DJ_PERSONA_SISTER_STATIC
+          ? `The other DJ just said: "${last.script}". Callback is welcome; do not repeat their information.`
+          : `You recently said: "${last.script}". Do not repeat it.`;
+      characterKnobs = {
+        ...characterKnobs,
+        alwaysInstructions: [characterKnobs.alwaysInstructions, other]
+          .filter(Boolean)
+          .join("\n\n"),
+      };
+    }
+  }
 
   const payload = {
     event,
@@ -3137,11 +3229,14 @@ export async function saveTtsClip(
     voice: voiceOverride = null,
     speed: speedOverride = null,
     provider: providerOverride = null,
+    pronunciations: pronunciationsOverride = null,
   } = {}
 ) {
   const text = applyMusicPronunciations(
     message,
-    ttsSettings().djPronunciations
+    pronunciationsOverride != null
+      ? pronunciationsOverride
+      : ttsSettings().djPronunciations
   );
   if (!text) throw new Error("Empty announce message.");
 
@@ -3322,6 +3417,33 @@ function withAnnounceLock(fn) {
   return run;
 }
 
+export async function writeBanterPunchline(leadScript, _summary = {}) {
+  const persona = getDjPersona(DJ_PERSONA_SISTER_STATIC);
+  const last = getLastDjAnnounce();
+  const event = eventDisplayName();
+  const prompt = buildSisterStaticPunchlinePrompt(leadScript, {
+    name: persona.djName,
+    event,
+    lastSpeakerScript: last?.script || null,
+  });
+  try {
+    const line = await withTimeout(
+      generateDjSpeechFromPrompt(prompt, {
+        maxWords: BANTER_PUNCHLINE_MAX_WORDS,
+        banList: persona.djBanList,
+      }),
+      LLM_SCRIPT_TIMEOUT_MS,
+      "Sister Static punchline timed out"
+    );
+    return String(line || "").trim();
+  } catch (err) {
+    console.warn(
+      `[dj-voice] Sister Static punchline failed: ${err.message}`
+    );
+    return "";
+  }
+}
+
 /**
  * Write set script + generate TTS without touching the Sonos queue.
  * Used to overlap announce prep with Random enqueue.
@@ -3342,22 +3464,57 @@ export async function prepareSetAnnounceClip(
     return { ok: false, skipped: true, reason: "queue-preempted" };
   }
   try {
-    const message = await writeSetScript(summary);
+    const assignment = resolveDjForAnnounce({ kind: "set" });
+    const leadPersona = personaFromAssignment(assignment);
+    const message = await writeSetScript({
+      ...summary,
+      personaId: assignment.leadId,
+    });
     if (queueWorkWasPreempted(preemptGeneration)) {
       return { ok: false, skipped: true, reason: "queue-preempted" };
     }
     if (!message || !String(message).trim()) {
       return { ok: false, error: "Empty announce message." };
     }
-    const clip = await saveTtsClip(String(message).trim());
+    const clip = await saveTtsClip(
+      String(message).trim(),
+      ttsOptsForPersona(leadPersona)
+    );
     if (queueWorkWasPreempted(preemptGeneration)) {
       return { ok: false, skipped: true, reason: "queue-preempted" };
     }
+    let punchline = "";
+    let punchClip = null;
+    if (assignment.type === "duet") {
+      try {
+        punchline = await writeBanterPunchline(message, summary);
+        if (punchline) {
+          punchClip = await saveTtsClip(
+            punchline,
+            ttsOptsForPersona(personaFromAssignment(assignment, { punch: true }))
+          );
+        }
+      } catch (err) {
+        console.warn(
+          `[dj-voice] banter punchline failed; inserting lead only: ${err.message}`
+        );
+        punchline = "";
+        punchClip = null;
+      }
+    }
     console.log(
       `[dj-voice] prepared announce clip ${clip.fileName} (${clip.bytes} bytes; ` +
-        `${clip.publicUrl === clip.localUrl ? "local media" : "external TTS media"})`
+        `${clip.publicUrl === clip.localUrl ? "local media" : "external TTS media"})` +
+        (punchClip ? ` + punch ${punchClip.fileName}` : "")
     );
-    return { ok: true, message, clip };
+    return {
+      ok: true,
+      message,
+      clip,
+      punchline,
+      punchClip,
+      assignment,
+    };
   } catch (err) {
     console.error("[dj-voice] prepare announce clip failed:", err.message);
     return { ok: false, error: err.message || "Prepare announce failed." };
@@ -3375,6 +3532,11 @@ export async function announceOnSonos(
     queuePosition = 1,
     preemptGeneration = queueWorkGeneration(),
     clip = null,
+    clip2 = null,
+    punchline = "",
+    assignment = null,
+    personaId = null,
+    speakerKind = "set",
     applyLeadBuffer = false,
     requestUri = null,
     allowImminentPause = false,
@@ -3390,6 +3552,11 @@ export async function announceOnSonos(
       queuePosition,
       preemptGeneration,
       clip,
+      clip2,
+      punchline,
+      assignment,
+      personaId,
+      speakerKind,
       applyLeadBuffer,
       requestUri,
       allowImminentPause,
@@ -3408,6 +3575,11 @@ async function announceOnSonosUnlocked(
     queuePosition = 1,
     preemptGeneration = queueWorkGeneration(),
     clip: prebuiltClip = null,
+    clip2: prebuiltClip2 = null,
+    punchline: punchlineText = "",
+    assignment = null,
+    personaId = null,
+    speakerKind = "set",
     applyLeadBuffer = false,
     requestUri = null,
     allowImminentPause = false,
@@ -3456,9 +3628,16 @@ async function announceOnSonosUnlocked(
       return { ok: false, skipped: true, reason: "queue-preempted" };
     }
     let clip = prebuiltClip;
+    let clip2 = prebuiltClip2;
+    const leadPersona = getDjPersona(
+      assignment?.leadId || personaId || DJ_PERSONA_HOLY_ROLLER
+    );
+    const punchPersona = assignment?.punchId
+      ? getDjPersona(assignment.punchId)
+      : null;
     const buildClip = async () => {
       if (clip?.publicUrl) return clip;
-      return saveTtsClip(String(message).trim());
+      return saveTtsClip(String(message).trim(), ttsOptsForPersona(leadPersona));
     };
     if (holdAtTrackEnd && !startPlayback) {
       const wrapped = await holdAtTrackEndWhile(buildClip);
@@ -3478,9 +3657,43 @@ async function announceOnSonosUnlocked(
     try {
       rememberDjClipScript(clip.publicUrl, message, {
         alsoUris: [clip.localUrl, clip.fileName].filter(Boolean),
+        personaId: leadPersona.id || DJ_PERSONA_HOLY_ROLLER,
       });
     } catch (err) {
       console.warn("[dj-voice] clip script memory failed:", err.message);
+    }
+    const punchText = String(punchlineText || "").trim();
+    if (punchPersona && punchText && !clip2?.publicUrl) {
+      try {
+        clip2 = await saveTtsClip(punchText, ttsOptsForPersona(punchPersona));
+      } catch (err) {
+        console.warn(
+          `[dj-voice] punchline TTS failed; inserting lead only: ${err.message}`
+        );
+        clip2 = null;
+      }
+    }
+    if (clip2?.publicUrl && punchPersona) {
+      try {
+        rememberDjClipScript(clip2.publicUrl, punchText || punchlineText, {
+          alsoUris: [clip2.localUrl, clip2.fileName].filter(Boolean),
+          personaId: punchPersona.id,
+        });
+      } catch (err) {
+        console.warn("[dj-voice] punch clip script memory failed:", err.message);
+      }
+    }
+    try {
+      rememberLastDjSpeaker({
+        personaId: clip2?.publicUrl
+          ? punchPersona?.id || DJ_PERSONA_SISTER_STATIC
+          : leadPersona.id || DJ_PERSONA_HOLY_ROLLER,
+        script: clip2?.publicUrl ? punchText || message : message,
+        kind: speakerKind || "set",
+        solo: !clip2?.publicUrl,
+      });
+    } catch {
+      /* memory is best-effort */
     }
     if (preempted()) {
       return { ok: false, skipped: true, reason: "queue-preempted" };
@@ -3508,14 +3721,21 @@ async function announceOnSonosUnlocked(
       ? { publicUrl: parked.rampUrl, durationSec: parked.rampSec || silenceDurationSec() }
       : ensureSilenceRamp();
     const restore = ensureSilenceBridge();
-    const { djName } = getDjVoiceSettings();
     const { insertAnnounceBlock, completeParkedAnnounce } = await import("./sonos.js");
     const ttsClip = {
       url: clip.publicUrl,
-      title: djName || DJ_VOICE_DEFAULTS.djName,
+      title: leadPersona.djName || DJ_VOICE_DEFAULTS.djName,
       artist: "PartyQueue",
       durationSec: clip.approxDurationSec,
     };
+    const tts2Clip = clip2?.publicUrl
+      ? {
+          url: clip2.publicUrl,
+          title: punchPersona?.djName || "Sister Static",
+          artist: "PartyQueue",
+          durationSec: clip2.approxDurationSec,
+        }
+      : null;
     const restoreClip = {
       url: restore.publicUrl,
       title: "PartyQueue Silence Bridge",
@@ -3528,6 +3748,7 @@ async function announceOnSonosUnlocked(
           rampUrl: parked.rampUrl,
           expectedRampPos: parked.rampPos,
           tts: ttsClip,
+          tts2: tts2Clip,
           restore: restoreClip,
           preemptGeneration,
           replaceWaitingRefill,
@@ -3561,6 +3782,7 @@ async function announceOnSonosUnlocked(
           durationSec: freshRamp.durationSec,
         },
         tts: ttsClip,
+        tts2: tts2Clip,
         restore: restoreClip,
       });
     }
@@ -3752,7 +3974,7 @@ export async function scheduleRefillAnnounce(
     /* best-effort — fall through to planned position below */
   }
 
-  const message = await writeSetScript({
+  const prepared = await prepareSetAnnounceClip({
     event: "session_refill",
     count: summary?.added ?? summary?.count ?? 0,
     highlights: summary?.highlights ?? [],
@@ -3763,7 +3985,12 @@ export async function scheduleRefillAnnounce(
     genreLane: summary?.genreLane ?? null,
     mood: summary?.mood ?? null,
     eraMood: summary?.mood ?? null,
-  });
+  }, { preemptGeneration });
+  if (!prepared?.ok) {
+    pending = null;
+    return null;
+  }
+  const message = prepared.message;
   if (queueWorkWasPreempted(preemptGeneration)) return null;
   const left = Math.max(0, Math.floor(Number(upcoming) || 0));
   const planned = track + left + 1;
@@ -3827,6 +4054,10 @@ export async function scheduleRefillAnnounce(
       queuePosition: insertAt,
       preemptGeneration,
       replaceWaitingRefill: true,
+      clip: prepared.clip,
+      clip2: prepared.punchClip,
+      punchline: prepared.punchline,
+      assignment: prepared.assignment,
     });
     pending.enqueued = !!result?.ok;
     pending.publicUrl = result?.publicUrl || null;
@@ -3883,8 +4114,11 @@ export async function announceFreshSet(
   if (!summary?.added) return { ok: false, skipped: true };
   let message = prepared?.ok ? prepared.message : null;
   let clip = prepared?.ok ? prepared.clip : null;
+  let punchClip = prepared?.ok ? prepared.punchClip : null;
+  let punchline = prepared?.ok ? prepared.punchline : "";
+  let assignment = prepared?.ok ? prepared.assignment : null;
   if (!message || !clip?.publicUrl) {
-    message = await writeSetScript({
+    const built = await prepareSetAnnounceClip({
       event: "session_start",
       count: summary.added,
       highlights: summary.highlights ?? [],
@@ -3895,8 +4129,15 @@ export async function announceFreshSet(
       genreLane: summary.genreLane ?? null,
       mood: summary.mood ?? null,
       eraMood: summary.mood ?? null,
-    });
-    clip = null;
+    }, { preemptGeneration });
+    if (!built?.ok) {
+      return { ok: false, skipped: !!built?.skipped, error: built?.error };
+    }
+    message = built.message;
+    clip = built.clip;
+    punchClip = built.punchClip;
+    punchline = built.punchline;
+    assignment = built.assignment;
   }
   if (queueWorkWasPreempted(preemptGeneration)) {
     return { ok: false, skipped: true, reason: "queue-preempted" };
@@ -3911,6 +4152,9 @@ export async function announceFreshSet(
     queuePosition: 1,
     preemptGeneration,
     clip,
+    clip2: punchClip,
+    punchline,
+    assignment,
     replaceWaitingRefill: true,
   });
   if (result?.ok) clearRefillAnnounceGuard();
@@ -3953,8 +4197,11 @@ export async function announceSetBatch(
 
   let message = prepared?.ok ? prepared.message : null;
   let clip = prepared?.ok ? prepared.clip : null;
+  let punchClip = prepared?.ok ? prepared.punchClip : null;
+  let punchline = prepared?.ok ? prepared.punchline : "";
+  let assignment = prepared?.ok ? prepared.assignment : null;
   if (!message || !clip?.publicUrl) {
-    message = await writeSetScript({
+    const built = await prepareSetAnnounceClip({
       event,
       count: summary.added,
       highlights: summary.highlights ?? [],
@@ -3965,8 +4212,15 @@ export async function announceSetBatch(
       genreLane: summary.genreLane ?? null,
       mood: summary.mood ?? null,
       eraMood: summary.mood ?? null,
-    });
-    clip = null;
+    }, { preemptGeneration });
+    if (!built?.ok) {
+      return { ok: false, skipped: !!built?.skipped, error: built?.error };
+    }
+    message = built.message;
+    clip = built.clip;
+    punchClip = built.punchClip;
+    punchline = built.punchline;
+    assignment = built.assignment;
   }
   if (queueWorkWasPreempted(preemptGeneration)) {
     return { ok: false, skipped: true, reason: "queue-preempted" };
@@ -4009,6 +4263,9 @@ export async function announceSetBatch(
     queuePosition: insertAt,
     preemptGeneration,
     clip,
+    clip2: punchClip,
+    punchline,
+    assignment,
     replaceWaitingRefill: true,
   });
   if (result?.ok) clearRefillAnnounceGuard();
@@ -4052,6 +4309,14 @@ export async function announcePartyRecap(
     startPlayback: false,
     queuePosition: pos,
     preemptGeneration,
+    speakerKind: "recap",
+    personaId: DJ_PERSONA_HOLY_ROLLER,
+    assignment: {
+      type: "solo",
+      personaId: DJ_PERSONA_HOLY_ROLLER,
+      leadId: DJ_PERSONA_HOLY_ROLLER,
+      punchId: null,
+    },
   });
 }
 

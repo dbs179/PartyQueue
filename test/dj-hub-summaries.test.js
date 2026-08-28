@@ -6,6 +6,8 @@ import {
   formatDjAdvancedHubLine,
   formatDjVolumeHubLine,
   formatDjShoutsHubLine,
+  formatDjTaglinesHubLine,
+  formatDjRosterHubLine,
   formatDjLastCallHubLine,
   formatEndOfNightLabel,
 } from "../public/js/dj-hub-summaries.js";
@@ -61,6 +63,27 @@ test("formatDjVolumeHubLine and formatDjShoutsHubLine", () => {
   assert.equal(
     formatDjShoutsHubLine({ mode: "percent", percent: 40 }),
     "40% of the time"
+  );
+});
+
+test("formatDjTaglinesHubLine counts lines", () => {
+  assert.equal(formatDjTaglinesHubLine([]), "0 lines");
+  assert.equal(formatDjTaglinesHubLine(["Rocking from the Pulpit"]), "1 line");
+  assert.equal(
+    formatDjTaglinesHubLine("Bringing that Heat\n\nRocking from the Pulpit\n"),
+    "2 lines"
+  );
+});
+
+test("formatDjRosterHubLine", () => {
+  assert.equal(formatDjRosterHubLine({}), "Holy Roller");
+  assert.equal(
+    formatDjRosterHubLine({ mode: "sister-static" }),
+    "Sister Static"
+  );
+  assert.equal(
+    formatDjRosterHubLine({ mode: "mix", mixHr: 70, banter: 15 }),
+    "Mix · 70/30 · Banter 15%"
   );
 });
 

@@ -4033,12 +4033,44 @@ html.pq-subtitle-all-caps .subtitle {
 }
 
 .dj-advanced-input,
-.dj-prompt-preview {
+.dj-prompt-preview,
+.dj-taglines-input {
   min-height: 6rem;
   resize: vertical;
   box-sizing: border-box;
   font: inherit;
   line-height: 1.4;
+}
+
+.dj-taglines-input {
+  min-height: 18rem;
+}
+
+#view-settings-dj-taglines .booth-section .setting-row-text {
+  grid-template-columns: 1fr;
+  align-items: start;
+}
+
+#view-settings-dj-taglines .booth-section .setting-row-text .setting-label {
+  margin-bottom: 2px;
+}
+
+.dj-persona-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 12px;
+}
+
+.dj-persona-switch-label {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-right: 4px;
+}
+
+.dj-persona-btn.accent {
+  border-color: var(--accent, #8b5cf6);
 }
 
 .dj-prompt-preview {

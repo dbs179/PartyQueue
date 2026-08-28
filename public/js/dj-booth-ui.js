@@ -7,6 +7,8 @@ import {
   formatDjAdvancedHubLine,
   formatDjVolumeHubLine,
   formatDjShoutsHubLine,
+  formatDjTaglinesHubLine,
+  formatDjRosterHubLine,
   formatDjLastCallHubLine,
   formatEndOfNightLabel,
 } from "./dj-hub-summaries.js";
@@ -37,6 +39,9 @@ export function createDjBoothUi(els, deps) {
   const {
     djVoiceToggle,
     djNameInput,
+    djTaglinesInput,
+    djTaglinesSaveBtn,
+    djTaglinesResetBtn,
     djIntroPercentInput,
     djMaxWordsInput,
     djVolumeLowInput,
@@ -76,6 +81,13 @@ export function createDjBoothUi(els, deps) {
     djVoicePreviewPlayer,
     djVoiceSaveBtns,
     djVoiceResetBtns,
+    djRosterModeInput,
+    djMixPercentInput,
+    djBanterPercentInput,
+    djMixRow,
+    djBanterRow,
+    djRosterSaveBtn,
+    djRosterResetBtn,
   } = els || {};
 
   const hostFetch = deps.hostFetch;
@@ -85,19 +97,167 @@ export function createDjBoothUi(els, deps) {
   const selectDjIcon = deps.selectDjIcon;
   const getSettingsDefaults = deps.getSettingsDefaults || (() => ({}));
   const refreshBoothMediaUrl = deps.refreshBoothMediaUrl || (() => {});
+  const loadDjIcons = deps.loadDjIcons || (() => {});
+
+  const PERSONA_HR = "holy-roller";
+  const PERSONA_SS = "sister-static";
+  const PERSONA_KEYS = [
+    "djName",
+    "djTaglines",
+    "djTtsProvider",
+    "djTtsVoiceOpenAi",
+    "djTtsVoiceElevenlabs",
+    "djTtsVoice",
+    "djTtsSpeed",
+    "djCharacterIntensity",
+    "djCatchphrase",
+    "djBanList",
+    "djPersonaNotes",
+    "djAlwaysInstructions",
+    "djNeverInstructions",
+    "djPronunciations",
+  ];
 
   /** @type {{ uri: string|null, name: string, artist: string }} */
   let endOfNightTrack = { ...DEFAULT_END_OF_NIGHT };
   let endOfNightSearchTimer = 0;
-  /** @type {string|null} */
-  let activeDjIconName = null;
+  /** @type {object} */
+  let lastDjSettings = {};
+  let editingPersona = PERSONA_HR;
 
   function setActiveDjIconName(name) {
-    activeDjIconName = name || null;
+    if (editingPersona === PERSONA_SS) {
+      lastDjSettings.djSisterStatic = {
+        ...(lastDjSettings.djSisterStatic || {}),
+        djIcon: name || null,
+      };
+      return;
+    }
+    lastDjSettings.djIcon = name || null;
+  }
+
+  function getEditingPersona() {
+    return editingPersona;
+  }
+
+  function sisterStaticFrom(s) {
+    return (s && s.djSisterStatic) || {};
+  }
+
+  function identitySource() {
+    if (editingPersona === PERSONA_SS) return sisterStaticFrom(lastDjSettings);
+    return lastDjSettings;
+  }
+
+  function payloadForSave(partial) {
+    if (editingPersona !== PERSONA_SS) return partial;
+    const nested = {};
+    const rest = { ...partial };
+    for (const key of PERSONA_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(partial, key)) {
+        nested[key] = partial[key];
+        delete rest[key];
+      }
+    }
+    if (Object.keys(nested).length) rest.djSisterStatic = nested;
+    return rest;
+  }
+
+  function syncDjRosterUi() {
+    const mix = djRosterModeInput?.value === "mix";
+    if (djMixRow) djMixRow.hidden = !mix;
+    if (djBanterRow) djBanterRow.hidden = !mix;
+  }
+
+  function paintPersonaSwitcher() {
+    document.querySelectorAll(".dj-persona-btn").forEach((btn) => {
+      const id = btn.getAttribute("data-dj-persona");
+      const on = id === editingPersona;
+      btn.classList.toggle("accent", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+  }
+
+  function paintIdentityFields(src) {
+    if (!src || typeof src !== "object") return;
+    if (src.djName != null && djNameInput) djNameInput.value = src.djName;
+    if (src.djTaglines != null) paintTaglines(src.djTaglines);
+    if (src.djTtsProvider != null && djTtsProviderInput) {
+      djTtsProviderInput.value = String(src.djTtsProvider);
+    }
+    if (src.djTtsVoiceOpenAi != null && djTtsVoiceInput) {
+      djTtsVoiceInput.value = String(src.djTtsVoiceOpenAi);
+    } else if (
+      src.djTtsVoice != null &&
+      djTtsVoiceInput &&
+      src.djTtsProvider === "openai_ha"
+    ) {
+      djTtsVoiceInput.value = String(src.djTtsVoice);
+    }
+    if (src.djTtsVoiceElevenlabs != null && djTtsVoiceElevenlabsInput) {
+      djTtsVoiceElevenlabsInput.value = String(src.djTtsVoiceElevenlabs);
+    } else if (
+      src.djTtsVoice != null &&
+      djTtsVoiceElevenlabsInput &&
+      src.djTtsProvider === "elevenlabs_ha"
+    ) {
+      djTtsVoiceElevenlabsInput.value = String(src.djTtsVoice);
+    }
+    syncDjTtsProviderUi();
+    if (src.djTtsSpeed != null && djTtsSpeedInput) {
+      djTtsSpeedInput.value = String(src.djTtsSpeed);
+    }
+    if (src.djCharacterIntensity != null && djIntensityInput) {
+      djIntensityInput.value = String(src.djCharacterIntensity);
+    }
+    if (src.djCatchphrase != null && djCatchphraseInput) {
+      djCatchphraseInput.value = String(src.djCatchphrase);
+    }
+    if (src.djBanList != null && djBanListInput) {
+      djBanListInput.value = String(src.djBanList);
+    }
+    if (src.djPersonaNotes != null && djPersonaNotesInput) {
+      djPersonaNotesInput.value = String(src.djPersonaNotes);
+    }
+    if (src.djAlwaysInstructions != null && djAlwaysInstructionsInput) {
+      djAlwaysInstructionsInput.value = String(src.djAlwaysInstructions);
+    }
+    if (src.djNeverInstructions != null && djNeverInstructionsInput) {
+      djNeverInstructionsInput.value = String(src.djNeverInstructions);
+    }
+    if (src.djPronunciations != null && djPronunciationsInput) {
+      djPronunciationsInput.value = String(src.djPronunciations);
+    }
+  }
+
+  function setEditingPersona(id) {
+    editingPersona = id === PERSONA_SS ? PERSONA_SS : PERSONA_HR;
+    paintPersonaSwitcher();
+    paintIdentityFields(identitySource());
+    updateDjHubSummaries();
+    void loadDjIcons();
   }
 
   function getEndOfNightName() {
     return endOfNightTrack.name;
+  }
+
+  function taglinesFromInput() {
+    return String(djTaglinesInput?.value || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+
+  function paintTaglines(lines) {
+    if (!djTaglinesInput) return;
+    const pack = Array.isArray(lines)
+      ? lines
+      : String(lines || "").split(/\r?\n/);
+    djTaglinesInput.value = pack
+      .map((line) => String(line || "").trim())
+      .filter(Boolean)
+      .join("\n");
   }
 
   function syncDjTtsProviderUi() {
@@ -124,32 +284,47 @@ export function createDjBoothUi(els, deps) {
     void refreshBoothMediaUrl();
     const bannerEl = document.getElementById("dj-stat-banner");
     const nameEl = document.getElementById("dj-stat-name");
+    const taglinesEl = document.getElementById("dj-stat-taglines");
     const voiceEl = document.getElementById("dj-stat-voice");
     const advancedEl = document.getElementById("dj-stat-advanced");
     const volumeEl = document.getElementById("dj-stat-volume");
     const shoutsEl = document.getElementById("dj-stat-shouts");
+    const cohostsEl = document.getElementById("dj-stat-cohosts");
 
-    if (bannerEl) bannerEl.textContent = formatDjIconLabel(activeDjIconName);
+    if (bannerEl) bannerEl.textContent = formatDjIconLabel(lastDjSettings.djIcon);
 
     if (nameEl) {
-      const name = (djNameInput?.value || "").trim() || "Party DJ";
+      const name = String(lastDjSettings.djName || "").trim() || "Party DJ";
       nameEl.textContent = name;
+    }
+
+    if (taglinesEl) {
+      const raw = lastDjSettings.djTaglines;
+      if (Array.isArray(raw) ? raw.length : String(raw || "").trim()) {
+        taglinesEl.textContent = formatDjTaglinesHubLine(raw);
+      } else {
+        const fallback = getSettingsDefaults()?.djTaglines;
+        taglinesEl.textContent =
+          Array.isArray(fallback) && fallback.length
+            ? formatDjTaglinesHubLine(fallback)
+            : "—";
+      }
     }
 
     if (voiceEl) {
       voiceEl.textContent = formatDjVoiceHubLine({
-        intensity: djIntensityInput?.value,
-        provider: djTtsProviderInput?.value,
-        speed: djTtsSpeedInput?.value ?? 1,
+        intensity: lastDjSettings.djCharacterIntensity,
+        provider: lastDjSettings.djTtsProvider,
+        speed: lastDjSettings.djTtsSpeed ?? 1,
       });
     }
 
     if (advancedEl) {
       advancedEl.textContent = formatDjAdvancedHubLine({
-        personaNotes: djPersonaNotesInput?.value,
-        alwaysInstructions: djAlwaysInstructionsInput?.value,
-        neverInstructions: djNeverInstructionsInput?.value,
-        pronunciations: djPronunciationsInput?.value,
+        personaNotes: lastDjSettings.djPersonaNotes,
+        alwaysInstructions: lastDjSettings.djAlwaysInstructions,
+        neverInstructions: lastDjSettings.djNeverInstructions,
+        pronunciations: lastDjSettings.djPronunciations,
       });
     }
 
@@ -170,6 +345,14 @@ export function createDjBoothUi(els, deps) {
       });
     }
 
+    if (cohostsEl) {
+      cohostsEl.textContent = formatDjRosterHubLine({
+        mode: djRosterModeInput?.value || lastDjSettings.djRosterMode,
+        mixHr: djMixPercentInput?.value ?? lastDjSettings.djMixHolyRollerPercent,
+        banter: djBanterPercentInput?.value ?? lastDjSettings.djBanterPercent,
+      });
+    }
+
     const lastCallEl = document.getElementById("dj-stat-lastcall");
     if (lastCallEl) {
       lastCallEl.textContent = formatDjLastCallHubLine(endOfNightTrack.name);
@@ -185,10 +368,17 @@ export function createDjBoothUi(els, deps) {
 
   function applyFromSettings(s) {
     if (!s || typeof s !== "object") return;
+    lastDjSettings = { ...lastDjSettings, ...s };
+    if (s.djSisterStatic && typeof s.djSisterStatic === "object") {
+      lastDjSettings.djSisterStatic = {
+        ...(lastDjSettings.djSisterStatic || {}),
+        ...s.djSisterStatic,
+      };
+    }
     if (s.djVoiceEnabled != null && djVoiceToggle) {
       djVoiceToggle.checked = !!s.djVoiceEnabled;
     }
-    if (s.djName != null && djNameInput) djNameInput.value = s.djName;
+    paintIdentityFields(identitySource());
     if (s.djNameIntroPercent != null && djIntroPercentInput) {
       djIntroPercentInput.value = s.djNameIntroPercent;
     }
@@ -207,52 +397,6 @@ export function createDjBoothUi(els, deps) {
     if (s.djHandoffSilenceSec != null && djSilenceInput) {
       djSilenceInput.value = String(s.djHandoffSilenceSec);
     }
-    if (s.djTtsProvider != null && djTtsProviderInput) {
-      djTtsProviderInput.value = String(s.djTtsProvider);
-    }
-    if (s.djTtsVoiceOpenAi != null && djTtsVoiceInput) {
-      djTtsVoiceInput.value = String(s.djTtsVoiceOpenAi);
-    } else if (
-      s.djTtsVoice != null &&
-      djTtsVoiceInput &&
-      s.djTtsProvider === "openai_ha"
-    ) {
-      djTtsVoiceInput.value = String(s.djTtsVoice);
-    }
-    if (s.djTtsVoiceElevenlabs != null && djTtsVoiceElevenlabsInput) {
-      djTtsVoiceElevenlabsInput.value = String(s.djTtsVoiceElevenlabs);
-    } else if (
-      s.djTtsVoice != null &&
-      djTtsVoiceElevenlabsInput &&
-      s.djTtsProvider === "elevenlabs_ha"
-    ) {
-      djTtsVoiceElevenlabsInput.value = String(s.djTtsVoice);
-    }
-    syncDjTtsProviderUi();
-    if (s.djTtsSpeed != null && djTtsSpeedInput) {
-      djTtsSpeedInput.value = String(s.djTtsSpeed);
-    }
-    if (s.djCharacterIntensity != null && djIntensityInput) {
-      djIntensityInput.value = String(s.djCharacterIntensity);
-    }
-    if (s.djCatchphrase != null && djCatchphraseInput) {
-      djCatchphraseInput.value = String(s.djCatchphrase);
-    }
-    if (s.djBanList != null && djBanListInput) {
-      djBanListInput.value = String(s.djBanList);
-    }
-    if (s.djPersonaNotes != null && djPersonaNotesInput) {
-      djPersonaNotesInput.value = String(s.djPersonaNotes);
-    }
-    if (s.djAlwaysInstructions != null && djAlwaysInstructionsInput) {
-      djAlwaysInstructionsInput.value = String(s.djAlwaysInstructions);
-    }
-    if (s.djNeverInstructions != null && djNeverInstructionsInput) {
-      djNeverInstructionsInput.value = String(s.djNeverInstructions);
-    }
-    if (s.djPronunciations != null && djPronunciationsInput) {
-      djPronunciationsInput.value = String(s.djPronunciations);
-    }
     if (s.djShoutEnabled != null && djShoutEnabledInput) {
       djShoutEnabledInput.checked = !!s.djShoutEnabled;
     }
@@ -269,6 +413,16 @@ export function createDjBoothUi(els, deps) {
     if (s.djPartyRecapEnabled != null && djPartyRecapEnabledInput) {
       djPartyRecapEnabledInput.checked = !!s.djPartyRecapEnabled;
     }
+    if (s.djRosterMode != null && djRosterModeInput) {
+      djRosterModeInput.value = String(s.djRosterMode);
+    }
+    if (s.djMixHolyRollerPercent != null && djMixPercentInput) {
+      djMixPercentInput.value = s.djMixHolyRollerPercent;
+    }
+    if (s.djBanterPercent != null && djBanterPercentInput) {
+      djBanterPercentInput.value = s.djBanterPercent;
+    }
+    syncDjRosterUi();
     if (
       s.endOfNightTrackUri !== undefined ||
       s.endOfNightTrackName !== undefined ||
@@ -286,8 +440,9 @@ export function createDjBoothUi(els, deps) {
       paintEndOfNightLabel();
     }
     if (Object.prototype.hasOwnProperty.call(s, "djIcon")) {
-      activeDjIconName = s.djIcon || null;
+      lastDjSettings.djIcon = s.djIcon || null;
     }
+    paintPersonaSwitcher();
     updateDjHubSummaries();
   }
 
@@ -295,6 +450,7 @@ export function createDjBoothUi(els, deps) {
     const provider = djTtsProviderInput?.value || "elevenlabs_ha";
     return {
       djName: djNameInput?.value ?? "",
+      djTaglines: taglinesFromInput(),
       djNameIntroPercent: Number(djIntroPercentInput?.value),
       djAnnounceMaxWords: Number(djMaxWordsInput?.value),
       djVolumeBumpLowPct: Number(djVolumeLowInput?.value),
@@ -381,9 +537,10 @@ export function createDjBoothUi(els, deps) {
     if (btn) btn.disabled = true;
     djEffectivePromptInput.value = "Loading effective prompt…";
     try {
-      const res = await hostFetch("/api/dj-voice/prompt-preview", {
-        cache: "no-store",
-      });
+      const res = await hostFetch(
+        `/api/dj-voice/prompt-preview?persona=${encodeURIComponent(editingPersona)}`,
+        { cache: "no-store" }
+      );
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Could not load prompt preview.");
       djEffectivePromptInput.value = data.prompt || "(No prompt returned.)";
@@ -399,6 +556,7 @@ export function createDjBoothUi(els, deps) {
     const d = getSettingsDefaults() || {};
     const values = {
       djName: d.djName ?? "Party DJ",
+      djTaglines: Array.isArray(d.djTaglines) ? d.djTaglines : [],
       djNameIntroPercent: d.djNameIntroPercent ?? 25,
       djAnnounceMaxWords: d.djAnnounceMaxWords ?? 55,
       djVolumeBumpLowPct: d.djVolumeBumpLowPct ?? 20,
@@ -425,6 +583,40 @@ export function createDjBoothUi(els, deps) {
       endOfNightTrackName: null,
       endOfNightTrackArtist: null,
     };
+    if (editingPersona === PERSONA_SS) {
+      const ss = d.djSisterStatic || {};
+      const ssValues = {
+        djName: ss.djName ?? "Sister Static",
+        djTaglines: Array.isArray(ss.djTaglines) ? ss.djTaglines : [],
+        djTtsProvider: ss.djTtsProvider ?? "openai_ha",
+        djTtsVoiceOpenAi: ss.djTtsVoiceOpenAi ?? "nova",
+        djTtsVoiceElevenlabs: ss.djTtsVoiceElevenlabs ?? "",
+        djTtsSpeed: ss.djTtsSpeed ?? 1,
+        djCharacterIntensity: ss.djCharacterIntensity ?? "extra",
+        djCatchphrase: ss.djCatchphrase ?? "",
+        djBanList: ss.djBanList ?? "",
+        djPersonaNotes: ss.djPersonaNotes ?? "",
+        djAlwaysInstructions: ss.djAlwaysInstructions ?? "",
+        djNeverInstructions: ss.djNeverInstructions ?? "",
+        djPronunciations: ss.djPronunciations ?? "",
+      };
+      lastDjSettings.djSisterStatic = {
+        ...(lastDjSettings.djSisterStatic || {}),
+        ...ssValues,
+        djIcon: null,
+      };
+      paintIdentityFields(ssValues);
+      try {
+        await selectDjIcon(null);
+      } catch {
+        /* icon select is best-effort; text defaults still save */
+      }
+      saveSettings(payloadForSave({ ...ssValues, djIcon: null }), {
+        toastMessage: "Set to Default",
+      });
+      updateDjHubSummaries();
+      return;
+    }
     applyFromSettings(values);
     endOfNightTrack = { ...DEFAULT_END_OF_NIGHT };
     paintEndOfNightLabel();
@@ -525,14 +717,16 @@ export function createDjBoothUi(els, deps) {
 
   (djVoiceSaveBtns || []).forEach((btn) => {
     btn.addEventListener("click", () => {
-      saveSettings(currentDjVoicePayload(), { toastMessage: "Saved" });
+      saveSettings(payloadForSave(currentDjVoicePayload()), {
+        toastMessage: "Saved",
+      });
     });
   });
 
   djAdvancedSaveBtn?.addEventListener("click", async () => {
     djAdvancedSaveBtn.disabled = true;
     try {
-      const saved = await saveSettings(currentDjVoicePayload(), {
+      const saved = await saveSettings(payloadForSave(currentDjVoicePayload()), {
         toastMessage: "Advanced DJ saved",
       });
       if (saved) await loadDjEffectivePrompt();
@@ -553,8 +747,16 @@ export function createDjBoothUi(els, deps) {
       djNeverInstructions: d.djNeverInstructions ?? "",
       djPronunciations: d.djPronunciations ?? "",
     };
-    applyFromSettings(values);
-    const saved = await saveSettings(values, {
+    paintIdentityFields({ ...identitySource(), ...values });
+    if (editingPersona === PERSONA_SS) {
+      lastDjSettings.djSisterStatic = {
+        ...(lastDjSettings.djSisterStatic || {}),
+        ...values,
+      };
+    } else {
+      lastDjSettings = { ...lastDjSettings, ...values };
+    }
+    const saved = await saveSettings(payloadForSave(values), {
       toastMessage: "Advanced DJ set to defaults",
     });
     if (saved) await loadDjEffectivePrompt();
@@ -570,6 +772,68 @@ export function createDjBoothUi(els, deps) {
   (djVoiceResetBtns || []).forEach((btn) => {
     btn.addEventListener("click", () => {
       void resetDjVoiceDefaults();
+    });
+  });
+
+  djTaglinesSaveBtn?.addEventListener("click", () => {
+    saveSettings(payloadForSave({ djTaglines: taglinesFromInput() }), {
+      toastMessage: "Saved",
+    });
+  });
+
+  djTaglinesResetBtn?.addEventListener("click", () => {
+    const d = getSettingsDefaults() || {};
+    const pack =
+      editingPersona === PERSONA_SS
+        ? d.djSisterStatic?.djTaglines
+        : d.djTaglines;
+    const lines = Array.isArray(pack) ? pack : [];
+    paintTaglines(lines);
+    saveSettings(payloadForSave({ djTaglines: lines }), {
+      toastMessage: "Set to Default",
+    });
+    updateDjHubSummaries();
+  });
+
+  djTaglinesInput?.addEventListener("input", updateDjHubSummaries);
+
+  function currentRosterPayload() {
+    return {
+      djRosterMode: djRosterModeInput?.value || PERSONA_HR,
+      djMixHolyRollerPercent: Number(djMixPercentInput?.value),
+      djBanterPercent: Number(djBanterPercentInput?.value),
+    };
+  }
+
+  djRosterModeInput?.addEventListener("change", () => {
+    syncDjRosterUi();
+    updateDjHubSummaries();
+  });
+  djMixPercentInput?.addEventListener("input", updateDjHubSummaries);
+  djBanterPercentInput?.addEventListener("input", updateDjHubSummaries);
+
+  djRosterSaveBtn?.addEventListener("click", () => {
+    saveSettings(currentRosterPayload(), { toastMessage: "Saved" });
+  });
+  djRosterResetBtn?.addEventListener("click", () => {
+    const d = getSettingsDefaults() || {};
+    const values = {
+      djRosterMode: d.djRosterMode ?? PERSONA_HR,
+      djMixHolyRollerPercent: d.djMixHolyRollerPercent ?? 70,
+      djBanterPercent: d.djBanterPercent ?? 15,
+    };
+    if (djRosterModeInput) djRosterModeInput.value = values.djRosterMode;
+    if (djMixPercentInput) djMixPercentInput.value = values.djMixHolyRollerPercent;
+    if (djBanterPercentInput) djBanterPercentInput.value = values.djBanterPercent;
+    lastDjSettings = { ...lastDjSettings, ...values };
+    syncDjRosterUi();
+    saveSettings(values, { toastMessage: "Set to Default" });
+    updateDjHubSummaries();
+  });
+
+  document.querySelectorAll(".dj-persona-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setEditingPersona(btn.getAttribute("data-dj-persona"));
     });
   });
 
@@ -614,6 +878,8 @@ export function createDjBoothUi(els, deps) {
 
   syncDjTtsProviderUi();
   syncDjShoutModeUi();
+  syncDjRosterUi();
+  paintPersonaSwitcher();
 
   return {
     applyFromSettings,
@@ -621,5 +887,6 @@ export function createDjBoothUi(els, deps) {
     loadDjEffectivePrompt,
     getEndOfNightName,
     setActiveDjIconName,
+    getEditingPersona,
   };
 }

@@ -7,6 +7,7 @@ import {
   previewTtsVoice,
   buildDjEffectivePromptPreview,
 } from "../dj-voice.js";
+import { normalizeDjPersonaId } from "../settings.js";
 import {
   armDjNextSet,
   clearDjNextSet,
@@ -32,9 +33,11 @@ export function registerDjRoutes(app) {
     }
   }));
 
-  app.get("/api/dj-voice/prompt-preview", requireHost, (_req, res) => {
+  app.get("/api/dj-voice/prompt-preview", requireHost, (req, res) => {
+    const personaId = normalizeDjPersonaId(req.query?.persona);
     res.json({
-      prompt: buildDjEffectivePromptPreview(),
+      prompt: buildDjEffectivePromptPreview(personaId),
+      personaId,
       coreRulesLocked: true,
     });
   });

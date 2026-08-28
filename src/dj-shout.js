@@ -1,6 +1,6 @@
 // Mood Pulse / DJ shout-outs on searched song adds.
 
-import { getDjVoiceSettings } from "./settings.js";
+import { getDjVoiceSettings, getDjPersona, DJ_PERSONA_SISTER_STATIC } from "./settings.js";
 import {
   isDjVoiceReady,
   announceOnSonos,
@@ -38,6 +38,7 @@ import {
 } from "./dedication-label.js";
 import { spotifyTrackId } from "./sampler.js";
 import { pickFlavorAnnounceLines } from "./dj-flavor-announce.js";
+import { resolveDjForAnnounce } from "./dj-roster.js";
 
 let searchAddCount = 0;
 
@@ -281,7 +282,17 @@ export function buildRequestShoutPrompt({
     neverInstructions: djSettings?.djNeverInstructions,
   });
 
-  return `You are ${dj}, a lively party DJ on Sonos. Write ONE short spoken shout-out only (no quotes, no stage directions, no bullet lists).
+  const isStatic =
+    djSettings?.id === DJ_PERSONA_SISTER_STATIC ||
+    /sister static/i.test(String(dj || ""));
+  const opener = isStatic
+    ? `You are ${dj}, the witty, sarcastic co-host to DJ Holy Roller at this party. Write ONE short spoken shout-out only (no quotes, no stage directions, no bullet lists). Dry humor is welcome; never cruel, never genuinely embarrassing.`
+    : `You are ${dj}, a lively party DJ on Sonos. Write ONE short spoken shout-out only (no quotes, no stage directions, no bullet lists).`;
+  const energyLine = isStatic
+    ? `- Dry, affectionate co-host energy. Never genuinely embarrass a guest. If this is a birthday shout, be warm — do not roast or pile on the song choice.`
+    : `- Warm party-DJ energy, but stay faithful to the host blurbs`;
+
+  return `${opener}
 
 ${hostGuidance ? `${hostGuidance}\n\n` : ""}${formatMusicPronunciationGuide(
     djSettings?.djPronunciations
@@ -289,7 +300,7 @@ ${hostGuidance ? `${hostGuidance}\n\n` : ""}${formatMusicPronunciationGuide(
 
 Hard limits:
 - At most ${maxWords} words
-- Warm party-DJ energy, but stay faithful to the host blurbs
+${energyLine}
 - Point of view: you are the DJ talking ABOUT ${by}. Host blurbs are facts about ${by}, never about you.
 - When you use a blurb, name ${by} (or they/them only after you have named them). Never say "I", "I'm", "I've", "I'll", "my", or "me" for a guest blurb — if a note is written as "I ...", it means ${by}.
 - Booth "I" is OK only for DJ actions ("I've got this request"). Never claim ${by}'s jokes, pets, drinks, or habits as your own.
@@ -364,8 +375,12 @@ export async function writeRequestShoutScript({
   trackId = null,
   kind = "songRequest",
   trackCount = 0,
+  personaId = null,
 } = {}) {
-  const dj = getDjVoiceSettings();
+  const assignmentId =
+    personaId || resolveDjForAnnounce({ kind: "shout" }).personaId;
+  const persona = getDjPersona(assignmentId);
+  const dj = { ...getDjVoiceSettings(), ...persona, id: assignmentId };
   const by = String(requestedBy || "").trim();
   const shoutKind = kind === "setRequest" ? "setRequest" : "songRequest";
   const flavor = pickFlavorAnnounceLines(shoutKind, {
@@ -540,6 +555,7 @@ export async function announceRequestShout(
     }
     const id = trackId || spotifyTrackId(uri) || null;
     // Re-read dedication at script time (toast dedicate may have landed).
+    const assignment = resolveDjForAnnounce({ kind: "shout" });
     const draft = await writeRequestShoutScript({
       name,
       artist,
@@ -548,6 +564,7 @@ export async function announceRequestShout(
       trackId: id,
       kind,
       trackCount,
+      personaId: assignment.personaId,
     });
     const message = draft?.script || "";
     if (!message) {
@@ -584,19 +601,16 @@ export async function announceRequestShout(
       startPlayback: !!startPlayback,
       queuePosition: pos,
       preemptGeneration,
-      // Re-resolve the request under the insert lock after TTS so pads stay
-      // glued to it if the queue shifted during script generation.
       applyLeadBuffer: !startPlayback && !parked,
       requestUri: uri || null,
       allowImminentPause: false,
-      // Set Request replaces a waiting Never-Ending refill intro; a regular
-      // song shout / dedication only supersedes this track's glued pads.
       replaceWaitingRefill: kind === "setRequest",
-      // Without a park, next-up still holds at the tail of the current song so
-      // the request cannot start before the pads land.
       holdAtTrackEnd:
         !startPlayback && !parked && Number(queuePosition) === 1,
       parked,
+      assignment,
+      personaId: assignment.personaId,
+      speakerKind: "shout",
     });
     if (parked) {
       if (!(result?.ok || result?.inserted)) {

@@ -267,3 +267,74 @@ test("insertAnnounceBlock re-demotes under the write lock before pads", async ()
   ]);
   resetQueuePreemptForTests();
 });
+
+test("insertAnnounceBlock with tts2 places punch between lead TTS and restore", async () => {
+  resetQueuePreemptForTests();
+  const urls = [];
+  const result = await insertAnnounceBlock({
+    queuePosition: 1,
+    preemptGeneration: queueWorkGeneration(),
+    ramp: media("http://x/ramp.mp3"),
+    tts: media("http://x/tts.mp3"),
+    tts2: media("http://x/tts2.mp3"),
+    restore: media("http://x/restore.mp3"),
+    ops: {
+      removePads: async () => ({
+        removed: 0,
+        removedBefore: 0,
+        protectedThrough: 0,
+      }),
+      enqueue: async (url) => {
+        urls.push(url);
+        return { url };
+      },
+      pauseTrim: () => {},
+      ensurePlayMode: async () => {},
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.ttsPos, result.rampPos + 1);
+  assert.equal(result.tts2Pos, result.ttsPos + 1);
+  assert.equal(result.restorePos, result.tts2Pos + 1);
+  assert.deepEqual(urls, [
+    "http://x/ramp.mp3",
+    "http://x/tts.mp3",
+    "http://x/tts2.mp3",
+    "http://x/restore.mp3",
+  ]);
+  resetQueuePreemptForTests();
+});
+
+test("insertAnnounceBlock without tts2 keeps the original three-clip sandwich", async () => {
+  resetQueuePreemptForTests();
+  const urls = [];
+  const result = await insertAnnounceBlock({
+    queuePosition: 1,
+    preemptGeneration: queueWorkGeneration(),
+    ramp: media("http://x/ramp.mp3"),
+    tts: media("http://x/tts.mp3"),
+    restore: media("http://x/restore.mp3"),
+    ops: {
+      removePads: async () => ({
+        removed: 0,
+        removedBefore: 0,
+        protectedThrough: 0,
+      }),
+      enqueue: async (url) => {
+        urls.push(url);
+        return { url };
+      },
+      pauseTrim: () => {},
+      ensurePlayMode: async () => {},
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.tts2Pos, null);
+  assert.equal(result.restorePos, result.ttsPos + 1);
+  assert.deepEqual(urls, [
+    "http://x/ramp.mp3",
+    "http://x/tts.mp3",
+    "http://x/restore.mp3",
+  ]);
+  resetQueuePreemptForTests();
+});
