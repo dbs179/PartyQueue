@@ -71,7 +71,6 @@ const SS_STARTER_ICONS = [
 ];
 const ALL_STARTER_ICONS = [...STARTER_ICONS, ...SS_STARTER_ICONS];
 const STARTER_DEST = new Set(ALL_STARTER_ICONS.map((s) => s.dest));
-const HR_STARTER_DEST = new Set(STARTER_ICONS.map((s) => s.dest));
 const SS_STARTER_DEST = new Set(SS_STARTER_ICONS.map((s) => s.dest));
 const STARTER_ORDER = new Map(
   ALL_STARTER_ICONS.map((s, i) => [s.dest, i])
