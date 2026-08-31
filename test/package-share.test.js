@@ -137,9 +137,10 @@ test(
         .map((file) => path.relative(expanded, file));
       assert.deepEqual(hits, []);
 
+      // Built-in persona names (Holy Roller, Sister Static) are app content and
+      // ship with the package; only the operator's own details must stay out.
       const installationMarkers = [
         ["CeNX9CMw", "mxDxUF5Q2Inm"].join(""),
-        ["Holy", " Roller"].join(""),
         ["David", " Swineford"].join(""),
         ["Henri", " Music"].join(""),
         ["Owen", "'s Minecraft"].join(""),
