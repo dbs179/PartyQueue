@@ -15,6 +15,12 @@ function syncHandoffActiveFlag() {
 
 const DEFAULT_POLL_MS = 150;
 const DEFAULT_RAMP_STEPS = 6;
+/**
+ * Gap between unverified ramp steps. Roughly the settle the verified path used
+ * to impose per step, so the audible ramp keeps its original ~2s length —
+ * maybeJumpToTtsAfterRamp measures the ramp against the pre-silence pad.
+ */
+const DEFAULT_RAMP_STEP_MS = 300;
 /** Instant EHOSTUNREACH used to hammer a dying NIC every 150ms. Back off, then abort. */
 export const HANDOFF_WATCH_MAX_FAILURES = 6;
 export const HANDOFF_WATCH_FAILURE_STREAK_MS = 8_000;
@@ -84,9 +90,15 @@ function defaultLogger() {
 async function defaultAdapter() {
   const sonos = await import("./sonos.js");
   return {
-    getNowPlaying: sonos.getNowPlayingFresh,
+    // Transport tick only (uri/state/positionSec) — the full now-playing
+    // snapshot pulls the whole queue during silence pads, which this loop
+    // would hammer the coordinator with several times a second.
+    getNowPlaying: sonos.getTransportTick,
     getVolume: sonos.getGroupVolume,
     setVolume: sonos.setGroupVolume,
+    // Intermediate ramp steps don't need read-back verification; only the
+    // endpoints (announce target, restored baseline) must land exactly.
+    setVolumeFast: sonos.setGroupVolumeFast,
     // Raw Pause — never host Pause (that cancels this handoff, then leaves
     // the first music track paused after the DJ). Same rule as next.
     pause: sonos.pausePlayback,
@@ -111,6 +123,7 @@ export function createDjVolumeHandoff({
   now = Date.now,
   pollMs = DEFAULT_POLL_MS,
   rampSteps = DEFAULT_RAMP_STEPS,
+  rampStepMs = DEFAULT_RAMP_STEP_MS,
   logger = defaultLogger(),
 } = {}) {
   if (typeof calculateTarget !== "function") {
@@ -213,7 +226,15 @@ export function createDjVolumeHandoff({
       const next = clampVolume(start + ((end - start) * index) / steps);
       if (next === previous && index < steps) continue;
       const io = await getAdapter();
-      await io.setVolume(next);
+      // Verify only the endpoint. Read-back plus settle on every step costs two
+      // SOAP calls per speaker for a level we overwrite ~300ms later; the
+      // explicit gap keeps the ramp the same length it always was.
+      if (index === steps || typeof io.setVolumeFast !== "function") {
+        await io.setVolume(next);
+      } else {
+        await io.setVolumeFast(next);
+        await sleep(Math.max(0, Number(rampStepMs) || 0));
+      }
       currentVolume = next;
       previous = next;
     }

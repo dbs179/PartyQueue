@@ -8,7 +8,21 @@ import {
 import { pickGroupByTarget } from "./sonos-queue-policy.js";
 import { getSonosTargetRoom } from "./settings.js";
 import { getSonosHost } from "./sonos-config.js";
+import {
+  isPlayerSkipped,
+  markPlayerReachable,
+  noteSpeakerFailure,
+} from "./sonos-reachability.js";
 import { envTimeoutMs, withTimeout } from "./with-timeout.js";
+
+// PartyQueue reads topology with its own GetZoneGroupState polls and never
+// consumes UPnP zone events. Leaving the library's subscription on means the
+// speaker holds a callback for us, re-SUBSCRIBEs every 600s, and NOTIFYs us on
+// every topology change — pure load on one box for data we ignore. Opt out
+// unless the operator explicitly asked for events.
+if (process.env.SONOS_DISABLE_EVENTS === undefined) {
+  process.env.SONOS_DISABLE_EVENTS = "true";
+}
 
 /** Connect / discovery budget (discovery itself asks for ~10s). */
 const SONOS_CONNECT_TIMEOUT_MS = envTimeoutMs(
@@ -26,10 +40,13 @@ const ZONE_DEVICE_FAILOVER_LIMIT = 3;
  * Household topology XML is the same on every speaker. Probe the configured
  * party host / target room first — SSDP order often puts a satellite (Office)
  * at Devices[0], and GetZoneGroupState on that box can knock it offline.
+ *
+ * Speakers inside their unreachable cool-off sink to the back rather than being
+ * dropped: if every speaker is skipped we still need something to ask.
  */
 export function orderTopologyProbeDevices(
   devices,
-  { preferHost = "", preferRoom = "" } = {}
+  { preferHost = "", preferRoom = "", now = Date.now() } = {}
 ) {
   const list = Array.isArray(devices) ? [...devices] : [];
   const host = String(preferHost || "").trim().toLowerCase();
@@ -37,14 +54,24 @@ export function orderTopologyProbeDevices(
   const score = (device) => {
     const dHost = String(device?.Host || "").trim().toLowerCase();
     const dName = String(device?.Name || "").trim().toLowerCase();
+    // A known-dead box is the last thing we should ask for topology, even when
+    // it is the target — the failover chain will find a live speaker instead.
+    const penalty = isPlayerSkipped(device, now) ? 10 : 0;
     // Target coordinator first: it already handles queue/transport SOAP.
     // Pinned SONOS_HOST (Kitchen Amp) is failover, not an extra hammer.
-    if (room && dName === room) return 0;
-    if (host && dHost === host) return 1;
-    return 2;
+    if (room && dName === room) return penalty;
+    if (host && dHost === host) return 1 + penalty;
+    return 2 + penalty;
   };
-  list.sort((a, b) => score(a) - score(b));
-  return list;
+  // Score once: isPlayerSkipped prunes expired entries as it reads, so the
+  // comparator must not be the thing calling it.
+  const scored = list.map((device, index) => ({
+    device,
+    index,
+    score: score(device),
+  }));
+  scored.sort((a, b) => a.score - b.score || a.index - b.index);
+  return scored.map((entry) => entry.device);
 }
 
 // Sonos Spotify "region" codes used when building track metadata.
@@ -56,6 +83,18 @@ let manager = null;
 let initializing = null;
 
 function dropSonosManager() {
+  // CancelSubscription is what clears the library's 600s renewal interval. Skip
+  // it and the orphaned zone service lives forever, re-subscribing to a speaker
+  // on behalf of a manager nobody holds — one more immortal subscription per
+  // reset, all of them NOTIFY'd on every topology change.
+  try {
+    manager?.CancelSubscription();
+  } catch (err) {
+    console.warn(
+      "[sonos] cancelling zone event subscription failed:",
+      err?.message || err
+    );
+  }
   manager = null;
   initializing = null;
 }
@@ -66,6 +105,11 @@ export function resetSonosManager() {
   // Host/config-driven reset: start a fresh unhealthy clock so auto-reset
   // doesn't immediately fire again on the next blip.
   clearSonosUnhealthy();
+}
+
+/** Shutdown hook: release any speaker-side event subscription before exit. */
+export function closeSonosManager() {
+  dropSonosManager();
 }
 
 let snapshotInvalidator = null;
@@ -144,6 +188,72 @@ let zoneInFlight = null;
 let zoneGeneration = 0;
 const ZONE_TTL_MS = 2000;
 
+/** Cool-off between device-list rebuilds triggered by topology drift. */
+export const DEVICE_DRIFT_REFRESH_MS = 60_000;
+let lastDeviceDriftRefreshAt = 0;
+let deviceDriftRefreshes = 0;
+
+/**
+ * With zone events off, nothing pushes a returning or brand-new speaker into
+ * m.Devices. Live topology is the signal instead: a member we cannot map to a
+ * managed device means the list is stale, so drop the manager once and let the
+ * next getManager() rebuild it. Debounced, because a member that stays
+ * unmappable must not rediscover on every poll.
+ * @returns {boolean} whether a refresh was triggered
+ */
+function noteTopologyDeviceDrift(m, groups, now = Date.now()) {
+  let devices;
+  try {
+    // SonosManager.Devices throws while the device list is still empty.
+    devices = m?.Devices;
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(devices) || !devices.length) return false;
+
+  const known = new Set();
+  for (const device of devices) {
+    if (device?.Uuid) known.add(String(device.Uuid));
+    if (device?.Host) known.add(String(device.Host));
+  }
+
+  const missing = [];
+  for (const group of Array.isArray(groups) ? groups : []) {
+    for (const member of group?.members ?? []) {
+      const uuid = member?.uuid ? String(member.uuid) : "";
+      const host = member?.host ? String(member.host) : "";
+      if ((uuid && known.has(uuid)) || (host && known.has(host))) continue;
+      missing.push(member?.name || uuid || host || "unknown");
+    }
+  }
+  if (!missing.length) return false;
+
+  if (
+    lastDeviceDriftRefreshAt &&
+    now - lastDeviceDriftRefreshAt < DEVICE_DRIFT_REFRESH_MS
+  ) {
+    return false;
+  }
+  lastDeviceDriftRefreshAt = now;
+  deviceDriftRefreshes += 1;
+  console.warn(
+    `[sonos] topology lists unmanaged speaker(s) (${missing.join(", ")}); rebuilding device list`
+  );
+  dropSonosManager();
+  return true;
+}
+
+/** Test helper — clear the device-drift refresh cool-off. */
+export function resetDeviceDriftForTests() {
+  lastDeviceDriftRefreshAt = 0;
+  deviceDriftRefreshes = 0;
+}
+
+/** Test helper — how many device-list rebuilds topology drift has triggered. */
+export function deviceDriftInfoForTests() {
+  return { refreshes: deviceDriftRefreshes, lastRefreshAt: lastDeviceDriftRefreshAt };
+}
+
 async function getZoneGroupStateFromHousehold(m, probePrefs = {}) {
   const devices = Array.isArray(m?.Devices) ? m.Devices : [];
   if (!devices.length) {
@@ -164,13 +274,16 @@ async function getZoneGroupStateFromHousehold(m, probePrefs = {}) {
     const device = toTry[i];
     if (typeof device?.GetZoneGroupState !== "function") continue;
     try {
-      return await withTimeout(
+      const groups = await withTimeout(
         device.GetZoneGroupState(),
         ZONE_DEVICE_TIMEOUT_MS,
         `Sonos topology timed out after ${Math.ceil(ZONE_DEVICE_TIMEOUT_MS / 1000)}s`
       );
+      markPlayerReachable(device);
+      return groups;
     } catch (err) {
       lastErr = err;
+      noteSpeakerFailure(device, err);
       const next = toTry[i + 1];
       if (next) {
         const from = device.Name || device.Host || `device[${i}]`;
@@ -207,6 +320,9 @@ export async function getZoneGroups(
       if (readGeneration === zoneGeneration) {
         zoneCache = { at: Date.now(), groups };
       }
+      // Safe to drop the manager here: this read's caller keeps using the
+      // instance it already holds, and the rebuild happens on the next call.
+      noteTopologyDeviceDrift(m, groups);
       return groups;
     } finally {
       if (zoneInFlight === request) zoneInFlight = null;

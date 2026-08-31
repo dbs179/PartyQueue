@@ -8,6 +8,11 @@ import {
 
 export const NOW_PLAYING_TTL_MS = 1000;
 export const SNAPSHOT_TTL_MS = 3000;
+// The group picker is the only reader that scans the whole household, so it
+// gets a longer window than now-playing/queue. Every topology mutation still
+// busts it, and the DJ Booth forces a read on open, so the picker stays right —
+// this only stops a guest's song add from re-scanning every room in the house.
+export const GROUPS_TTL_MS = 10_000;
 
 export function makeCachedReader(fn, ttlMs) {
   let cache = { at: 0, value: null };

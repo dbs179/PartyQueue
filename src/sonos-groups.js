@@ -25,6 +25,14 @@ import {
   shouldResumeAfterTopology,
   wasPlayingFromQueue,
 } from "./sonos-topology-resume.js";
+import {
+  markPlayerReachable,
+  noteSpeakerFailure,
+} from "./sonos-reachability.js";
+import { envTimeoutMs, withTimeout } from "./with-timeout.js";
+
+/** Per-speaker budget for a topology write, so one dead box can't pin the lane. */
+const JOIN_TIMEOUT_MS = envTimeoutMs("PARTYQUEUE_SONOS_JOIN_TIMEOUT_MS", 5_000);
 
 async function captureTargetWasPlaying() {
   try {
@@ -113,12 +121,21 @@ async function groupAllUnlocked() {
   const anchor = await resolveCoordinator(m);
 
   // Join each other room to the anchor's group (sequential to avoid topology
-  // races). Already-grouped rooms are effectively a no-op.
+  // races). Already-grouped rooms are effectively a no-op. Group All means
+  // every speaker, so we still ask a skipped room — but with a deadline, and a
+  // failure buys it a cool-off so the volume lock below and the topology probe
+  // stop piling on the same dying box.
   for (const device of m.Devices) {
     if (device.Uuid === anchor.Uuid) continue;
     try {
-      await device.JoinGroup(anchor.Name);
+      await withTimeout(
+        device.JoinGroup(anchor.Name),
+        JOIN_TIMEOUT_MS,
+        `Sonos join timed out after ${Math.ceil(JOIN_TIMEOUT_MS / 1000)}s`
+      );
+      markPlayerReachable(device);
     } catch (err) {
+      noteSpeakerFailure(device, err);
       console.error(`[group-all] ${device.Name} join failed:`, err.message);
     }
   }
@@ -233,12 +250,18 @@ export async function ungroupAll() {
 
   for (const device of multiMembers) {
     try {
-      await device.AVTransportService.BecomeCoordinatorOfStandaloneGroup({
-        InstanceID: 0,
-      });
+      await withTimeout(
+        device.AVTransportService.BecomeCoordinatorOfStandaloneGroup({
+          InstanceID: 0,
+        }),
+        JOIN_TIMEOUT_MS,
+        `Sonos ungroup timed out after ${Math.ceil(JOIN_TIMEOUT_MS / 1000)}s`
+      );
+      markPlayerReachable(device);
       changed += 1;
       await sleep(150);
     } catch (err) {
+      noteSpeakerFailure(device, err);
       console.error(`[ungroup-all] ${device.Name} leave failed:`, err.message);
     }
   }

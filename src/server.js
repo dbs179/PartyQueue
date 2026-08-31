@@ -27,6 +27,7 @@ import {
   registerPartySettingsRoutes,
 } from "./party-settings-http.js";
 import { setSonosDemandChecker } from "./sonos-manager-health.js";
+import { closeSonosManager } from "./sonos-core.js";
 import { registerApiRoutes } from "./routes/index.js";
 import {
   getBrandingSettings,
@@ -708,6 +709,9 @@ export async function shutdownServer({
   }
 
   await Promise.allSettled(pendingShutdown);
+  // Release any speaker-side event subscription before the process goes away,
+  // so a restart loop can't leave stale callbacks registered on a player.
+  closeSonosManager();
   flushShutdownStores();
   httpServer = null;
 

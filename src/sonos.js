@@ -31,6 +31,7 @@ export {
 
 export {
   makeCachedReader,
+  GROUPS_TTL_MS,
   NOW_PLAYING_TTL_MS,
   SNAPSHOT_TTL_MS,
 } from "./sonos-cache.js";
@@ -41,12 +42,14 @@ export {
   resolveGroup,
   isNotCoordinatorError,
   resetSonosManager,
+  closeSonosManager,
   resolveRegion,
 } from "./sonos-core.js";
 
 export {
   getNowPlaying,
   getNowPlayingFresh,
+  getTransportTick,
   getQueueList,
   listGroups,
   getQueueStatus,
@@ -72,6 +75,7 @@ export {
 export {
   getGroupVolume,
   setGroupVolume,
+  setGroupVolumeFast,
   volumeUp,
   volumeDown,
   getCachedGroupVolume,

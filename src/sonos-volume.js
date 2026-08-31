@@ -3,30 +3,29 @@ import { getManager, resolveGroup } from "./sonos-core.js";
 import { invalidateSonosSnapshots } from "./sonos-snapshots.js";
 import { isDjVolumeHandoffActive } from "./dj-volume-handoff-state.js";
 import { envTimeoutMs, withTimeout } from "./with-timeout.js";
-import { isSonosUnreachableError } from "./sonos-reachability.js";
+import {
+  liveMembers,
+  markPlayerReachable,
+  noteSpeakerFailure,
+  resetSpeakerReachabilityForTests,
+  setSkipUnreachableMsForTests,
+} from "./sonos-reachability.js";
 
 const VOLUME_STEP = 1;
 const PLAYER_VOLUME_TIMEOUT_MS = envTimeoutMs(
   "PARTYQUEUE_PLAYER_VOLUME_TIMEOUT_MS",
   2_000
 );
-const SKIP_UNREACHABLE_MS = 60_000;
 
 let playerVolumeTimeoutMs = PLAYER_VOLUME_TIMEOUT_MS;
-let skipUnreachableMs = SKIP_UNREACHABLE_MS;
-/** @type {Map<string, number>} host -> skip-until epoch ms */
-const unreachableUntil = new Map();
 
 export function setPlayerVolumeTimeoutForTests(ms) {
   if (ms != null) playerVolumeTimeoutMs = Number(ms);
 }
-export function setSkipUnreachableMsForTests(ms) {
-  if (ms != null) skipUnreachableMs = Number(ms);
-}
+export { setSkipUnreachableMsForTests };
 export function resetVolumeReachabilityForTests() {
   playerVolumeTimeoutMs = PLAYER_VOLUME_TIMEOUT_MS;
-  skipUnreachableMs = SKIP_UNREACHABLE_MS;
-  unreachableUntil.clear();
+  resetSpeakerReachabilityForTests();
   cachedGroupVolume = null;
 }
 
@@ -73,43 +72,6 @@ export function resolveVolumeForDisplay({ handoff = null, cached = null } = {}) 
   return null;
 }
 
-function playerKey(device) {
-  return String(device?.Host || device?.Uuid || device?.Name || "");
-}
-
-function isPlayerSkipped(device, now = Date.now()) {
-  const key = playerKey(device);
-  if (!key) return false;
-  const until = unreachableUntil.get(key);
-  if (!until) return false;
-  if (now >= until) {
-    unreachableUntil.delete(key);
-    return false;
-  }
-  return true;
-}
-
-function markPlayerUnreachable(device, now = Date.now()) {
-  const key = playerKey(device);
-  if (!key) return;
-  const already = unreachableUntil.has(key);
-  unreachableUntil.set(key, now + skipUnreachableMs);
-  if (!already) {
-    console.warn(
-      `[sonos] skipping unreachable player ${key} for ${Math.round(skipUnreachableMs / 1000)}s`
-    );
-  }
-}
-
-function markPlayerReachable(device) {
-  const key = playerKey(device);
-  if (key) unreachableUntil.delete(key);
-}
-
-function liveMembers(members, now = Date.now()) {
-  return (members || []).filter((device) => !isPlayerSkipped(device, now));
-}
-
 export function assertManualVolumeAvailable() {
   if (!isDjVolumeHandoffActive()) return;
   const error = new Error(
@@ -153,9 +115,7 @@ async function readPlayerVolumeSafe(device) {
     markPlayerReachable(device);
     return { device, volume, ok: true };
   } catch (err) {
-    if (isSonosUnreachableError(err) || /timed out/i.test(String(err?.message || ""))) {
-      markPlayerUnreachable(device);
-    }
+    noteSpeakerFailure(device, err);
     return { device, volume: null, ok: false };
   }
 }
@@ -170,9 +130,7 @@ async function setPlayerVolumeSafe(device, volume) {
     markPlayerReachable(device);
     return true;
   } catch (err) {
-    if (isSonosUnreachableError(err) || /timed out/i.test(String(err?.message || ""))) {
-      markPlayerUnreachable(device);
-    }
+    noteSpeakerFailure(device, err);
     return false;
   }
 }
@@ -281,4 +239,28 @@ async function setGroupVolumeUnlocked(level) {
   noteGroupVolume(target);
   invalidateSonosSnapshots();
   return { volume: target, players: members.length, locked };
+}
+
+/**
+ * One SetVolume per reachable member — no read-back, no settle, no correction
+ * passes, and no snapshot invalidation. For intermediate DJ ramp steps, where
+ * the next step overwrites the level a few hundred ms later and only the
+ * endpoint has to land exactly. Busting snapshots here would also nudge the
+ * now-playing monitor once per step, which is load we're trying to remove.
+ */
+export async function setGroupVolumeFast(level) {
+  return withSonosTransportLane(() => setGroupVolumeFastUnlocked(level));
+}
+
+async function setGroupVolumeFastUnlocked(level) {
+  const m = await getManager();
+  const { members } = await resolveGroup(m);
+  const active = liveMembers(members);
+  if (!active.length) {
+    throw new Error("No reachable Sonos players for group volume.");
+  }
+  const target = Math.max(0, Math.min(100, Math.round(Number(level) || 0)));
+  await Promise.all(active.map((device) => setPlayerVolumeSafe(device, target)));
+  noteGroupVolume(target);
+  return { volume: target, players: active.length };
 }

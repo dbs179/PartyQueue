@@ -28,10 +28,12 @@ function fakeHandoff({
   sleep = async () => {},
   setVolume = null,
   next = null,
+  fastVolume = false,
 } = {}) {
   let volume = baseline;
   let index = 0;
   const writes = [];
+  const fastWrites = [];
   const calls = [];
   const phases = [];
   const adapter = {
@@ -114,6 +116,16 @@ function fakeHandoff({
       }
     },
   };
+  // Opt-in only: the other tests here assert on the verified write sequence,
+  // and the handoff falls back to setVolume when no fast set is offered.
+  if (fastVolume) {
+    adapter.setVolumeFast = async (level) => {
+      fastWrites.push(level);
+      calls.push(["set-volume-fast", level]);
+      volume = level;
+      return { volume: level };
+    };
+  }
   const logger = {
     info(message) {
       if (message.startsWith("phase ")) phases.push(message.slice(6));
@@ -131,6 +143,7 @@ function fakeHandoff({
     now,
     pollMs: 0,
     rampSteps: 6,
+    rampStepMs: 0,
     ttsPosition: 2,
     musicPosition: 4,
     logger,
@@ -140,6 +153,7 @@ function fakeHandoff({
     handoff,
     options,
     writes,
+    fastWrites,
     calls,
     phases,
     getVolume: () => volume,
@@ -158,6 +172,53 @@ test("DJ volume adapter uses raw pause, not host Pause", () => {
   assert.ok(adapter, "defaultAdapter should exist");
   assert.match(adapter[0], /pause:\s*sonos\.pausePlayback/);
   assert.doesNotMatch(adapter[0], /pause:\s*sonos\.pause,/);
+});
+
+test("DJ volume adapter reads a transport tick, not the full now-playing snapshot", () => {
+  const src = readFileSync(
+    path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "src",
+      "dj-volume-handoff.js"
+    ),
+    "utf8"
+  );
+  const adapter = src.match(/async function defaultAdapter\(\) \{[\s\S]*?\n\}/);
+  assert.ok(adapter, "defaultAdapter should exist");
+  // getNowPlayingFresh pulls the entire queue while a silence pad is current,
+  // which this loop would re-fetch several times a second.
+  assert.match(adapter[0], /getNowPlaying:\s*sonos\.getTransportTick/);
+  assert.doesNotMatch(adapter[0], /sonos\.getNowPlayingFresh/);
+  assert.match(adapter[0], /setVolumeFast:\s*sonos\.setGroupVolumeFast/);
+});
+
+test("ramp verifies only its final step when a fast set is available", async () => {
+  const run = fakeHandoff({
+    timeline: [PRE, DJ, POST, MUSIC],
+    fastVolume: true,
+  });
+  await run.handoff.start();
+
+  // 10 -> 30 over 6 steps: the five intermediate levels go out unverified.
+  assert.deepEqual(run.fastWrites.slice(0, 5), [13, 17, 20, 23, 27]);
+  assert.ok(
+    !run.fastWrites.includes(30),
+    "the announce target must not be left unverified"
+  );
+  assert.ok(run.writes.includes(30), "announce target is a verified write");
+  assert.ok(run.writes.includes(10), "restored baseline is a verified write");
+  assert.equal(run.getVolume(), 10);
+});
+
+test("ramp stays fully verified when the adapter offers no fast set", async () => {
+  const run = fakeHandoff({ timeline: [PRE, DJ, POST, MUSIC] });
+  await run.handoff.start();
+
+  assert.equal(run.fastWrites.length, 0);
+  assert.ok(run.writes.includes(13), "every step goes through setVolume");
+  assert.ok(run.writes.includes(30));
+  assert.equal(run.getVolume(), 10);
 });
 
 test("classifies pre-silence, DJ, and post-silence URIs", () => {

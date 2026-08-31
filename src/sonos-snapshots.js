@@ -1,5 +1,6 @@
 import {
   makeCachedReader,
+  GROUPS_TTL_MS,
   NOW_PLAYING_TTL_MS,
   SNAPSHOT_TTL_MS,
 } from "./sonos-cache.js";
@@ -52,6 +53,18 @@ import {
   noteSonosReadSuccess,
   noteSonosReadFailure,
 } from "./sonos-manager-health.js";
+import {
+  isPlayerSkipped,
+  markPlayerReachable,
+  noteSpeakerFailure,
+} from "./sonos-reachability.js";
+import { envTimeoutMs, withTimeout } from "./with-timeout.js";
+
+/** Per-coordinator budget for the group picker's playing-state scan. */
+const GROUP_STATE_TIMEOUT_MS = envTimeoutMs(
+  "PARTYQUEUE_GROUP_STATE_TIMEOUT_MS",
+  2_000
+);
 
 export function groupLabel(group) {
   const members = group.members ?? [];
@@ -60,13 +73,23 @@ export function groupLabel(group) {
   return names.length ? names.join(" + ") : (group.name ?? "Group");
 }
 
+// The group picker scans every group, so this runs against speakers that are
+// not in the party. Skip anything inside its cool-off and cap the wait, or one
+// wedged standalone room slows (and keeps getting hit by) every groups read.
 async function isGroupPlaying(m, group) {
   const coordinator = deviceForMember(m, group.coordinator);
   if (!coordinator) return false;
+  if (isPlayerSkipped(coordinator)) return false;
   try {
-    const transport = await coordinator.AVTransportService.GetTransportInfo();
+    const transport = await withTimeout(
+      coordinator.AVTransportService.GetTransportInfo(),
+      GROUP_STATE_TIMEOUT_MS,
+      "Sonos group state timed out"
+    );
+    markPlayerReachable(coordinator);
     return transport.CurrentTransportState === "PLAYING";
-  } catch {
+  } catch (err) {
+    noteSpeakerFailure(coordinator, err);
     return false;
   }
 }
@@ -607,8 +630,34 @@ export async function getNowPlayingFresh() {
     throw err;
   }
 }
+
+/**
+ * Minimal live transport read: only the fields the DJ volume handoff watch loop
+ * inspects (uri / state / positionSec). The full now-playing snapshot is five
+ * SOAP calls plus an entire GetQueue while a silence pad is current — far too
+ * much to run against the party coordinator at the handoff's poll rate.
+ */
+export async function getTransportTick() {
+  try {
+    const m = await getManager();
+    const coordinator = await resolveCoordinator(m);
+    const [pos, transport] = await Promise.all([
+      coordinator.AVTransportService.GetPositionInfo(),
+      coordinator.AVTransportService.GetTransportInfo(),
+    ]);
+    noteSonosReadSuccess();
+    return {
+      uri: pos.TrackURI ?? null,
+      state: transport.CurrentTransportState,
+      positionSec: parseSonosTime(pos.RelTime),
+    };
+  } catch (err) {
+    noteSonosReadFailure();
+    throw err;
+  }
+}
 export const getQueueList = makeCachedReader(getQueueListRaw, SNAPSHOT_TTL_MS);
-export const listGroups = makeCachedReader(listGroupsRaw, SNAPSHOT_TTL_MS);
+export const listGroups = makeCachedReader(listGroupsRaw, GROUPS_TTL_MS);
 export const getQueueStatus = makeCachedReader(getQueueStatusRaw, SNAPSHOT_TTL_MS);
 
 // Drop the cached now-playing/queue snapshots so the next poll re-reads Sonos.

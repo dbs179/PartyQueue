@@ -1,11 +1,25 @@
-import { test } from "node:test";
+import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import {
   clearZoneCache,
+  deviceDriftInfoForTests,
   getZoneGroups,
   orderTopologyProbeDevices,
+  resetDeviceDriftForTests,
   zoneCacheInfoForTests,
 } from "../src/sonos-core.js";
+import {
+  markPlayerUnreachable,
+  reachabilityInfoForTests,
+  resetSpeakerReachabilityForTests,
+} from "../src/sonos-reachability.js";
+
+// The skip map is shared household-wide, so a failover test must not leave a
+// speaker cooling off for the next one.
+afterEach(() => {
+  resetSpeakerReachabilityForTests();
+  resetDeviceDriftForTests();
+});
 
 function mockManager(results) {
   let i = 0;
@@ -142,4 +156,103 @@ test("getZoneGroups probes the preferred room before Office", async () => {
   assert.deepEqual(groups, [{ id: "kitchen-group" }]);
   assert.equal(kitchenCalls, 1);
   assert.equal(officeCalls, 0);
+});
+
+test("a failed topology probe puts that speaker in the shared cool-off", async () => {
+  clearZoneCache();
+  const m = {
+    Devices: [
+      {
+        Name: "Office",
+        Host: "10.10.20.196",
+        GetZoneGroupState: async () => {
+          const err = new Error("connect EHOSTUNREACH");
+          err.code = "EHOSTUNREACH";
+          throw err;
+        },
+      },
+      {
+        Name: "Kitchen",
+        Host: "10.10.20.190",
+        GetZoneGroupState: async () => [{ id: "kitchen-group" }],
+      },
+    ],
+  };
+
+  await getZoneGroups(m, { fresh: true, preferHost: "", preferRoom: "" });
+  assert.deepEqual(reachabilityInfoForTests().skipped, ["10.10.20.196"]);
+});
+
+test("orderTopologyProbeDevices sinks a speaker inside its cool-off", () => {
+  const office = { Name: "Office", Host: "10.10.20.196" };
+  const kitchen = { Name: "Kitchen", Host: "10.10.20.190" };
+  markPlayerUnreachable(office);
+
+  // Office is the target room and would normally win outright.
+  const ordered = orderTopologyProbeDevices([office, kitchen], {
+    preferHost: "",
+    preferRoom: "Office",
+  });
+  assert.deepEqual(
+    ordered.map((d) => d.Name),
+    ["Kitchen", "Office"]
+  );
+});
+
+test("an unmanaged topology member rebuilds the device list once per cool-off", async () => {
+  clearZoneCache();
+  resetDeviceDriftForTests();
+  const topology = [
+    {
+      members: [
+        { uuid: "RINCON_KITCHEN", host: "10.10.20.190", name: "Kitchen" },
+        // Office came back online after the manager was built.
+        { uuid: "RINCON_OFFICE", host: "10.10.20.196", name: "Office" },
+      ],
+    },
+  ];
+  const m = {
+    Devices: [
+      {
+        Name: "Kitchen",
+        Host: "10.10.20.190",
+        Uuid: "RINCON_KITCHEN",
+        GetZoneGroupState: async () => topology,
+      },
+    ],
+  };
+
+  await getZoneGroups(m, { fresh: true, preferHost: "", preferRoom: "" });
+  assert.equal(deviceDriftInfoForTests().refreshes, 1);
+
+  await getZoneGroups(m, { fresh: true, preferHost: "", preferRoom: "" });
+  assert.equal(
+    deviceDriftInfoForTests().refreshes,
+    1,
+    "second read inside the cool-off must not rediscover again"
+  );
+});
+
+test("topology whose members are all managed never rebuilds", async () => {
+  clearZoneCache();
+  resetDeviceDriftForTests();
+  const m = {
+    Devices: [
+      {
+        Name: "Kitchen",
+        Host: "10.10.20.190",
+        Uuid: "RINCON_KITCHEN",
+        GetZoneGroupState: async () => [
+          {
+            members: [
+              { uuid: "RINCON_KITCHEN", host: "10.10.20.190", name: "Kitchen" },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  await getZoneGroups(m, { fresh: true, preferHost: "", preferRoom: "" });
+  assert.equal(deviceDriftInfoForTests().refreshes, 0);
 });
