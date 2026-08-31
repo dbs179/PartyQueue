@@ -34,6 +34,8 @@ const RESTORE_RETRY_MS = 250;
 const PAD_RESUME_MS = 1200;
 const PAD_RESUME_TRIES = 8;
 const DEADLINE_SLACK_MS = 10_000;
+/** If the ramp pad has this little left after SOAP, SeekTrack TTS instead of waiting. */
+const PAD_ADVANCE_SLACK_MS = 1500;
 
 const clampVolume = (value) =>
   Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
@@ -131,11 +133,13 @@ export function createDjVolumeHandoff({
   let advancedFromRestore = false;
   let restoreHeldAt = null;
   let deadlineHandled = false;
+  let djRecoverTries = 0;
   let ttsPublicUrl = publicUrl;
   let liveTtsPosition = ttsPosition;
   let liveMusicPosition = musicPosition;
   let preSilenceReleased = !holdPreSilence;
   let pausedByHold = false;
+  let preSilenceStartedAt = null;
   let currentVolume = null;
   const preservedBaseline =
     baselineOverride == null ? null : clampVolume(baselineOverride);
@@ -285,6 +289,50 @@ export function createDjVolumeHandoff({
     );
   };
 
+  /** Sonos often skips the HTTP TTS clip when the 3s ramp expires during SOAP. */
+  const DJ_RECOVER_MAX = 2;
+  const recoverSkippedDjClip = async (io, reason) => {
+    if (sawDjPlaying || djRecoverTries >= DJ_RECOVER_MAX) return false;
+    if (Number(liveTtsPosition) < 1 || typeof io.playAt !== "function") {
+      return false;
+    }
+    djRecoverTries += 1;
+    logger.warn(`${reason}; jumping to TTS (try ${djRecoverTries})`);
+    await io.playAt(Number(liveTtsPosition));
+    try {
+      await io.resume();
+    } catch (error) {
+      logger.warn(`resume after DJ recovery failed: ${error.message}`);
+    }
+    return true;
+  };
+
+  const maybeJumpToTtsAfterRamp = async (io) => {
+    if (Number(liveTtsPosition) < 1 || typeof io.playAt !== "function") {
+      logger.info("volume ready on pre-silence; letting pad advance");
+      return;
+    }
+    const padMs = Math.max(0, Math.round(Number(silenceSec || 3) * 1000));
+    const elapsed =
+      preSilenceStartedAt == null
+        ? 0
+        : Math.max(0, now() - preSilenceStartedAt);
+    const remainingMs = padMs - elapsed;
+    if (remainingMs >= PAD_ADVANCE_SLACK_MS) {
+      logger.info("volume ready on pre-silence; letting pad advance");
+      return;
+    }
+    logger.warn(
+      `pre-silence nearly elapsed (${Math.max(0, remainingMs)}ms left); jumping to TTS`
+    );
+    await io.playAt(Number(liveTtsPosition));
+    try {
+      await io.resume();
+    } catch (error) {
+      logger.warn(`resume after pre-silence jump failed: ${error.message}`);
+    }
+  };
+
   const advanceAfterSilencePad = async (
     position,
     label,
@@ -359,6 +407,7 @@ export function createDjVolumeHandoff({
           // Silence is silent: ramp volume while the pad is current.
           // If the DJ clip is not queued yet, pause here so the 3s pad cannot
           // expire into the guest request (tease → pause → restart).
+          preSilenceStartedAt = now();
           await captureBaseline();
           setPhase("ramping-up");
           await ramp(baselineVolume, announceVolume);
@@ -373,7 +422,7 @@ export function createDjVolumeHandoff({
             logger.info("holding pre-silence until announce clip is queued");
           } else {
             setPhase("announcing");
-            logger.info("volume ready on pre-silence; letting pad advance");
+            await maybeJumpToTtsAfterRamp(io);
           }
         } else if (onRamp && phase === "holding-pre-silence") {
           handledPad = true;
@@ -397,12 +446,16 @@ export function createDjVolumeHandoff({
             setPhase("ramping-up-fallback");
             await ramp(baselineVolume, announceVolume);
           }
-          if (state === "PLAYING" || state === "TRANSITIONING") {
+          if (state === "PLAYING") {
             sawDjPlaying = true;
           }
           if (phase !== "restored") setPhase("announcing");
+          const playedSec = Number(np?.positionSec);
+          const playedEnough =
+            Number.isFinite(playedSec) && playedSec >= 1.5;
           if (
             sawDjPlaying &&
+            playedEnough &&
             !advancedFromDj &&
             (state === "STOPPED" || state === "PAUSED_PLAYBACK") &&
             Number(liveMusicPosition) >= 2 &&
@@ -428,6 +481,15 @@ export function createDjVolumeHandoff({
             logger.info("advanced completed DJ clip to post-silence");
           }
         } else if (onRestore && baselineVolume != null) {
+          if (
+            !sawDjPlaying &&
+            (await recoverSkippedDjClip(
+              io,
+              "restore pad before DJ clip played"
+            ))
+          ) {
+            continue;
+          }
           handledPad = true;
           if (phase !== "restored") {
             restoreHeldAt = now();
@@ -461,6 +523,15 @@ export function createDjVolumeHandoff({
             advancedFromRestore = true;
           }
         } else if (!onPad && baselineVolume != null) {
+          if (
+            !sawDjPlaying &&
+            (await recoverSkippedDjClip(
+              io,
+              "music started before DJ clip played"
+            ))
+          ) {
+            continue;
+          }
           if (phase !== "restored") {
             try {
               await io.pause();

@@ -5,6 +5,7 @@ import {
   lookupLyrics,
   normalizeLrc,
   pickBestSearchHit,
+  fitLyricsToDuration,
   resetLyricsStateForTests,
   warmLyrics,
 } from "../src/lyrics.js";
@@ -419,6 +420,64 @@ describe("lookupLyrics", () => {
     assert.doesNotThrow(() => warmLyrics({ title: "", artist: "" }));
   });
 
+  it("re-picks lyrics once duration arrives after a duration-blind cache", async () => {
+    const originalFetch = globalThis.fetch;
+    let searches = 0;
+    globalThis.fetch = async (url) => {
+      const value = String(url);
+      if (value.includes("unison.boidu.dev") || value.includes("lyrics.ovh")) {
+        return jsonResponse({ success: true, data: [] }, 404);
+      }
+      if (value.includes("/api/search?")) {
+        searches += 1;
+        return jsonResponse([
+          {
+            trackName: "Maps",
+            artistName: "Yeah Yeah Yeahs",
+            albumName: "Fever To Tell (Deluxe Remastered)",
+            duration: 259,
+            syncedLyrics: "[00:59.75]Pack up\n[03:24.42]Wait",
+            plainLyrics: "Pack up",
+          },
+          {
+            trackName: "Maps",
+            artistName: "Yeah Yeah Yeahs",
+            albumName: "Fever To Tell (Deluxe Remastered)",
+            duration: 220,
+            syncedLyrics: "[00:29.48]Pack up\n[02:53.82]Wait",
+            plainLyrics: "Pack up",
+          },
+        ]);
+      }
+      return jsonResponse(null, 404);
+    };
+
+    try {
+      const base = {
+        title: "Maps",
+        artist: "Yeah Yeah Yeahs",
+        album: "Fever To Tell (Deluxe Remastered)",
+        uri: "spotify:track:maps-test",
+      };
+      const blind = await lookupLyrics(base);
+      assert.equal(blind.found, true);
+      assert.match(blind.syncedLyrics, /00:29\.48/);
+      const firstSearches = searches;
+
+      const cachedBlind = await lookupLyrics(base);
+      assert.equal(cachedBlind.cached, true);
+      assert.equal(searches, firstSearches);
+
+      const timed = await lookupLyrics({ ...base, duration: 220 });
+      assert.equal(timed.found, true);
+      assert.match(timed.syncedLyrics, /00:29\.48/);
+      assert.ok(searches > firstSearches, "duration-aware lookup bypasses provisional cache");
+      assert.equal(timed.cached, undefined);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("upgrades plain lyrics to synced when a featuring artist credit hid the hit", async () => {
     const originalFetch = globalThis.fetch;
     const lrclibSearches = [];
@@ -724,4 +783,93 @@ it("prefers synced lyrics that fit the playing duration over a closer duration l
   };
   const picked = pickBestSearchHit([volume1, otherMix], 229);
   assert.equal(picked, otherMix);
+});
+
+it("picks the on-time Maps mix over a Deluxe search hit that starts 30s late", () => {
+  const lateDeluxe = {
+    trackName: "Maps",
+    artistName: "Yeah Yeah Yeahs",
+    albumName: "Fever To Tell (Deluxe Remastered)",
+    duration: 259,
+    syncedLyrics: "[00:59.75]Pack up\n[03:24.42]Wait, they don't love you like I love you",
+    plainLyrics: "Pack up",
+  };
+  const onTime = {
+    trackName: "Maps",
+    artistName: "Yeah Yeah Yeahs",
+    albumName: "Fever To Tell (Deluxe Remastered)",
+    duration: 220,
+    syncedLyrics: "[00:29.48]Pack up\n[02:53.82]Wait, they don't love you like I love you",
+    plainLyrics: "Pack up",
+  };
+  const compilation = {
+    trackName: "Maps",
+    artistName: "Yeah Yeah Yeahs",
+    albumName: "00s Mixtape Vol. 1",
+    duration: 214,
+    syncedLyrics: "[00:29.48]Pack up\n[02:58.16]Wait, they don't love you like I love you",
+    plainLyrics: "Pack up",
+  };
+  const album = "Fever To Tell (Deluxe Remastered)";
+  assert.equal(
+    pickBestSearchHit([lateDeluxe, onTime, compilation], 220, album),
+    onTime
+  );
+  // Duration-blind overlay used to follow LRClib order (the 0:59 file).
+  assert.equal(
+    pickBestSearchHit([lateDeluxe, onTime, compilation], null, album),
+    onTime
+  );
+  assert.equal(
+    pickBestSearchHit([lateDeluxe, onTime], null, album),
+    onTime
+  );
+});
+
+it("prefers duration-matched plain Folsom lyrics over a 170s studio karaoke file", () => {
+  const studioSynced = {
+    trackName: "Folsom Prison Blues",
+    artistName: "Johnny Cash",
+    albumName: "The Essential Johnny Cash",
+    duration: 170,
+    syncedLyrics:
+      "[00:04.80]I hear the train a-coming'\n[02:45.87]On down to San Antone",
+    plainLyrics: "I hear the train a-coming'",
+  };
+  const albumPlain = {
+    trackName: "Folsom Prison Blues",
+    artistName: "Johnny Cash",
+    albumName: "I Walk the Line",
+    duration: 156,
+    plainLyrics: "I hear the train a comin'",
+  };
+  const junkDuration = {
+    trackName: "Folsom Prison Blues",
+    artistName: "Johnny Cash",
+    albumName: "I Walk the Line",
+    duration: 2,
+    syncedLyrics:
+      "[00:04.80]I hear the train a-coming'\n[02:36.79]On down to San Antone",
+    plainLyrics: "I hear the train a-coming'",
+  };
+  const picked = pickBestSearchHit(
+    [junkDuration, studioSynced, albumPlain],
+    156,
+    "I Walk the Line"
+  );
+  assert.equal(picked, albumPlain);
+
+  const stripped = fitLyricsToDuration(
+    {
+      found: true,
+      syncedLyrics: studioSynced.syncedLyrics,
+      plainLyrics: studioSynced.plainLyrics,
+      duration: 170,
+      syncKind: "line",
+    },
+    156
+  );
+  assert.equal(stripped.syncKind, "plain");
+  assert.equal(stripped.syncedLyrics, "");
+  assert.match(stripped.plainLyrics, /train/);
 });

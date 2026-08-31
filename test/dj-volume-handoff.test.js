@@ -52,7 +52,13 @@ function fakeHandoff({
       ) {
         index += 1;
       }
-      return { uri, state };
+      const positionSec =
+        isDjClipUri(uri, DJ) && state === "STOPPED"
+          ? 8
+          : isDjClipUri(uri, DJ)
+            ? 2
+            : 0;
+      return { uri, state, positionSec };
     },
     async getVolume() {
       calls.push(["read-volume", volume]);
@@ -225,6 +231,101 @@ test("does not pause pre-silence when Skip lands on the ramp pad early", async (
   );
   assert.equal(run.getVolume(), 10);
   assert.equal(run.phases.includes("announcing"), true);
+});
+
+test("recovers when seek-near-end skips the DJ clip onto restore silence", async () => {
+  // Skip seek leaves ~1s of song + a draining ramp. Volume SOAP eats the rest
+  // of the 3s pad; Sonos then skips the HTTP TTS onto restore. UI still shows
+  // DJ Holy Roller (silence pads reuse the clip tagline) but nothing plays.
+  const run = fakeHandoff({
+    timeline: [PRE, POST, DJ, POST, MUSIC],
+    states: ["PLAYING", "PLAYING", "PLAYING", "PLAYING", "PLAYING"],
+  });
+
+  const result = await run.handoff.start();
+
+  assert.equal(result.phase, "complete");
+  const playAts = run.calls
+    .filter(([name]) => name === "play-at")
+    .map(([, position]) => position);
+  assert.ok(playAts.includes(2), "should SeekTrack the TTS clip");
+  assert.ok(
+    run.calls.some(([name, uri]) => name === "now-playing" && uri === DJ),
+    "DJ clip should play after recovery"
+  );
+  assert.equal(run.getVolume(), 10);
+});
+
+test("recovers when seek-near-end skips the DJ clip onto music", async () => {
+  const run = fakeHandoff({
+    timeline: [PRE, MUSIC, DJ, POST, MUSIC],
+    states: ["PLAYING", "PLAYING", "PLAYING", "PLAYING", "PLAYING"],
+  });
+
+  const result = await run.handoff.start();
+
+  assert.equal(result.phase, "complete");
+  assert.ok(
+    run.calls.some(([name, position]) => name === "play-at" && position === 2),
+    "should SeekTrack the TTS clip after music started too early"
+  );
+  assert.ok(
+    run.calls.some(([name, uri]) => name === "now-playing" && uri === DJ),
+    "DJ clip should play after recovery"
+  );
+  assert.equal(run.getVolume(), 10);
+});
+
+test("jumps to TTS when volume SOAP eats the ramp pad", async () => {
+  // Natural song-end (no Skip): 6 SOAP volume steps often consume the 3s
+  // ramp, then Sonos skips the HTTP TTS onto restore. Jump before that.
+  let t = 0;
+  const run = fakeHandoff({
+    timeline: [PRE, PRE, DJ, POST, MUSIC],
+    now: () => t,
+    setVolume: async () => {
+      t += 400;
+      return { result: { locked: true } };
+    },
+  });
+
+  const result = await run.handoff.start();
+
+  assert.equal(result.phase, "complete");
+  assert.ok(
+    run.calls.some(([name, position]) => name === "play-at" && position === 2),
+    "should SeekTrack TTS while the ramp pad still has a sliver left"
+  );
+  assert.ok(
+    run.calls.some(([name, uri]) => name === "now-playing" && uri === DJ),
+    "DJ clip should play after the pre-silence jump"
+  );
+  assert.equal(run.getVolume(), 10);
+});
+
+test("a TRANSITIONING DJ clip is not treated as played", async () => {
+  // Sonos can flash TRANSITIONING on the TTS URI then skip it in ~150ms.
+  // That is a failed start, not a finished announce.
+  const run = fakeHandoff({
+    timeline: [PRE, DJ, POST, DJ, POST, MUSIC],
+    states: [
+      "PLAYING",
+      "TRANSITIONING",
+      "PLAYING",
+      "PLAYING",
+      "PLAYING",
+      "PLAYING",
+    ],
+  });
+
+  const result = await run.handoff.start();
+
+  assert.equal(result.phase, "complete");
+  assert.ok(
+    run.calls.some(([name, position]) => name === "play-at" && position === 2),
+    "failed TRANSITIONING start should SeekTrack the TTS clip from restore"
+  );
+  assert.equal(run.getVolume(), 10);
 });
 
 test("does not Next past music if restore pad already advanced", async () => {

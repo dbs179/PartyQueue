@@ -45,7 +45,7 @@ function formatKind(format, lyrics = "") {
   return looksLikeLrc(lyrics) ? "lrc" : null;
 }
 
-function scoreHit(hit, { title, artist, duration }) {
+function scoreHit(hit, { title, artist, album, duration }) {
   if (!hit || typeof hit !== "object") return -Infinity;
   const kind = formatKind(hit.format, hit.lyrics);
   if (!kind) return -Infinity;
@@ -53,6 +53,14 @@ function scoreHit(hit, { title, artist, duration }) {
   let score = kind === "lrc" ? 100 : 40;
   if (normalized(hit.song) === normalized(title)) score += 50;
   if (normalized(hit.artist) === normalized(artist)) score += 50;
+  const queryAlbum = normalized(album);
+  const hitAlbum = normalized(hit.album);
+  if (queryAlbum && hitAlbum) {
+    if (hitAlbum === queryAlbum) score += 24;
+    else if (hitAlbum.includes(queryAlbum) || queryAlbum.includes(hitAlbum)) {
+      score += 16;
+    }
+  }
   if (duration != null && Number.isFinite(Number(hit.duration))) {
     score += Math.max(0, 30 - Math.abs(Number(hit.duration) - duration) * 3);
   }
@@ -116,6 +124,9 @@ function normalizeRecord(record, fallback = null) {
     instrumental: false,
     trackName: record.song || fallback?.song || null,
     artistName: record.artist || fallback?.artist || null,
+    duration: Number.isFinite(Number(record.duration ?? fallback?.duration))
+      ? Number(record.duration ?? fallback?.duration)
+      : null,
     provider: "unison",
     attribution: UNISON_ATTRIBUTION,
   };

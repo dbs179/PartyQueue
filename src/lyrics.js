@@ -18,7 +18,12 @@ import {
 const LRCLIB_BASE = "https://lrclib.net";
 const FOUND_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MISS_CACHE_TTL_MS = 30 * 60 * 1000;
+/** Duration-blind picks stay sticky for one URI — keep them brief. */
+const PROVISIONAL_CACHE_TTL_MS = 20_000;
 const CACHE_MAX = 200;
+const CACHE_VERSION = "l2";
+/** Synced LRC farther than this from the playing length is the wrong mix. */
+const SYNC_DURATION_SLACK_SEC = 6;
 const LOOKUP_BUDGET_MS = 10_000;
 const LRCLIB_CALL_MS = 2_500;
 /** Keep enough budget for lyrics.ovh artist-variant fallbacks. */
@@ -111,17 +116,22 @@ export class LyricsUnavailableError extends Error {
   }
 }
 
+function playingDuration(value) {
+  if (value == null || !Number.isFinite(Number(value))) return null;
+  const n = Number(value);
+  return n > 0 ? n : null;
+}
+
 function cacheKey({ title, artist, album, duration, uri }) {
   const id = String(uri || "").trim().toLowerCase();
   // One Spotify/Sonos id = one lyrics payload. Including duration used to
   // fetch a second LRC mid-song when TrackDuration arrived late, which
   // swapped karaoke timing (Amigo the Devil — The Dreamer).
-  if (id) return id;
+  if (id) return `${CACHE_VERSION}:${id}`;
   const d =
-    duration != null && Number.isFinite(Number(duration))
-      ? Math.round(Number(duration))
-      : "";
+    playingDuration(duration) != null ? Math.round(playingDuration(duration)) : "";
   return [
+    CACHE_VERSION,
     String(title || "").trim().toLowerCase(),
     String(artist || "").trim().toLowerCase(),
     String(album || "").trim().toLowerCase(),
@@ -156,11 +166,22 @@ function lrcToPlain(value) {
     .join("\n");
 }
 
-function readCache(key) {
+function readCache(key, { duration } = {}) {
   const hit = cache.get(key);
   if (!hit) return null;
-  const ttl = hit.value?.found ? FOUND_CACHE_TTL_MS : MISS_CACHE_TTL_MS;
+  const ttl = Number.isFinite(hit.ttlMs)
+    ? hit.ttlMs
+    : hit.value?.found
+      ? FOUND_CACHE_TTL_MS
+      : MISS_CACHE_TTL_MS;
   if (Date.now() - hit.at > ttl) {
+    cache.delete(key);
+    persistCache();
+    return null;
+  }
+  // A duration-blind pick cached the wrong mix (Maps / Folsom). Re-score
+  // once TrackDuration is known instead of keeping it for 24h.
+  if (hit.value?.provisional && playingDuration(duration) != null) {
     cache.delete(key);
     persistCache();
     return null;
@@ -170,14 +191,30 @@ function readCache(key) {
   return hit.value;
 }
 
-function writeCache(key, value) {
+function writeCache(key, value, ttlMs) {
+  const existing = cache.get(key);
+  if (
+    existing?.value?.found &&
+    !existing.value?.provisional &&
+    value?.provisional
+  ) {
+    return;
+  }
   if (cache.has(key)) cache.delete(key);
-  cache.set(key, { at: Date.now(), value });
+  const entry = { at: Date.now(), value };
+  if (Number.isFinite(ttlMs) && ttlMs > 0) entry.ttlMs = ttlMs;
+  cache.set(key, entry);
   while (cache.size > CACHE_MAX) {
     const oldest = cache.keys().next().value;
     cache.delete(oldest);
   }
   persistCache();
+}
+
+function publicLyricsPayload(value) {
+  if (!value || typeof value !== "object") return value;
+  const { provisional: _p, duration: _d, ...rest } = value;
+  return rest;
 }
 
 function normalizeRecord(rec, provider = "lrclib") {
@@ -209,6 +246,7 @@ function normalizeRecord(rec, provider = "lrclib") {
     syncedLyrics: synced,
     trackName: rec.trackName || null,
     artistName: rec.artistName || null,
+    duration: Number.isFinite(Number(rec.duration)) ? Number(rec.duration) : null,
     provider,
     syncKind: synced ? "line" : "plain",
   };
@@ -259,38 +297,152 @@ export function lrcTimestampSpan(syncedLyrics) {
   return { first, last };
 }
 
-export function pickBestSearchHit(results, duration) {
+function foldedText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function albumMatchScore(hitAlbum, queryAlbum) {
+  const hit = foldedText(hitAlbum);
+  const query = foldedText(queryAlbum);
+  if (!hit || !query) return 0;
+  if (hit === query) return 24;
+  if (hit.includes(query) || query.includes(hit)) return 16;
+  return 0;
+}
+
+function medianNumber(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[mid]
+    : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function clusterConsensusFirst(firsts, radius = 4) {
+  if (firsts.length < 2) return null;
+  let bestCenter = null;
+  let bestCount = 0;
+  for (const center of firsts) {
+    const members = firsts.filter((t) => Math.abs(t - center) <= radius);
+    if (
+      members.length > bestCount ||
+      (members.length === bestCount &&
+        bestCenter != null &&
+        center < bestCenter)
+    ) {
+      bestCount = members.length;
+      bestCenter = medianNumber(members);
+    }
+  }
+  if (bestCount >= 2) return bestCenter;
+  // Two singleton families (Deluxe Maps 0:59 vs 0:29): prefer the earlier
+  // vocal. Wrong mixes usually pad intro, they rarely skip it.
+  return Math.min(...firsts);
+}
+
+/** Ignore junk labels like duration: 2 on a 3-minute LRC. */
+function trustedLabeledDuration(record, span) {
+  const labeled = Number(record?.duration);
+  if (!Number.isFinite(labeled) || labeled < 30) return null;
+  const rounded = Math.round(labeled);
+  if (span && Math.abs(span.last - rounded) > 60) return null;
+  return rounded;
+}
+
+function syncedFitsDuration(record, duration) {
+  const target = playingDuration(duration);
+  if (target == null) return true;
+  if (!record?.syncedLyrics) return true;
+  const rounded = Math.round(target);
+  const span = lrcTimestampSpan(record.syncedLyrics);
+  const labeled = trustedLabeledDuration(record, span);
+  if (labeled != null && Math.abs(labeled - rounded) > SYNC_DURATION_SLACK_SEC) {
+    return false;
+  }
+  if (span && span.last - rounded > 8) return false;
+  return true;
+}
+
+/**
+ * Drop karaoke timestamps when they belong to another mix, keeping plain text.
+ * Folsom Prison Blues on "I Walk the Line" is 156s; community LRCs are ~170s.
+ */
+export function fitLyricsToDuration(result, duration) {
+  const target = playingDuration(duration);
+  if (!result?.found || !result.syncedLyrics || target == null) return result;
+  const rounded = Math.round(target);
+  const span = lrcTimestampSpan(result.syncedLyrics);
+  const labeled = trustedLabeledDuration(result, span);
+  const labeledOff =
+    labeled != null && Math.abs(labeled - rounded) > SYNC_DURATION_SLACK_SEC;
+  const overrun = span ? span.last - rounded : 0;
+  if (!labeledOff && overrun <= 8) return result;
+  return {
+    ...result,
+    syncedLyrics: "",
+    syncKind: result.plainLyrics ? "plain" : result.syncKind,
+  };
+}
+
+export function pickBestSearchHit(results, duration, album) {
   if (!Array.isArray(results) || !results.length) return null;
   const pool = results.filter(
     (r) => r && (r.plainLyrics || r.syncedLyrics || r.instrumental)
   );
   if (!pool.length) return results[0] || null;
 
-  const target =
-    duration != null && Number.isFinite(duration) ? Math.round(duration) : null;
+  const target = playingDuration(duration);
+  const targetSec = target != null ? Math.round(target) : null;
+  const firsts = pool
+    .map((r) => (r.syncedLyrics ? lrcTimestampSpan(r.syncedLyrics)?.first : null))
+    .filter((n) => n != null);
+  const consensusFirst = clusterConsensusFirst(firsts);
 
   let best = null;
   let bestScore = -Infinity;
   for (const r of pool) {
     let score = 0;
-    if (r.syncedLyrics) score += 100;
-    else if (r.plainLyrics) score += 40;
+    const span = r.syncedLyrics ? lrcTimestampSpan(r.syncedLyrics) : null;
+    const labeled = trustedLabeledDuration(r, span);
+    const durationOk = syncedFitsDuration(r, targetSec);
+
+    if (r.syncedLyrics) {
+      // Duration-mismatched karaoke is worse than unsynced lyrics of the
+      // playing cut (Johnny Cash "I Walk the Line" vs the 170s studio LRC).
+      // Untrusted labels (duration: 2 on a 3-minute file) don't count as a fit.
+      if (targetSec == null) score += 100;
+      else if (durationOk && labeled != null) score += 100;
+      else score += 40;
+    } else if (r.plainLyrics) {
+      score += 40;
+    }
     if (r.instrumental) score += 5;
-    if (target != null && Number.isFinite(Number(r.duration))) {
-      const delta = Math.abs(Math.round(Number(r.duration)) - target);
+    if (targetSec != null && labeled != null) {
+      const delta = Math.abs(labeled - targetSec);
       score += Math.max(0, 40 - delta * 4);
     }
+    score += albumMatchScore(r.albumName, album);
     // Community LRCs for the "same" song often belong to another mix.
     // Prefer timestamps that fit the playing length over a closer duration
     // label with lines that run past the end (karaoke looks "way off").
-    if (target != null && r.syncedLyrics) {
-      const span = lrcTimestampSpan(r.syncedLyrics);
-      if (span) {
-        const overrun = span.last - target;
-        if (overrun > 3) {
-          score -= Math.min(90, Math.round((overrun - 3) * 6));
-        }
+    if (targetSec != null && span) {
+      const overrun = span.last - targetSec;
+      if (overrun > 3) {
+        score -= Math.min(90, Math.round((overrun - 3) * 6));
       }
+    }
+    // Yeah Yeah Yeahs Maps: Deluxe search returns a 259s file first (vocals
+    // at 0:59) beside many 3:40 files (vocals at 0:29). Duration-blind picks
+    // used to take search order and karaoke ran half a minute late.
+    if (span && consensusFirst != null && firsts.length >= 2) {
+      const drift = Math.abs(span.first - consensusFirst);
+      if (drift <= 4) score += 20;
+      else if (drift > 12) score -= 50;
     }
     if (score > bestScore) {
       bestScore = score;
@@ -337,11 +489,12 @@ async function lookupLrclib(query, deadline) {
       track_name: title,
       artist_name: artistName,
     });
-    if (album) searchParams.set("album_name", album);
+    // Album is a scoring signal, not a search filter. Filtering Deluxe Maps
+    // put a 259s/0:59-vocal file first; duration-blind karaoke followed it.
     try {
       const results = await lrclibFetch(`/api/search?${searchParams}`, deadline);
       sawSuccess = true;
-      const hit = pickBestSearchHit(results, duration);
+      const hit = pickBestSearchHit(results, duration, album);
       if (isRicherLrclibHit(hit, record)) {
         record = hit;
       }
@@ -352,11 +505,10 @@ async function lookupLrclib(query, deadline) {
   }
 
   const wantExact =
-    duration != null &&
-    duration > 0 &&
+    playingDuration(duration) != null &&
     album &&
-    (!record || !record.syncedLyrics) &&
-    Date.now() < deadline;
+    Date.now() < deadline &&
+    (!record || !record.syncedLyrics || !syncedFitsDuration(record, duration));
   if (wantExact) {
     // Exact get uses the best artist form we already preferred (primary when
     // a featuring credit was stripped during search).
@@ -373,9 +525,9 @@ async function lookupLrclib(query, deadline) {
     try {
       const exact = await lrclibFetch(`/api/get?${params}`, deadline);
       sawSuccess = true;
-      if (isRicherLrclibHit(exact, record)) {
-        record = exact;
-      }
+      record =
+        pickBestSearchHit([record, exact].filter(Boolean), duration, album) ||
+        record;
     } catch (err) {
       sawError = true;
       console.error("[lyrics] LRClib get failed:", err.message);
@@ -431,21 +583,23 @@ export async function lookupLyrics(q = {}) {
     return { found: false, error: "Missing title or artist." };
   }
   const album = String(q.album || "").trim();
-  const durationRaw = q.duration;
-  const duration =
-    durationRaw != null && Number.isFinite(Number(durationRaw))
-      ? Number(durationRaw)
-      : null;
+  const duration = playingDuration(q.duration);
   const uri = String(q.uri || "").trim();
   const query = { title, artist, album, duration, uri };
 
   const key = cacheKey(query);
-  const cached = readCache(key);
-  if (cached) return { ...cached, cached: true };
+  const cached = readCache(key, { duration });
+  if (cached) return { ...publicLyricsPayload(cached), cached: true };
   const pending = inFlight.get(key);
-  if (pending) return pending;
+  if (
+    pending &&
+    (duration == null || pending.hasDuration)
+  ) {
+    return pending.promise;
+  }
 
-  const request = (async () => {
+  const request = { hasDuration: duration != null, promise: null };
+  request.promise = (async () => {
     const startedAt = Date.now();
     const deadline = startedAt + LOOKUP_BUDGET_MS;
     const primaryDeadline = Math.max(
@@ -496,7 +650,10 @@ export async function lookupLyrics(q = {}) {
 
     if (jobs.length) await Promise.all(jobs);
 
-    let out = pickPreferred(lrclibResult, unisonResult);
+    let out = fitLyricsToDuration(
+      pickPreferred(lrclibResult, unisonResult),
+      duration
+    );
     const needsPlainFallback =
       !out.found || (!out.syncedLyrics && !out.instrumental && !out.plainLyrics);
 
@@ -512,7 +669,7 @@ export async function lookupLyrics(q = {}) {
         });
         ovhResponded = true;
         ovhBackoffUntil = 0;
-        out = pickPreferred(out, ovhResult);
+        out = fitLyricsToDuration(pickPreferred(out, ovhResult), duration);
       } catch (err) {
         if (!(err instanceof OvhUnavailableError)) throw err;
         ovhBackoffUntil = Date.now() + PROVIDER_BACKOFF_MS;
@@ -536,8 +693,14 @@ export async function lookupLyrics(q = {}) {
           });
           if (fallback?.found) {
             const { cached: _c, ...clean } = fallback;
-            writeCache(key, clean);
-            return clean;
+            const stored =
+              duration == null ? { ...clean, provisional: true } : clean;
+            writeCache(
+              key,
+              stored,
+              duration == null ? PROVISIONAL_CACHE_TTL_MS : undefined
+            );
+            return publicLyricsPayload(clean);
           }
         } catch {
           // Providers are struggling; surface the original miss handling.
@@ -552,8 +715,14 @@ export async function lookupLyrics(q = {}) {
 
     if (out.found) {
       const payload = degraded ? { ...out, degraded: true } : out;
-      writeCache(key, payload);
-      return payload;
+      const stored =
+        duration == null ? { ...payload, provisional: true } : payload;
+      writeCache(
+        key,
+        stored,
+        duration == null ? PROVISIONAL_CACHE_TTL_MS : undefined
+      );
+      return publicLyricsPayload(payload);
     }
 
     if (anyResponded) {
@@ -573,7 +742,7 @@ export async function lookupLyrics(q = {}) {
   })();
   inFlight.set(key, request);
   try {
-    return await request;
+    return await request.promise;
   } finally {
     if (inFlight.get(key) === request) {
       inFlight.delete(key);
@@ -587,14 +756,11 @@ export function warmLyrics(q = {}) {
   const artist = String(q.artist || "").trim();
   if (!title || !artist) return;
   const album = String(q.album || "").trim();
-  const durationRaw = q.duration;
-  const duration =
-    durationRaw != null && Number.isFinite(Number(durationRaw))
-      ? Number(durationRaw)
-      : null;
+  const duration = playingDuration(q.duration);
+  if (duration == null) return;
   const uri = String(q.uri || "").trim();
   const key = cacheKey({ title, artist, album, duration, uri });
-  if (readCache(key)) return;
+  if (readCache(key, { duration })) return;
   lookupLyrics({ title, artist, album, duration, uri }).catch((err) => {
     // Warm must never poison interactive lookups; provider backoffs already apply.
     console.error("[lyrics] warm failed:", err.message);

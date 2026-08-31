@@ -2,6 +2,7 @@ import { withSonosWriteLock } from "./sonos-lock.js";
 import {
   getManager,
   resolveCoordinator,
+  resolveGroup,
   getZoneGroups,
   deviceForMember,
   clearZoneCache,
@@ -123,11 +124,22 @@ async function groupAllUnlocked() {
   }
 
   // Let the topology change settle, then drop the cache so later resolves see
-  // the new single group, and lock every player to the party volume.
+  // the new single group. Volume-lock only the party group — SOAPing every
+  // household Device (including a satellite that failed JoinGroup) is how a
+  // weak room like Office gets knocked offline while the party keeps playing.
   await sleep(SETTLE_MS);
   clearZoneCache();
 
-  const locked = await lockGroupVolume(m.Devices, GROUP_ALL_VOLUME);
+  let volumeMembers = [anchor];
+  try {
+    const group = await resolveGroup(m, { fresh: true });
+    if (group?.members?.length) volumeMembers = group.members;
+  } catch (err) {
+    console.warn(
+      `[group-all] party group lookup after join failed: ${err.message}`
+    );
+  }
+  const locked = await lockGroupVolume(volumeMembers, GROUP_ALL_VOLUME);
   invalidateSonosSnapshots();
   return { players: m.Devices.length, volume: GROUP_ALL_VOLUME, locked };
 }

@@ -7,6 +7,7 @@ import {
 } from "./sonos-manager-health.js";
 import { pickGroupByTarget } from "./sonos-queue-policy.js";
 import { getSonosTargetRoom } from "./settings.js";
+import { getSonosHost } from "./sonos-config.js";
 import { envTimeoutMs, withTimeout } from "./with-timeout.js";
 
 /** Connect / discovery budget (discovery itself asks for ~10s). */
@@ -20,6 +21,31 @@ const ZONE_DEVICE_TIMEOUT_MS = envTimeoutMs(
   4_000
 );
 const ZONE_DEVICE_FAILOVER_LIMIT = 3;
+
+/**
+ * Household topology XML is the same on every speaker. Probe the configured
+ * party host / target room first — SSDP order often puts a satellite (Office)
+ * at Devices[0], and GetZoneGroupState on that box can knock it offline.
+ */
+export function orderTopologyProbeDevices(
+  devices,
+  { preferHost = "", preferRoom = "" } = {}
+) {
+  const list = Array.isArray(devices) ? [...devices] : [];
+  const host = String(preferHost || "").trim().toLowerCase();
+  const room = String(preferRoom || "").trim().toLowerCase();
+  const score = (device) => {
+    const dHost = String(device?.Host || "").trim().toLowerCase();
+    const dName = String(device?.Name || "").trim().toLowerCase();
+    // Target coordinator first: it already handles queue/transport SOAP.
+    // Pinned SONOS_HOST (Kitchen Amp) is failover, not an extra hammer.
+    if (room && dName === room) return 0;
+    if (host && dHost === host) return 1;
+    return 2;
+  };
+  list.sort((a, b) => score(a) - score(b));
+  return list;
+}
 
 // Sonos Spotify "region" codes used when building track metadata.
 // These map to the SA_RINCON<region> service id the library embeds.
@@ -118,12 +144,21 @@ let zoneInFlight = null;
 let zoneGeneration = 0;
 const ZONE_TTL_MS = 2000;
 
-async function getZoneGroupStateFromHousehold(m) {
+async function getZoneGroupStateFromHousehold(m, probePrefs = {}) {
   const devices = Array.isArray(m?.Devices) ? m.Devices : [];
   if (!devices.length) {
     throw new Error("No Sonos devices available for topology.");
   }
-  const toTry = devices.slice(0, ZONE_DEVICE_FAILOVER_LIMIT);
+  const preferHost =
+    probePrefs.preferHost !== undefined ? probePrefs.preferHost : getSonosHost();
+  const preferRoom =
+    probePrefs.preferRoom !== undefined
+      ? probePrefs.preferRoom
+      : getSonosTargetRoom();
+  const toTry = orderTopologyProbeDevices(devices, {
+    preferHost,
+    preferRoom,
+  }).slice(0, ZONE_DEVICE_FAILOVER_LIMIT);
   let lastErr;
   for (let i = 0; i < toTry.length; i++) {
     const device = toTry[i];
@@ -149,7 +184,10 @@ async function getZoneGroupStateFromHousehold(m) {
   throw lastErr || new Error("Sonos topology query failed.");
 }
 
-export async function getZoneGroups(m, { fresh = false } = {}) {
+export async function getZoneGroups(
+  m,
+  { fresh = false, preferHost, preferRoom } = {}
+) {
   const now = Date.now();
   if (!fresh && zoneCache.groups && now - zoneCache.at < ZONE_TTL_MS) {
     return zoneCache.groups;
@@ -161,7 +199,10 @@ export async function getZoneGroups(m, { fresh = false } = {}) {
   const readGeneration = zoneGeneration;
   const request = (async () => {
     try {
-      const groups = await getZoneGroupStateFromHousehold(m);
+      const groups = await getZoneGroupStateFromHousehold(m, {
+        preferHost,
+        preferRoom,
+      });
       // clearZoneCache() bumps generation; never let a superseded read refill.
       if (readGeneration === zoneGeneration) {
         zoneCache = { at: Date.now(), groups };
