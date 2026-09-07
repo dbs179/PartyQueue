@@ -335,6 +335,24 @@ export function createDjVolumeHandoff({
     if (Number(liveTtsPosition) < 1 || typeof io.playAt !== "function") {
       return false;
     }
+    try {
+      const live = await io.getNowPlaying();
+      const liveUri = String(live?.uri || "");
+      const liveState = String(live?.state || "").toUpperCase();
+      if (
+        isLeadDjClipUri(liveUri, ttsPublicUrl) &&
+        (liveState === "PLAYING" || liveState === "TRANSITIONING")
+      ) {
+        if (liveState === "PLAYING") {
+          sawDjPlaying = true;
+          sawLeadPlaying = true;
+        }
+        logger.info(`${reason}; already on lead DJ clip — not seeking`);
+        return false;
+      }
+    } catch {
+      /* jump if we cannot tell */
+    }
     djRecoverTries += 1;
     logger.warn(`${reason}; jumping to TTS (try ${djRecoverTries})`);
     await io.playAt(Number(liveTtsPosition));
@@ -359,6 +377,27 @@ export function createDjVolumeHandoff({
     const remainingMs = padMs - elapsed;
     if (remainingMs >= PAD_ADVANCE_SLACK_MS) {
       logger.info("volume ready on pre-silence; letting pad advance");
+      return;
+    }
+    // Re-read: the volume SOAP ramp often outlasts the 3s pad, so Sonos has
+    // already moved onto the TTS clip. SeekTrack on a live http:// clip
+    // restarts it from 0 (double intro).
+    let liveUri = "";
+    let liveState = "";
+    try {
+      const live = await io.getNowPlaying();
+      liveUri = String(live?.uri || "");
+      liveState = String(live?.state || "").toUpperCase();
+    } catch {
+      /* jump if we cannot tell */
+    }
+    const liveOnDj = isDjClipUri(liveUri, ttsPublicUrl);
+    const livePlaying =
+      liveState === "PLAYING" || liveState === "TRANSITIONING";
+    if (liveOnDj && livePlaying) {
+      logger.info("pre-silence elapsed; already on DJ clip — not seeking");
+      if (liveState === "PLAYING") sawDjPlaying = true;
+      if (isLeadDjClipUri(liveUri, ttsPublicUrl)) sawLeadPlaying = true;
       return;
     }
     logger.warn(

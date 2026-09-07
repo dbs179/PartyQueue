@@ -356,9 +356,11 @@ test("recovers when seek-near-end skips the DJ clip onto music", async () => {
 test("jumps to TTS when volume SOAP eats the ramp pad", async () => {
   // Natural song-end (no Skip): 6 SOAP volume steps often consume the 3s
   // ramp, then Sonos skips the HTTP TTS onto restore. Jump before that.
+  // Extra PRE covers the post-ramp transport re-read (must still be on the
+  // pad, or SeekTrack would restart an already-playing Holy Roller clip).
   let t = 0;
   const run = fakeHandoff({
-    timeline: [PRE, PRE, DJ, POST, MUSIC],
+    timeline: [PRE, PRE, PRE, DJ, POST, MUSIC],
     now: () => t,
     setVolume: async () => {
       t += 400;
@@ -378,6 +380,84 @@ test("jumps to TTS when volume SOAP eats the ramp pad", async () => {
     "DJ clip should play after the pre-silence jump"
   );
   assert.equal(run.getVolume(), 10);
+});
+
+test("does not SeekTrack TTS when the ramp already advanced onto the DJ clip", async () => {
+  // Volume SOAP outlasts the 3s pad; Holy Roller is already talking. Seeking
+  // that http clip restarts it from 0 (double intro).
+  let t = 0;
+  let uri = PRE;
+  let polls = 0;
+  let volume = 10;
+  const calls = [];
+  const adapter = {
+    async getNowPlaying() {
+      polls += 1;
+      t += 200;
+      let state = "PLAYING";
+      let positionSec = 0;
+      if (uri === DJ) {
+        positionSec = 5;
+        if (polls >= 8) {
+          state = "STOPPED";
+          positionSec = 8;
+        }
+      }
+      calls.push(["now-playing", uri, state]);
+      return { uri, state, positionSec };
+    },
+    async getVolume() {
+      return volume;
+    },
+    async setVolume(level) {
+      volume = level;
+      t += 400;
+      // After the volume ramp, the silence pad is gone and TTS is current.
+      uri = DJ;
+      calls.push(["set-volume", level]);
+      return { locked: true };
+    },
+    async pause() {
+      calls.push(["pause"]);
+    },
+    async resume() {
+      calls.push(["resume"]);
+    },
+    async playAt(position) {
+      calls.push(["play-at", position]);
+      if (uri === POST) uri = MUSIC;
+      else uri = DJ;
+    },
+    async next() {
+      calls.push(["next"]);
+      if (uri === DJ) uri = POST;
+      else if (uri === POST) uri = MUSIC;
+    },
+  };
+  const handoff = createDjVolumeHandoff({
+    publicUrl: DJ,
+    approxDurationSec: 8,
+    silenceSec: 3,
+    calculateTarget: () => 30,
+    adapter,
+    sleep: async () => {},
+    now: () => t,
+    pollMs: 0,
+    rampSteps: 6,
+    ttsPosition: 2,
+    musicPosition: 4,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  await handoff.start();
+
+  assert.equal(
+    calls.filter(([name]) => name === "play-at").length,
+    0,
+    "must not SeekTrack an already-playing DJ intro"
+  );
+  assert.ok(calls.some(([name, liveUri]) => name === "now-playing" && liveUri === DJ));
+  assert.equal(volume, 10);
 });
 
 test("a TRANSITIONING DJ clip is not treated as played", async () => {
