@@ -2945,6 +2945,7 @@ async function beginVolumeSession({
   silenceSec = silenceDurationSec(),
   startPlayback,
   ttsPosition,
+  tts2Position = null,
   musicPosition,
 } = {}) {
   const tiers = volumeBumpTiers();
@@ -2953,6 +2954,7 @@ async function beginVolumeSession({
     approxDurationSec,
     silenceSec,
     ttsPosition,
+    tts2Position,
     musicPosition,
     takeOver: !!startPlayback,
     rearmOnComplete: true,
@@ -3012,11 +3014,13 @@ export async function rearmDjVolumeHandoffFromQueue({
     silenceSec: plan.silenceSec,
     startPlayback: false,
     ttsPosition: plan.ttsPosition,
+    tts2Position: plan.tts2Position,
     musicPosition: plan.musicPosition,
   });
   console.info(
     `[dj-volume] rearmed orphaned announce handoff ` +
       `(tts@${plan.ttsPosition}` +
+      `${plan.tts2Position ? ` tts2@${plan.tts2Position}` : ""}` +
       `${plan.rampPosition != null ? ` ramp@${plan.rampPosition}` : ""}` +
       ` music@${plan.musicPosition})`
   );
@@ -3862,7 +3866,10 @@ async function announceOnSonosUnlocked(
       };
     }
     didInsert = true;
-    const { rampPos, ttsPos, restorePos, wiped } = block;
+    const { rampPos, ttsPos, tts2Pos, restorePos, wiped } = block;
+    const leadSec = Number(clip.approxDurationSec) || 8;
+    const punchSec = tts2Clip ? Number(clip2?.approxDurationSec) || 8 : 0;
+    const announceSec = leadSec + punchSec;
     if (wiped?.removedBefore > 0) {
       console.log(
         `[dj-voice] supersede: removed ${wiped.removed} pad(s); insert ${queuePosition} → ${rampPos}`
@@ -3873,8 +3880,12 @@ async function announceOnSonosUnlocked(
       );
     }
     console.log(
-      `[dj-voice] enqueued ramp@${rampPos} TTS@${ttsPos} restore@${restorePos} ` +
-        `(${ramp.durationSec}s / ~${clip.approxDurationSec}s / ${restore.durationSec}s)`
+      `[dj-voice] enqueued ramp@${rampPos} TTS@${ttsPos}` +
+        (tts2Pos ? ` TTS2@${tts2Pos}` : "") +
+        ` restore@${restorePos} ` +
+        `(${ramp.durationSec}s / ~${leadSec}s` +
+        (punchSec ? ` + ~${punchSec}s` : "") +
+        ` / ${restore.durationSec}s)`
     );
 
     // Fresh sets / empty-queue shouts: Play ramp → boost → DJ → music.
@@ -3883,6 +3894,7 @@ async function announceOnSonosUnlocked(
       parked.handoff.setTtsUrl?.(clip.publicUrl);
       parked.handoff.setPositions?.({
         ttsPosition: ttsPos,
+        tts2Position: tts2Pos || null,
         musicPosition: restorePos + 1,
       });
       parked.handoff.releasePreSilenceHold?.();
@@ -3895,10 +3907,11 @@ async function announceOnSonosUnlocked(
     } else {
       vol = await beginVolumeSession({
         publicUrl: clip.publicUrl,
-        approxDurationSec: clip.approxDurationSec,
+        approxDurationSec: announceSec,
         silenceSec: ramp.durationSec,
         startPlayback: !!startPlayback || heldAtTrackEnd,
         ttsPosition: ttsPos,
+        tts2Position: tts2Pos || null,
         musicPosition: restorePos + 1,
       });
       volHold = vol.startHold || null;

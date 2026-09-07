@@ -3,14 +3,14 @@
 import { escapeHtml, formatSuggestionWhen } from "./format.js";
 import { sanitizeDisplayName } from "./guest.js";
 
-export const SUGGESTION_TEXT_MAX = 280;
+export const SUGGESTION_TEXT_MAX = 32768;
 
 /**
  * @param {number} length
- * @param {number} [max]
+ * @param {number} [_max] unused; kept so callers can pass a safety cap
  */
-export function formatSuggestionCharCount(length, max = SUGGESTION_TEXT_MAX) {
-  return `${Math.max(0, Number(length) || 0)} / ${max}`;
+export function formatSuggestionCharCount(length, _max) {
+  return String(Math.max(0, Number(length) || 0));
 }
 
 /**
@@ -22,11 +22,11 @@ export function formatSuggestionCharCount(length, max = SUGGESTION_TEXT_MAX) {
 export function wireSuggestionCharCount(
   textEl,
   countEl,
-  max = SUGGESTION_TEXT_MAX
+  _max = SUGGESTION_TEXT_MAX
 ) {
   function sync() {
     if (!countEl || !textEl) return;
-    countEl.textContent = formatSuggestionCharCount(textEl.value.length, max);
+    countEl.textContent = formatSuggestionCharCount(textEl.value.length);
   }
   textEl?.addEventListener("input", sync);
   sync();

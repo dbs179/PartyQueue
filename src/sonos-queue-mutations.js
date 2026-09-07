@@ -8,7 +8,7 @@ import {
 } from "./sonos-core.js";
 import { invalidateSonosSnapshots } from "./sonos-snapshots.js";
 import {
-  removeRangeFor,
+  trimPlayedDecision,
   autoStartDecision,
   findInsertPosition,
   findUpcomingAnnouncePadIndices,
@@ -118,30 +118,45 @@ async function trimPlayedTracksUnlocked() {
       coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
         CurrentURI: "",
       })),
-      coordinator.GetQueue().catch(() => ({ Result: [], UpdateID: 0 })),
+      coordinator.GetQueue().catch(() => ({ Result: [], UpdateID: 0, TotalMatches: 0 })),
     ]);
 
     // Only the local queue source has a meaningful "played" history to trim;
     // radio/line-in keep a stale pointer we must not act on.
     const playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
-    if (!playingFromQueue) return { removed: 0 };
-
-    // Never trim while the current track is our HTTP DJ clip (or we're still
-    // on track 1 of a fresh set).
-    const trackUri = String(pos.TrackURI || "");
-    if (/tts_proxy|\/media\/tts\//i.test(trackUri)) return { removed: 0 };
-
-    const range = removeRangeFor(pos.Track);
-    if (!range) return { removed: 0 };
+    const items = Array.isArray(queue.Result) ? queue.Result : [];
+    const queueLength = Number(queue.TotalMatches) || items.length;
+    let handoffActive = false;
+    try {
+      const { isDjVolumeHandoffActive } = await import("./dj-volume-handoff.js");
+      handoffActive = isDjVolumeHandoffActive();
+    } catch {
+      /* trim still runs if the handoff module is unavailable */
+    }
+    const meta = typeof pos.TrackMetaData === "object" ? pos.TrackMetaData : null;
+    const decision = trimPlayedDecision({
+      track: pos.Track,
+      queueLength,
+      handoffActive,
+      currentUri: String(pos.TrackURI || ""),
+      currentTitle: meta?.Title ?? "",
+      playingFromQueue,
+    });
+    if (decision.action !== "trim") {
+      if (decision.reason && decision.reason !== "nothing-behind" && decision.reason !== "not-queue") {
+        console.log(`[trim] skip (${decision.reason})`);
+      }
+      return { removed: 0 };
+    }
 
     await coordinator.AVTransportService.RemoveTrackRangeFromQueue({
       InstanceID: 0,
       UpdateID: Number(queue.UpdateID) || 0,
-      StartingIndex: range.StartingIndex,
-      NumberOfTracks: range.NumberOfTracks,
+      StartingIndex: decision.StartingIndex,
+      NumberOfTracks: decision.NumberOfTracks,
     });
     invalidateSonosSnapshots();
-    return { removed: range.NumberOfTracks };
+    return { removed: decision.NumberOfTracks };
   } catch (err) {
     console.error("[trim] failed:", err.message);
     return { removed: 0 };

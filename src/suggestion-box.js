@@ -1,8 +1,9 @@
 // Guest suggestion box: party people leave ideas for the host; the host reviews
 // them on a Memory-style page and can check them off when implemented.
 //
-// Backed by a bounded JSON file in data/ (Docker volume). Honors
-// PARTYQUEUE_SUGGESTIONS_FILE for tests.
+// Backed by a JSON file in data/ (Docker volume). Honors
+// PARTYQUEUE_SUGGESTIONS_FILE for tests. History is not FIFO-capped — the host
+// uses this box for tracking notes.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -16,8 +17,9 @@ const SUGGESTIONS_FILE =
   process.env.PARTYQUEUE_SUGGESTIONS_FILE ||
   path.join(__dirname, "..", "data", "suggestions.json");
 
-const MAX = 800;
-export const SUGGESTION_TEXT_MAX = 280;
+// Payload safety cap only — the compose box is for host tracking notes,
+// not tweet-length guest blurbs. Keep this high so long paste-ins survive.
+export const SUGGESTION_TEXT_MAX = 32_768;
 export const SUGGESTION_TEXT_MIN = 3;
 
 let cache = null;
@@ -93,7 +95,6 @@ export function addSuggestion({ text, requestedBy } = {}, ts = Date.now()) {
   };
   if (by) row.requestedBy = by;
   list.push(row);
-  while (list.length > MAX) list.shift();
   cache = list;
   persist();
   return { ...row };

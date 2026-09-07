@@ -36,6 +36,62 @@ export function removeRangeFor(track) {
   return { StartingIndex: 1, NumberOfTracks: t - 1 };
 }
 
+/**
+ * Max already-played tracks to drop in one maintenance tick. A DJ seek that
+ * lands near the end of a leftover queue must not wipe the whole night in one
+ * SOAP call; leftover history drains across ticks instead.
+ */
+export const TRIM_PLAYED_MAX_PER_TICK = 8;
+
+/**
+ * Whether maintenance may strip tracks behind the playhead.
+ * Skip when the DJ handoff owns the room, when GetQueue failed (empty length
+ * with a playhead past 1), or when Track is ahead of the reported queue —
+ * those are the windows that looked like a host Clear Queue.
+ *
+ * @param {{
+ *   track?: number,
+ *   queueLength?: number,
+ *   handoffActive?: boolean,
+ *   currentUri?: string,
+ *   currentTitle?: string,
+ *   playingFromQueue?: boolean,
+ * }} [opts]
+ * @returns {{
+ *   action: "trim"|"skip",
+ *   reason?: string,
+ *   StartingIndex?: number,
+ *   NumberOfTracks?: number,
+ * }}
+ */
+export function trimPlayedDecision({
+  track,
+  queueLength,
+  handoffActive = false,
+  currentUri = "",
+  currentTitle = "",
+  playingFromQueue = true,
+} = {}) {
+  if (!playingFromQueue) return { action: "skip", reason: "not-queue" };
+  if (handoffActive) return { action: "skip", reason: "dj-handoff" };
+  if (isAnnounceQueuePad(currentUri, currentTitle)) {
+    return { action: "skip", reason: "announce-pad" };
+  }
+  const t = Math.floor(Number(track) || 0);
+  const n = Math.floor(Number(queueLength) || 0);
+  if (t <= 1) return { action: "skip", reason: "nothing-behind" };
+  if (n <= 0) return { action: "skip", reason: "queue-unread" };
+  if (t > n) return { action: "skip", reason: "stale-pointer" };
+  const want = t - 1;
+  const capped = Math.min(want, TRIM_PLAYED_MAX_PER_TICK, Math.max(0, n - 1));
+  if (capped < 1) return { action: "skip", reason: "nothing-behind" };
+  return {
+    action: "trim",
+    StartingIndex: 1,
+    NumberOfTracks: capped,
+  };
+}
+
 /** True when Sonos PlayMode includes shuffle (order is not queue index order). */
 export function isShufflePlayMode(mode) {
   return /SHUFFLE/.test(String(mode || ""));
@@ -574,9 +630,9 @@ export function queueTrackFromPlaylist(id, meta) {
  * Guest-facing view of the upcoming queue. Silence pads are always hidden
  * (they stay in the Sonos queue for volume handoff). DJ TTS rows are kept so
  * people see the announce coming — except while the announce block itself is
- * playing: the block is three queue items (ramp pad → TTS → restore pad) but
- * should read as ONE DJ entry, so once any segment is the current track the
- * rest of that contiguous block is hidden too.
+ * playing: the block is ramp → TTS → restore (or ramp → lead TTS → punch TTS
+ * → restore for banter) but should read as ONE DJ entry, so once any segment
+ * is the current track the rest of that contiguous block is hidden too.
  * @param {Array<{ TrackUri?: string, Title?: string }>} items full Sonos queue
  * @param {number} offset 1-based index of the current track (0 = show all)
  * @returns {Array<{ t: object, absoluteIndex: number }>}

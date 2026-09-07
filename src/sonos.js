@@ -5,6 +5,8 @@
 export {
   pickGroupByTarget,
   removeRangeFor,
+  trimPlayedDecision,
+  TRIM_PLAYED_MAX_PER_TICK,
   autoStartDecision,
   isTransportPlaying,
   shoutPlaybackHoldDecision,

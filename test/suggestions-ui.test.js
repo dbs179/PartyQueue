@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  SUGGESTION_TEXT_MAX,
   formatSuggestionCharCount,
   filterSuggestions,
   suggestionsCountLabel,
@@ -10,9 +9,9 @@ import {
   wireSuggestionCharCount,
 } from "../public/js/suggestions.js";
 
-test("formatSuggestionCharCount formats length against max", () => {
-  assert.equal(formatSuggestionCharCount(12), `12 / ${SUGGESTION_TEXT_MAX}`);
-  assert.equal(formatSuggestionCharCount(-1, 10), "0 / 10");
+test("formatSuggestionCharCount shows the length", () => {
+  assert.equal(formatSuggestionCharCount(12), "12");
+  assert.equal(formatSuggestionCharCount(-1, 10), "0");
 });
 
 test("filterSuggestions splits open / done / all", () => {
@@ -69,11 +68,11 @@ test("wireSuggestionCharCount syncs on input and returns sync fn", () => {
   };
   const countEl = { textContent: "" };
   const sync = wireSuggestionCharCount(textEl, countEl, 50);
-  assert.equal(countEl.textContent, "2 / 50");
+  assert.equal(countEl.textContent, "2");
   textEl.value = "hello";
   listeners.input();
-  assert.equal(countEl.textContent, "5 / 50");
+  assert.equal(countEl.textContent, "5");
   textEl.value = "";
   sync();
-  assert.equal(countEl.textContent, "0 / 50");
+  assert.equal(countEl.textContent, "0");
 });

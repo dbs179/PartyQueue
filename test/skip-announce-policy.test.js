@@ -141,6 +141,7 @@ test("findUpcomingAnnounceHandoffPlan maps ramp→TTS→restore→music", () => 
   assert.deepEqual(plan, {
     rampPosition: 2,
     ttsPosition: 3,
+    tts2Position: null,
     restorePosition: 4,
     musicPosition: 5,
     ttsUri: TTS,
@@ -159,8 +160,32 @@ test("findUpcomingAnnounceHandoffPlan works when already on the ramp", () => {
   const plan = findUpcomingAnnounceHandoffPlan(items, 1);
   assert.equal(plan?.rampPosition, 1);
   assert.equal(plan?.ttsPosition, 2);
+  assert.equal(plan?.tts2Position, null);
   assert.equal(plan?.musicPosition, 4);
   assert.equal(plan?.approxDurationSec, 12);
+});
+
+test("findUpcomingAnnounceHandoffPlan keeps music after a banter punch TTS", () => {
+  const punch = "http://partyqueue/media/tts/tts-punch.mp3";
+  const items = [
+    { TrackUri: SONG, Title: "A" },
+    { TrackUri: RAMP, Title: "PartyQueue Volume Ramp" },
+    { TrackUri: TTS, Title: "Holy Roller", Duration: "0:00:09" },
+    { TrackUri: punch, Title: "Sister Static", Duration: "0:00:07" },
+    { TrackUri: RESTORE, Title: "PartyQueue Silence Bridge" },
+    { TrackUri: MUSIC, Title: "B" },
+    { TrackUri: "x-sonos-http:track%3aid%3aspotify%3atrack%3ac", Title: "C" },
+    { TrackUri: "x-sonos-http:track%3aid%3aspotify%3atrack%3ad", Title: "D" },
+    { TrackUri: "x-sonos-http:track%3aid%3aspotify%3atrack%3ae", Title: "E" },
+    { TrackUri: "x-sonos-http:track%3aid%3aspotify%3atrack%3af", Title: "F" },
+  ];
+  const plan = findUpcomingAnnounceHandoffPlan(items, 1);
+  assert.equal(plan?.rampPosition, 2);
+  assert.equal(plan?.ttsPosition, 3);
+  assert.equal(plan?.tts2Position, 4);
+  assert.equal(plan?.restorePosition, 5);
+  assert.equal(plan?.musicPosition, 6);
+  assert.equal(plan?.approxDurationSec, 16);
 });
 
 test("findUpcomingAnnounceHandoffPlan returns null without a DJ clip", () => {

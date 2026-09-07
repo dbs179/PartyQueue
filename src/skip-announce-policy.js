@@ -1,5 +1,7 @@
 /**
- * Pure Skip policy around DJ announce blocks (ramp → TTS → restore).
+ * Pure Skip policy around DJ announce blocks (ramp → TTS → restore, or
+ * ramp → lead TTS → punch TTS → restore when Holy Roller and Sister Static
+ * banter in the same set intro).
  *
  * 1. Music with next item an announce pad → seek near end of the song so the
  *    natural handoff runs (avoids Sonos Next() restarting HTTP TTS).
@@ -140,6 +142,7 @@ export function decideSkipAnnounceAction(ctx = {}) {
  * @returns {{
  *   rampPosition: number|null,
  *   ttsPosition: number,
+ *   tts2Position: number|null,
  *   restorePosition: number|null,
  *   musicPosition: number,
  *   ttsUri: string,
@@ -181,9 +184,20 @@ export function findUpcomingAnnounceHandoffPlan(items, currentTrack1Based) {
   // Require a real DJ clip after an optional ramp (silence pads alone are not enough).
   if (!isDjClipUri(ttsUri)) return null;
   const ttsPosition = i + 1;
-  const approxDurationSec =
+  let approxDurationSec =
     queueItemDurationSec(list[i]) || DEFAULT_ANNOUNCE_DURATION_SEC;
   i += 1;
+
+  // Banter: Holy Roller lead then Sister Static punch before the restore pad.
+  // Skipping these as "already at restore" made musicPosition land on the punch
+  // clip and the volume handoff skip the first song of the set.
+  let tts2Position = null;
+  while (i < list.length && isDjClipUri(queueItemUri(list[i]))) {
+    if (tts2Position == null) tts2Position = i + 1;
+    approxDurationSec +=
+      queueItemDurationSec(list[i]) || DEFAULT_ANNOUNCE_DURATION_SEC;
+    i += 1;
+  }
 
   let restorePosition = null;
   if (i < list.length && isRestoreSilenceUri(queueItemUri(list[i]))) {
@@ -200,6 +214,7 @@ export function findUpcomingAnnounceHandoffPlan(items, currentTrack1Based) {
   return {
     rampPosition,
     ttsPosition,
+    tts2Position,
     restorePosition,
     musicPosition,
     ttsUri,

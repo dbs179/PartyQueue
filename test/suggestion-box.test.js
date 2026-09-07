@@ -34,10 +34,23 @@ test("records suggestion with sanitized name", () => {
   assert.equal(row.ts, 1000);
 });
 
-test("caps text length", () => {
+test("keeps long tracking notes", () => {
   const long = "x".repeat(500);
   const row = box.addSuggestion({ text: long, requestedBy: "Pat" });
+  assert.equal(row.text.length, 500);
+});
+
+test("still bounds runaway payloads", () => {
+  const long = "x".repeat(box.SUGGESTION_TEXT_MAX + 50);
+  const row = box.addSuggestion({ text: long, requestedBy: "Pat" });
   assert.equal(row.text.length, box.SUGGESTION_TEXT_MAX);
+});
+
+test("does not drop older tracking notes", () => {
+  for (let i = 0; i < 12; i++) {
+    box.addSuggestion({ text: `Note ${i} tracking item`, requestedBy: "Dave" }, i);
+  }
+  assert.equal(box.getSuggestions().length, 12);
 });
 
 test("setSuggestionDone toggles and sorts open before done", () => {

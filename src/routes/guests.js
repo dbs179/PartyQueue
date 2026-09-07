@@ -7,6 +7,7 @@ import { softRateLimit } from "../rate-limit.js";
 import {
   requireHost,
   requireHostStrict,
+  requestHasHostSession,
 } from "../host-auth.js";
 import {
   listGuestProfiles,
@@ -277,14 +278,17 @@ export function registerGuestRoutes(app) {
 
   app.post("/api/suggestions", (req, res) => {
     try {
+      const hostSubmit = requestHasHostSession(req);
       const key = suggestClientKey(req);
       const now = Date.now();
-      const last = suggestLastByIp.get(key) || 0;
-      if (now - last < SUGGEST_COOLDOWN_MS) {
-        return res.status(429).json({
-          error: "Please wait a few seconds before sending another suggestion.",
-          retryMs: SUGGEST_COOLDOWN_MS - (now - last),
-        });
+      if (!hostSubmit) {
+        const last = suggestLastByIp.get(key) || 0;
+        if (now - last < SUGGEST_COOLDOWN_MS) {
+          return res.status(429).json({
+            error: "Please wait a few seconds before sending another suggestion.",
+            retryMs: SUGGEST_COOLDOWN_MS - (now - last),
+          });
+        }
       }
       const text = typeof req.body?.text === "string" ? req.body.text : "";
       const { user } = resolveGuestIdentity({
@@ -297,11 +301,15 @@ export function registerGuestRoutes(app) {
       // Suggestions are host-facing — stamp the stable User, not the queue alias.
       const row = addSuggestion({ text, requestedBy: user });
       if (!row) {
+        const rawLen = text.trim().length;
         return res.status(400).json({
-          error: `Suggestion must be at least 3 characters (max ${SUGGESTION_TEXT_MAX}).`,
+          error:
+            rawLen > SUGGESTION_TEXT_MAX
+              ? "Suggestion is too long."
+              : "Suggestion must be at least 3 characters.",
         });
       }
-      suggestLastByIp.set(key, now);
+      if (!hostSubmit) suggestLastByIp.set(key, now);
       res.json({ ok: true, suggestion: row, counts: suggestionCounts() });
     } catch (err) {
       console.error("[suggestions/add]", err.message);

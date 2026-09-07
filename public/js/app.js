@@ -1614,7 +1614,7 @@ suggestionSubmit?.addEventListener("click", async () => {
   }
   suggestionSubmit.disabled = true;
   try {
-    const res = await fetch("/api/suggestions", {
+    const res = await hostFetch("/api/suggestions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, ...guestIdentityPayload() }),

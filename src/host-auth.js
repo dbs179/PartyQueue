@@ -281,6 +281,11 @@ export function isValidHostToken(token) {
   return true;
 }
 
+/** True when this request carries a live host session (cookie, header, or Bearer). */
+export function requestHasHostSession(req) {
+  return isValidHostToken(extractHostToken(req));
+}
+
 /** @param {import("express").Request} req */
 export function extractHostToken(req) {
   const hdr = String(req.get?.(HEADER_NAME) || "").trim();

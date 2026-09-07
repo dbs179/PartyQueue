@@ -10,6 +10,7 @@ import {
   handoffWatchSleepMs,
   HANDOFF_WATCH_MAX_FAILURES,
   isDjClipUri,
+  isLeadDjClipUri,
   isRampSilenceUri,
   isRestoreSilenceUri,
 } from "../src/dj-volume-handoff.js";
@@ -29,6 +30,9 @@ function fakeHandoff({
   setVolume = null,
   next = null,
   fastVolume = false,
+  ttsPosition = 2,
+  tts2Position = null,
+  musicPosition = 4,
 } = {}) {
   let volume = baseline;
   let index = 0;
@@ -95,13 +99,19 @@ function fakeHandoff({
       if (next) await next();
       const cur = timeline[Math.min(index, timeline.length - 1)];
       if (isDjClipUri(cur, DJ)) {
-        const restoreIdx = timeline.findIndex(
-          (uri, idx) => idx >= index && isRestoreSilenceUri(uri)
-        );
-        index =
-          restoreIdx >= 0
-            ? restoreIdx
-            : Math.min(index + 1, timeline.length - 1);
+        const nextUri = timeline[index + 1];
+        if (nextUri && isDjClipUri(nextUri, DJ) && nextUri !== cur) {
+          // Banter: lead TTS then a different punch TTS — one Next.
+          index += 1;
+        } else {
+          const restoreIdx = timeline.findIndex(
+            (uri, idx) => idx >= index && isRestoreSilenceUri(uri)
+          );
+          index =
+            restoreIdx >= 0
+              ? restoreIdx
+              : Math.min(index + 1, timeline.length - 1);
+        }
       } else if (isRestoreSilenceUri(cur)) {
         let nextIdx = index + 1;
         while (
@@ -144,8 +154,9 @@ function fakeHandoff({
     pollMs: 0,
     rampSteps: 6,
     rampStepMs: 0,
-    ttsPosition: 2,
-    musicPosition: 4,
+    ttsPosition,
+    tts2Position,
+    musicPosition,
     logger,
   };
   const handoff = createDjVolumeHandoff(options);
@@ -226,6 +237,11 @@ test("classifies pre-silence, DJ, and post-silence URIs", () => {
   assert.equal(isRestoreSilenceUri(PRE), false);
   assert.equal(isDjClipUri(PRE, DJ), false);
   assert.equal(isDjClipUri(DJ, DJ), true);
+  assert.equal(isLeadDjClipUri(DJ, DJ), true);
+  assert.equal(
+    isLeadDjClipUri("http://partyqueue/media/tts/tts-punch.mp3", DJ),
+    false
+  );
   assert.equal(isRestoreSilenceUri(POST), true);
   assert.equal(isDjClipUri(POST, DJ), false);
 });
@@ -389,6 +405,79 @@ test("a TRANSITIONING DJ clip is not treated as played", async () => {
   assert.equal(run.getVolume(), 10);
 });
 
+test("seeks lead TTS when banter punch starts before Holy Roller", async () => {
+  const punch = "http://partyqueue/media/tts/tts-punch.mp3";
+  const timeline = [PRE, punch, DJ, POST, MUSIC];
+  let index = 0;
+  let volume = 10;
+  const calls = [];
+  const adapter = {
+    async getNowPlaying() {
+      const uri = timeline[Math.min(index, timeline.length - 1)];
+      const state = "PLAYING";
+      calls.push(["now-playing", uri, state]);
+      if (isRampSilenceUri(uri) && index < timeline.length - 1) {
+        index += 1;
+      } else if (uri === DJ && index < timeline.length - 1) {
+        index += 1;
+      }
+      const positionSec = uri === DJ ? 2 : 0;
+      return { uri, state, positionSec };
+    },
+    async getVolume() {
+      return volume;
+    },
+    async setVolume(level) {
+      volume = level;
+      calls.push(["set-volume", level]);
+      return { locked: true };
+    },
+    async pause() {
+      calls.push(["pause"]);
+    },
+    async resume() {
+      calls.push(["resume"]);
+    },
+    async playAt(position) {
+      calls.push(["play-at", position]);
+      const leadIdx = timeline.indexOf(DJ);
+      if (leadIdx >= 0) index = leadIdx;
+    },
+    async next() {
+      calls.push(["next"]);
+      if (index < timeline.length - 1) index += 1;
+    },
+  };
+  const handoff = createDjVolumeHandoff({
+    publicUrl: DJ,
+    approxDurationSec: 16,
+    silenceSec: 3,
+    calculateTarget: () => 30,
+    adapter,
+    sleep: async () => {},
+    now: () => 0,
+    pollMs: 0,
+    rampSteps: 6,
+    ttsPosition: 2,
+    tts2Position: 3,
+    musicPosition: 5,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const result = await handoff.start();
+
+  assert.equal(result.phase, "complete");
+  assert.ok(
+    calls.some(([name, position]) => name === "play-at" && position === 2),
+    "punch-before-lead must SeekTrack Holy Roller's clip"
+  );
+  assert.ok(
+    calls.some(([name, uri]) => name === "now-playing" && uri === DJ),
+    "lead DJ clip should play after recovery"
+  );
+  assert.equal(volume, 10);
+});
+
 test("does not Next past music if restore pad already advanced", async () => {
   // Restore expires into MUSIC during settle; a blind Next would skip it.
   const timeline = [PRE, DJ, POST];
@@ -503,6 +592,29 @@ test("advances a completed STOPPED DJ clip instead of replaying it", async () =>
   assert.equal(run.getVolume(), 10);
 });
 
+test("banter punch TTS is not skipped when the lead clip ends STOPPED", async () => {
+  const punch = "http://partyqueue/media/tts/tts-punch.mp3";
+  const run = fakeHandoff({
+    // Duplicate lead URI is the STOPPED retry slot used by other tests here;
+    // the punch clip is a different TTS URL so Next() must not jump to restore.
+    timeline: [PRE, DJ, DJ, punch, POST, MUSIC],
+    states: ["PLAYING", "PLAYING", "STOPPED", "STOPPED", "PLAYING", "PLAYING"],
+    musicPosition: 5,
+    tts2Position: 3,
+  });
+
+  await run.handoff.start();
+
+  const nextCalls = run.calls.filter(([name]) => name === "next");
+  assert.ok(
+    nextCalls.length >= 2,
+    "lead STOPPED Nexts to punch; punch STOPPED Nexts to restore"
+  );
+  assert.equal(run.getVolume(), 10);
+  const lastNp = [...run.calls].reverse().find(([name]) => name === "now-playing");
+  assert.equal(lastNp?.[1], MUSIC);
+});
+
 test("retries a failed DJ advance without replaying the completed clip", async () => {
   let attempts = 0;
   const run = fakeHandoff({
@@ -607,6 +719,95 @@ test("absolute deadline restores even while still on an announce pad", async () 
     run.phases.includes("restoring") && run.phases.includes("restored"),
     true
   );
+});
+
+test("absolute deadline does not skip a still-playing DJ intro", async () => {
+  let volume = 10;
+  let queued = DJ;
+  let queuedState = "PLAYING";
+  let positionSec = 3;
+  let polls = 0;
+  const calls = [];
+  const adapter = {
+    async getNowPlaying() {
+      polls += 1;
+      if (queued === DJ && queuedState === "PLAYING" && polls >= 5) {
+        queuedState = "STOPPED";
+        positionSec = 8;
+      }
+      calls.push(["now-playing", queued, queuedState]);
+      return { uri: queued, state: queuedState, positionSec };
+    },
+    async getVolume() {
+      return volume;
+    },
+    async setVolume(level) {
+      volume = level;
+      calls.push(["set-volume", level]);
+      return { locked: true };
+    },
+    async pause() {
+      calls.push(["pause", queued, queuedState]);
+    },
+    async resume() {
+      calls.push(["resume"]);
+    },
+    async playAt(position) {
+      calls.push(["play-at", position, queued, queuedState]);
+      if (queued === DJ) queued = POST;
+      else if (queued === POST) queued = MUSIC;
+      queuedState = "PLAYING";
+    },
+    async next() {
+      calls.push(["next", queued, queuedState]);
+      if (queued === DJ) queued = POST;
+      else if (queued === POST) queued = MUSIC;
+      queuedState = "PLAYING";
+    },
+  };
+  let currentTime = 0;
+  const handoff = createDjVolumeHandoff({
+    publicUrl: DJ,
+    approxDurationSec: 5,
+    silenceSec: 3,
+    calculateTarget: () => 30,
+    adapter,
+    sleep: async () => {},
+    now: () => {
+      currentTime += 20_000;
+      return currentTime;
+    },
+    pollMs: 0,
+    rampSteps: 6,
+    ttsPosition: 2,
+    musicPosition: 4,
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  await handoff.start();
+
+  assert.equal(
+    calls.filter(
+      ([name, uri, state]) =>
+        name === "next" && uri === DJ && state === "PLAYING"
+    ).length,
+    0,
+    "deadline must not Next() a still-playing intro"
+  );
+  assert.equal(
+    calls.filter(([name, _uri, state]) => name === "pause" && state === "PLAYING")
+      .length,
+    0,
+    "deadline must not Pause a still-playing intro"
+  );
+  assert.ok(
+    calls.some(
+      ([name, uri, state]) =>
+        name === "next" && uri === DJ && state === "STOPPED"
+    ),
+    "intro can advance once it has actually finished"
+  );
+  assert.equal(volume, 10);
 });
 
 test("supersede cancellation restores the immutable pre-DJ baseline", async () => {

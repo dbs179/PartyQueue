@@ -114,6 +114,25 @@ test("createHostSession tokens validate until reset", () => {
   assert.equal(auth.isValidHostToken("nope"), false);
 });
 
+test("requestHasHostSession follows the live token", () => {
+  process.env.SETTINGS_PIN = "1234";
+  const token = auth.createHostSession();
+  assert.equal(
+    auth.requestHasHostSession({
+      get: (n) => (n === "x-partyqueue-host" ? token : ""),
+      headers: {},
+    }),
+    true
+  );
+  assert.equal(
+    auth.requestHasHostSession({
+      get: () => "",
+      headers: {},
+    }),
+    false
+  );
+});
+
 test("extractHostToken reads header, bearer, and cookie", () => {
   assert.equal(
     auth.extractHostToken({

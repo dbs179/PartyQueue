@@ -72,6 +72,16 @@ export function isDjClipUri(uri, publicUrl) {
   );
 }
 
+/** True when this TTS URI is the lead (Holy Roller) clip, not a banter punch. */
+export function isLeadDjClipUri(uri, publicUrl) {
+  if (!isDjClipUri(uri, publicUrl)) return false;
+  const fileToken = publicUrl
+    ? String(publicUrl).split("/").pop() || ""
+    : "";
+  if (!fileToken) return true;
+  return String(uri || "").includes(fileToken);
+}
+
 function defaultLogger() {
   const log = createLogger("dj-volume");
   return {
@@ -114,6 +124,7 @@ export function createDjVolumeHandoff({
   approxDurationSec = 8,
   silenceSec = 3,
   ttsPosition = null,
+  tts2Position = null,
   musicPosition = null,
   baselineOverride = null,
   holdPreSilence = false,
@@ -142,13 +153,19 @@ export function createDjVolumeHandoff({
   let lastPadResumeAt = 0;
   let padResumeTries = 0;
   let sawDjPlaying = false;
-  let advancedFromDj = false;
+  let sawLeadPlaying = false;
+  /** URI of the last DJ clip we already Next()'d off, so a second banter clip can still advance. */
+  let lastAdvancedDjUri = null;
+  let djPlayUri = "";
+  let djPlayAccumMs = 0;
+  let djPlayLastTick = null;
   let advancedFromRestore = false;
   let restoreHeldAt = null;
   let deadlineHandled = false;
   let djRecoverTries = 0;
   let ttsPublicUrl = publicUrl;
   let liveTtsPosition = ttsPosition;
+  let liveTts2Position = tts2Position;
   let liveMusicPosition = musicPosition;
   let preSilenceReleased = !holdPreSilence;
   let pausedByHold = false;
@@ -171,6 +188,7 @@ export function createDjVolumeHandoff({
     volumeLocked,
     deadlineAt,
     ttsPosition: liveTtsPosition,
+    tts2Position: liveTts2Position,
     musicPosition: liveMusicPosition,
     currentVolume,
   });
@@ -313,7 +331,7 @@ export function createDjVolumeHandoff({
   /** Sonos often skips the HTTP TTS clip when the 3s ramp expires during SOAP. */
   const DJ_RECOVER_MAX = 2;
   const recoverSkippedDjClip = async (io, reason) => {
-    if (sawDjPlaying || djRecoverTries >= DJ_RECOVER_MAX) return false;
+    if (sawLeadPlaying || djRecoverTries >= DJ_RECOVER_MAX) return false;
     if (Number(liveTtsPosition) < 1 || typeof io.playAt !== "function") {
       return false;
     }
@@ -458,6 +476,18 @@ export function createDjVolumeHandoff({
             logger.info("announce queued; releasing pre-silence hold");
           }
         } else if (onDj) {
+          const onLead = isLeadDjClipUri(uri, ttsPublicUrl);
+          if (
+            Number(liveTts2Position) >= 1 &&
+            !onLead &&
+            !sawLeadPlaying &&
+            (await recoverSkippedDjClip(
+              io,
+              "companion clip before lead DJ played"
+            ))
+          ) {
+            continue;
+          }
           if (baselineVolume == null) {
             handledPad = true;
             // Do NOT pause a live TTS HTTP stream here. Sonos often restarts
@@ -467,43 +497,79 @@ export function createDjVolumeHandoff({
             setPhase("ramping-up-fallback");
             await ramp(baselineVolume, announceVolume);
           }
+          if (uri !== djPlayUri) {
+            djPlayUri = uri;
+            djPlayAccumMs = 0;
+            djPlayLastTick = null;
+          }
           if (state === "PLAYING") {
             sawDjPlaying = true;
+            if (onLead) sawLeadPlaying = true;
+            if (djPlayLastTick != null) {
+              djPlayAccumMs += Math.max(0, now() - djPlayLastTick);
+            }
+            djPlayLastTick = now();
+          } else if (djPlayLastTick != null) {
+            djPlayAccumMs += Math.max(0, now() - djPlayLastTick);
+            djPlayLastTick = null;
           }
           if (phase !== "restored") setPhase("announcing");
           const playedSec = Number(np?.positionSec);
-          const playedEnough =
-            Number.isFinite(playedSec) && playedSec >= 1.5;
+          const relDone = Number.isFinite(playedSec) && playedSec >= 4;
+          const wallDone = djPlayAccumMs >= 2_000;
+          const frozenClock = djPlayAccumMs === 0;
+          const heardEnough = wallDone || (frozenClock && relDone);
           if (
             sawDjPlaying &&
-            playedEnough &&
-            !advancedFromDj &&
+            heardEnough &&
             (state === "STOPPED" || state === "PAUSED_PLAYBACK") &&
             Number(liveMusicPosition) >= 2 &&
             (typeof io.next === "function" || typeof io.playAt === "function")
           ) {
-            handledPad = true;
-            // Next from a STOPPED/PAUSED TTS clip often leaves the transport
-            // idle on the restore pad — always Play after advancing or the
-            // room stays paused after the DJ (Set Request / mid-set shouts).
-            if (typeof io.next === "function") {
-              await io.next();
-              try {
-                await io.resume();
-              } catch (error) {
-                logger.warn(
-                  `resume after DJ advance failed: ${error.message}`
-                );
-              }
-            } else {
-              await io.playAt(Number(liveMusicPosition) - 1);
+            // Re-read: Sonos may already have moved to the punch clip or restore.
+            let liveUri = uri;
+            let liveState = state;
+            try {
+              const live = await io.getNowPlaying();
+              liveUri = String(live?.uri || uri);
+              liveState = String(live?.state || state).toUpperCase();
+            } catch {
+              /* keep the poll */
             }
-            advancedFromDj = true;
-            logger.info("advanced completed DJ clip to post-silence");
+            const stillOnDj =
+              isDjClipUri(liveUri, ttsPublicUrl) &&
+              (liveState === "STOPPED" || liveState === "PAUSED_PLAYBACK");
+            if (stillOnDj && liveUri !== lastAdvancedDjUri) {
+              handledPad = true;
+              // Next from a STOPPED/PAUSED TTS clip often leaves the transport
+              // idle on the next pad — always Play after advancing or the
+              // room stays paused after the DJ (Set Request / mid-set shouts).
+              // Banter queues a second TTS after the lead; Next once per clip
+              // so Sister Static still plays instead of jumping to restore.
+              if (typeof io.next === "function") {
+                try {
+                  await io.next();
+                  lastAdvancedDjUri = liveUri;
+                  try {
+                    await io.resume();
+                  } catch (error) {
+                    logger.warn(
+                      `resume after DJ advance failed: ${error.message}`
+                    );
+                  }
+                } catch (error) {
+                  logger.warn(`DJ advance failed: ${error.message}`);
+                }
+              } else {
+                await io.playAt(Number(liveMusicPosition) - 1);
+                lastAdvancedDjUri = liveUri;
+              }
+              logger.info("advanced completed DJ clip to next announce pad");
+            }
           }
         } else if (onRestore && baselineVolume != null) {
           if (
-            !sawDjPlaying &&
+            !sawLeadPlaying &&
             (await recoverSkippedDjClip(
               io,
               "restore pad before DJ clip played"
@@ -545,7 +611,7 @@ export function createDjVolumeHandoff({
           }
         } else if (!onPad && baselineVolume != null) {
           if (
-            !sawDjPlaying &&
+            !sawLeadPlaying &&
             (await recoverSkippedDjClip(
               io,
               "music started before DJ clip played"
@@ -584,10 +650,16 @@ export function createDjVolumeHandoff({
         ) {
           deadlineHandled = true;
           handledPad = true;
-          try {
-            await io.pause();
-          } catch {
-            /* best effort */
+          const djStillPlaying =
+            onDj && (state === "PLAYING" || state === "TRANSITIONING");
+          // Never Pause a live intro to "catch up" — that is what skipped
+          // DJ lines when the duration estimate ran out early.
+          if (!djStillPlaying) {
+            try {
+              await io.pause();
+            } catch {
+              /* best effort */
+            }
           }
           const restored = await restoreExact("absolute deadline");
           if (restored && typeof io.playAt === "function") {
@@ -595,20 +667,40 @@ export function createDjVolumeHandoff({
             // the volume restore. Seeking an already-playing TTS clip restarts
             // it from 0 (double announce).
             let liveUri = uri;
+            let liveState = state;
             try {
-              liveUri = String((await io.getNowPlaying())?.uri || uri);
+              const live = await io.getNowPlaying();
+              liveUri = String(live?.uri || uri);
+              liveState = String(live?.state || state).toUpperCase();
             } catch {
               /* keep the poll's uri */
             }
             const liveOnRamp = isRampSilenceUri(liveUri);
             const liveOnDj = isDjClipUri(liveUri, ttsPublicUrl);
             const liveOnRestore = isRestoreSilenceUri(liveUri);
+            const liveDjPlaying =
+              djStillPlaying ||
+              (liveOnDj &&
+                (liveState === "PLAYING" || liveState === "TRANSITIONING"));
             if (liveOnRamp && Number(liveTtsPosition) >= 1) {
               await io.playAt(Number(liveTtsPosition));
-            } else if (liveOnDj && Number(liveMusicPosition) >= 2) {
-              // Past the lead-in — skip forward. Never SeekTrack the TTS URI
-              // itself (that restarts the http clip from 0).
-              advancedFromDj = true;
+            } else if (liveDjPlaying) {
+              logger.warn(
+                "deadline reached while DJ intro still playing; not skipping"
+              );
+              try {
+                await io.resume();
+              } catch {
+                /* already playing */
+              }
+            } else if (
+              liveOnDj &&
+              liveUri !== lastAdvancedDjUri &&
+              Number(liveMusicPosition) >= 2
+            ) {
+              // Idle/finished clip — skip forward one slot (punch TTS or restore).
+              // Never SeekTrack the TTS URI itself (that restarts the http clip).
+              lastAdvancedDjUri = liveUri;
               if (typeof io.next === "function") {
                 await io.next();
                 try {
@@ -709,8 +801,13 @@ export function createDjVolumeHandoff({
     setTtsUrl(url) {
       ttsPublicUrl = url || ttsPublicUrl;
     },
-    setPositions({ ttsPosition: nextTts, musicPosition: nextMusic } = {}) {
+    setPositions({
+      ttsPosition: nextTts,
+      tts2Position: nextTts2,
+      musicPosition: nextMusic,
+    } = {}) {
       if (nextTts != null) liveTtsPosition = nextTts;
+      if (nextTts2 != null) liveTts2Position = nextTts2;
       if (nextMusic != null) liveMusicPosition = nextMusic;
     },
     releasePreSilenceHold() {

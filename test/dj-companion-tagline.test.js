@@ -68,6 +68,36 @@ test("upcoming list shows the DJ TTS row while a song is playing", () => {
   );
 });
 
+test("duet upcoming list hides both TTS rows once the ramp plays, keeping the set", () => {
+  const punch = {
+    TrackUri: "http://ha.local:8123/api/tts_proxy/sister-static.mp3",
+    Title: "tts",
+  };
+  const s3 = { TrackUri: "spotify:track:ghi", Title: "Song 3" };
+  const s4 = { TrackUri: "spotify:track:jkl", Title: "Song 4" };
+  const s5 = { TrackUri: "spotify:track:mno", Title: "Song 5" };
+  const s6 = { TrackUri: "spotify:track:pqr", Title: "Song 6" };
+  const items = [song, ramp, tts, punch, restore, song2, s3, s4, s5, s6];
+  // Current = song; both DJ clips stay visible ahead of the five-song set.
+  assert.deepEqual(
+    visibleUpcomingQueueItems(items, 1).map((u) => u.t.TrackUri),
+    [
+      tts.TrackUri,
+      punch.TrackUri,
+      song2.TrackUri,
+      s3.TrackUri,
+      s4.TrackUri,
+      s5.TrackUri,
+      s6.TrackUri,
+    ]
+  );
+  // Current = ramp; collapse the whole banter block, leave all five set songs.
+  assert.deepEqual(
+    visibleUpcomingQueueItems(items, 2).map((u) => u.t.TrackUri),
+    [song2.TrackUri, s3.TrackUri, s4.TrackUri, s5.TrackUri, s6.TrackUri]
+  );
+});
+
 test("upcoming list hides the rest of the announce block once the ramp pad plays", () => {
   // Current track = ramp (offset 2); Now Playing already shows the DJ, so
   // the TTS row must not appear a second time in Up Next.

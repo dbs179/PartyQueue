@@ -3502,13 +3502,13 @@ body:has(#view-settings-user-edit:not([hidden])) > .container {
 .suggestion-input {
   flex: 1 1 auto;
   width: 100%;
-  min-height: 5.5rem;
+  min-height: 8rem;
   margin: 0;
   border: none;
   border-radius: 0;
   background: transparent;
   color: var(--text);
-  resize: none;
+  resize: vertical;
   font: inherit;
   font-size: 0.95rem;
   line-height: 1.35;

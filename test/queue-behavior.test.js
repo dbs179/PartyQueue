@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   removeRangeFor,
+  trimPlayedDecision,
+  TRIM_PLAYED_MAX_PER_TICK,
   autoStartDecision,
   isTransportPlaying,
   shoutPlaybackHoldDecision,
@@ -34,6 +36,66 @@ test("removeRangeFor returns null for a zero/empty pointer", () => {
 test("removeRangeFor trims everything before the current track", () => {
   assert.deepEqual(removeRangeFor(2), { StartingIndex: 1, NumberOfTracks: 1 });
   assert.deepEqual(removeRangeFor(5), { StartingIndex: 1, NumberOfTracks: 4 });
+});
+
+test("trimPlayedDecision trims a small played prefix", () => {
+  assert.deepEqual(
+    trimPlayedDecision({
+      track: 4,
+      queueLength: 10,
+      playingFromQueue: true,
+    }),
+    { action: "trim", StartingIndex: 1, NumberOfTracks: 3 }
+  );
+});
+
+test("trimPlayedDecision skips during DJ handoff and unread/stale queue", () => {
+  assert.equal(
+    trimPlayedDecision({
+      track: 12,
+      queueLength: 20,
+      handoffActive: true,
+      playingFromQueue: true,
+    }).action,
+    "skip"
+  );
+  assert.equal(
+    trimPlayedDecision({
+      track: 12,
+      queueLength: 0,
+      playingFromQueue: true,
+    }).reason,
+    "queue-unread"
+  );
+  assert.equal(
+    trimPlayedDecision({
+      track: 20,
+      queueLength: 8,
+      playingFromQueue: true,
+    }).reason,
+    "stale-pointer"
+  );
+  assert.equal(
+    trimPlayedDecision({
+      track: 5,
+      queueLength: 20,
+      currentUri: "http://partyqueue/media/tts/silence-3s.mp3",
+      playingFromQueue: true,
+    }).reason,
+    "announce-pad"
+  );
+});
+
+test("trimPlayedDecision caps a runaway playhead so one tick cannot wipe the queue", () => {
+  const decision = trimPlayedDecision({
+    track: 25,
+    queueLength: 25,
+    playingFromQueue: true,
+  });
+  assert.equal(decision.action, "trim");
+  assert.equal(decision.StartingIndex, 1);
+  assert.equal(decision.NumberOfTracks, TRIM_PLAYED_MAX_PER_TICK);
+  assert.ok(decision.NumberOfTracks < 24);
 });
 
 // autoStartDecision: whether an add should kick off playback.
