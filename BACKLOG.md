@@ -4,6 +4,14 @@ Ideas parked for later — not scheduled work unless pulled into a release.
 
 ## Playback / Sonos
 
+- **Arc TV input blocks auto-start after Clear / Random**  
+  Living Room Arc is the whole-house coordinator. After a Home Assistant Node-RED grouping flow, the TV can power on and the Arc switches to HDMI/SPDIF (`x-sonos-htastream:…:spdif`). That reports `PLAYING`, so `autoStartDecision` skips starting the queue. Songs sit in Up Next with `queuePlaying: false`. Host Play already does `SwitchToQueue` and works. Seen after Clear then Random 5.
+
+  **Later**
+  1. Treat `x-sonos-htastream` as idle for auto-start / DJ hold (do not steal SiriusXM/radio/line-in).
+  2. After Clear, `SwitchToQueue` so the grouped rooms do not keep blasting TV audio.
+  3. Now Playing label "TV" instead of the raw RINCON URI.
+
 - **Paused Now Playing: wake instead of 5s poll**  
   Keep today’s cadences until we pull this (1.5s while playing, 5s paused; queue 3s / 15s). Extra phones and TVs already share one server poller.
 
