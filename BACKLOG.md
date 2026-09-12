@@ -12,6 +12,17 @@ Ideas parked for later — not scheduled work unless pulled into a release.
   2. After Clear, `SwitchToQueue` so the grouped rooms do not keep blasting TV audio.
   3. Now Playing label "TV" instead of the raw RINCON URI.
 
+- **Zone topology flaps mid-operation, so Play lands on a non-coordinator**  
+  Seen 2026-09-12 while smoke-testing 11.2.4 against the Office alone. PartyQueue pulled Office out of the house group and enqueued three Spotify tracks to it correctly (own coordinator, transport on `x-rincon-queue:<Office>#0`, playhead on row 1), and every `Play` still came back `701 Transition not available`; `SeekTrack` gave `711 Illegal seek target`. Mid-run, `/api/groups` showed **all seven rooms standalone** when only Office had been removed, and a queue-clear moments later reported Office back in "Living Room + 6". So something outside PartyQueue is regrouping rooms while requests are in flight.
+
+  Suspect the same Home Assistant Node-RED grouping flow as the Arc item above. The failure mode is generic: we resolve a coordinator, enqueue to it, and by the time `Play` is sent that device is no longer the coordinator, so Sonos refuses the transition. Because nothing ever started, no DJ shout was generated either — announces silently do not happen.
+
+  **Later**
+  1. On `701`/`711`, invalidate the zone cache, re-resolve the coordinator, and retry once before surfacing an error.
+  2. Log the group topology alongside the failure so this is diagnosable from logs instead of a live probe.
+  3. Consider whether guest-visible state should say "speakers regrouped" rather than failing quietly.
+  4. Worth checking against the 2026-09-11 party logs — this may be a second, independent cause of missed announces alongside the stale queue indices fixed in 11.2.4.
+
 - **Paused Now Playing: wake instead of 5s poll**  
   Keep today’s cadences until we pull this (1.5s while playing, 5s paused; queue 3s / 15s). Extra phones and TVs already share one server poller.
 
