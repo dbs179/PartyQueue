@@ -9,7 +9,16 @@
 import { getManager, resolveCoordinator } from "../src/sonos-core.js";
 
 const m = await getManager();
-const coordinator = await resolveCoordinator(m);
+const roomArg = process.argv.indexOf("--room");
+const coordinator =
+  roomArg >= 0
+    ? m.Devices.find(
+        (d) =>
+          String(d.Name).toLowerCase() ===
+          String(process.argv[roomArg + 1]).toLowerCase()
+      )
+    : await resolveCoordinator(m);
+if (!coordinator) throw new Error("room not found");
 console.log("coordinator:", coordinator.Name, coordinator.Uuid);
 
 const [media, transport, position] = await Promise.all([

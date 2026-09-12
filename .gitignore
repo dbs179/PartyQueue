@@ -13,8 +13,9 @@ data/
 tmp-*
 .tmp-*
 .override-*
-# Saved speaker layout while smoke:room has the house split up.
+# Saved speaker layout / DJ Voice state while a live smoke run is in progress.
 .smoke-room-state.json
+.smoke-dj-state.json
 tmp/
 test-results/
 playwright-report/
