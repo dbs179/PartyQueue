@@ -13,6 +13,8 @@ data/
 tmp-*
 .tmp-*
 .override-*
+# Saved speaker layout while smoke:room has the house split up.
+.smoke-room-state.json
 tmp/
 test-results/
 playwright-report/

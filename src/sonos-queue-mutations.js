@@ -102,6 +102,9 @@ export function pauseQueueTrim(ms = 20000) {
   trimPausedUntil = Date.now() + Math.max(0, Number(ms) || 0);
 }
 
+/** Consecutive ticks the DJ has held trim off, so an announce cannot starve it. */
+let consecutiveDjTrimSkips = 0;
+
 export async function trimPlayedTracks(...args) {
   return withSonosWriteLock(() => trimPlayedTracksUnlocked(...args));
 }
@@ -127,9 +130,13 @@ async function trimPlayedTracksUnlocked() {
     const items = Array.isArray(queue.Result) ? queue.Result : [];
     const queueLength = Number(queue.TotalMatches) || items.length;
     let handoffActive = false;
+    let handoffArmed = false;
+    let shiftHandoffPositions = null;
     try {
-      const { isDjVolumeHandoffActive } = await import("./dj-volume-handoff.js");
-      handoffActive = isDjVolumeHandoffActive();
+      const handoff = await import("./dj-volume-handoff.js");
+      handoffActive = handoff.isDjVolumeHandoffActive();
+      handoffArmed = handoff.isDjVolumeHandoffArmed();
+      shiftHandoffPositions = handoff.shiftDjVolumeHandoffPositions;
     } catch {
       /* trim still runs if the handoff module is unavailable */
     }
@@ -138,10 +145,16 @@ async function trimPlayedTracksUnlocked() {
       track: pos.Track,
       queueLength,
       handoffActive,
+      handoffArmed,
+      djSkipStreak: consecutiveDjTrimSkips,
       currentUri: String(pos.TrackURI || ""),
       currentTitle: meta?.Title ?? "",
       playingFromQueue,
     });
+    consecutiveDjTrimSkips =
+      decision.reason === "dj-handoff" || decision.reason === "dj-announce-armed"
+        ? consecutiveDjTrimSkips + 1
+        : 0;
     if (decision.action !== "trim") {
       if (decision.reason && decision.reason !== "nothing-behind" && decision.reason !== "not-queue") {
         console.log(`[trim] skip (${decision.reason})`);
@@ -155,6 +168,14 @@ async function trimPlayedTracksUnlocked() {
       StartingIndex: decision.StartingIndex,
       NumberOfTracks: decision.NumberOfTracks,
     });
+    // Everything left just slid down by this many slots. Any announce still
+    // holding absolute indices has to follow, or its next seek lands past the
+    // DJ clip and drags unplayed requests behind the playhead.
+    try {
+      shiftHandoffPositions?.(decision.NumberOfTracks);
+    } catch (err) {
+      console.warn("[trim] handoff position shift failed:", err.message);
+    }
     invalidateSonosSnapshots();
     return { removed: decision.NumberOfTracks };
   } catch (err) {

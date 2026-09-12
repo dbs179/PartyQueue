@@ -18,6 +18,7 @@ import {
   nudgeVolumeTo,
   searchTrack,
   countUpcomingDjClips,
+  waitFor,
   BASE,
 } from "./smoke-lib.mjs";
 
@@ -73,16 +74,19 @@ async function main() {
   await sleep(400);
   console.log("add #2 (Alex) immediately…");
   await addAs("Alex", b);
-  await sleep(1200);
 
-  const q = await queueList();
-  const djClips = countUpcomingDjClips(q);
-  console.log(`upcoming DJ TTS rows after dual add: ${djClips}`);
-
-  // Guest list hides silence ramps. Both request shouts must stay glued.
-  if (djClips < 2) {
+  // Guest list hides silence ramps. Both request shouts must stay glued — but
+  // each one only appears once its copy is drafted and voiced, which is seconds
+  // of OpenAI plus TTS, not the millisecond the add returns in.
+  const shouts = await waitFor(
+    async () => countUpcomingDjClips(await queueList()),
+    (n) => n >= 2,
+    { timeoutMs: 45000 }
+  );
+  console.log(`upcoming DJ TTS rows after dual add: ${shouts.value}`);
+  if (!shouts.ok) {
     throw new Error(
-      `Expected both request shouts to stay in queue, found ${djClips}`
+      `Expected both request shouts to stay in queue, found ${shouts.value}`
     );
   }
 

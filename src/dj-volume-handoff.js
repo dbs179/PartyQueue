@@ -1,26 +1,43 @@
 import { createLogger } from "./logger.js";
 import {
   isDjVolumeHandoffActive,
+  isDjVolumeHandoffArmed,
   setDjVolumeHandoffActive,
+  setDjVolumeHandoffArmed,
 } from "./dj-volume-handoff-state.js";
 
-export { isDjVolumeHandoffActive };
+export { isDjVolumeHandoffActive, isDjVolumeHandoffArmed };
 
 let activeHandoff = null;
 
-/** Keep the leaf flag aligned with prior `!!activeHandoff?.isVolumeLocked()`. */
+/** Keep the leaf flags aligned with the live handoff. */
 function syncHandoffActiveFlag() {
   setDjVolumeHandoffActive(!!activeHandoff?.isVolumeLocked());
+  const phase = activeHandoff?.snapshot?.()?.phase;
+  setDjVolumeHandoffArmed(
+    !!activeHandoff && phase !== "complete" && phase !== "cancelled"
+  );
+}
+
+/**
+ * Slide this handoff's queue indices after tracks were removed from the front.
+ * Trim always deletes from index 1, so everything left shifts down by `count`.
+ */
+export function shiftDjVolumeHandoffPositions(count) {
+  const removed = Math.floor(Number(count) || 0);
+  if (removed < 1 || !activeHandoff?.shiftPositions) return false;
+  return activeHandoff.shiftPositions(removed);
 }
 
 const DEFAULT_POLL_MS = 150;
-const DEFAULT_RAMP_STEPS = 6;
+const DEFAULT_RAMP_STEPS = 4;
 /**
- * Gap between unverified ramp steps. Roughly the settle the verified path used
- * to impose per step, so the audible ramp keeps its original ~2s length —
- * maybeJumpToTtsAfterRamp measures the ramp against the pre-silence pad.
+ * Gap between unverified ramp steps. The ramp has to finish well inside the 3s
+ * pre-silence pad: at 6 x 300ms it ran ~2.2s and left under PAD_ADVANCE_SLACK_MS,
+ * so maybeJumpToTtsAfterRamp took the SeekTrack branch on every single announce
+ * instead of letting the pad walk onto the clip. 4 x 200ms lands near 1.1s.
  */
-const DEFAULT_RAMP_STEP_MS = 300;
+const DEFAULT_RAMP_STEP_MS = 200;
 /** Instant EHOSTUNREACH used to hammer a dying NIC every 150ms. Back off, then abort. */
 export const HANDOFF_WATCH_MAX_FAILURES = 6;
 export const HANDOFF_WATCH_FAILURE_STREAK_MS = 8_000;
@@ -116,6 +133,35 @@ async function defaultAdapter() {
     playAt: (trackNumber) => sonos.play({ trackNumber }),
     // Raw Next — never host announce-aware Skip (that cancels this handoff).
     next: sonos.advanceQueueTrack,
+    // Fresh queue read, only ever called right before a seek (never per poll).
+    // Maintenance trims played songs off the front between arming this handoff
+    // and the ramp reaching the playhead, so the indices we were handed at
+    // insert time are wrong by however many songs were reaped in between.
+    locateAnnounce: async (clipUrl) => {
+      const [core, policy] = await Promise.all([
+        import("./sonos-core.js"),
+        import("./skip-announce-policy.js"),
+      ]);
+      const m = await core.getManager();
+      const coordinator = await core.resolveCoordinator(m);
+      const [queue, pos, media] = await Promise.all([
+        coordinator.GetQueue(),
+        coordinator.AVTransportService.GetPositionInfo().catch(() => ({
+          Track: 0,
+        })),
+        coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(
+          () => ({ CurrentURI: "" })
+        ),
+      ]);
+      return policy.locateAnnounceBlockByClipUrl(
+        Array.isArray(queue.Result) ? queue.Result : [],
+        clipUrl,
+        {
+          currentTrack: Number(pos.Track) || 0,
+          playingFromQueue: /^x-rincon-queue:/.test(media.CurrentURI || ""),
+        }
+      );
+    },
   };
 }
 
@@ -167,6 +213,8 @@ export function createDjVolumeHandoff({
   let liveTtsPosition = ttsPosition;
   let liveTts2Position = tts2Position;
   let liveMusicPosition = musicPosition;
+  /** Last live lookup of this announce block, used to bound every seek. */
+  let locatedBlock = null;
   let preSilenceReleased = !holdPreSilence;
   let pausedByHold = false;
   let preSilenceStartedAt = null;
@@ -197,6 +245,75 @@ export function createDjVolumeHandoff({
     if (phase === next) return;
     phase = next;
     logger.info(`phase ${next}`);
+    syncHandoffActiveFlag();
+  };
+
+  /**
+   * Re-read where this announce actually sits before seeking to it.
+   *
+   * The positions we were armed with are absolute Sonos indices from the moment
+   * the block was enqueued, but maintenance trims played songs off the front of
+   * the queue while we wait for the ramp to reach the playhead — one trim, and
+   * every index is one too high. Returns false when the seek must not happen at
+   * all (the clip is gone from the queue).
+   */
+  const syncPositions = async (io, reason) => {
+    if (typeof io.locateAnnounce !== "function") return true;
+    let found = null;
+    try {
+      found = await io.locateAnnounce(ttsPublicUrl);
+    } catch (error) {
+      logger.warn(`announce lookup failed (${reason}): ${error.message}`);
+      return locatedBlock != null;
+    }
+    if (!found) {
+      locatedBlock = null;
+      logger.warn(`announce clip is no longer queued (${reason}); not seeking`);
+      return false;
+    }
+    if (found.ttsPosition !== liveTtsPosition) {
+      logger.info(
+        `announce moved since it was queued (${reason}): ` +
+          `tts@${liveTtsPosition} → tts@${found.ttsPosition}`
+      );
+    }
+    locatedBlock = found;
+    liveTtsPosition = found.ttsPosition;
+    liveTts2Position = found.tts2Position;
+    if (found.musicPosition != null) liveMusicPosition = found.musicPosition;
+    return true;
+  };
+
+  /**
+   * SeekTrack, bounded to this announce block and the song it introduces.
+   * A wrong index used to drop the playhead several songs ahead; everything it
+   * skipped then sat behind the playhead, where trim reaped it as "already
+   * played". A missed announce is recoverable, a deleted request is not.
+   */
+  const seekWithinBlock = async (io, position, reason) => {
+    const target = Math.floor(Number(position) || 0);
+    if (target < 1 || typeof io.playAt !== "function") return false;
+    if (!locatedBlock) {
+      // No bounds means the lookup failed or was never run. Seeking on the
+      // indices we were armed with is the original bug, so refuse outright
+      // whenever the adapter could have told us where the block really is.
+      if (typeof io.locateAnnounce === "function") {
+        logger.warn(`refusing ${reason} seek to #${target}: block unresolved`);
+        return false;
+      }
+      await io.playAt(target);
+      return true;
+    }
+    const limit = locatedBlock.musicPosition ?? locatedBlock.blockEnd;
+    if (target < locatedBlock.blockStart || target > limit) {
+      logger.warn(
+        `refusing ${reason} seek to #${target}: outside announce block ` +
+          `#${locatedBlock.blockStart}-#${limit}`
+      );
+      return false;
+    }
+    await io.playAt(target);
+    return true;
   };
 
   const captureBaseline = async () => {
@@ -354,8 +471,11 @@ export function createDjVolumeHandoff({
       /* jump if we cannot tell */
     }
     djRecoverTries += 1;
+    if (!(await syncPositions(io, reason))) return false;
     logger.warn(`${reason}; jumping to TTS (try ${djRecoverTries})`);
-    await io.playAt(Number(liveTtsPosition));
+    if (!(await seekWithinBlock(io, liveTtsPosition, "DJ recovery"))) {
+      return false;
+    }
     try {
       await io.resume();
     } catch (error) {
@@ -400,10 +520,18 @@ export function createDjVolumeHandoff({
       if (isLeadDjClipUri(liveUri, ttsPublicUrl)) sawLeadPlaying = true;
       return;
     }
+    if (!(await syncPositions(io, "pre-silence elapsed"))) return;
+    // Still holding the ramp, and the clip is the very next row: Sonos will
+    // walk onto it on its own. Seeking here only risks landing somewhere else
+    // — recoverSkippedDjClip picks up the rare drop after the fact.
+    if (isRampSilenceUri(liveUri) && locatedBlock?.rampPosition != null) {
+      logger.info("pre-silence elapsed; DJ clip is next — letting pad advance");
+      return;
+    }
     logger.warn(
       `pre-silence nearly elapsed (${Math.max(0, remainingMs)}ms left); jumping to TTS`
     );
-    await io.playAt(Number(liveTtsPosition));
+    if (!(await seekWithinBlock(io, liveTtsPosition, "pre-silence"))) return;
     try {
       await io.resume();
     } catch (error) {
@@ -449,11 +577,18 @@ export function createDjVolumeHandoff({
       logger.info(`advanced from ${label} with Next after ${silenceSec}s`);
       return;
     }
-    if (Number(position) >= 1 && typeof io.playAt === "function") {
-      await io.playAt(Number(position));
-      pausedByHold = false;
-      logger.info(`advanced from ${label} after ${silenceSec}s`);
-      return;
+    // Only ever seek to a freshly resolved row. Falling back to the position we
+    // were armed with is what jumped the playhead over unplayed requests.
+    if (
+      Number(position) >= 1 &&
+      typeof io.playAt === "function" &&
+      (await syncPositions(io, label))
+    ) {
+      if (await seekWithinBlock(io, liveMusicPosition, label)) {
+        pausedByHold = false;
+        logger.info(`advanced from ${label} after ${silenceSec}s`);
+        return;
+      }
     }
     try {
       await io.resume();
@@ -599,8 +734,12 @@ export function createDjVolumeHandoff({
                 } catch (error) {
                   logger.warn(`DJ advance failed: ${error.message}`);
                 }
-              } else {
-                await io.playAt(Number(liveMusicPosition) - 1);
+              } else if (await syncPositions(io, "completed DJ clip")) {
+                await seekWithinBlock(
+                  io,
+                  Number(liveMusicPosition) - 1,
+                  "DJ advance"
+                );
                 lastAdvancedDjUri = liveUri;
               }
               logger.info("advanced completed DJ clip to next announce pad");
@@ -721,8 +860,11 @@ export function createDjVolumeHandoff({
               djStillPlaying ||
               (liveOnDj &&
                 (liveState === "PLAYING" || liveState === "TRANSITIONING"));
-            if (liveOnRamp && Number(liveTtsPosition) >= 1) {
-              await io.playAt(Number(liveTtsPosition));
+            // Deadline seeks run minutes after the block was queued; re-resolve
+            // before using any of these indices.
+            const synced = await syncPositions(io, "absolute deadline");
+            if (liveOnRamp && synced && Number(liveTtsPosition) >= 1) {
+              await seekWithinBlock(io, liveTtsPosition, "deadline");
             } else if (liveDjPlaying) {
               logger.warn(
                 "deadline reached while DJ intro still playing; not skipping"
@@ -735,6 +877,7 @@ export function createDjVolumeHandoff({
             } else if (
               liveOnDj &&
               liveUri !== lastAdvancedDjUri &&
+              synced &&
               Number(liveMusicPosition) >= 2
             ) {
               // Idle/finished clip — skip forward one slot (punch TTS or restore).
@@ -748,10 +891,18 @@ export function createDjVolumeHandoff({
                   /* best effort */
                 }
               } else {
-                await io.playAt(Number(liveMusicPosition) - 1);
+                await seekWithinBlock(
+                  io,
+                  Number(liveMusicPosition) - 1,
+                  "deadline"
+                );
               }
-            } else if (liveOnRestore && Number(liveMusicPosition) >= 1) {
-              await io.playAt(Number(liveMusicPosition));
+            } else if (
+              liveOnRestore &&
+              synced &&
+              Number(liveMusicPosition) >= 1
+            ) {
+              await seekWithinBlock(io, liveMusicPosition, "deadline");
             } else if (!liveOnRamp && !liveOnDj && !liveOnRestore) {
               await io.resume();
             }
@@ -848,9 +999,35 @@ export function createDjVolumeHandoff({
       if (nextTts != null) liveTtsPosition = nextTts;
       if (nextTts2 != null) liveTts2Position = nextTts2;
       if (nextMusic != null) liveMusicPosition = nextMusic;
+      locatedBlock = null;
+    },
+    /** Follow a front-of-queue removal (trim) so the stored indices stay live. */
+    shiftPositions(count) {
+      const removed = Math.floor(Number(count) || 0);
+      if (removed < 1) return false;
+      const slide = (value) =>
+        Number(value) >= 1 ? Math.max(1, Number(value) - removed) : value;
+      liveTtsPosition = slide(liveTtsPosition);
+      liveTts2Position =
+        liveTts2Position == null ? liveTts2Position : slide(liveTts2Position);
+      liveMusicPosition = slide(liveMusicPosition);
+      locatedBlock = null;
+      logger.info(
+        `queue trimmed ${removed}; announce now tts@${liveTtsPosition} music@${liveMusicPosition}`
+      );
+      return true;
     },
     releasePreSilenceHold() {
       preSilenceReleased = true;
+    },
+    /** Re-resolve against the live queue, then hand back a current snapshot. */
+    async refreshPositions(reason = "refresh") {
+      try {
+        await syncPositions(await getAdapter(), reason);
+      } catch (error) {
+        logger.warn(`position refresh failed (${reason}): ${error.message}`);
+      }
+      return snapshot();
     },
     snapshot,
     restoreExact,
@@ -860,6 +1037,12 @@ export function createDjVolumeHandoff({
   };
 }
 
+/**
+ * Does the incoming announce sit further down the queue than the active one?
+ * Both sides must be measured against the same queue: `next` is fresh from the
+ * insert that just ran, so `previous` has to be re-resolved first or a trim in
+ * between makes the earlier shout look later and cancels the wrong handoff.
+ */
 function isLaterAnnounce(previous, next) {
   const prevTts = Number(previous?.ttsPosition);
   const nextTts = Number(next?.ttsPosition);
@@ -907,9 +1090,11 @@ function createDeferredHandoff() {
 export async function beginDjVolumeHandoff(options = {}) {
   let preservedBaseline = null;
   if (activeHandoff) {
-    const previous = activeHandoff.snapshot();
+    let previous = activeHandoff.snapshot();
     const previousPhase = previous.phase;
     if (previousPhase !== "complete" && previousPhase !== "cancelled") {
+      previous =
+        (await activeHandoff.refreshPositions?.("supersede check")) ?? previous;
       // A later request shout must not cancel the earlier handoff. Cancelling
       // left the first ramp in queue with no TTS session — empty DJ, then a
       // jump to the later song. Rearm when the active handoff completes.

@@ -44,15 +44,36 @@ export function removeRangeFor(track) {
 export const TRIM_PLAYED_MAX_PER_TICK = 8;
 
 /**
+ * Consecutive maintenance ticks an armed announce may hold trim off. At the
+ * 45s tick this is a couple of minutes of played rows, which is cheap; letting
+ * it run forever is not, because a busy party never has zero announces armed.
+ */
+export const TRIM_ARMED_SKIP_LIMIT = 3;
+
+/**
  * Whether maintenance may strip tracks behind the playhead.
- * Skip when the DJ handoff owns the room, when GetQueue failed (empty length
- * with a playhead past 1), or when Track is ahead of the reported queue —
- * those are the windows that looked like a host Clear Queue.
+ * Skip when the DJ handoff owns the room, when an announce is armed but has not
+ * reached the playhead yet, when GetQueue failed (empty length with a playhead
+ * past 1), or when Track is ahead of the reported queue — those are the windows
+ * that looked like a host Clear Queue.
+ *
+ * Trimming removes tracks from index 1, so every remaining index slides down.
+ * An armed announce is still holding the absolute indices it was given when the
+ * block was enqueued, so a trim in that window is what made the handoff seek
+ * past its own DJ clip and strand guest requests behind the playhead.
+ *
+ * That skip is bounded by `djSkipStreak`, the number of consecutive ticks the
+ * DJ has already held trim off for any reason. A busy party always has some
+ * announce armed or playing, so an unbounded skip grows the Sonos queue for the
+ * rest of the night. Past TRIM_ARMED_SKIP_LIMIT we trim anyway and rely on the
+ * handoff's position shift and live clip lookup to stay on the right rows.
  *
  * @param {{
  *   track?: number,
  *   queueLength?: number,
  *   handoffActive?: boolean,
+ *   handoffArmed?: boolean,
+ *   djSkipStreak?: number,
  *   currentUri?: string,
  *   currentTitle?: string,
  *   playingFromQueue?: boolean,
@@ -68,12 +89,17 @@ export function trimPlayedDecision({
   track,
   queueLength,
   handoffActive = false,
+  handoffArmed = false,
+  djSkipStreak = 0,
   currentUri = "",
   currentTitle = "",
   playingFromQueue = true,
 } = {}) {
   if (!playingFromQueue) return { action: "skip", reason: "not-queue" };
   if (handoffActive) return { action: "skip", reason: "dj-handoff" };
+  if (handoffArmed && djSkipStreak < TRIM_ARMED_SKIP_LIMIT) {
+    return { action: "skip", reason: "dj-announce-armed" };
+  }
   if (isAnnounceQueuePad(currentUri, currentTitle)) {
     return { action: "skip", reason: "announce-pad" };
   }

@@ -9,7 +9,10 @@
  *    whole block to the next real music track.
  */
 
-import { isAnnounceQueuePad } from "./sonos-queue-policy.js";
+import {
+  isAnnounceQueuePad,
+  clipUrlMatchesQueueUri,
+} from "./sonos-queue-policy.js";
 import {
   isDjClipUri,
   isRampSilenceUri,
@@ -220,5 +223,86 @@ export function findUpcomingAnnounceHandoffPlan(items, currentTrack1Based) {
     ttsUri,
     silenceSec,
     approxDurationSec,
+  };
+}
+
+/**
+ * Live positions of the announce block whose lead clip is `clipUrl`.
+ *
+ * Absolute queue indices captured when the block was enqueued go stale the
+ * moment maintenance trims played songs off the front of the queue, so every
+ * seek inside the volume handoff re-resolves against a fresh GetQueue instead.
+ * Prefers the copy at or after the current track (the ramp pad may already be
+ * playing). Falls back to the nearest copy behind the playhead, because by the
+ * time we are holding on the restore pad the lead clip has already played.
+ *
+ * Block edges are read outward from the lead clip only — a stacked shout whose
+ * pads sit flush against this one must not be swallowed into the range.
+ *
+ * @param {Array<{ TrackUri?: string, uri?: string, Title?: string, title?: string }>} items
+ * @param {string} clipUrl lead TTS clip URL for this announce
+ * @param {{ currentTrack?: number, playingFromQueue?: boolean }} [opts]
+ * @returns {{
+ *   rampPosition: number|null,
+ *   ttsPosition: number,
+ *   tts2Position: number|null,
+ *   restorePosition: number|null,
+ *   musicPosition: number|null,
+ *   blockStart: number,
+ *   blockEnd: number,
+ * }|null}
+ */
+export function locateAnnounceBlockByClipUrl(
+  items,
+  clipUrl,
+  { currentTrack = 0, playingFromQueue = false } = {}
+) {
+  const list = Array.isArray(items) ? items : [];
+  const want = String(clipUrl || "").trim();
+  if (!want) return null;
+  const track = Math.floor(Number(currentTrack) || 0);
+  const start = playingFromQueue && track >= 1 ? Math.max(0, track - 1) : 0;
+  const isWanted = (index) => {
+    const uri = queueItemUri(list[index]);
+    return isDjClipUri(uri) && clipUrlMatchesQueueUri(uri, want);
+  };
+
+  let hit = -1;
+  for (let i = start; i < list.length; i++) {
+    if (isWanted(i)) {
+      hit = i;
+      break;
+    }
+  }
+  for (let i = start - 1; hit < 0 && i >= 0; i--) {
+    if (isWanted(i)) hit = i;
+  }
+  if (hit < 0) return null;
+
+  const ttsPosition = hit + 1;
+  const rampPosition =
+    hit >= 1 && isRampSilenceUri(queueItemUri(list[hit - 1])) ? hit : null;
+
+  // Banter: Sister Static's punch clip sits between the lead and the restore.
+  let tts2Position = null;
+  let i = hit + 1;
+  while (i < list.length && isDjClipUri(queueItemUri(list[i]))) {
+    if (tts2Position == null) tts2Position = i + 1;
+    i += 1;
+  }
+
+  let restorePosition = null;
+  if (i < list.length && isRestoreSilenceUri(queueItemUri(list[i]))) {
+    restorePosition = i + 1;
+  }
+
+  return {
+    rampPosition,
+    ttsPosition,
+    tts2Position,
+    restorePosition,
+    musicPosition: findNextMusicTrackNumber(list, ttsPosition),
+    blockStart: rampPosition ?? ttsPosition,
+    blockEnd: restorePosition ?? tts2Position ?? ttsPosition,
   };
 }

@@ -18,6 +18,11 @@ import {
   randomDjAnnouncePlan,
   songMatchKey,
 } from "../src/sonos.js";
+import {
+  isDjVolumeHandoffArmed,
+  setDjVolumeHandoffArmed,
+  MAX_HANDOFF_ARMED_MS,
+} from "../src/dj-volume-handoff-state.js";
 
 // Build Sonos-style queue items from a list of track IDs.
 const items = (...ids) => ids.map((id) => ({ TrackUri: `spotify:track:${id}` }));
@@ -84,6 +89,37 @@ test("trimPlayedDecision skips during DJ handoff and unread/stale queue", () => 
     }).reason,
     "announce-pad"
   );
+});
+
+test("trimPlayedDecision skips while an announce is armed but not yet playing", () => {
+  // Trim removes from index 1, so everything left slides down. An announce
+  // waiting for its ramp is still holding the indices it was given at insert
+  // time — shifting them under it is what made the handoff seek past its own
+  // DJ clip and strand guest requests behind the playhead.
+  const decision = trimPlayedDecision({
+    track: 6,
+    queueLength: 20,
+    handoffArmed: true,
+    playingFromQueue: true,
+  });
+  assert.equal(decision.action, "skip");
+  assert.equal(decision.reason, "dj-announce-armed");
+});
+
+test("the armed flag expires so a stuck announce cannot pause trim all night", () => {
+  let clock = 1_000;
+  const now = () => clock;
+  setDjVolumeHandoffArmed(true, now);
+  assert.equal(isDjVolumeHandoffArmed(now), true);
+
+  // Phase churn must not keep renewing the window.
+  clock += MAX_HANDOFF_ARMED_MS - 1;
+  setDjVolumeHandoffArmed(true, now);
+  assert.equal(isDjVolumeHandoffArmed(now), true);
+
+  clock += 2;
+  assert.equal(isDjVolumeHandoffArmed(now), false);
+  setDjVolumeHandoffArmed(false, now);
 });
 
 test("trimPlayedDecision caps a runaway playhead so one tick cannot wipe the queue", () => {

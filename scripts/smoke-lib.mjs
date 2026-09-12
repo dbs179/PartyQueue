@@ -85,6 +85,23 @@ export function near(a, b, tol = 2) {
   return Math.abs(Number(a) - Number(b)) <= tol;
 }
 
+/**
+ * Poll until `read()` returns a value `ok()` accepts, then hand it back.
+ * Announce pads do not land with the add that triggered them — the shout has to
+ * be written and voiced first, which takes seconds — so a fixed sleep either
+ * flakes or wastes time. Returns the last value read when the wait times out,
+ * leaving the caller to report it.
+ */
+export async function waitFor(read, ok, { timeoutMs = 30000, everyMs = 500 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let last = await read();
+  while (!ok(last) && Date.now() < deadline) {
+    await sleep(everyMs);
+    last = await read();
+  }
+  return { value: last, ok: ok(last) };
+}
+
 export async function nudgeVolumeTo(target) {
   let v = await vol();
   let guard = 0;

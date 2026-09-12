@@ -14,11 +14,163 @@ import {
   isRampSilenceUri,
   isRestoreSilenceUri,
 } from "../src/dj-volume-handoff.js";
+import { locateAnnounceBlockByClipUrl } from "../src/skip-announce-policy.js";
 
 const PRE = "http://partyqueue/media/tts/silence-ramp-3s.mp3";
 const DJ = "http://partyqueue/media/tts/tts-announce.mp3";
 const POST = "http://partyqueue/media/tts/silence-3s.mp3";
 const MUSIC = "spotify:track:next";
+
+/**
+ * Queue-backed adapter: `playAt(n)` lands on row `n` and `locateAnnounce`
+ * answers from the same array.
+ *
+ * The `timeline` harness below scripts what the transport reports over time, so
+ * its `playAt` can ignore the position entirely and every assertion still
+ * passes. That is exactly how a stale SeekTrack index shipped: maintenance
+ * trims played songs off the front of the live queue between arming an announce
+ * and the ramp reaching the playhead, and nothing in the suite could tell the
+ * difference. Position bugs need this model.
+ *
+ * @param {{ queue: string[], startTrack?: number, msPerVolumeWrite?: number }} opts
+ */
+function fakeQueueHandoff({
+  queue,
+  startTrack = 1,
+  baseline = 10,
+  target = 30,
+  sleep = async () => {},
+  // Each volume write costs this much wall clock, the way SOAP does. Enough of
+  // them and the pre-silence pad runs out, which is the branch that seeks.
+  msPerVolumeWrite = 0,
+  msPerPoll = 150,
+  djClipMs = 2000,
+  approxDurationSec = 5,
+  silenceSec = 3,
+  ttsPosition,
+  tts2Position = null,
+  musicPosition,
+  // Drop the lookup after N answers to exercise the bounds check on its own.
+  locateFailsAfter = Infinity,
+  // Report the clip as gone after N answers, the way a trimmed-away block does.
+  locateNullAfter = Infinity,
+  withNext = true,
+} = {}) {
+  const rows = [...queue];
+  let track = Math.max(1, startTrack);
+  let volume = baseline;
+  let clock = 0;
+  let rowStartedAt = 0;
+  let locateCalls = 0;
+  const calls = [];
+  const phases = [];
+  const seeks = [];
+
+  // How long each row holds the playhead. The ramp has to outlast the volume
+  // writes, or the pad advances onto the clip before the handoff ever decides
+  // whether to seek — which is the whole window the bug lived in. Restore is
+  // sticky so the post-advance guards get a stable read.
+  const dwellMs = (uri) => {
+    if (isRampSilenceUri(uri)) return silenceSec * 1000;
+    if (isDjClipUri(uri, DJ)) return djClipMs;
+    // The restore pad outlasts the volume ramp-down so the post-advance guards
+    // get a stable read, but it is still a finite clip: a sticky-forever pad
+    // would let a handoff that refuses to seek spin here indefinitely.
+    if (isRestoreSilenceUri(uri)) return silenceSec * 1000 * 8;
+    return Infinity;
+  };
+
+  const moveTo = (position) => {
+    track = Math.max(1, Math.min(rows.length, Math.floor(position)));
+    rowStartedAt = clock;
+  };
+
+  const adapter = {
+    async getNowPlaying() {
+      clock += msPerPoll;
+      const uri = rows[track - 1] ?? "";
+      calls.push(["now-playing", uri, track]);
+      if (clock - rowStartedAt >= dwellMs(uri) && track < rows.length) {
+        moveTo(track + 1);
+      }
+      return {
+        uri,
+        state: "PLAYING",
+        positionSec: isDjClipUri(uri, DJ) ? 2 : 0,
+      };
+    },
+    async getVolume() {
+      return volume;
+    },
+    async setVolume(level) {
+      volume = level;
+      clock += msPerVolumeWrite;
+      calls.push(["set-volume", level]);
+      return { locked: true };
+    },
+    async pause() {
+      calls.push(["pause"]);
+    },
+    async resume() {
+      calls.push(["resume"]);
+    },
+    async playAt(position) {
+      calls.push(["play-at", position]);
+      seeks.push(position);
+      moveTo(position);
+    },
+    async locateAnnounce(clipUrl) {
+      locateCalls += 1;
+      if (locateCalls > locateFailsAfter) {
+        throw new Error("GetQueue failed");
+      }
+      if (locateCalls > locateNullAfter) return null;
+      return locateAnnounceBlockByClipUrl(
+        rows.map((uri) => ({ TrackUri: uri })),
+        clipUrl,
+        { currentTrack: track, playingFromQueue: true }
+      );
+    },
+  };
+  if (withNext) {
+    adapter.next = async () => {
+      calls.push(["next"]);
+      if (track < rows.length) moveTo(track + 1);
+    };
+  }
+
+  const handoff = createDjVolumeHandoff({
+    publicUrl: DJ,
+    approxDurationSec,
+    silenceSec,
+    calculateTarget: () => target,
+    adapter,
+    sleep,
+    now: () => clock,
+    pollMs: 0,
+    rampStepMs: 0,
+    ttsPosition,
+    tts2Position,
+    musicPosition,
+    logger: {
+      info(message) {
+        if (message.startsWith("phase ")) phases.push(message.slice(6));
+      },
+      warn() {},
+      error() {},
+    },
+  });
+
+  return {
+    handoff,
+    calls,
+    phases,
+    seeks,
+    playedUris: () => calls.filter(([name]) => name === "now-playing").map(([, uri]) => uri),
+    getTrack: () => track,
+    getVolume: () => volume,
+  };
+}
 
 function fakeHandoff({
   timeline,
@@ -556,6 +708,207 @@ test("seeks lead TTS when banter punch starts before Holy Roller", async () => {
     "lead DJ clip should play after recovery"
   );
   assert.equal(volume, 10);
+});
+
+// Regression: 2026-09-11 party. Maintenance trims played songs off the front of
+// the queue while an announce waits for its ramp to reach the playhead, so every
+// index the handoff was armed with is N too high. Fourteen of fourteen announces
+// that had a trim in that window seeked past their own DJ clip; the three with
+// no trim played fine.
+test("announce still plays after trim shifted the queue under it", async () => {
+  // Armed as ramp@3 TTS@4 restore@5, then one played song was trimmed away.
+  const run = fakeQueueHandoff({
+    queue: [MUSIC, PRE, DJ, POST, "spotify:track:man-in-the-box"],
+    startTrack: 2,
+    ttsPosition: 4,
+    musicPosition: 6,
+    msPerVolumeWrite: 400,
+  });
+
+  const result = await run.handoff.start();
+
+  assert.equal(result.phase, "complete");
+  assert.ok(
+    run.playedUris().includes(DJ),
+    "the DJ clip must still play after the queue shifted"
+  );
+  assert.ok(
+    run.seeks.every((position) => position <= 5),
+    `no seek may land past the announce block, got ${run.seeks.join(",")}`
+  );
+  assert.equal(run.getVolume(), 10);
+});
+
+test("a shifted banter block still plays Holy Roller and Sister Static", async () => {
+  const punch = "http://partyqueue/media/tts/tts-punch.mp3";
+  // Banter blocks are four rows, so they desync twice as fast.
+  const run = fakeQueueHandoff({
+    queue: [MUSIC, MUSIC, PRE, DJ, punch, POST, "spotify:track:talk-dirty"],
+    startTrack: 3,
+    ttsPosition: 6,
+    tts2Position: 7,
+    musicPosition: 9,
+    msPerVolumeWrite: 400,
+  });
+
+  await run.handoff.start();
+
+  const played = run.playedUris();
+  assert.ok(played.includes(DJ), "Holy Roller's lead clip must play");
+  assert.ok(played.includes(punch), "Sister Static's punch clip must play");
+});
+
+test("a stale index never strands unplayed requests behind the playhead", async () => {
+  // The Guardian Angel case: rearmed at tts@7, then four songs were trimmed, so
+  // the seek landed two songs past the announce. Both skipped songs ended up
+  // behind the playhead and the next maintenance tick deleted them.
+  const requests = ["spotify:track:request-a", "spotify:track:request-b"];
+  const run = fakeQueueHandoff({
+    queue: [PRE, DJ, POST, ...requests, "spotify:track:filler"],
+    startTrack: 1,
+    ttsPosition: 7,
+    musicPosition: 9,
+    msPerVolumeWrite: 400,
+  });
+
+  await run.handoff.start();
+
+  assert.ok(run.playedUris().includes(DJ), "the DJ clip must play");
+  assert.ok(
+    run.getTrack() <= 4,
+    `playhead must not run past the announced song, ended on ${run.getTrack()}`
+  );
+  for (const [index, uri] of requests.entries()) {
+    assert.ok(
+      !run.seeks.includes(4 + index),
+      `must never seek over ${uri}`
+    );
+  }
+});
+
+test("a seek outside the announce block is refused, not sent to Sonos", async () => {
+  // Lookup dies after the first answer, so the handoff is left holding the
+  // indices it was armed with. Those must not be trusted blindly.
+  const run = fakeQueueHandoff({
+    queue: [PRE, DJ, POST, "spotify:track:announced", "spotify:track:request"],
+    startTrack: 1,
+    ttsPosition: 2,
+    musicPosition: 9,
+    msPerVolumeWrite: 400,
+    locateFailsAfter: 1,
+    withNext: false,
+  });
+
+  await run.handoff.start();
+
+  assert.ok(
+    run.seeks.every((position) => position <= 4),
+    `stale music index must be refused, got ${run.seeks.join(",")}`
+  );
+});
+
+// Found by scripts/sim-busy-party.mjs: when the lookup could not place the
+// block, the advance and deadline paths fell back to the index the handoff was
+// armed with and seeked on it anyway, jumping the playhead over live requests.
+test("a lost announce block stops the seek instead of falling back to the armed index", async () => {
+  const run = fakeQueueHandoff({
+    queue: [
+      PRE,
+      DJ,
+      POST,
+      "spotify:track:announced",
+      "spotify:track:request-a",
+      "spotify:track:request-b",
+      "spotify:track:filler",
+    ],
+    startTrack: 1,
+    ttsPosition: 2,
+    musicPosition: 7,
+    msPerVolumeWrite: 400,
+    locateNullAfter: 0,
+    withNext: false,
+  });
+
+  await run.handoff.start();
+
+  assert.ok(
+    run.seeks.every((position) => position <= 4),
+    `must not seek on the armed index once the block is lost, got ${run.seeks.join(",")}`
+  );
+  assert.ok(
+    run.getTrack() <= 4,
+    `playhead must not pass the announced song, ended on ${run.getTrack()}`
+  );
+});
+
+test("locateAnnounceBlockByClipUrl reads the live block around its clip", () => {
+  const items = [
+    { TrackUri: MUSIC },
+    { TrackUri: PRE },
+    { TrackUri: DJ },
+    { TrackUri: POST },
+    { TrackUri: "spotify:track:announced" },
+  ].map((row) => row);
+
+  const found = locateAnnounceBlockByClipUrl(items, DJ, {
+    currentTrack: 2,
+    playingFromQueue: true,
+  });
+
+  assert.deepEqual(found, {
+    rampPosition: 2,
+    ttsPosition: 3,
+    tts2Position: null,
+    restorePosition: 4,
+    musicPosition: 5,
+    blockStart: 2,
+    blockEnd: 4,
+  });
+});
+
+test("locateAnnounceBlockByClipUrl finds its clip once the restore pad is current", () => {
+  const items = [
+    { TrackUri: PRE },
+    { TrackUri: DJ },
+    { TrackUri: POST },
+    { TrackUri: MUSIC },
+  ];
+
+  const found = locateAnnounceBlockByClipUrl(items, DJ, {
+    currentTrack: 3,
+    playingFromQueue: true,
+  });
+
+  assert.equal(found?.ttsPosition, 2);
+  assert.equal(found?.musicPosition, 4);
+});
+
+test("locateAnnounceBlockByClipUrl does not swallow a stacked neighbour block", () => {
+  const second = "http://partyqueue/media/tts/tts-second.mp3";
+  const items = [
+    { TrackUri: PRE },
+    { TrackUri: DJ },
+    { TrackUri: POST },
+    { TrackUri: PRE },
+    { TrackUri: second },
+    { TrackUri: POST },
+    { TrackUri: MUSIC },
+  ];
+
+  const found = locateAnnounceBlockByClipUrl(items, DJ, {
+    currentTrack: 1,
+    playingFromQueue: true,
+  });
+
+  assert.equal(found?.blockStart, 1);
+  assert.equal(found?.blockEnd, 3);
+  assert.equal(found?.tts2Position, null, "the next shout is not our punch clip");
+});
+
+test("locateAnnounceBlockByClipUrl returns null once the clip is gone", () => {
+  const items = [{ TrackUri: MUSIC }, { TrackUri: "spotify:track:other" }];
+
+  assert.equal(locateAnnounceBlockByClipUrl(items, DJ, {}), null);
 });
 
 test("does not Next past music if restore pad already advanced", async () => {
