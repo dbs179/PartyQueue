@@ -150,9 +150,17 @@ export { sleep, SETTLE_MS };
 // Set every member to one absolute target, then settle + verify in a short
 // loop, re-asserting the target on any player that hasn't landed on it yet.
 // This guarantees the whole group ends locked to the same exact level.
+/** Prefer live members. If a topology timeout skipped the whole group, still
+ *  talk to those speakers — a slow GetZoneGroupState is not a dead player. */
+function volumeTargets(members) {
+  const live = liveMembers(members);
+  if (live.length) return live;
+  return Array.isArray(members) ? members.filter(Boolean) : [];
+}
+
 export async function lockGroupVolume(members, target) {
   const want = Math.max(0, Math.min(100, Math.round(Number(target) || 0)));
-  let active = liveMembers(members);
+  let active = volumeTargets(members);
   if (!active.length) {
     throw new Error("No reachable Sonos players for group volume.");
   }
@@ -174,7 +182,7 @@ export async function lockGroupVolume(members, target) {
 async function adjustGroupVolume(delta) {
   const m = await getManager();
   const { members } = await resolveGroup(m);
-  const active = liveMembers(members);
+  const active = volumeTargets(members);
   if (!active.length) {
     throw new Error("No reachable Sonos players for group volume.");
   }
@@ -213,7 +221,7 @@ export async function volumeDown(step = VOLUME_STEP) {
 export async function getGroupVolume() {
   const m = await getManager();
   const { members } = await resolveGroup(m);
-  const active = liveMembers(members);
+  const active = volumeTargets(members);
   if (!active.length) {
     throw new Error("No reachable Sonos players for group volume.");
   }
@@ -237,7 +245,7 @@ async function setGroupVolumeUnlocked(level) {
   const target = Math.max(0, Math.min(100, Math.round(Number(level) || 0)));
   const locked = await lockGroupVolume(members, target);
   noteGroupVolume(target);
-  invalidateSonosSnapshots();
+  invalidateSonosSnapshots({ preserveAnnounceHold: true });
   return { volume: target, players: members.length, locked };
 }
 
@@ -255,7 +263,7 @@ export async function setGroupVolumeFast(level) {
 async function setGroupVolumeFastUnlocked(level) {
   const m = await getManager();
   const { members } = await resolveGroup(m);
-  const active = liveMembers(members);
+  const active = volumeTargets(members);
   if (!active.length) {
     throw new Error("No reachable Sonos players for group volume.");
   }

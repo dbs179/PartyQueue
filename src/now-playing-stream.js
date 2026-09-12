@@ -151,6 +151,7 @@ export function createSnapshotMonitor({
   const subscribers = new Set();
   let timer = null;
   let activeTick = null;
+  let pollGeneration = 0;
   let latest = null;
   let latestSignature = "";
   let streamSequence = 0;
@@ -269,9 +270,11 @@ export function createSnapshotMonitor({
     }
     cancelTimer();
     let nextDelay = intervalMs;
+    const gen = pollGeneration;
     const tickPromise = Promise.resolve()
       .then(readSnapshot)
       .then((snapshot) => {
+        if (gen !== pollGeneration) return snapshot;
         const recovered = health.status === "disconnected";
         consecutiveFailures = 0;
         updateHealth({
@@ -294,6 +297,7 @@ export function createSnapshotMonitor({
         return snapshot;
       })
       .catch((err) => {
+        if (gen !== pollGeneration) return null;
         consecutiveFailures += 1;
         nextDelay = snapshotErrorDelayMs(consecutiveFailures, errorIntervalMs);
         if (consecutiveFailures >= Math.max(1, failureThreshold)) {
@@ -357,6 +361,17 @@ export function createSnapshotMonitor({
     else void pollNow();
   }
 
+  /** Drop a SOAP that started before Play / Skip so it cannot republish the old song. */
+  function discardStalePoll() {
+    pollGeneration += 1;
+  }
+
+  function seed(snapshot) {
+    if (stopped || !snapshot) return;
+    pollGeneration += 1;
+    publish(snapshot, { force: true });
+  }
+
   async function stop() {
     stopped = true;
     cancelTimer();
@@ -371,6 +386,8 @@ export function createSnapshotMonitor({
   return {
     subscribe,
     nudge,
+    seed,
+    discardStalePoll,
     pollNow,
     stop,
     get subscriberCount() {

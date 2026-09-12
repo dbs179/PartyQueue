@@ -65,6 +65,14 @@ describe("music pronunciation", () => {
       ),
       "Zye-lo with A C D C, U Two, and R E M"
     );
+    assert.equal(
+      applyMusicPronunciations("First up, P!nk is here with Just Give Me a Reason"),
+      "First up, Pink is here with Just Give Me a Reason"
+    );
+    assert.equal(
+      applyMusicPronunciations("First up, P! Nk is here with Just Give Me a Reason"),
+      "First up, Pink is here with Just Give Me a Reason"
+    );
   });
 
   it("tells the AI to prioritize standard music-name pronunciation", () => {

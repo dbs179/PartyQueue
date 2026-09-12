@@ -16,6 +16,7 @@ import {
   getNowPlayingFresh,
   getQueueList,
   onSonosSnapshotsInvalidated,
+  holdAnnounceNowPlaying,
 } from "./sonos.js";
 
 const GENRE_LABEL_BY_ID = new Map(GENRE_BUCKETS.map((b) => [b.id, b.label]));
@@ -185,13 +186,18 @@ export async function enrichNowPlaying(np) {
   let upcomingForGenre = null;
   if (np?.djVoice || np?.djSilence) {
     upcomingForGenre =
-      np.upcomingForGenre || (await upcomingTrackForGenreDisplay());
+      np.upcomingForGenre ||
+      (np.announceHeld ? null : await upcomingTrackForGenreDisplay());
   }
   const { mixGenreLane, mixGenreLabel } = resolveDisplayGenre(np, {
     setLane,
     upcomingForGenre,
   });
-  const { upcomingForGenre: _upcomingHint, ...publicNp } = np || {};
+  const {
+    upcomingForGenre: _upcomingHint,
+    announceHeld: _announceHeld,
+    ...publicNp
+  } = np || {};
   // Party-wide toggles / Vibe selection / Closing Time live on /api/party.
   // NP enrich stays track-scoped: Genre header + reactions for this play.
   const playId = trackId
@@ -310,8 +316,21 @@ export function broadcastNowPlayingMutation() {
 }
 
 const unsubscribeSonosStreamNudge = onSonosSnapshotsInvalidated(() => {
+  nowPlayingMonitor.discardStalePoll?.();
   broadcastNowPlayingMutation();
 });
+
+/**
+ * Play just started a baked announce. Paint the DJ immediately so a slow
+ * GetPositionInfo that still says the last song cannot own the booth.
+ */
+export function seedAnnounceNowPlaying(opts = {}) {
+  const snapshot = holdAnnounceNowPlaying(opts);
+  if (!snapshot) return null;
+  nowPlayingMonitor.seed(snapshot);
+  nudgeNowPlayingTransition(snapshot);
+  return snapshot;
+}
 
 export function nudgeNowPlayingStream() {
   nowPlayingMonitor.nudge();

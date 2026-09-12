@@ -53,5 +53,12 @@ export function makeCachedReader(fn, ttlMs) {
     // request. The original caller may still finish, guarded by generation.
     inFlight = null;
   };
+  // Plant a value the next poll can return immediately (DJ announce after Play)
+  // so a 10s+ SOAP that started on the previous song cannot keep winning.
+  read.seed = (value) => {
+    generation += 1;
+    cache = { at: Date.now(), value };
+    inFlight = null;
+  };
   return read;
 }

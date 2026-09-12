@@ -284,7 +284,18 @@ function clipUriLookupKeys(uri) {
  * @param {string|null|undefined} script
  * @param {{ alsoUris?: Array<string|null|undefined>, now?: number }} [opts]
  */
-export function rememberDjClipScript(uri, script, { alsoUris = [], now = Date.now(), personaId = null } = {}) {
+export function rememberDjClipScript(
+  uri,
+  script,
+  {
+    alsoUris = [],
+    now = Date.now(),
+    personaId = null,
+    punchPersonaId = null,
+    punchStartsAtSec = null,
+    punchScript = null,
+  } = {}
+) {
   const text = String(script || "").trim();
   if (!text) return;
   const uris = [uri, ...(Array.isArray(alsoUris) ? alsoUris : [])]
@@ -296,15 +307,19 @@ export function rememberDjClipScript(uri, script, { alsoUris = [], now = Date.no
   const store = pruneStore(ts);
   const clips = store.global.clipScripts || [];
   const persona = personaId ? String(personaId).trim() : null;
+  const punchPersona = punchPersonaId ? String(punchPersonaId).trim() : null;
+  const punchAt = Number(punchStartsAtSec);
+  const punchText = String(punchScript || "").trim() || null;
   for (const uriKey of uris) {
     const existing = clips.find((item) => item.uri === uriKey);
-    if (existing) {
-      existing.text = text;
-      existing.ts = ts;
-      if (persona) existing.personaId = persona;
-    } else {
-      clips.push({ uri: uriKey, text, ts, personaId: persona });
-    }
+    const next = existing || { uri: uriKey };
+    next.text = text;
+    next.ts = ts;
+    if (persona) next.personaId = persona;
+    if (punchPersona) next.punchPersonaId = punchPersona;
+    if (Number.isFinite(punchAt) && punchAt > 0) next.punchStartsAtSec = punchAt;
+    if (punchText) next.punchScript = punchText;
+    if (!existing) clips.push(next);
   }
   while (clips.length > MAX_CLIP_SCRIPTS) clips.shift();
   store.global.clipScripts = clips;
@@ -315,47 +330,58 @@ export function rememberDjClipScript(uri, script, { alsoUris = [], now = Date.no
  * @param {string|null|undefined} uri
  * @returns {string|null}
  */
-export function scriptForClip(uri) {
+function findClipRecord(uri) {
   const keys = clipUriLookupKeys(uri);
   if (!keys.length) return null;
-  const store = pruneStore();
-  const clips = store.global.clipScripts || [];
+  const clips = pruneStore().global.clipScripts || [];
   if (!clips.length) return null;
-
   for (const key of keys) {
     const hit = clips.find((item) => item.uri === key);
-    if (hit?.text) return hit.text;
+    if (hit) return hit;
   }
-  // Basename fallback when Sonos rewrites host/port but keeps the file name.
   const keySet = new Set(keys);
   for (const item of clips) {
     for (const itemKey of clipUriLookupKeys(item.uri)) {
-      if (keySet.has(itemKey) && item.text) return item.text;
+      if (keySet.has(itemKey)) return item;
     }
   }
   return null;
 }
 
+function inPunchWindow(record, positionSec) {
+  const start = Number(record?.punchStartsAtSec);
+  const pos = Number(positionSec);
+  return (
+    !!record?.punchPersonaId &&
+    Number.isFinite(start) &&
+    start > 0 &&
+    Number.isFinite(pos) &&
+    pos >= start
+  );
+}
+
 /**
  * @param {string|null|undefined} uri
+ * @param {{ positionSec?: number }} [opts]
  * @returns {string|null}
  */
-export function personaForClip(uri) {
-  const keys = clipUriLookupKeys(uri);
-  if (!keys.length) return null;
-  const store = pruneStore();
-  const clips = store.global.clipScripts || [];
-  for (const key of keys) {
-    const hit = clips.find((item) => item.uri === key);
-    if (hit?.personaId) return hit.personaId;
-  }
-  const keySet = new Set(keys);
-  for (const item of clips) {
-    for (const itemKey of clipUriLookupKeys(item.uri)) {
-      if (keySet.has(itemKey) && item.personaId) return item.personaId;
-    }
-  }
-  return null;
+export function scriptForClip(uri, { positionSec } = {}) {
+  const hit = findClipRecord(uri);
+  if (!hit) return null;
+  if (inPunchWindow(hit, positionSec) && hit.punchScript) return hit.punchScript;
+  return hit.text || null;
+}
+
+/**
+ * @param {string|null|undefined} uri
+ * @param {{ positionSec?: number }} [opts]
+ * @returns {string|null}
+ */
+export function personaForClip(uri, { positionSec } = {}) {
+  const hit = findClipRecord(uri);
+  if (!hit) return null;
+  if (inPunchWindow(hit, positionSec)) return hit.punchPersonaId;
+  return hit.personaId || null;
 }
 
 /**

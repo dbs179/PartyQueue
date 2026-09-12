@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { insertAnnounceBlock } from "../src/sonos-queue-mutations.js";
+import { insertAnnounceClip } from "../src/sonos-queue-mutations.js";
 import {
   withSonosWriteLock,
   withSonosTransportLane,
@@ -13,45 +13,44 @@ import {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function media(url) {
-  return {
-    url,
-    title: url,
-    artist: "PartyQueue",
-    durationSec: 1,
-  };
+function announce(url = "http://x/dj-announce-abc.mp3") {
+  return { url, title: "DJ Holy Roller", artist: "PartyQueue", durationSec: 24 };
 }
 
-test("insertAnnounceBlock keeps strip + pads inside one write lock", async () => {
+const noopOps = {
+  removePads: async () => ({
+    removed: 0,
+    removedBefore: 0,
+    protectedThrough: 0,
+  }),
+  enqueue: async () => {},
+  pauseTrim: () => {},
+  ensurePlayMode: async () => {},
+};
+
+test("the announce insert holds the write lock across strip and enqueue", async () => {
   const steps = [];
   let releaseEnqueue;
   const enqueueGate = new Promise((r) => (releaseEnqueue = r));
-  let enqueues = 0;
 
-  const insert = insertAnnounceBlock({
+  const insert = insertAnnounceClip({
     queuePosition: 3,
     preemptGeneration: queueWorkGeneration(),
-    ramp: media("http://x/ramp.mp3"),
-    tts: media("http://x/tts.mp3"),
-    restore: media("http://x/restore.mp3"),
+    clip: announce(),
     ops: {
+      ...noopOps,
       removePads: async () => {
         steps.push("strip");
         return { removed: 0, removedBefore: 0, protectedThrough: 0 };
       },
       enqueue: async (url) => {
-        enqueues += 1;
         steps.push(`enqueue:${url.split("/").pop()}`);
-        if (enqueues === 1) await enqueueGate;
-        return { url };
+        await enqueueGate;
       },
-      pauseTrim: () => {},
-      ensurePlayMode: async () => {},
     },
   });
 
   await sleep(15);
-  // Guest-style write must wait behind the whole announce block.
   let guestRan = false;
   const guest = withSonosWriteLock(() => {
     guestRan = true;
@@ -59,282 +58,173 @@ test("insertAnnounceBlock keeps strip + pads inside one write lock", async () =>
   });
   // Pause must still work immediately on the transport lane.
   await withSonosTransportLane(() => steps.push("pause"));
-  assert.equal(guestRan, false);
-  assert.ok(steps.includes("pause"));
-  assert.ok(steps.includes("strip"));
-  assert.ok(steps.includes("enqueue:ramp.mp3"));
+  assert.equal(guestRan, false, "a guest add must wait for the announce");
 
   releaseEnqueue();
   await insert;
   await guest;
   assert.deepEqual(steps, [
     "strip",
-    "enqueue:ramp.mp3",
+    "enqueue:dj-announce-abc.mp3",
     "pause",
-    "enqueue:tts.mp3",
-    "enqueue:restore.mp3",
     "guest-add",
   ]);
 });
 
-test("insertAnnounceBlock aborts between pads when Clear preempts", async () => {
-  resetQueuePreemptForTests();
-  const gen = queueWorkGeneration();
-  const urls = [];
-  const strips = [];
-
-  const result = await insertAnnounceBlock({
-    queuePosition: 1,
-    preemptGeneration: gen,
-    ramp: media("http://x/ramp.mp3"),
-    tts: media("http://x/tts.mp3"),
-    restore: media("http://x/restore.mp3"),
+test("the announce is one row, so nothing can land inside it", async () => {
+  const enqueued = [];
+  const result = await insertAnnounceClip({
+    queuePosition: 4,
+    preemptGeneration: queueWorkGeneration(),
+    clip: announce(),
     ops: {
-      removePads: async (opts) => {
-        strips.push(opts);
-        return {
-          removed: 1,
-          removedBefore: strips.length === 1 ? 1 : 0,
-          protectedThrough: 0,
-        };
-      },
-      enqueue: async (url) => {
-        urls.push(url);
-        if (urls.length === 1) preemptQueueWork(); // Clear during insert
-        return { url };
-      },
-      pauseTrim: () => {},
-      ensurePlayMode: async () => {},
+      ...noopOps,
+      enqueue: async (url, opts) => enqueued.push([url, opts.position]),
     },
   });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.skipped, true);
-  assert.equal(result.reason, "queue-preempted");
-  assert.equal(result.partial, true);
-  assert.equal(result.cleaned, true);
-  assert.deepEqual(urls, ["http://x/ramp.mp3"]);
-  assert.equal(strips.length, 2, "initial supersede strip plus leftover cleanup");
-  assert.equal(strips[1].beforePosition, 1);
-  resetQueuePreemptForTests();
+  assert.equal(result.ok, true);
+  assert.equal(result.clipPos, 4);
+  assert.equal(enqueued.length, 1, "exactly one Sonos row");
+  assert.deepEqual(enqueued[0], ["http://x/dj-announce-abc.mp3", 4]);
 });
 
-test("insertAnnounceBlock strips leftover ramp+TTS when preempted before restore", async () => {
-  resetQueuePreemptForTests();
-  const urls = [];
-  const strips = [];
-
-  const result = await insertAnnounceBlock({
+test("banter is already inside the clip, so it is still a single row", async () => {
+  // The punch clip is baked in upstream; the queue never sees a second row.
+  const enqueued = [];
+  const result = await insertAnnounceClip({
     queuePosition: 2,
     preemptGeneration: queueWorkGeneration(),
-    ramp: media("http://x/ramp.mp3"),
-    tts: media("http://x/tts.mp3"),
-    restore: media("http://x/restore.mp3"),
+    clip: { ...announce("http://x/dj-announce-banter.mp3"), durationSec: 38 },
     ops: {
-      removePads: async (opts) => {
-        strips.push(opts);
-        return { removed: 0, removedBefore: 0, protectedThrough: 0 };
-      },
-      enqueue: async (url) => {
-        urls.push(url);
-        if (urls.length === 2) preemptQueueWork();
-        return { url };
-      },
-      pauseTrim: () => {},
-      ensurePlayMode: async () => {},
+      ...noopOps,
+      enqueue: async (url, opts) => enqueued.push([url, opts.position, opts.durationSec]),
     },
   });
 
-  assert.equal(result.ok, false);
-  assert.equal(result.partial, true);
-  assert.equal(result.cleaned, true);
-  assert.deepEqual(urls, ["http://x/ramp.mp3", "http://x/tts.mp3"]);
-  assert.equal(strips.length, 2);
-  assert.equal(strips[1].beforePosition, 2);
-  resetQueuePreemptForTests();
+  assert.equal(result.ok, true);
+  assert.deepEqual(enqueued, [["http://x/dj-announce-banter.mp3", 2, 38]]);
 });
 
-test("insertAnnounceBlock leaves a complete block when preempted after restore", async () => {
+test("a preempt before the enqueue leaves nothing in the queue", async () => {
   resetQueuePreemptForTests();
-  const urls = [];
-  let stripCount = 0;
+  const generation = queueWorkGeneration();
+  let enqueued = 0;
 
-  const result = await insertAnnounceBlock({
-    queuePosition: 1,
-    preemptGeneration: queueWorkGeneration(),
-    ramp: media("http://x/ramp.mp3"),
-    tts: media("http://x/tts.mp3"),
-    restore: media("http://x/restore.mp3"),
+  const result = await insertAnnounceClip({
+    queuePosition: 2,
+    preemptGeneration: generation,
+    clip: announce(),
     ops: {
+      ...noopOps,
       removePads: async () => {
-        stripCount += 1;
+        preemptQueueWork("clear");
         return { removed: 0, removedBefore: 0, protectedThrough: 0 };
       },
-      enqueue: async (url) => {
-        urls.push(url);
-        if (urls.length === 3) preemptQueueWork();
-        return { url };
+      enqueue: async () => {
+        enqueued += 1;
       },
-      pauseTrim: () => {},
-      ensurePlayMode: async () => {},
     },
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.skipped, true);
-  assert.equal(result.partial, false);
-  assert.equal(result.inserted, true);
-  assert.deepEqual(urls, [
-    "http://x/ramp.mp3",
-    "http://x/tts.mp3",
-    "http://x/restore.mp3",
-  ]);
-  assert.equal(stripCount, 1, "do not strip a complete announce block");
+  assert.equal(result.reason, "queue-preempted");
+  assert.equal(enqueued, 0);
+  assert.equal(result.inserted, undefined, "nothing was inserted");
   resetQueuePreemptForTests();
 });
 
-test("insertAnnounceBlock adjusts position after supersede wipe", async () => {
+test("a preempt after the enqueue reports a whole announce, never a partial one", async () => {
   resetQueuePreemptForTests();
-  const positions = [];
+  const generation = queueWorkGeneration();
 
-  const result = await insertAnnounceBlock({
+  const result = await insertAnnounceClip({
+    queuePosition: 2,
+    preemptGeneration: generation,
+    clip: announce(),
+    ops: {
+      ...noopOps,
+      enqueue: async () => {
+        preemptQueueWork("clear");
+      },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "queue-preempted");
+  assert.equal(result.inserted, true);
+  // The old four-row insert could strand a ramp with no DJ behind it; one row
+  // is all-or-nothing, so there is no partial state to report or clean up.
+  assert.equal(result.partial, undefined);
+  assert.equal(result.cleaned, undefined);
+  resetQueuePreemptForTests();
+});
+
+test("the insert position moves down when supersede removed pads ahead of it", async () => {
+  const enqueued = [];
+  const result = await insertAnnounceClip({
     queuePosition: 5,
     preemptGeneration: queueWorkGeneration(),
-    ramp: media("http://x/ramp.mp3"),
-    tts: media("http://x/tts.mp3"),
-    restore: media("http://x/restore.mp3"),
+    clip: announce(),
     ops: {
+      ...noopOps,
       removePads: async () => ({
         removed: 2,
         removedBefore: 2,
         protectedThrough: 0,
       }),
-      enqueue: async (_url, opts) => {
-        positions.push(opts.position);
-        return {};
-      },
-      pauseTrim: () => {},
-      ensurePlayMode: async () => {},
+      enqueue: async (url, opts) => enqueued.push(opts.position),
     },
   });
 
-  assert.equal(result.ok, true);
-  assert.equal(result.rampPos, 3);
-  assert.deepEqual(positions, [3, 4, 5]);
-  resetQueuePreemptForTests();
+  assert.equal(result.clipPos, 3);
+  assert.deepEqual(enqueued, [3]);
 });
 
-test("insertAnnounceBlock re-demotes under the write lock before pads", async () => {
-  resetQueuePreemptForTests();
-  const steps = [];
-  const positions = [];
-
-  const result = await insertAnnounceBlock({
+test("the insert lands after an announce that supersede chose to protect", async () => {
+  const result = await insertAnnounceClip({
     queuePosition: 2,
+    preemptGeneration: queueWorkGeneration(),
+    clip: announce(),
+    ops: {
+      ...noopOps,
+      removePads: async () => ({
+        removed: 0,
+        removedBefore: 0,
+        protectedThrough: 4,
+      }),
+    },
+  });
+
+  assert.equal(result.clipPos, 5, "must not land on top of the protected block");
+});
+
+test("the request position is re-resolved under the lock before inserting", async () => {
+  const result = await insertAnnounceClip({
+    queuePosition: 2,
+    preemptGeneration: queueWorkGeneration(),
     applyLeadBuffer: true,
-    preemptGeneration: queueWorkGeneration(),
-    ramp: media("http://x/ramp.mp3"),
-    tts: media("http://x/tts.mp3"),
-    restore: media("http://x/restore.mp3"),
+    clip: announce(),
     ops: {
-      ensureLeadBuffer: async (pos) => {
-        steps.push(`lead:${pos}`);
-        return { buffered: true, absoluteQueuePosition: 3, reason: "demoted" };
-      },
-      removePads: async () => {
-        steps.push("strip");
-        return { removed: 0, removedBefore: 0, protectedThrough: 0 };
-      },
-      enqueue: async (_url, opts) => {
-        steps.push("enqueue");
-        positions.push(opts.position);
-        return {};
-      },
-      pauseTrim: () => {},
-      ensurePlayMode: async () => {},
+      ...noopOps,
+      ensureLeadBuffer: async () => ({
+        absoluteQueuePosition: 7,
+        reason: "re-resolved",
+      }),
     },
   });
 
-  assert.equal(result.ok, true);
-  assert.equal(result.rampPos, 3);
-  assert.deepEqual(positions, [3, 4, 5]);
-  assert.deepEqual(steps, [
-    "lead:2",
-    "strip",
-    "enqueue",
-    "enqueue",
-    "enqueue",
-  ]);
-  resetQueuePreemptForTests();
+  assert.equal(result.clipPos, 7);
 });
 
-test("insertAnnounceBlock with tts2 places punch between lead TTS and restore", async () => {
-  resetQueuePreemptForTests();
-  const urls = [];
-  const result = await insertAnnounceBlock({
-    queuePosition: 1,
-    preemptGeneration: queueWorkGeneration(),
-    ramp: media("http://x/ramp.mp3"),
-    tts: media("http://x/tts.mp3"),
-    tts2: media("http://x/tts2.mp3"),
-    restore: media("http://x/restore.mp3"),
-    ops: {
-      removePads: async () => ({
-        removed: 0,
-        removedBefore: 0,
-        protectedThrough: 0,
-      }),
-      enqueue: async (url) => {
-        urls.push(url);
-        return { url };
-      },
-      pauseTrim: () => {},
-      ensurePlayMode: async () => {},
-    },
-  });
-  assert.equal(result.ok, true);
-  assert.equal(result.ttsPos, result.rampPos + 1);
-  assert.equal(result.tts2Pos, result.ttsPos + 1);
-  assert.equal(result.restorePos, result.tts2Pos + 1);
-  assert.deepEqual(urls, [
-    "http://x/ramp.mp3",
-    "http://x/tts.mp3",
-    "http://x/tts2.mp3",
-    "http://x/restore.mp3",
-  ]);
-  resetQueuePreemptForTests();
-});
-
-test("insertAnnounceBlock without tts2 keeps the original three-clip sandwich", async () => {
-  resetQueuePreemptForTests();
-  const urls = [];
-  const result = await insertAnnounceBlock({
-    queuePosition: 1,
-    preemptGeneration: queueWorkGeneration(),
-    ramp: media("http://x/ramp.mp3"),
-    tts: media("http://x/tts.mp3"),
-    restore: media("http://x/restore.mp3"),
-    ops: {
-      removePads: async () => ({
-        removed: 0,
-        removedBefore: 0,
-        protectedThrough: 0,
-      }),
-      enqueue: async (url) => {
-        urls.push(url);
-        return { url };
-      },
-      pauseTrim: () => {},
-      ensurePlayMode: async () => {},
-    },
-  });
-  assert.equal(result.ok, true);
-  assert.equal(result.tts2Pos, null);
-  assert.equal(result.restorePos, result.ttsPos + 1);
-  assert.deepEqual(urls, [
-    "http://x/ramp.mp3",
-    "http://x/tts.mp3",
-    "http://x/restore.mp3",
-  ]);
-  resetQueuePreemptForTests();
+test("a missing clip url is a programming error, not a silent no-op", async () => {
+  await assert.rejects(
+    insertAnnounceClip({
+      queuePosition: 1,
+      preemptGeneration: queueWorkGeneration(),
+      clip: { title: "no url" },
+      ops: noopOps,
+    }),
+    /requires a baked clip url/
+  );
 });

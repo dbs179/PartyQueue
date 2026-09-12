@@ -325,6 +325,29 @@ test("an in-flight read is discarded after the final disconnect", async () => {
   await monitor.stop();
 });
 
+test("discardStalePoll prevents a pre-Play SOAP from republishing the old song", async () => {
+  let release;
+  const received = [];
+  const monitor = makeMonitor(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      })
+  );
+  monitor.subscribe((snapshot) => received.push(snapshot.title));
+  const poll = monitor.pollNow();
+  await Promise.resolve();
+
+  monitor.discardStalePoll();
+  monitor.seed({ title: "Sister Static", uri: "http://pq/dj-announce.mp3" });
+  release({ title: "Pink Pony Club", uri: "spotify:track:ppc" });
+  await poll;
+
+  assert.deepEqual(received, ["Sister Static"]);
+  assert.equal(monitor.latest.title, "Sister Static");
+  await monitor.stop();
+});
+
 test("poll failures can retry without dropping subscribers", async () => {
   let reads = 0;
   const received = [];

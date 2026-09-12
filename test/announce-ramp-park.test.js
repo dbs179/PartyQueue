@@ -92,14 +92,13 @@ test("parkAnnounceRamp ignores a played copy of the same request", async () => {
   assert.deepEqual(enqueued, [{ url: RAMP, position: 5 }]);
 });
 
-test("completeParkedAnnounce glues TTS + restore after the parked ramp", async () => {
+test("completeParkedAnnounce glues the baked announce after the parked stall pad", async () => {
   beginAnnounceRampPark({ rampUrl: RAMP, requestUri: "spotify:track:tnt" });
   const enqueued = [];
   const result = await completeParkedAnnounce({
     rampUrl: RAMP,
     expectedRampPos: 2,
-    tts: media("http://x/tts.mp3"),
-    restore: media("http://x/silence-3s.mp3"),
+    clip: media("http://x/dj-announce-abc.mp3"),
     preemptGeneration: queueWorkGeneration(),
     ops: {
       enqueue: async (url, opts) => {
@@ -115,11 +114,10 @@ test("completeParkedAnnounce glues TTS + restore after the parked ramp", async (
   });
   assert.equal(result.ok, true);
   assert.equal(result.rampPos, 2);
-  assert.equal(result.ttsPos, 3);
-  assert.equal(result.restorePos, 4);
+  assert.equal(result.clipPos, 3);
   assert.deepEqual(
     enqueued.map((e) => e.url),
-    ["http://x/tts.mp3", "http://x/silence-3s.mp3"]
+    ["http://x/dj-announce-abc.mp3"]
   );
   assert.equal(isAnnounceRampParkActive(), false);
 });
@@ -133,8 +131,7 @@ test("completeParkedAnnounce never anchors on a ramp behind the playhead", async
   const result = await completeParkedAnnounce({
     rampUrl: RAMP,
     expectedRampPos: 6,
-    tts: media("http://x/tts.mp3"),
-    restore: media("http://x/silence-3s.mp3"),
+    clip: media("http://x/dj-announce-abc.mp3"),
     preemptGeneration: queueWorkGeneration(),
     ops: {
       enqueue: async (url, opts) => {
@@ -162,7 +159,7 @@ test("completeParkedAnnounce never anchors on a ramp behind the playhead", async
   assert.equal(result.rampPos, 6, "must find the live ramp, not the played one");
   assert.deepEqual(
     enqueued.map((e) => e.position),
-    [7, 8]
+    [7]
   );
 });
 
@@ -174,8 +171,7 @@ test("completeParkedAnnounce picks the ramp nearest its own slot", async () => {
   const result = await completeParkedAnnounce({
     rampUrl: RAMP,
     expectedRampPos: 4,
-    tts: media("http://x/tts-b.mp3"),
-    restore: media("http://x/silence-3s.mp3"),
+    clip: media("http://x/dj-announce-b.mp3"),
     preemptGeneration: queueWorkGeneration(),
     ops: {
       enqueue: async (url, opts) => {
@@ -199,7 +195,7 @@ test("completeParkedAnnounce picks the ramp nearest its own slot", async () => {
   assert.equal(result.rampPos, 4);
   assert.deepEqual(
     enqueued.map((e) => e.position),
-    [5, 6]
+    [5]
   );
 });
 
@@ -209,8 +205,7 @@ test("completeParkedAnnounce reports a missing ramp instead of guessing", async 
   const result = await completeParkedAnnounce({
     rampUrl: RAMP,
     expectedRampPos: 2,
-    tts: media("http://x/tts.mp3"),
-    restore: media("http://x/silence-3s.mp3"),
+    clip: media("http://x/dj-announce-abc.mp3"),
     preemptGeneration: queueWorkGeneration(),
     ops: {
       enqueue: async () => {

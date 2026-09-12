@@ -1,47 +1,40 @@
 #!/usr/bin/env node
 /**
- * Randomised busy-party simulator.
+ * Randomised busy-party simulation for single-row baked announces.
  *
- * Drives the real DJ volume handoff, the real announce-block locator and the
- * real trim decision against a modelled Sonos queue, with many guests adding
- * songs, dedications, shout-outs and banter announces while maintenance trims
- * behind the playhead. After every step it re-checks the invariants that the
- * 2026-09-11 party broke.
+ * Drives the REAL volume driver (src/dj-announce-volume.js) and the REAL trim
+ * decision (src/sonos-queue-policy.js) against a modelled Sonos queue, while
+ * guests pile on requests, Random tops the queue up, the host skips, and
+ * maintenance trims played rows underneath it all.
  *
- *   node scripts/sim-busy-party.mjs                 # 200 parties
- *   node scripts/sim-busy-party.mjs --parties 2000  # longer soak
- *   node scripts/sim-busy-party.mjs --seed 12345 --verbose
+ * The four-row announce block this used to model is gone: an announce is now
+ * one row, so "block got split" and "playhead landed in the wrong part of the
+ * block" are no longer possible by construction. What IS still worth hammering
+ * is what the new design can get wrong:
+ *
+ *   1. the room is left boosted or muted after an announce
+ *   2. an unplayed guest request ends up stranded behind the playhead
+ *   3. trim eats a row the playhead never reached
+ *   4. an announce is separated from the song it was written to introduce
+ *
+ *   node scripts/sim-busy-party.mjs --parties 500 --seed 42 [--verbose]
  */
-import {
-  beginDjVolumeHandoff,
-  getDjVolumeHandoffState,
-  isDjVolumeHandoffArmed,
-  shiftDjVolumeHandoffPositions,
-  cancelActiveDjVolumeHandoff,
-} from "../src/dj-volume-handoff.js";
-import { locateAnnounceBlockByClipUrl } from "../src/skip-announce-policy.js";
+import { runAnnounceVolume } from "../src/dj-announce-volume.js";
 import {
   trimPlayedDecision,
   findInsertPosition,
 } from "../src/sonos-queue-policy.js";
-import { isDjVolumeHandoffActive } from "../src/dj-volume-handoff-state.js";
 
 const argv = process.argv.slice(2);
 const flag = (name, fallback) => {
-  const i = argv.indexOf(`--${name}`);
-  return i >= 0 ? argv[i + 1] : fallback;
+  const hit = argv.indexOf(`--${name}`);
+  return hit >= 0 && argv[hit + 1] ? argv[hit + 1] : fallback;
 };
 const PARTIES = Number(flag("parties", 200));
 const SEED = Number(flag("seed", 0)) || Math.floor(Math.random() * 1e9);
 const VERBOSE = argv.includes("--verbose");
-/**
- * Trim even while an announce is armed, i.e. pretend the armed guard is not
- * there. Proves the live locator and the block-bounded seek hold the queue on
- * their own, instead of the whole fix resting on one flag.
- */
-const IGNORE_ARMED = argv.includes("--ignore-armed");
-/** Skip the post-trim position shift, leaving only the live clip lookup. */
-const NO_SHIFT = argv.includes("--no-shift");
+/** Disable the volume restore guard, to prove the simulation can see the bug. */
+const NO_RESTORE = argv.includes("--no-restore");
 
 /** Deterministic PRNG so a failing party can be replayed with --seed. */
 function rng(seed) {
@@ -52,89 +45,84 @@ function rng(seed) {
     s ^= s >> 17;
     s ^= s << 5;
     s >>>= 0;
-    return s / 4294967296;
+    return s / 0xffffffff;
   };
 }
 
-const GUESTS = [
-  "Dave",
-  "Mark",
-  "Alex",
-  "Jen",
-  "Sam",
-  "Priya",
-  "Tom",
-  "Nina",
-  "Chris",
-  "Bex",
-];
-const RAMP = "http://pq/media/tts/silence-ramp-3s.mp3";
-const RESTORE = "http://pq/media/tts/silence-3s.mp3";
+const GUESTS = ["Dave", "Mel", "Jo", "Sam", "Kit", "Ash"];
+const MUSIC_VOLUME = 8;
+const ANNOUNCE_VOLUME = 20;
 
 // ---------------------------------------------------------------------------
-// Modelled Sonos
+// Modelled speaker
 // ---------------------------------------------------------------------------
-
 class FakeSonos {
-  constructor(log) {
-    /** @type {Array<{uri:string, title:string, kind:string, songId?:number, requestedBy?:string, announceId?:number}>} */
+  constructor(rand) {
+    this.rand = rand;
     this.rows = [];
-    this.track = 1;
+    this.track = 0; // 1-based playhead; 0 = nothing playing
+    this.positionSec = 0;
+    this.volume = MUSIC_VOLUME;
     this.clock = 0;
-    this.volume = 12;
-    this.log = log;
-    this.seeks = [];
     this.played = new Set();
-    this.removedRows = [];
-    /** Clips the speaker itself refused to start (not our fault to fix). */
-    this.droppedClips = new Set();
+    this.dropped = new Set();
+    this.volumeLog = [];
+    this.seq = 0;
   }
 
   row(n) {
-    return this.rows[n - 1];
+    return this.rows[n - 1] ?? null;
+  }
+  get current() {
+    return this.row(this.track);
   }
 
-  uri(n) {
-    return this.row(n)?.uri ?? "";
+  add(kind, at = 0, extra = {}) {
+    const n = this.seq++;
+    const row = {
+      kind,
+      id: `${kind}-${n}`,
+      // Spotify ids must be alphanumeric for spotifyTrackId() to parse them.
+      url: extra.url ?? `x-sonos-spotify:spotify:track:sim${n}`,
+      ...extra,
+    };
+    if (at >= 1 && at <= this.rows.length) this.rows.splice(at - 1, 0, row);
+    else this.rows.push(row);
+    // An insert at or before the playhead shifts what we are playing.
+    if (at >= 1 && at <= this.track) this.track += 1;
+    return row;
   }
 
+  /** Queue in the shape the real policy functions expect. */
   items() {
-    return this.rows.map((r) => ({ TrackUri: r.uri, Title: r.title }));
+    return this.rows.map((r) => ({ TrackUri: r.url, Title: r.id }));
   }
 
-  isPad(n) {
-    const k = this.row(n)?.kind;
-    return k === "ramp" || k === "tts" || k === "tts2" || k === "restore";
+  /** Spotify ids of rows that came from a guest request. */
+  searchedIds() {
+    const ids = new Set();
+    for (const r of this.rows) {
+      if (r.kind === "song" && r.request) ids.add(`sim${r.id.split("-")[1]}`);
+    }
+    return ids;
   }
 
-  /** Advance the playhead one row, recording what actually got heard. */
   advance() {
-    if (this.track > this.rows.length) return false;
-    const cur = this.row(this.track);
-    if (cur) this.played.add(cur.uri);
-    if (this.track >= this.rows.length) return false;
-    this.track += 1;
-    return true;
+    if (this.track >= 1 && this.current) this.played.add(this.current.id);
+    this.track = this.track < this.rows.length ? this.track + 1 : 0;
+    this.positionSec = 0;
   }
 
-  seekTo(n) {
-    const target = Math.max(1, Math.min(this.rows.length, Math.floor(n)));
-    this.seeks.push({ from: this.track, to: target });
-    this.log?.(`SEEK ${this.track} -> ${target} (${this.row(target)?.kind})`);
-    this.track = target;
+  /** Remove rows [from, to] inclusive, 1-based, adjusting the playhead. */
+  remove(from, to) {
+    const removed = this.rows.splice(from - 1, to - from + 1);
+    if (this.track >= from) this.track = Math.max(0, this.track - removed.length);
+    return removed;
   }
 
-  /** Rows removed from the front, exactly like RemoveTrackRangeFromQueue. */
-  removeFront(count) {
-    const gone = this.rows.splice(0, count);
-    this.removedRows.push(...gone);
-    this.track = Math.max(1, this.track - count);
-    return gone;
-  }
-
-  insertAt(position, rows) {
-    this.rows.splice(position - 1, 0, ...rows);
-    if (position <= this.track) this.track += rows.length;
+  setVolume(level) {
+    this.volume = level;
+    this.volumeLog.push(level);
   }
 }
 
@@ -142,469 +130,267 @@ class FakeSonos {
 // Invariants
 // ---------------------------------------------------------------------------
 
-/**
- * Every announce block must stay contiguous and sit immediately before the song
- * it introduces. A block split by an insert means a guest request landed in the
- * middle of a shout.
- */
-function checkBlocksIntact(sonos, failures, where) {
-  const byId = new Map();
-  sonos.rows.forEach((r, i) => {
-    if (r.announceId == null) return;
-    if (!byId.has(r.announceId)) byId.set(r.announceId, []);
-    byId.get(r.announceId).push({ ...r, pos: i + 1 });
-  });
-  for (const [id, parts] of byId) {
-    const positions = parts.map((p) => p.pos);
-    const span = positions[positions.length - 1] - positions[0] + 1;
-    if (span !== parts.length) {
-      failures.push(
-        `${where}: announce ${id} is split across rows ${positions.join(",")}`
-      );
-      continue;
-    }
-    // Trim eats the block from the front, so any suffix of the canonical order
-    // is legal. What is not legal is the rows being shuffled.
-    const rank = { ramp: 0, tts: 1, tts2: 2, restore: 3 };
-    const ranks = parts.map((p) => rank[p.kind]);
-    const ordered = ranks.every((r, i) => i === 0 || r > ranks[i - 1]);
-    if (!ordered) {
-      const kinds = parts.map((p) => p.kind).join(">");
-      failures.push(`${where}: announce ${id} rows out of order (${kinds})`);
-    }
+/** The room must never be left away from the music level once an announce ends. */
+function checkVolumeSettled(sonos, failures, where) {
+  const onAnnounce =
+    sonos.current?.kind === "announce" && !sonos.dropped.has(sonos.current.id);
+  if (!onAnnounce && sonos.volume !== MUSIC_VOLUME) {
+    failures.push(
+      `${where}: volume left at ${sonos.volume} (music level is ${MUSIC_VOLUME})`
+    );
   }
 }
 
-/**
- * The queue-loss bug: a guest request that never played must not end up behind
- * the playhead, because trim then deletes it as "already played".
- */
+/** Nothing a guest asked for may end up behind the playhead unplayed. */
 function checkNothingStranded(sonos, failures, where) {
-  for (let n = 1; n < sonos.track; n++) {
-    const r = sonos.row(n);
-    if (!r || r.kind !== "song") continue;
-    if (!sonos.played.has(r.uri)) {
-      failures.push(
-        `${where}: "${r.title}" (${r.requestedBy}) sits at row ${n} behind ` +
-          `playhead ${sonos.track} but never played`
-      );
+  for (let i = 1; i < sonos.track; i++) {
+    const row = sonos.row(i);
+    if (row?.kind === "song" && row.request && !sonos.played.has(row.id)) {
+      failures.push(`${where}: stranded request ${row.id} at #${i} behind #${sonos.track}`);
     }
   }
 }
 
 /** Trim may only ever delete rows the playhead already passed. */
-function checkTrimOnlyAtePlayed(sonos, failures, where) {
-  for (const r of sonos.removedRows) {
-    if (r.kind !== "song") continue;
-    if (!sonos.played.has(r.uri)) {
+function checkTrimOnlyAtePlayed(removed, sonos, failures, where) {
+  for (const row of removed) {
+    if (!sonos.played.has(row.id)) {
       failures.push(
-        `${where}: trim deleted unplayed request "${r.title}" (${r.requestedBy})`
+        `${where}: trim removed unplayed ${row.id}` +
+          ` | track=${sonos.track} rows=[${sonos.rows.map((r) => r.id).join(",")}]` +
+          ` played={${[...sonos.played].join(",")}}`
       );
     }
   }
 }
 
+/**
+ * An announce must never end up behind the song it introduces — that would
+ * mean the DJ teeing up a track the party already heard.
+ *
+ * Deliberately not an adjacency check: a guest request placed between the
+ * announce and its song is allowed, and the app does that on purpose. Only the
+ * ordering is a correctness property.
+ */
+function checkAnnounceStillAheadOfItsSong(sonos, failures, where) {
+  sonos.rows.forEach((row, idx) => {
+    if (row.kind !== "announce" || !row.introduces) return;
+    if (sonos.played.has(row.id)) return;
+    const songIdx = sonos.rows.findIndex((r) => r.id === row.introduces);
+    if (songIdx >= 0 && songIdx < idx) {
+      failures.push(
+        `${where}: announce ${row.id} sits behind ${row.introduces} ` +
+          `(#${idx + 1} vs #${songIdx + 1})`
+      );
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // One party
 // ---------------------------------------------------------------------------
-
-async function runParty(seed) {
+async function runParty(seed, stats) {
   const rand = rng(seed);
-  const pick = (list) => list[Math.floor(rand() * list.length)];
-  const chance = (p) => rand() < p;
+  const sonos = new FakeSonos(rand);
+  const failures = [];
+  const log = (m) => VERBOSE && console.log(`  [${seed}] ${m}`);
 
-  const events = [];
-  const log = (msg) => {
-    events.push(msg);
-    if (VERBOSE) console.log("   " + msg);
+  // Seed the queue with a few songs and start playing.
+  for (let i = 0; i < 3 + Math.floor(rand() * 3); i++) sonos.add("song");
+  sonos.track = 1;
+
+  const dropChance = rand() * 0.15;
+  let activeAnnounce = null;
+  let djTrimSkips = 0;
+
+  const io = {
+    now: () => sonos.clock,
+    read: async () => ({
+      uri: sonos.current?.url ?? "",
+      positionSec: sonos.positionSec,
+    }),
+    setVolume: async (level) => {
+      if (NO_RESTORE && level === MUSIC_VOLUME) return;
+      sonos.setVolume(level);
+    },
+    sleep: async () => new Promise((r) => setImmediate(r)),
   };
 
-  const sonos = new FakeSonos((m) => log(m));
-  const failures = [];
-  let songSeq = 0;
-  let announceSeq = 0;
-  let lastTrimAt = 0;
-  const volumeWriteMs = 60 + Math.floor(rand() * 650);
-  const dropClipChance = rand() * 0.5;
-  const stats = { trims: 0, trimmedRows: 0, shifts: 0, trimSkips: {} };
-  let djSkipStreak = 0;
-  const announcesArmed = [];
-  const announcesHeard = new Set();
+  const steps = 40 + Math.floor(rand() * 60);
+  for (let step = 0; step < steps && sonos.track >= 1; step++) {
+    const roll = rand();
 
-  /** Guest requests, so findInsertPosition puts new ones below them. */
-  const searchedIds = new Set();
-
-  // Seed the queue with filler so the party starts mid-set like a real night.
-  for (let i = 0; i < 4 + Math.floor(rand() * 4); i++) {
-    songSeq += 1;
-    sonos.rows.push({
-      uri: `spotify:track:fill${songSeq}`,
-      title: `Filler ${songSeq}`,
-      kind: "song",
-      songId: songSeq,
-      requestedBy: "Playlist",
-    });
-  }
-
-  // -- adapter: the handoff drives the modelled speaker through this ----------
-  const adapter = {
-    async getNowPlaying() {
-      sonos.clock += 150;
-      const uri = sonos.uri(sonos.track);
-      const kind = sonos.row(sonos.track)?.kind;
-      // Pads and clips drain on their own; songs are held by the driver so the
-      // simulation does not have to burn a full track length per row.
-      const dwell =
-        kind === "ramp" || kind === "restore"
-          ? 3000
-          : kind === "tts" || kind === "tts2"
-            ? 2500
-            : Infinity;
-      if (sonos.padStartedAt == null || sonos.padRow !== sonos.track) {
-        sonos.padRow = sonos.track;
-        sonos.padStartedAt = sonos.clock;
-      }
-      if (sonos.clock - sonos.padStartedAt >= dwell) {
-        sonos.advance();
-        // Sonos sometimes refuses to start an http:// clip and falls straight
-        // through it. That drop is exactly what recoverSkippedDjClip is for,
-        // and it is the only way the seek paths get exercised now that the
-        // shortened ramp lets the pad advance on its own.
-        const nextKind = sonos.row(sonos.track)?.kind;
-        if (
-          (nextKind === "tts" || nextKind === "tts2") &&
-          rand() < dropClipChance
-        ) {
-          log(`sonos dropped clip at row ${sonos.track}`);
-          sonos.droppedClips.add(sonos.uri(sonos.track));
-          sonos.advance();
-        }
-        sonos.padRow = sonos.track;
-        sonos.padStartedAt = sonos.clock;
-      }
-      if (kind === "tts" || kind === "tts2") announcesHeard.add(uri);
-      return {
-        uri,
-        state: "PLAYING",
-        positionSec: kind === "tts" || kind === "tts2" ? 2 : 0,
-      };
-    },
-    async getVolume() {
-      return sonos.volume;
-    },
-    async setVolume(level) {
-      sonos.volume = level;
-      // Congested SOAP is what used to eat the pre-silence pad and push the
-      // handoff onto its SeekTrack branch, so vary it hard across parties.
-      sonos.clock += volumeWriteMs;
-      return { locked: true };
-    },
-    async pause() {},
-    async resume() {},
-    async playAt(n) {
-      sonos.seekTo(n);
-      sonos.padRow = sonos.track;
-      sonos.padStartedAt = sonos.clock;
-    },
-    async next() {
-      const from = sonos.track;
-      sonos.advance();
-      log(`NEXT ${from} -> ${sonos.track} (${sonos.row(sonos.track)?.kind})`);
-      sonos.padRow = sonos.track;
-      sonos.padStartedAt = sonos.clock;
-    },
-    async locateAnnounce(clipUrl) {
-      return locateAnnounceBlockByClipUrl(sonos.items(), clipUrl, {
+    if (roll < 0.16) {
+      // A guest requests a song. Placed by the real policy, which is what
+      // keeps an announce glued to the song it introduces.
+      const guest = GUESTS[Math.floor(rand() * GUESTS.length)];
+      const at = findInsertPosition(sonos.items(), {
         currentTrack: sonos.track,
         playingFromQueue: true,
+        searchedIds: sonos.searchedIds(),
       });
-    },
-  };
-
-  // -- actors ----------------------------------------------------------------
-
-  const addSong = (requestedBy, { dedication = false } = {}) => {
-    songSeq += 1;
-    const row = {
-      uri: `spotify:track:sim${songSeq}`,
-      title: `Song ${songSeq}`,
-      kind: "song",
-      songId: songSeq,
-      requestedBy,
-      dedication: dedication ? `for ${pick(GUESTS)}` : null,
-    };
-    // Real inserts go through findInsertPosition: bottom of the request block,
-    // above filler, and never between a shout and the song it introduces.
-    const position = findInsertPosition(sonos.items(), {
-      currentTrack: sonos.track,
-      playingFromQueue: true,
-      searchedIds,
-    });
-    const at = position >= 1 ? position : sonos.rows.length + 1;
-    sonos.insertAt(at, [row]);
-    searchedIds.add(`sim${songSeq}`);
-    log(`add "${row.title}" by ${requestedBy} at ${at}`);
-    return { row, at };
-  };
-
-  const insertAnnounce = (songRow, { banter = false } = {}) => {
-    const songIdx = sonos.rows.indexOf(songRow);
-    if (songIdx < 0) return null;
-    const position = songIdx + 1;
-    if (position <= sonos.track) return null; // already playing / behind
-    announceSeq += 1;
-    const id = announceSeq;
-    const clip = `http://pq/media/tts/tts-${id}.mp3`;
-    const rows = [
-      { uri: RAMP, title: "PartyQueue Volume Ramp", kind: "ramp", announceId: id },
-      { uri: clip, title: "DJ Holy Roller", kind: "tts", announceId: id },
-    ];
-    if (banter) {
-      rows.push({
-        uri: `http://pq/media/tts/tts-${id}-punch.mp3`,
-        title: "Sister Static",
-        kind: "tts2",
-        announceId: id,
+      const song = sonos.add("song", at, { request: true, guest });
+      log(`${guest} requested ${song.id} at #${at || "end"}`);
+    } else if (roll < 0.3 && !activeAnnounce) {
+      // The DJ announces the next upcoming song. A new announce supersedes any
+      // pending one, exactly as insertAnnounceClip strips upcoming pads first —
+      // two announces never stack in front of the same song.
+      for (let i = sonos.rows.length; i > sonos.track; i--) {
+        const row = sonos.row(i);
+        if (row?.kind === "announce" && !sonos.played.has(row.id)) {
+          log(`superseding pending ${row.id}`);
+          sonos.remove(i, i);
+        }
+      }
+      // Announce the next real song, never another announce row.
+      let at = sonos.track + 1;
+      while (at <= sonos.rows.length && sonos.row(at)?.kind !== "song") at += 1;
+      const introduces = at <= sonos.rows.length ? sonos.row(at).id : null;
+      if (introduces) {
+        const clipUrl = `http://pq/media/tts/dj-announce-${sonos.seq}.mp3`;
+        const durationSec = 18 + Math.floor(rand() * 20);
+        const row = sonos.add("announce", at, {
+          url: clipUrl,
+          introduces,
+          durationSec,
+        });
+        log(`announce ${row.id} at #${at} before ${introduces}`);
+        stats.announces += 1;
+        activeAnnounce = runAnnounceVolume(
+          {
+            clipUrl,
+            durationSec,
+            rampSec: 3,
+            restoreSec: 3,
+            musicVolume: MUSIC_VOLUME,
+            announceVolume: ANNOUNCE_VOLUME,
+          },
+          io,
+          { graceMs: 60_000, maxMs: 600_000 }
+        ).then((r) => {
+          activeAnnounce = null;
+          return r;
+        });
+      }
+    } else if (roll < 0.42) {
+      // Random tops the queue up at the end.
+      sonos.add("song");
+    } else if (roll < 0.52) {
+      // Host skip.
+      log(`skip from #${sonos.track}`);
+      sonos.advance();
+      await settle();
+    } else if (roll < 0.62) {
+      // Maintenance trim, through the real decision function.
+      const decision = trimPlayedDecision({
+        track: sonos.track,
+        queueLength: sonos.rows.length,
+        handoffActive: false,
+        handoffArmed: !!activeAnnounce,
+        // Climbs while an announce holds trim off, so the guard cannot starve
+        // trim for the whole night.
+        djSkipStreak: djTrimSkips,
+        currentUri: sonos.current?.url ?? "",
+        currentTitle: "",
+        playingFromQueue: true,
       });
-    }
-    rows.push({
-      uri: RESTORE,
-      title: "PartyQueue Silence Bridge",
-      kind: "restore",
-      announceId: id,
-    });
-    sonos.insertAt(position, rows);
-    log(
-      `announce ${id} ${banter ? "(banter) " : ""}before "${songRow.title}" ` +
-        `at ramp@${position} tts@${position + 1}`
-    );
-    return { id, clip, rampPosition: position, rows, songRow };
-  };
-
-  const armAnnounce = async (ann) => {
-    const idx = sonos.rows.findIndex((r) => r.uri === ann.clip);
-    if (idx < 0) return;
-    const ttsPosition = idx + 1;
-    const tts2 = sonos.rows[idx + 1]?.kind === "tts2" ? idx + 2 : null;
-    const musicIdx = sonos.rows.findIndex(
-      (r, i) => i > idx && r.kind === "song"
-    );
-    const handoff = await beginDjVolumeHandoff({
-      publicUrl: ann.clip,
-      approxDurationSec: 8,
-      silenceSec: 3,
-      adapter,
-      // Must yield a macrotask: a microtask-only sleep starves the driver loop
-      // and the handoff then spins forever waiting for a queue that never moves.
-      sleep: () => new Promise((r) => setImmediate(r)),
-      now: () => sonos.clock,
-      pollMs: 0,
-      rampStepMs: 0,
-      calculateTarget: () => 26,
-      ttsPosition,
-      tts2Position: tts2,
-      musicPosition: musicIdx >= 0 ? musicIdx + 1 : ttsPosition + 2,
-      logger: { info: () => {}, warn: () => {}, error: () => {} },
-    });
-    if (handoff.deferred) {
-      log(`announce ${ann.id} deferred behind the active handoff`);
-      return;
-    }
-    announcesArmed.push({ ...ann, handoff, armedAt: sonos.clock });
-    log(`announce ${ann.id} armed tts@${ttsPosition}`);
-    // Run the handoff alongside the party rather than blocking the driver.
-    handoff.start().catch(() => {});
-  };
-
-  const runTrim = () => {
-    const pos = { Track: sonos.track };
-    const decision = trimPlayedDecision({
-      track: pos.Track,
-      queueLength: sonos.rows.length,
-      handoffActive: isDjVolumeHandoffActive(),
-      handoffArmed: IGNORE_ARMED ? false : isDjVolumeHandoffArmed(),
-      djSkipStreak,
-      currentUri: sonos.uri(sonos.track),
-      currentTitle: sonos.row(sonos.track)?.title ?? "",
-      playingFromQueue: true,
-    });
-    djSkipStreak =
-      decision.reason === "dj-handoff" || decision.reason === "dj-announce-armed"
-        ? djSkipStreak + 1
-        : 0;
-    if (decision.action !== "trim") {
-      stats.trimSkips[decision.reason] =
-        (stats.trimSkips[decision.reason] ?? 0) + 1;
-      log(`trim skip (${decision.reason})`);
-      return;
-    }
-    sonos.removeFront(decision.NumberOfTracks);
-    const shifted = NO_SHIFT
-      ? false
-      : shiftDjVolumeHandoffPositions(decision.NumberOfTracks);
-    stats.trims += 1;
-    stats.trimmedRows += decision.NumberOfTracks;
-    if (shifted) stats.shifts += 1;
-    log(`trim removed ${decision.NumberOfTracks}; playhead now ${sonos.track}`);
-  };
-
-  // -- the night ------------------------------------------------------------
-  const pendingAnnounces = [];
-  const STEPS = 120;
-  const wallDeadline = Date.now() + 8000;
-  for (let step = 0; step < STEPS; step++) {
-    if (Date.now() > wallDeadline) {
-      failures.push(`step ${step}: party did not finish within 8s (stuck?)`);
-      break;
-    }
-    // Let the active handoff poll a few times between party events.
-    for (let i = 0; i < 6; i++) await new Promise((r) => setImmediate(r));
-
-    const roll = rand();
-    if (roll < 0.3) {
-      // Guest request, usually with a shout.
-      const guest = pick(GUESTS);
-      const { row } = addSong(guest, { dedication: chance(0.25) });
-      if (chance(0.7)) {
-        const ann = insertAnnounce(row, { banter: chance(0.3) });
-        if (ann) pendingAnnounces.push(ann);
+      stats.trimDecisions[decision.reason ?? decision.action] =
+        (stats.trimDecisions[decision.reason ?? decision.action] || 0) + 1;
+      djTrimSkips =
+        decision.reason === "dj-announce-armed" || decision.reason === "dj-handoff"
+          ? djTrimSkips + 1
+          : 0;
+      if (decision.action === "trim") {
+        // StartingIndex goes straight to RemoveTrackRangeFromQueue, which is
+        // 1-based — the same convention as our rows.
+        const from = decision.StartingIndex;
+        const removed = sonos.remove(from, from + decision.NumberOfTracks - 1);
+        checkTrimOnlyAtePlayed(removed, sonos, failures, `party ${seed} trim`);
+        stats.trimmedRows += removed.length;
+        log(`trimmed ${removed.length} row(s) -> track #${sonos.track}`);
       }
-    } else if (roll < 0.4) {
-      // Two guests add at almost the same moment (the supersede path).
-      const a = addSong(pick(GUESTS));
-      const b = addSong(pick(GUESTS));
-      for (const r of [a.row, b.row]) {
-        const ann = insertAnnounce(r, { banter: chance(0.3) });
-        if (ann) pendingAnnounces.push(ann);
-      }
-    } else if (roll < 0.5) {
-      // A song plays all the way through. Real track lengths are what set the
-      // maintenance cadence, and trim only misbehaves across many ticks.
-      if (!sonos.isPad(sonos.track)) {
-        sonos.clock += 150_000 + Math.floor(rand() * 90_000);
-        sonos.advance();
-      } else {
-        sonos.clock += 1000;
-      }
-    } else if (roll < 0.55) {
-      // Host skip, part way through.
-      sonos.clock += 20_000 + Math.floor(rand() * 40_000);
-      if (!sonos.isPad(sonos.track)) {
-        sonos.advance();
-        log(`host skip -> row ${sonos.track}`);
+    } else if (roll < 0.68) {
+      // Clear everything from the playhead forward.
+      if (sonos.rows.length > sonos.track) {
+        log(`clearing ${sonos.rows.length - sonos.track} upcoming row(s)`);
+        sonos.remove(sonos.track + 1, sonos.rows.length);
       }
     } else {
-      sonos.clock += 5_000 + Math.floor(rand() * 20_000);
+      // Play out the current row.
+      const row = sonos.current;
+      if (!row) break;
+      if (row.kind === "announce" && !sonos.dropped.has(row.id)) {
+        if (rand() < dropChance) {
+          // The speaker occasionally refuses to fetch a clip.
+          log(`speaker dropped ${row.id}`);
+          sonos.dropped.add(row.id);
+          sonos.advance();
+        } else {
+          // Step through the clip so the driver sees ramp, hold and restore.
+          const total = row.durationSec;
+          for (const at of [0, 1.5, 3, total / 2, total - 1.5, total]) {
+            sonos.positionSec = at;
+            sonos.clock += 150;
+            await settle();
+          }
+          sonos.advance();
+        }
+      } else {
+        // Real track lengths are what set the maintenance cadence.
+        sonos.clock += 150_000 + Math.floor(rand() * 90_000);
+        sonos.advance();
+      }
+      await settle();
     }
 
-    // Arm whatever is waiting, one at a time, exactly like production.
-    while (
-      pendingAnnounces.length &&
-      getDjVolumeHandoffState().phase === "idle"
-    ) {
-      await armAnnounce(pendingAnnounces.shift());
-    }
-
-    // Maintenance tick every 45s of simulated time.
-    if (sonos.clock - lastTrimAt >= 45_000) {
-      lastTrimAt = sonos.clock;
-      runTrim();
-    }
-
-    checkBlocksIntact(sonos, failures, `step ${step}`);
-    checkNothingStranded(sonos, failures, `step ${step}`);
-    checkTrimOnlyAtePlayed(sonos, failures, `step ${step}`);
+    checkNothingStranded(sonos, failures, `party ${seed} step ${step}`);
+    checkAnnounceStillAheadOfItsSong(sonos, failures, `party ${seed} step ${step}`);
     if (failures.length) break;
   }
 
-  await cancelActiveDjVolumeHandoff("sim end").catch(() => {});
-  for (let i = 0; i < 40; i++) await new Promise((r) => setImmediate(r));
+  // Let any in-flight announce finish, then the room must be back to normal.
+  sonos.clock += 600_000;
+  await settle(50);
+  if (activeAnnounce) await activeAnnounce;
+  checkVolumeSettled(sonos, failures, `party ${seed} end`);
 
-  // An announce the playhead walked past must have been heard. A clip the
-  // speaker itself refused to start is a Sonos fault and only gets counted;
-  // one we seeked past is the bug this whole investigation was about.
-  let dropped = 0;
-  let skipped = 0;
-  for (const ann of announcesArmed) {
-    if (sonos.rows.some((r) => r.uri === ann.clip)) continue; // still upcoming
-    if (announcesHeard.has(ann.clip)) continue;
-    if (sonos.droppedClips.has(ann.clip)) {
-      dropped += 1;
-      continue;
-    }
-    skipped += 1;
-    failures.push(`announce ${ann.id} was seeked past without ever playing`);
+  return failures;
+}
+
+/** Yield enough macrotasks for the driver loop to make progress. */
+function settle(times = 8) {
+  let p = Promise.resolve();
+  for (let i = 0; i < times; i++) {
+    p = p.then(() => new Promise((r) => setImmediate(r)));
   }
-
-  return {
-    failures,
-    events,
-    sonos,
-    announcesHeard,
-    announcesArmed,
-    skipped,
-    dropped,
-    stats,
-  };
+  return p;
 }
 
 // ---------------------------------------------------------------------------
+const stats = { announces: 0, trimmedRows: 0, trimDecisions: {} };
+const allFailures = [];
 
-console.log(`busy-party sim: ${PARTIES} parties, base seed ${SEED}`);
-let failed = 0;
-let totalSeeks = 0;
-let totalAnnounces = 0;
-let totalHeard = 0;
-let totalDropped = 0;
-let totalRecovered = 0;
-const agg = { trims: 0, trimmedRows: 0, shifts: 0, trimSkips: {} };
-
-for (let p = 0; p < PARTIES; p++) {
-  const seed = SEED + p;
-  let result;
-  try {
-    result = await runParty(seed);
-  } catch (err) {
-    console.error(`\nPARTY ${p} (seed ${seed}) THREW: ${err.stack}`);
-    failed += 1;
-    if (failed >= 3) break;
-    continue;
-  }
-  totalSeeks += result.sonos.seeks.length;
-  totalAnnounces += result.announcesArmed.length;
-  totalHeard += result.announcesHeard.size;
-  totalDropped += result.dropped;
-  agg.trims += result.stats.trims;
-  agg.trimmedRows += result.stats.trimmedRows;
-  agg.shifts += result.stats.shifts;
-  for (const [reason, n] of Object.entries(result.stats.trimSkips)) {
-    agg.trimSkips[reason] = (agg.trimSkips[reason] ?? 0) + n;
-  }
-  totalRecovered += [...result.sonos.droppedClips].filter((u) =>
-    result.announcesHeard.has(u)
-  ).length;
-  if (result.failures.length) {
-    failed += 1;
-    console.error(`\nPARTY ${p} FAILED (replay: --seed ${seed} --parties 1)`);
-    for (const f of result.failures.slice(0, 6)) console.error("  ! " + f);
-    console.error("  last events:");
-    for (const e of result.events.slice(-14)) console.error("    " + e);
-    if (failed >= 3) break;
+console.log(
+  `simulating ${PARTIES} parties (seed ${SEED})` +
+    (NO_RESTORE ? " [--no-restore: expecting failures]" : "")
+);
+for (let i = 0; i < PARTIES; i++) {
+  const failures = await runParty(SEED + i, stats);
+  if (failures.length) {
+    allFailures.push(...failures);
+    if (allFailures.length > 20) break;
   }
 }
 
 console.log(
-  `\narmed ${totalAnnounces} announces, heard ${totalHeard}, ` +
-    `${totalSeeks} seeks, ${totalRecovered} clips recovered after a speaker ` +
-    `drop, ${totalDropped} drops not recovered`
+  `\nannounces: ${stats.announces} | trimmed rows: ${stats.trimmedRows}`
 );
-console.log(
-  `trim: ${agg.trims} ticks removed ${agg.trimmedRows} rows ` +
-    `(${agg.shifts} shifted a live announce); skips ` +
-    JSON.stringify(agg.trimSkips)
-);
-if (failed) {
-  console.error(`FAIL: ${failed} parties broke an invariant`);
+console.log(`trim decisions: ${JSON.stringify(stats.trimDecisions)}`);
+
+if (allFailures.length) {
+  console.error(`\nFAILED (${allFailures.length}):`);
+  for (const f of allFailures.slice(0, 20)) console.error(`  ${f}`);
+  console.error(`\nreplay a party with: --parties 1 --seed <n> --verbose`);
   process.exit(1);
 }
-console.log("PASS: all parties kept the queue intact");
+console.log("\nPASS — no stranded requests, no bad trims, volume always settled");

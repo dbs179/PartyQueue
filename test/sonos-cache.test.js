@@ -39,3 +39,27 @@ test("cache bust prevents an in-flight stale read from repopulating cache", asyn
   );
   assert.equal(calls, 2);
 });
+
+test("seed replaces cache and drops an in-flight stale read", async () => {
+  const first = deferred();
+  let calls = 0;
+  const read = makeCachedReader(() => {
+    calls += 1;
+    return first.promise;
+  }, 60_000);
+
+  const staleRequest = read();
+  assert.equal(calls, 1);
+
+  read.seed({ title: "Sister Static", djVoice: true });
+  assert.deepEqual(await read(), { title: "Sister Static", djVoice: true });
+  assert.equal(calls, 1, "seeded value must not start another SOAP read");
+
+  first.resolve({ title: "Pink Pony Club" });
+  assert.deepEqual(await staleRequest, { title: "Pink Pony Club" });
+  assert.deepEqual(
+    await read(),
+    { title: "Sister Static", djVoice: true },
+    "stale SOAP must not overwrite the seeded announce"
+  );
+});

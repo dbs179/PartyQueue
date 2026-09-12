@@ -667,11 +667,14 @@ async function enqueueHttpAudioUnlocked(
 }
 
 /**
- * Strip superseded announce pads and insert ramp → TTS → restore under a
- * single write lock so guest adds / Random cannot split the block. Checks
- * preempt between Sonos calls so Clear Queue can abort mid-insert (Pause
- * stays on the transport lane and does not wait for this lock). A partial
- * insert strips the leftover ramp/TTS before releasing the lock.
+ * Strip superseded announce pads and insert the baked announce — one row
+ * holding ramp silence, the DJ, and restore silence — under a single write
+ * lock so guest adds / Random cannot land on top of it.
+ *
+ * This used to enqueue three or four rows and had to unwind a partial insert
+ * when Clear Queue preempted it mid-way. A single row is atomic: it is either
+ * in the queue or it is not, so there is no half-inserted announce to clean up
+ * and no contiguous run for a later trim to split.
  *
  * @param {{
  *   queuePosition?: number,
@@ -679,9 +682,7 @@ async function enqueueHttpAudioUnlocked(
  *   applyLeadBuffer?: boolean, // re-resolve request position; never reorders
  *   requestUri?: string|null,
  *   replaceWaitingRefill?: boolean, // strip leftover Never-Ending refill pads
- *   ramp: { url: string, title?: string, artist?: string, durationSec?: number },
- *   tts: { url: string, title?: string, artist?: string, durationSec?: number },
- *   restore: { url: string, title?: string, artist?: string, durationSec?: number },
+ *   clip: { url: string, title?: string, artist?: string, durationSec?: number },
  *   ops?: {
  *     removePads?: Function,
  *     enqueue?: Function,
@@ -690,8 +691,8 @@ async function enqueueHttpAudioUnlocked(
  *   }
  * }} opts
  */
-export async function insertAnnounceBlock(opts) {
-  return withSonosWriteLock(() => insertAnnounceBlockUnlocked(opts));
+export async function insertAnnounceClip(opts) {
+  return withSonosWriteLock(() => insertAnnounceClipUnlocked(opts));
 }
 
 function clipEnqueueOpts(clip, position) {
@@ -855,8 +856,12 @@ async function parkAnnounceRampUnlocked({
 }
 
 /**
- * After TTS is ready, glue the DJ clip + restore pad after the parked ramp.
- * Does not strip the ramp (we may already be holding on it).
+ * After TTS is ready, glue the baked announce in behind the parked stall pad.
+ * Does not strip that pad (we may already be playing it).
+ *
+ * The pad is pure stalling now — it buys time while the clip is generated and
+ * carries no volume meaning, because the baked announce brings its own silence
+ * to ramp under.
  */
 export async function completeParkedAnnounce(opts) {
   return withSonosWriteLock(() => completeParkedAnnounceUnlocked(opts));
@@ -865,9 +870,7 @@ export async function completeParkedAnnounce(opts) {
 async function completeParkedAnnounceUnlocked({
   rampUrl,
   expectedRampPos,
-  tts,
-  tts2 = null,
-  restore,
+  clip,
   preemptGeneration,
   replaceWaitingRefill = false,
   ops = {},
@@ -880,8 +883,8 @@ async function completeParkedAnnounceUnlocked({
   if (preempted()) {
     return { ok: false, skipped: true, reason: "queue-preempted" };
   }
-  if (!tts?.url || !restore?.url) {
-    throw new Error("completeParkedAnnounce requires tts and restore urls.");
+  if (!clip?.url) {
+    throw new Error("completeParkedAnnounce requires a baked clip url.");
   }
 
   let rampPos = 0;
@@ -925,43 +928,13 @@ async function completeParkedAnnounceUnlocked({
     }
   }
 
-  const ttsPos = rampPos + 1;
-  const tts2Pos = tts2?.url ? ttsPos + 1 : null;
-  const restorePos = (tts2Pos || ttsPos) + 1;
-  await enqueue(tts.url, clipEnqueueOpts(tts, ttsPos));
-  if (preempted()) {
-    return {
-      ok: false,
-      skipped: true,
-      reason: "queue-preempted",
-      partial: true,
-      rampPos,
-      ttsPos,
-      tts2Pos,
-    };
-  }
-  if (tts2?.url) {
-    await enqueue(tts2.url, clipEnqueueOpts(tts2, tts2Pos));
-    if (preempted()) {
-      return {
-        ok: false,
-        skipped: true,
-        reason: "queue-preempted",
-        partial: true,
-        rampPos,
-        ttsPos,
-        tts2Pos,
-      };
-    }
-  }
-  await enqueue(restore.url, clipEnqueueOpts(restore, restorePos));
+  const clipPos = rampPos + 1;
+  await enqueue(clip.url, clipEnqueueOpts(clip, clipPos));
   endAnnounceRampPark();
   console.log(
-    `[dj-voice] completed parked announce ramp@${rampPos} TTS@${ttsPos}` +
-      (tts2Pos ? ` TTS2@${tts2Pos}` : "") +
-      ` restore@${restorePos}`
+    `[dj-voice] completed parked announce stall@${rampPos} announce@${clipPos}`
   );
-  return { ok: true, inserted: true, rampPos, ttsPos, tts2Pos, restorePos };
+  return { ok: true, inserted: true, rampPos, clipPos };
 }
 
 /**
@@ -1012,13 +985,10 @@ async function releaseParkedRampUnlocked({ rampUrl, ops = {} } = {}) {
   }
 }
 
-async function insertAnnounceBlockUnlocked({
+async function insertAnnounceClipUnlocked({
   queuePosition = 1,
   preemptGeneration,
-  ramp,
-  tts,
-  tts2 = null,
-  restore,
+  clip,
   applyLeadBuffer = false,
   requestUri = null,
   replaceWaitingRefill = false,
@@ -1042,8 +1012,8 @@ async function insertAnnounceBlockUnlocked({
   if (preempted()) {
     return { ok: false, skipped: true, reason: "queue-preempted" };
   }
-  if (!ramp?.url || !tts?.url || !restore?.url) {
-    throw new Error("insertAnnounceBlock requires ramp, tts, and restore urls.");
+  if (!clip?.url) {
+    throw new Error("insertAnnounceClip requires a baked clip url.");
   }
 
   try {
@@ -1053,11 +1023,11 @@ async function insertAnnounceBlockUnlocked({
   }
 
   pauseTrim(25000);
-  let rampPos = Number(queuePosition) || 1;
+  let clipPos = Number(queuePosition) || 1;
 
-  // Re-resolve the request under this write lock so pads stay glued to it if
-  // another add shifted positions during script/TTS. Guest songs are never
-  // reordered (lead buffer is a no-op).
+  // Re-resolve the request under this write lock so the announce stays glued to
+  // it if another add shifted positions during script/TTS. Guest songs are
+  // never reordered (lead buffer is a no-op).
   if (applyLeadBuffer) {
     try {
       if (requestUri) {
@@ -1065,18 +1035,18 @@ async function insertAnnounceBlockUnlocked({
         const coordinator = await resolveCoordinator(m);
         const queue = await coordinator.GetQueue().catch(() => ({ Result: [] }));
         const items = Array.isArray(queue.Result) ? queue.Result : [];
-        const live = resolveQueuePosition(items, requestUri, rampPos);
-        if (live) rampPos = live;
+        const live = resolveQueuePosition(items, requestUri, clipPos);
+        if (live) clipPos = live;
       }
-      const lead = await ensureLeadBuffer(rampPos);
+      const lead = await ensureLeadBuffer(clipPos);
       if (Number.isFinite(lead?.absoluteQueuePosition)) {
-        if (lead.absoluteQueuePosition !== rampPos) {
+        if (lead.absoluteQueuePosition !== clipPos) {
           console.log(
-            `[announce-block] lead buffer under insert lock: #${rampPos} → #${lead.absoluteQueuePosition}` +
+            `[announce-block] lead buffer under insert lock: #${clipPos} → #${lead.absoluteQueuePosition}` +
               (lead.reason ? ` (${lead.reason})` : "")
           );
         }
-        rampPos = lead.absoluteQueuePosition;
+        clipPos = lead.absoluteQueuePosition;
       }
     } catch (err) {
       console.warn(
@@ -1093,14 +1063,14 @@ async function insertAnnounceBlockUnlocked({
   let wiped = { removed: 0, removedBefore: 0, protectedThrough: 0 };
   try {
     wiped = await removePads({
-      beforePosition: rampPos,
+      beforePosition: clipPos,
       replaceWaitingRefill,
     });
     if (wiped.removedBefore > 0) {
-      rampPos = Math.max(1, rampPos - wiped.removedBefore);
+      clipPos = Math.max(1, clipPos - wiped.removedBefore);
     }
-    if (wiped.protectedThrough >= rampPos) {
-      rampPos = wiped.protectedThrough + 1;
+    if (wiped.protectedThrough >= clipPos) {
+      clipPos = wiped.protectedThrough + 1;
     }
   } catch (err) {
     console.warn(
@@ -1113,84 +1083,28 @@ async function insertAnnounceBlockUnlocked({
     return { ok: false, skipped: true, reason: "queue-preempted", wiped };
   }
 
-  const ttsPos = rampPos + 1;
-  const tts2Pos = tts2?.url ? ttsPos + 1 : null;
-  const restorePos = (tts2Pos || ttsPos) + 1;
-  const clipOpts = (clip, position) => ({
+  await enqueue(clip.url, {
     title: clip.title,
     artist: clip.artist,
     durationSec: clip.durationSec,
-    position,
+    position: clipPos,
   });
 
-  const abortPartial = async () => {
-    let cleaned = false;
-    try {
-      await removePads({ beforePosition: rampPos });
-      cleaned = true;
-    } catch (err) {
-      console.warn(
-        "[announce-block] partial-insert cleanup failed:",
-        err?.message || err
-      );
-    }
+  if (preempted()) {
+    // The announce is in and whole — one row cannot be half-inserted — so there
+    // is nothing to unwind. Skip the volume session and Play so Clear owns the
+    // room; maintenance strips the orphaned row on its next pass.
     return {
       ok: false,
       skipped: true,
       reason: "queue-preempted",
-      partial: true,
-      cleaned,
-      wiped,
-      rampPos,
-      ttsPos,
-      tts2Pos,
-      restorePos,
-    };
-  };
-
-  await enqueue(ramp.url, clipOpts(ramp, rampPos));
-  if (preempted()) {
-    return abortPartial();
-  }
-
-  await enqueue(tts.url, clipOpts(tts, ttsPos));
-  if (preempted()) {
-    return abortPartial();
-  }
-
-  if (tts2?.url) {
-    await enqueue(tts2.url, clipOpts(tts2, tts2Pos));
-    if (preempted()) {
-      return abortPartial();
-    }
-  }
-
-  await enqueue(restore.url, clipOpts(restore, restorePos));
-  if (preempted()) {
-    // Complete block is in; skip handoff/Play so Clear can own the room.
-    return {
-      ok: false,
-      skipped: true,
-      reason: "queue-preempted",
-      partial: false,
       inserted: true,
       wiped,
-      rampPos,
-      ttsPos,
-      tts2Pos,
-      restorePos,
+      clipPos,
     };
   }
 
-  return {
-    ok: true,
-    inserted: true,
-    rampPos,
-    ttsPos,
-    tts2Pos,
-    restorePos,
-    wiped,
-  };
+  return { ok: true, inserted: true, clipPos, wiped };
 }
 
 // Find a queued track's CURRENT absolute 1-based position from a fresh queue

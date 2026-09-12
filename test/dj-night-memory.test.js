@@ -181,6 +181,38 @@ test("clip scripts bind spoken copy to TTS URLs for lyrics display", () => {
   assert.equal(mem.scriptForClip("http://other/missing.mp3"), null);
 });
 
+test("a baked announce URI resolves the script stored against that file name", () => {
+  const baked = "http://10.10.10.10:8088/media/tts/dj-announce-4e003ce1ed090c3f.mp3";
+  const script =
+    "The silence had a good run. Now for the soundtrack.";
+  mem.rememberDjClipScript(baked, script, {
+    alsoUris: ["dj-announce-4e003ce1ed090c3f.mp3"],
+  });
+  assert.equal(mem.scriptForClip(baked), script);
+  assert.equal(
+    mem.scriptForClip("x-rincon-mp3radio://10.10.10.10:8088/media/tts/dj-announce-4e003ce1ed090c3f.mp3"),
+    script
+  );
+});
+
+test("a baked banter clip flips to Sister Static once the punch starts", () => {
+  const baked = "http://10.10.10.10:8088/media/tts/dj-announce-banter.mp3";
+  mem.rememberDjClipScript(baked, "Holy Roller opens the set.", {
+    personaId: "holy-roller",
+    punchPersonaId: "sister-static",
+    punchStartsAtSec: 15,
+    punchScript: "Sister Static takes it from here.",
+  });
+  assert.equal(mem.personaForClip(baked), "holy-roller");
+  assert.equal(mem.personaForClip(baked, { positionSec: 14.9 }), "holy-roller");
+  assert.equal(mem.personaForClip(baked, { positionSec: 15 }), "sister-static");
+  assert.equal(mem.scriptForClip(baked, { positionSec: 10 }), "Holy Roller opens the set.");
+  assert.equal(
+    mem.scriptForClip(baked, { positionSec: 16 }),
+    "Sister Static takes it from here."
+  );
+});
+
 test("clip memory stores personaId for display remap", () => {
   const uri = "http://ha.local:8123/api/tts_proxy/sister.mp3";
   mem.rememberDjClipScript(uri, "I'll keep this short.", {

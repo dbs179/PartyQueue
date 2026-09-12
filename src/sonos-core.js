@@ -283,7 +283,8 @@ async function getZoneGroupStateFromHousehold(m, probePrefs = {}) {
       return groups;
     } catch (err) {
       lastErr = err;
-      noteSpeakerFailure(device, err);
+      // A topology probe timeout is not "this speaker is dead." Marking Office
+      // unreachable here banned SetVolume for 60s and the DJ never ducked.
       const next = toTry[i + 1];
       if (next) {
         const from = device.Name || device.Host || `device[${i}]`;

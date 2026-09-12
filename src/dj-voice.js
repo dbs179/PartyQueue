@@ -39,11 +39,10 @@ import {
 } from "./settings.js";
 import { GENRE_BUCKETS, bucketsForArtistSync } from "./genres.js";
 import { moodLabel as eraMoodLabel } from "./moods.js";
-import {
-  beginDjVolumeHandoff,
-  getDjVolumeHandoffState,
-} from "./dj-volume-handoff.js";
-import { findUpcomingAnnounceHandoffPlan } from "./skip-announce-policy.js";
+import { getDjVolumeHandoffState } from "./dj-volume-handoff.js";
+import { bakeAnnounceClip, isBakedAnnounceUri } from "./dj-announce-bake.js";
+import { runAnnounceVolume } from "./dj-announce-volume.js";
+import { createStallHold } from "./announce-stall-hold.js";
 import {
   IMMINENT_ANNOUNCE_PAUSE_SEC,
   shouldPauseForImminentAnnounce,
@@ -447,6 +446,8 @@ export function applyMusicPronunciations(
       .replace(/\bAC\/DC\b/gi, "A C D C")
       .replace(/\bU2\b/g, "U Two")
       .replace(/\bR\.?E\.?M\.?(?=\W|$)/gi, "R E M")
+      // P!nk / P!NK, and the LLM's "P! Nk" respelling that TTS then reads as two syllables.
+      .replace(/\bP!\s*nk\b/gi, "Pink")
       .trim()
   );
 }
@@ -474,7 +475,7 @@ export function formatMusicPronunciationGuide(
 - Before using a music name, silently determine its standard spoken pronunciation from context.
 - If uncertain, omit the name instead of guessing.
 - When a name is included, make the spoken output TTS-friendly. Use a natural phonetic respelling only when needed; never explain the pronunciation to listeners.
-- AC/DC is spoken "A C D C"; U2 is "U Two"; R.E.M. is "R E M".
+- AC/DC is spoken "A C D C"; U2 is "U Two"; R.E.M. is "R E M"; P!nk is "Pink".
 - Write "Junior" / "Junior's" instead of "Jr." / "Jr.'s" (same for Senior / Sr.). A period after Jr. makes TTS pause, then spell the possessive S.${customBlock}`;
 }
 
@@ -2728,36 +2729,28 @@ export async function parkRampForShortAnnounce({
     rampUrl: ramp.publicUrl,
     rampSec: ramp.durationSec,
     requestUri,
-    handoff: null,
+    hold: null,
     seekNow: false,
   };
 
-  const handoff = await beginDjVolumeHandoff({
-    publicUrl: null,
-    approxDurationSec: 45,
-    silenceSec: ramp.durationSec,
-    // Claim the slots this block will occupy so a later shout defers to us
-    // instead of cancelling this handoff and leaving a ramp with no clip.
-    ttsPosition: livePos + 1,
-    musicPosition: livePos + 3,
-    holdPreSilence: true,
-    takeOver: false,
-    rearmOnComplete: true,
-    calculateTarget: (baseline) =>
-      announceVolumeFromMusic(baseline, volumeBumpTiers()),
+  // Sit on the pad until the announce is ready. The pad no longer carries any
+  // volume meaning — the baked clip brings its own silence to ramp under — so
+  // this only has to Pause when the pad arrives and Play when released.
+  const sonos = await import("./sonos.js");
+  const hold = createStallHold({
+    padUrl: ramp.publicUrl,
+    io: {
+      read: async () => {
+        const tick = await sonos.getTransportTick();
+        return { uri: tick?.uri ?? "", state: tick?.state ?? "" };
+      },
+      pause: sonos.pausePlayback,
+      resume: sonos.resumeQueuePlayback,
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    },
   });
-  if (handoff?.deferred) {
-    // Nothing will hold the pad, so the ramp would just play through and the
-    // request would start ahead of the DJ. Undo rather than half-park.
-    console.log("[dj-voice] ramp park deferred to an active handoff — undoing");
-    parked.handoff = handoff;
-    await abortParkedAnnounce(parked, "handoff deferred");
-    return null;
-  }
-  parked.handoff = handoff;
-  handoff.start()?.catch((err) =>
-    console.error("[dj-volume] park handoff crashed:", err.message)
-  );
+  parked.hold = hold;
+  hold.start();
   setAnnounceRampParkExpiry(() =>
     abortParkedAnnounce(parked, "park watchdog expired", { endPark: false })
   );
@@ -2790,14 +2783,14 @@ export async function abortParkedAnnounce(
   { endPark = true } = {}
 ) {
   if (!parked) return;
-  const held = !!parked.handoff?.heldPlayback;
+  const held = !!parked.hold?.held;
   try {
-    await parked.handoff?.cancelAndRestore?.(reason);
+    await parked.hold?.release?.(reason);
   } catch {
-    /* best-effort volume restore */
+    /* best-effort resume */
   }
-  // If we were paused on the ramp, cancelAndRestore just resumed onto it —
-  // leave it to play out (3s of silence) rather than deleting it live.
+  // If we were paused on the pad, releasing just resumed onto it — leave it to
+  // play out (a few seconds of silence) rather than deleting it live.
   if (!held && parked.rampUrl) {
     try {
       const { releaseParkedRamp } = await import("./sonos.js");
@@ -2939,58 +2932,74 @@ async function pauseIfAnnounceImminent(queuePosition) {
   }
 }
 
-async function beginVolumeSession({
-  publicUrl,
-  approxDurationSec,
-  silenceSec = silenceDurationSec(),
-  startPlayback,
-  ttsPosition,
-  tts2Position = null,
-  musicPosition,
+/**
+ * Duck the room for one baked announce.
+ *
+ * When the baked clip starts, ramp the room up. In the last few silent seconds,
+ * ramp it back. Play is not this function's job — a failed volume read must
+ * never prevent the DJ from starting.
+ */
+async function beginAnnounceVolume({
+  clipUrl,
+  durationSec,
+  rampSec,
+  restoreSec,
 } = {}) {
   const tiers = volumeBumpTiers();
-  const handoff = await beginDjVolumeHandoff({
-    publicUrl,
-    approxDurationSec,
-    silenceSec,
-    ttsPosition,
-    tts2Position,
-    musicPosition,
-    takeOver: !!startPlayback,
-    rearmOnComplete: true,
-    calculateTarget: (baseline) => announceVolumeFromMusic(baseline, tiers),
-  });
-  if (handoff?.deferred) {
-    return {
-      musicVol: null,
-      announceLevel: null,
-      tiers,
-      cancelled: false,
-      startHold: null,
-      handoff,
-    };
-  }
-  const startHold = () => {
-    handoff.start()?.catch((err) =>
-      console.error("[dj-volume] handoff crashed:", err.message)
-    );
-  };
-  if (!startPlayback) startHold();
+  const sonos = await import("./sonos.js");
 
-  return {
-    musicVol: null,
-    announceLevel: null,
-    tiers,
-    cancelled: false,
-    startHold: startPlayback ? startHold : null,
-    handoff,
+  let musicVolume = sonos.getCachedGroupVolume();
+  try {
+    musicVolume = Number(await sonos.getGroupVolume());
+    if (!Number.isFinite(musicVolume)) musicVolume = sonos.getCachedGroupVolume();
+  } catch (err) {
+    console.warn(
+      `[dj-volume] baseline read failed; using last known ${musicVolume ?? "none"}: ${err?.message || err}`
+    );
+  }
+  const announceVolume =
+    musicVolume != null ? announceVolumeFromMusic(musicVolume, tiers) : null;
+
+  const io = {
+    read: async () => {
+      const tick = await sonos.getTransportTick();
+      return {
+        uri: tick?.uri ?? "",
+        positionSec: Number(tick?.positionSec) || 0,
+      };
+    },
+    setVolume: (level, exact) =>
+      exact ? sonos.setGroupVolume(level) : sonos.setGroupVolumeFast(level),
+    getVolume: () => sonos.getGroupVolume(),
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   };
+
+  runAnnounceVolume(
+    {
+      clipUrl,
+      durationSec,
+      rampSec,
+      restoreSec,
+      musicVolume,
+      announceVolume,
+      calculateTarget: (baseline) => announceVolumeFromMusic(baseline, tiers),
+    },
+    io
+  )
+    .then(({ reason }) =>
+      console.log(`[dj-volume] announce volume finished (${reason})`)
+    )
+    .catch((err) =>
+      console.error(`[dj-volume] announce volume crashed: ${err?.message || err}`)
+    );
+
+  return { announceLevel: announceVolume, tiers, cancelled: false };
 }
 
 /**
- * Re-arm DJ volume handoff when announce pads remain in the Sonos queue but the
- * in-memory session was lost (container restart / crash). Safe no-op when a
- * handoff is already running or no announce block is found.
+ * Re-arm the announce volume driver when a baked announce is still sitting in
+ * the Sonos queue but the in-memory session was lost (container restart or
+ * crash). Without this the DJ would play at music volume.
  *
  * @param {{
  *   queueItems?: Array,
@@ -3001,30 +3010,57 @@ export async function rearmDjVolumeHandoffFromQueue({
   queueItems,
   currentTrack,
 } = {}) {
-  const state = getDjVolumeHandoffState();
-  if (state.phase !== "idle") {
-    return { ok: false, reason: "already-active", phase: state.phase };
-  }
-  const plan = findUpcomingAnnounceHandoffPlan(queueItems, currentTrack);
-  if (!plan) return { ok: false, reason: "no-announce-block" };
+  const found = findQueuedBakedAnnounce(queueItems, currentTrack);
+  if (!found) return { ok: false, reason: "no-announce-block" };
 
-  const vol = await beginVolumeSession({
-    publicUrl: plan.ttsUri,
-    approxDurationSec: plan.approxDurationSec,
-    silenceSec: plan.silenceSec,
-    startPlayback: false,
-    ttsPosition: plan.ttsPosition,
-    tts2Position: plan.tts2Position,
-    musicPosition: plan.musicPosition,
+  const padSec = silenceDurationSec();
+  const vol = await beginAnnounceVolume({
+    clipUrl: found.uri,
+    durationSec: found.durationSec,
+    // The pads are inside the clip; their lengths are the configured ones.
+    rampSec: Math.min(padSec, found.durationSec / 2),
+    restoreSec: Math.min(padSec, found.durationSec / 2),
   });
+  if (vol.cancelled) return { ok: false, reason: "baseline-unavailable" };
   console.info(
-    `[dj-volume] rearmed orphaned announce handoff ` +
-      `(tts@${plan.ttsPosition}` +
-      `${plan.tts2Position ? ` tts2@${plan.tts2Position}` : ""}` +
-      `${plan.rampPosition != null ? ` ramp@${plan.rampPosition}` : ""}` +
-      ` music@${plan.musicPosition})`
+    `[dj-volume] rearmed orphaned announce at #${found.position} ` +
+      `(${found.durationSec}s)`
   );
-  return { ok: true, plan, handoff: vol.handoff };
+  return { ok: true, position: found.position };
+}
+
+/**
+ * First baked announce at or after the playhead. Rows behind it have already
+ * played, so re-arming on one would duck the room for audio nobody will hear.
+ *
+ * @param {Array<{ TrackUri?: string, uri?: string, Duration?: string }>} items
+ * @param {number} currentTrack1Based
+ */
+export function findQueuedBakedAnnounce(items, currentTrack1Based) {
+  const list = Array.isArray(items) ? items : [];
+  const track = Math.max(0, Math.floor(Number(currentTrack1Based) || 0));
+  const from = track >= 1 ? track - 1 : 0;
+  for (let i = from; i < list.length; i++) {
+    const uri = String(list[i]?.TrackUri ?? list[i]?.uri ?? "");
+    if (!isBakedAnnounceUri(uri)) continue;
+    return {
+      uri,
+      position: i + 1,
+      durationSec: parseClipDuration(list[i]?.Duration) || 24,
+    };
+  }
+  return null;
+}
+
+/** "0:00:24" / "00:24" → seconds. Null when Sonos gave us nothing usable. */
+function parseClipDuration(value) {
+  const parts = String(value || "").trim().split(":");
+  if (parts.length < 2 || parts.length > 3) return null;
+  const nums = parts.map(Number);
+  if (!nums.every(Number.isFinite)) return null;
+  return parts.length === 3
+    ? nums[0] * 3600 + nums[1] * 60 + nums[2]
+    : nums[0] * 60 + nums[1];
 }
 
 /** Live Sonos lookup + rearm (startup / recovery). */
@@ -3438,13 +3474,27 @@ export async function previewTtsVoice(
   };
 }
 
-async function startQueuePlayback(trackNumber = 1) {
+async function startQueuePlayback(trackNumber = 1, announce = null) {
   // SwitchToQueue â†’ SeekTrack(N) â†’ Play. Seek is required after inserting TTS
   // at the front, otherwise the playhead can stay on the first Spotify track.
   await new Promise((r) => setTimeout(r, 200));
   const { play, pauseQueueTrim } = await import("./sonos.js");
   pauseQueueTrim(25000);
   await play({ trackNumber });
+  try {
+    const http = await import("./now-playing-http.js");
+    if (announce?.uri) {
+      http.seedAnnounceNowPlaying({
+        uri: announce.uri,
+        durationSec: announce.durationSec,
+        queueTrack: trackNumber,
+      });
+    } else {
+      http.nudgeNowPlayingTransition();
+    }
+  } catch {
+    /* UI refresh is best-effort */
+  }
 }
 
 // Serialize Sonos DJ inserts so stacked shouts, set intros, and refills
@@ -3768,82 +3818,103 @@ async function announceOnSonosUnlocked(
         /* best-effort */
       }
     }
-    // Queue order: ramp silence → DJ TTS → restore silence → music.
-    // Volume rises during the lead pad and returns exactly during the trailing pad.
+    // One queue row: [ramp silence | DJ | optional punch | restore silence].
+    // Volume rises under the leading silence and is back at the music level by
+    // the end of the trailing silence, so neither change is audible.
     //
-    // Insert the whole block under one Sonos write lock so guest adds / Random
-    // cannot land between pads. Clear Queue preempts between steps; Pause uses
-    // the transport lane and does not wait on this lock.
+    // Baking the pads into the clip is what makes this safe. A single row is
+    // atomic — guest adds and Random cannot land inside it, trim cannot eat
+    // half of it, and the volume ramp needs no transport commands to follow the
+    // playhead between rows.
     if (preempted()) {
       return { ok: false, skipped: true, reason: "queue-preempted" };
     }
-    const ramp = parked?.rampUrl
-      ? { publicUrl: parked.rampUrl, durationSec: parked.rampSec || silenceDurationSec() }
-      : ensureSilenceRamp();
-    const restore = ensureSilenceBridge();
-    const { insertAnnounceBlock, completeParkedAnnounce } = await import("./sonos.js");
-    const ttsClip = {
-      url: clip.publicUrl,
+    const { insertAnnounceClip, completeParkedAnnounce } = await import("./sonos.js");
+
+    // The bake reads the pads straight off disk, so make sure every prebuilt
+    // silence length is present in data/tts before asking ffmpeg for them.
+    syncSilencePadFiles();
+    const padSec = silenceDurationSec();
+    // A parked stall pad is already playing its own silence, so the baked clip
+    // does not repeat the lead pad — it only needs enough to ramp under.
+    const leadPadSec = parked?.rampUrl ? Math.min(padSec, 1) : padSec;
+    let baked;
+    try {
+      baked = await bakeAnnounceClip({
+        ttsDir: TTS_DIR,
+        leadFile: clip.fileName,
+        punchFile: clip2?.fileName || null,
+        rampFile: silenceRampFileName(leadPadSec),
+        restoreFile: silenceFileName(padSec),
+        rampSec: leadPadSec,
+        restoreSec: padSec,
+        leadSec: Number(clip.approxDurationSec) || 8,
+        punchSec: clip2 ? Number(clip2.approxDurationSec) || 8 : 0,
+        publicBaseUrl: getPublicBaseUrl(),
+        ffmpegBin: resolveFfmpegBin(),
+      });
+    } catch (err) {
+      console.error(`[dj-voice] could not bake announce: ${err?.message || err}`);
+      return { ok: false, reason: "announce-bake-failed" };
+    }
+    console.log(
+      `[dj-voice] baked announce ${baked.fileName} ` +
+        `(${baked.rampSec}s + ~${baked.speechSec}s + ${baked.restoreSec}s = ` +
+        `${baked.durationSec}s)${baked.cached ? " [cached]" : ""}`
+    );
+    // Now Playing / DJ Script look up copy by the URI Sonos is playing. That
+    // is the baked file, not the raw TTS clip we remembered a few lines above.
+    try {
+      const leadSec = Number(clip.approxDurationSec) || 8;
+      rememberDjClipScript(baked.publicUrl, message, {
+        alsoUris: [baked.fileName, clip.publicUrl, clip.fileName].filter(Boolean),
+        personaId: leadPersona.id || DJ_PERSONA_HOLY_ROLLER,
+        // Banter lives in the same file; flip the booth once the punch starts.
+        punchPersonaId: punchPersona?.id || null,
+        punchStartsAtSec:
+          punchPersona && clip2?.fileName ? baked.rampSec + leadSec : null,
+        punchScript: punchText || punchlineText || null,
+      });
+    } catch (err) {
+      console.warn("[dj-voice] baked clip script memory failed:", err.message);
+    }
+    const announceClip = {
+      url: baked.publicUrl,
       title: leadPersona.djName || DJ_VOICE_DEFAULTS.djName,
       artist: "PartyQueue",
-      durationSec: clip.approxDurationSec,
-    };
-    const tts2Clip = clip2?.publicUrl
-      ? {
-          url: clip2.publicUrl,
-          title: punchPersona?.djName || "Sister Static",
-          artist: "PartyQueue",
-          durationSec: clip2.approxDurationSec,
-        }
-      : null;
-    const restoreClip = {
-      url: restore.publicUrl,
-      title: "PartyQueue Silence Bridge",
-      artist: "PartyQueue",
-      durationSec: restore.durationSec,
+      durationSec: baked.durationSec,
     };
     let unparkedFallback = false;
     let block = parked?.rampPos
       ? await completeParkedAnnounce({
           rampUrl: parked.rampUrl,
           expectedRampPos: parked.rampPos,
-          tts: ttsClip,
-          tts2: tts2Clip,
-          restore: restoreClip,
+          clip: announceClip,
           preemptGeneration,
           replaceWaitingRefill,
         })
       : null;
     if (!block?.ok && parked?.rampPos && block?.reason === "parked-ramp-missing") {
-      // The ramp we parked on is gone (skip / clear / host edit). Unwind the
-      // park completely — otherwise the freeze and the volume hold outlive it —
-      // then insert a normal block with its own ramp and volume session.
-      console.warn("[dj-voice] parked ramp missing; inserting a full announce block");
+      // The stall pad we parked on is gone (skip / clear / host edit). Unwind
+      // the park completely — otherwise the freeze outlives it — then insert
+      // the announce on its own.
+      console.warn("[dj-voice] parked stall pad missing; inserting the announce on its own");
       await abortParkedAnnounce(parked, "parked ramp missing");
       parked = null;
       block = null;
       // The park was our position anchor; without it we must re-resolve the
-      // request under the insert lock or the pads land wherever it used to be.
+      // request under the insert lock or the announce lands where it used to be.
       unparkedFallback = true;
     }
     if (!block) {
-      const freshRamp = parked ? ramp : ensureSilenceRamp();
-      block = await insertAnnounceBlock({
+      block = await insertAnnounceClip({
         queuePosition,
         preemptGeneration,
         applyLeadBuffer:
           (!!applyLeadBuffer || unparkedFallback) && !startPlayback && !parked,
         requestUri: requestUri || null,
         replaceWaitingRefill,
-        ramp: {
-          url: freshRamp.publicUrl,
-          title: "PartyQueue Volume Ramp",
-          artist: "PartyQueue",
-          durationSec: freshRamp.durationSec,
-        },
-        tts: ttsClip,
-        tts2: tts2Clip,
-        restore: restoreClip,
+        clip: announceClip,
       });
     }
     if (!block?.ok) {
@@ -3866,13 +3937,13 @@ async function announceOnSonosUnlocked(
       };
     }
     didInsert = true;
-    const { rampPos, ttsPos, tts2Pos, restorePos, wiped } = block;
-    const leadSec = Number(clip.approxDurationSec) || 8;
-    const punchSec = tts2Clip ? Number(clip2?.approxDurationSec) || 8 : 0;
-    const announceSec = leadSec + punchSec;
+    const { clipPos, rampPos, wiped } = block;
+    // Where playback should start: the parked stall pad when there is one,
+    // otherwise the announce row itself.
+    const startPos = parked?.rampPos ? rampPos : clipPos;
     if (wiped?.removedBefore > 0) {
       console.log(
-        `[dj-voice] supersede: removed ${wiped.removed} pad(s); insert ${queuePosition} → ${rampPos}`
+        `[dj-voice] supersede: removed ${wiped.removed} pad(s); insert ${queuePosition} → ${clipPos}`
       );
     } else if (wiped?.removed > 0) {
       console.log(
@@ -3880,48 +3951,30 @@ async function announceOnSonosUnlocked(
       );
     }
     console.log(
-      `[dj-voice] enqueued ramp@${rampPos} TTS@${ttsPos}` +
-        (tts2Pos ? ` TTS2@${tts2Pos}` : "") +
-        ` restore@${restorePos} ` +
-        `(${ramp.durationSec}s / ~${leadSec}s` +
-        (punchSec ? ` + ~${punchSec}s` : "") +
-        ` / ${restore.durationSec}s)`
+      `[dj-voice] enqueued announce@${clipPos} (${baked.durationSec}s, one row)`
     );
 
-    // Fresh sets / empty-queue shouts: Play ramp → boost → DJ → music.
-    let vol;
-    if (parked?.handoff && !parked.handoff.deferred) {
-      parked.handoff.setTtsUrl?.(clip.publicUrl);
-      parked.handoff.setPositions?.({
-        ttsPosition: ttsPos,
-        tts2Position: tts2Pos || null,
-        musicPosition: restorePos + 1,
+    // Arm the volume driver before anything starts moving, so the first poll
+    // owns the baseline rather than reading a level we already changed.
+    const vol = await beginAnnounceVolume({
+      clipUrl: baked.publicUrl,
+      durationSec: baked.durationSec,
+      rampSec: baked.rampSec,
+      restoreSec: baked.restoreSec,
+    });
+    if (parked?.hold?.held) {
+      // We are paused on the stall pad with the announce now sitting right
+      // behind it. Let go and the room rolls straight into the DJ.
+      await parked.hold.release("announce ready");
+      didStart = true;
+    } else if (startPlayback || heldAtTrackEnd) {
+      // Volume is optional. Play is not — SeekTrack to the baked row or the
+      // playhead stays on the song that just shifted down (Home Team).
+      await parked?.hold?.stop?.();
+      await startQueuePlayback(startPos, {
+        uri: baked.publicUrl,
+        durationSec: baked.durationSec,
       });
-      parked.handoff.releasePreSilenceHold?.();
-      vol = {
-        announceLevel: parked.handoff.snapshot?.()?.announceVolume ?? null,
-        tiers: volumeBumpTiers(),
-        cancelled: false,
-        startHold: null,
-      };
-    } else {
-      vol = await beginVolumeSession({
-        publicUrl: clip.publicUrl,
-        approxDurationSec: announceSec,
-        silenceSec: ramp.durationSec,
-        startPlayback: !!startPlayback || heldAtTrackEnd,
-        ttsPosition: ttsPos,
-        tts2Position: tts2Pos || null,
-        musicPosition: restorePos + 1,
-      });
-      volHold = vol.startHold || null;
-    }
-    if ((startPlayback || heldAtTrackEnd) && !vol.cancelled) {
-      // Arm before Play so the first pre-silence poll owns the baseline.
-      // Track-end hold: do not resume the dying song — Play the announce block.
-      volHold?.();
-      volHold = null;
-      await startQueuePlayback(rampPos);
       didStart = true;
     } else if (pausedForImminent) {
       // Legacy mid-song imminent pause: resume the current song.
@@ -3936,13 +3989,12 @@ async function announceOnSonosUnlocked(
       ok: true,
       inserted: true,
       mode: "queue",
-      publicUrl: clip.publicUrl,
-      position: ttsPos,
-      rampPosition: rampPos,
-      restorePosition: restorePos,
-      silenceSec: ramp.durationSec,
-      rampSec: ramp.durationSec,
-      restoreSec: restore.durationSec,
+      publicUrl: baked.publicUrl,
+      position: clipPos,
+      silenceSec: baked.rampSec,
+      rampSec: baked.rampSec,
+      restoreSec: baked.restoreSec,
+      durationSec: baked.durationSec,
       started: didStart,
       volumeBump: vol.announceLevel,
       volumeTiers: vol.tiers,

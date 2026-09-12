@@ -85,6 +85,20 @@ test("lockGroupVolume does not keep SOAP-ing a recently unreachable player", asy
   assert.equal(kitchen.volume, 18);
 });
 
+test("lockGroupVolume still writes when every member was marked skipped", async () => {
+  setPlayerVolumeTimeoutForTests(30);
+  setSkipUnreachableMsForTests(60_000);
+  const dead = fakePlayer("10.10.20.10", { volume: 8, fail: true });
+  await lockGroupVolume([dead], 20);
+  assert.ok(dead.writes >= 1);
+
+  const office = fakePlayer("10.10.20.10", { volume: 8 });
+  const locked = await lockGroupVolume([office], 22);
+  assert.equal(locked, true);
+  assert.ok(office.writes >= 1, "must retry the only room even while skipped");
+  assert.equal(office.volume, 22);
+});
+
 test("lockGroupVolume times out a hung player instead of waiting forever", async () => {
   setPlayerVolumeTimeoutForTests(25);
   const kitchen = fakePlayer("10.10.20.190", { volume: 8 });

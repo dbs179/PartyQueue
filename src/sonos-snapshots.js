@@ -60,6 +60,113 @@ import {
 } from "./sonos-reachability.js";
 import { envTimeoutMs, withTimeout } from "./with-timeout.js";
 
+const NOW_PLAYING_SOAP_TIMEOUT_MS = envTimeoutMs(
+  "PARTYQUEUE_NOW_PLAYING_TIMEOUT_MS",
+  3_500
+);
+const TRANSPORT_TICK_TIMEOUT_MS = envTimeoutMs(
+  "PARTYQUEUE_TRANSPORT_TICK_TIMEOUT_MS",
+  2_000
+);
+
+/** After Play starts a baked announce, serve this instead of a stale song SOAP. */
+let announceNowPlayingHold = null;
+
+export function resetAnnounceNowPlayingHoldForTests() {
+  announceNowPlayingHold = null;
+}
+
+export function announceNowPlayingHoldForTests() {
+  return announceNowPlayingHold
+    ? { uri: announceNowPlayingHold.uri, until: announceNowPlayingHold.until }
+    : null;
+}
+
+export function buildDjNowPlayingSnapshot({
+  uri,
+  durationSec,
+  queueTrack = 1,
+  room = null,
+  positionSec = 0,
+} = {}) {
+  const pos = Math.max(0, Number(positionSec) || 0);
+  const persona = djVoiceDisplay(uri, { remember: true, positionSec: pos });
+  const announceScript = scriptForClip(uri, { positionSec: pos });
+  return {
+    isPlaying: true,
+    queuePlaying: true,
+    queueTrack: Number(queueTrack) || 1,
+    state: "PLAYING",
+    muted: false,
+    shuffle: false,
+    title: persona.title,
+    artist: persona.artist,
+    album: persona.album,
+    uri,
+    albumArt: persona.albumArt,
+    positionSec: pos,
+    positionObservedAt: Date.now(),
+    durationSec: Number(durationSec) || 0,
+    djVoice: true,
+    djSilence: false,
+    announceHeld: true,
+    ...(announceScript ? { announceScript } : {}),
+    room,
+    origin: null,
+    searched: false,
+    discovered: false,
+    moodPick: false,
+    mood: null,
+    genreLane: null,
+    requestedBy: null,
+    requestedByUser: null,
+    dedication: null,
+  };
+}
+
+function snapshotFromAnnounceHold() {
+  const hold = announceNowPlayingHold;
+  if (!hold) return null;
+  const positionSec = Math.min(
+    hold.durationSec,
+    Math.max(0, (Date.now() - hold.startedAt) / 1000)
+  );
+  return buildDjNowPlayingSnapshot({
+    uri: hold.uri,
+    durationSec: hold.durationSec,
+    queueTrack: hold.queueTrack,
+    room: hold.room,
+    positionSec,
+  });
+}
+
+/**
+ * Keep Now Playing on the DJ for the length of the baked clip, even when
+ * GetPositionInfo is still reporting the song that just finished.
+ */
+export function holdAnnounceNowPlaying({
+  uri,
+  durationSec,
+  queueTrack = 1,
+  room = null,
+} = {}) {
+  const clipUrl = String(uri || "");
+  if (!clipUrl) return null;
+  const duration = Math.max(1, Number(durationSec) || 20);
+  const startedAt = Date.now();
+  announceNowPlayingHold = {
+    uri: clipUrl,
+    durationSec: duration,
+    queueTrack,
+    room,
+    startedAt,
+    until: startedAt + (duration + 1) * 1000,
+  };
+  const snapshot = snapshotFromAnnounceHold();
+  getNowPlaying.seed(snapshot);
+  return snapshot;
+}
+
 /** Per-coordinator budget for the group picker's playing-state scan. */
 const GROUP_STATE_TIMEOUT_MS = envTimeoutMs(
   "PARTYQUEUE_GROUP_STATE_TIMEOUT_MS",
@@ -178,10 +285,11 @@ let lastNowPlayingDjTagline = null;
 
 function djVoiceDisplay(
   uri = null,
-  { silence = false, remember = false, companionUri = null } = {}
+  { silence = false, remember = false, companionUri = null, positionSec = null } = {}
 ) {
   const personaId =
-    personaForClip(silence ? companionUri : uri) || DJ_PERSONA_HOLY_ROLLER;
+    personaForClip(silence ? companionUri : uri, { positionSec }) ||
+    DJ_PERSONA_HOLY_ROLLER;
   const persona = getDjPersona(personaId);
   const pack = persona.djTaglines;
   let tagline;
@@ -247,22 +355,31 @@ function scheduleLyricsWarm(q, slot) {
 }
 
 async function getNowPlayingRaw() {
+  const hold = announceNowPlayingHold;
+  if (hold && Date.now() < hold.until) {
+    return snapshotFromAnnounceHold();
+  }
+
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
 
-  const [pos, transport, groupMute, settings, media] = await Promise.all([
-    coordinator.AVTransportService.GetPositionInfo(),
-    coordinator.AVTransportService.GetTransportInfo(),
-    coordinator.GroupRenderingControlService.GetGroupMute({ InstanceID: 0 }).catch(
-      () => ({ CurrentMute: false })
-    ),
-    coordinator.AVTransportService.GetTransportSettings({ InstanceID: 0 }).catch(
-      () => ({ PlayMode: "NORMAL" })
-    ),
-    coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(
-      () => ({ CurrentURI: "" })
-    ),
-  ]);
+  const [pos, transport, groupMute, settings, media] = await withTimeout(
+    Promise.all([
+      coordinator.AVTransportService.GetPositionInfo(),
+      coordinator.AVTransportService.GetTransportInfo(),
+      coordinator.GroupRenderingControlService.GetGroupMute({ InstanceID: 0 }).catch(
+        () => ({ CurrentMute: false })
+      ),
+      coordinator.AVTransportService.GetTransportSettings({ InstanceID: 0 }).catch(
+        () => ({ PlayMode: "NORMAL" })
+      ),
+      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(
+        () => ({ CurrentURI: "" })
+      ),
+    ]),
+    NOW_PLAYING_SOAP_TIMEOUT_MS,
+    "Sonos now-playing timed out"
+  );
   // Shared snapshots can be reused for up to a few seconds. Clients use this
   // observation time to advance RelTime by the snapshot's age.
   const positionObservedAt = Date.now();
@@ -296,17 +413,21 @@ async function getNowPlayingRaw() {
       /* best-effort — fall back to last remembered tagline */
     }
   }
+  const livePositionSec = parseSonosTime(pos.RelTime);
   const djPersona =
     djClip || silenceBridge
       ? djVoiceDisplay(uri, {
           silence: silenceBridge,
           remember: true,
           companionUri,
+          positionSec: livePositionSec,
         })
       : null;
   const announceScript =
     djClip || silenceBridge
-      ? scriptForClip(silenceBridge ? companionUri || uri : uri)
+      ? scriptForClip(silenceBridge ? companionUri || uri : uri, {
+          positionSec: livePositionSec,
+        })
       : null;
 
   let title;
@@ -370,7 +491,7 @@ async function getNowPlayingRaw() {
   }
 
   // Sonos reports RelTime / TrackDuration as H:MM:SS (sometimes with decimals).
-  const positionSec = parseSonosTime(pos.RelTime);
+  const positionSec = livePositionSec;
   const durationSec = parseSonosTime(pos.TrackDuration);
 
   // Warm lyrics for the current track in the shared server cache (overlay-ready).
@@ -641,10 +762,14 @@ export async function getTransportTick() {
   try {
     const m = await getManager();
     const coordinator = await resolveCoordinator(m);
-    const [pos, transport] = await Promise.all([
-      coordinator.AVTransportService.GetPositionInfo(),
-      coordinator.AVTransportService.GetTransportInfo(),
-    ]);
+    const [pos, transport] = await withTimeout(
+      Promise.all([
+        coordinator.AVTransportService.GetPositionInfo(),
+        coordinator.AVTransportService.GetTransportInfo(),
+      ]),
+      TRANSPORT_TICK_TIMEOUT_MS,
+      "Sonos transport tick timed out"
+    );
     noteSonosReadSuccess();
     return {
       uri: pos.TrackURI ?? null,
@@ -671,7 +796,8 @@ export function onSonosSnapshotsInvalidated(listener) {
   return () => snapshotInvalidationListeners.delete(listener);
 }
 
-export function invalidateSonosSnapshots() {
+export function invalidateSonosSnapshots({ preserveAnnounceHold = false } = {}) {
+  if (!preserveAnnounceHold) announceNowPlayingHold = null;
   getNowPlaying.bust();
   getQueueList.bust();
   // Never-Ending reads getQueueStatus — must bust on Clear/mutations or a
