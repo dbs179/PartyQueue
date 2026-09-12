@@ -16,6 +16,8 @@ tmp-*
 # Saved speaker layout / DJ Voice state while a live smoke run is in progress.
 .smoke-room-state.json
 .smoke-dj-state.json
+# Live room/container watcher output captured while debugging a party.
+.watch/
 tmp/
 test-results/
 playwright-report/

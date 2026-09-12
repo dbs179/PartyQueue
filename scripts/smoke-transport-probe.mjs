@@ -19,7 +19,13 @@ const coordinator =
       )
     : await resolveCoordinator(m);
 if (!coordinator) throw new Error("room not found");
-console.log("coordinator:", coordinator.Name, coordinator.Uuid);
+console.log("device:", coordinator.Name, coordinator.Uuid);
+console.log(
+  "  GroupName:",
+  coordinator.GroupName,
+  "| Coordinator:",
+  coordinator.Coordinator?.Name ?? "(self)"
+);
 
 const [media, transport, position] = await Promise.all([
   coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }),
