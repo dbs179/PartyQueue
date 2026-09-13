@@ -336,13 +336,13 @@ export function registerQueueRoutes(app, ctx) {
                 !voice?.skipped &&
                 !queueWorkWasPreempted(preemptGeneration)
               ) {
-                await sonos.play({ trackNumber: 1 });
+                await sonos.play();
               }
             } catch (err) {
               console.error("[queue] request shout:", err.message);
               if (!queueWorkWasPreempted(preemptGeneration)) {
                 try {
-                  await sonos.play({ trackNumber: 1 });
+                  await sonos.play();
                 } catch (playErr) {
                   console.error("[queue] shout fallback play:", playErr.message);
                 }
@@ -384,7 +384,7 @@ export function registerQueueRoutes(app, ctx) {
         !queueWorkWasPreempted(preemptGeneration)
       ) {
         // Shout was deferred-start but didn't fire (DJ not ready, etc.) — play song.
-        void sonos.play({ trackNumber: 1 }).catch((err) =>
+        void sonos.play().catch((err) =>
           console.error("[queue] deferred start failed:", err.message)
         );
       }
@@ -580,7 +580,7 @@ export function registerQueueRoutes(app, ctx) {
                 !voice?.skipped &&
                 !queueWorkWasPreempted(preemptGeneration)
               ) {
-                await sonos.play({ trackNumber: 1 });
+                await sonos.play();
               }
             } catch (err) {
               console.error("[queue/set-request] shout:", err.message);
@@ -589,7 +589,7 @@ export function registerQueueRoutes(app, ctx) {
                 !queueWorkWasPreempted(preemptGeneration)
               ) {
                 try {
-                  await sonos.play({ trackNumber: 1 });
+                  await sonos.play();
                 } catch (playErr) {
                   console.error(
                     "[queue/set-request] shout fallback play:",
@@ -607,7 +607,7 @@ export function registerQueueRoutes(app, ctx) {
           !result.started &&
           !queueWorkWasPreempted(preemptGeneration)
         ) {
-          void sonos.play({ trackNumber: 1 }).catch((err) =>
+          void sonos.play().catch((err) =>
             console.error("[queue/set-request] deferred start:", err.message)
           );
         }
@@ -837,7 +837,7 @@ export function registerQueueRoutes(app, ctx) {
             if (voice?.ok) {
               result.started = true;
             } else if (!queueWorkWasPreempted(preemptGeneration)) {
-              await sonos.play({ trackNumber: 1 });
+              await sonos.play();
               result.started = true;
             }
           } catch (err) {
@@ -846,7 +846,7 @@ export function registerQueueRoutes(app, ctx) {
               result.preempted = true;
             } else {
               try {
-                await sonos.play({ trackNumber: 1 });
+                await sonos.play();
                 result.started = true;
               } catch (playErr) {
                 console.error(

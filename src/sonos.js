@@ -43,6 +43,7 @@ export {
   resolveCoordinator,
   resolveGroup,
   isNotCoordinatorError,
+  isTransportRefusalError,
   resetSonosManager,
   closeSonosManager,
   resolveRegion,

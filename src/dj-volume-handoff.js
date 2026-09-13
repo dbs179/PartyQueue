@@ -5,6 +5,7 @@ import {
   setDjVolumeHandoffActive,
   setDjVolumeHandoffArmed,
 } from "./dj-volume-handoff-state.js";
+import { isBakedAnnounceUri } from "./dj-announce-bake.js";
 
 export { isDjVolumeHandoffActive, isDjVolumeHandoffArmed };
 
@@ -80,6 +81,7 @@ export function isRestoreSilenceUri(uri) {
 export function isDjClipUri(uri, publicUrl) {
   const value = String(uri || "");
   if (isRampSilenceUri(value) || isRestoreSilenceUri(value)) return false;
+  if (isBakedAnnounceUri(value)) return true;
   const fileToken = publicUrl
     ? String(publicUrl).split("/").pop() || ""
     : "";
@@ -1154,13 +1156,21 @@ export async function beginDjVolumeHandoff(options = {}) {
 
 export async function cancelActiveDjVolumeHandoff(reason = "queue preempted") {
   const handoff = activeHandoff;
-  if (!handoff) return false;
-  await handoff.cancelAndRestore(reason);
-  if (activeHandoff === handoff) {
-    activeHandoff = null;
-    syncHandoffActiveFlag();
+  if (handoff) {
+    await handoff.cancelAndRestore(reason);
+    if (activeHandoff === handoff) {
+      activeHandoff = null;
+      syncHandoffActiveFlag();
+    }
   }
-  return true;
+  // Host Pause must not drop bake armed/active — the clip is still current.
+  // Clear / skip-past-announce / preempt do, so trim can run again.
+  const why = String(reason || "");
+  if (/clear|skip announce|queue preempted|queue cleared/i.test(why)) {
+    setDjVolumeHandoffActive(false);
+    setDjVolumeHandoffArmed(false);
+  }
+  return !!handoff;
 }
 
 export function getDjVolumeHandoffState() {

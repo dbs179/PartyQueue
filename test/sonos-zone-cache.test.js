@@ -4,6 +4,7 @@ import {
   clearZoneCache,
   deviceDriftInfoForTests,
   getZoneGroups,
+  isTransportRefusalError,
   orderTopologyProbeDevices,
   resetDeviceDriftForTests,
   zoneCacheInfoForTests,
@@ -19,6 +20,19 @@ import {
 afterEach(() => {
   resetSpeakerReachabilityForTests();
   resetDeviceDriftForTests();
+});
+
+test("isTransportRefusalError matches Sonos 701 and 711", () => {
+  assert.equal(
+    isTransportRefusalError(new Error("Upnp Error: 701 Transition not available")),
+    true
+  );
+  assert.equal(
+    isTransportRefusalError(new Error("UPnP Error 711: Illegal seek target")),
+    true
+  );
+  assert.equal(isTransportRefusalError(new Error("UPnP 800")), false);
+  assert.equal(isTransportRefusalError(new Error("timeout")), false);
 });
 
 function mockManager(results) {
@@ -158,7 +172,9 @@ test("getZoneGroups probes the preferred room before Office", async () => {
   assert.equal(officeCalls, 0);
 });
 
-test("a failed topology probe puts that speaker in the shared cool-off", async () => {
+test("a failed topology probe does not ban SetVolume on that speaker", async () => {
+  // Topology SOAP is not "this speaker is dead." Marking Office unreachable
+  // here used to ban SetVolume for 60s, so the DJ never ducked.
   clearZoneCache();
   const m = {
     Devices: [
@@ -180,7 +196,7 @@ test("a failed topology probe puts that speaker in the shared cool-off", async (
   };
 
   await getZoneGroups(m, { fresh: true, preferHost: "", preferRoom: "" });
-  assert.deepEqual(reachabilityInfoForTests().skipped, ["10.10.20.196"]);
+  assert.deepEqual(reachabilityInfoForTests().skipped, []);
 });
 
 test("orderTopologyProbeDevices sinks a speaker inside its cool-off", () => {

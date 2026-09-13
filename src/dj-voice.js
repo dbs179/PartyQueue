@@ -40,8 +40,17 @@ import {
 import { GENRE_BUCKETS, bucketsForArtistSync } from "./genres.js";
 import { moodLabel as eraMoodLabel } from "./moods.js";
 import { getDjVolumeHandoffState } from "./dj-volume-handoff.js";
+import {
+  isDjVolumeHandoffArmed,
+  MAX_HANDOFF_ARMED_MS,
+  setDjVolumeHandoffArmed,
+} from "./dj-volume-handoff-state.js";
 import { bakeAnnounceClip, isBakedAnnounceUri } from "./dj-announce-bake.js";
-import { runAnnounceVolume } from "./dj-announce-volume.js";
+import {
+  inheritAnnounceMusicBaseline,
+  runAnnounceVolume,
+} from "./dj-announce-volume.js";
+import { resolveAnnouncePlayTarget } from "./skip-announce-policy.js";
 import { createStallHold } from "./announce-stall-hold.js";
 import {
   IMMINENT_ANNOUNCE_PAUSE_SEC,
@@ -2669,6 +2678,7 @@ export async function parkRampForShortAnnounce({
     isAnnounceRampParkActive,
     announceRampToken,
     setAnnounceRampParkExpiry,
+    MAX_ANNOUNCE_PARK_MS,
   } = await import("./announce-ramp-park.js");
 
   // One park at a time, and never on top of an announce that is still being
@@ -2682,8 +2692,14 @@ export async function parkRampForShortAnnounce({
     return null;
   }
   const activePhase = getDjVolumeHandoffState()?.phase;
-  if (activePhase && !SETTLED_HANDOFF_PHASES.has(activePhase)) {
-    console.log(`[dj-voice] skip ramp park — handoff busy (${activePhase})`);
+  if (
+    isDjVolumeHandoffArmed() ||
+    (activePhase && !SETTLED_HANDOFF_PHASES.has(activePhase))
+  ) {
+    console.log(
+      `[dj-voice] skip ramp park — announce already armed` +
+        (activePhase ? ` (${activePhase})` : "")
+    );
     return null;
   }
 
@@ -2748,11 +2764,18 @@ export async function parkRampForShortAnnounce({
       resume: sonos.resumeQueuePlayback,
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     },
+    maxHoldMs: MAX_ANNOUNCE_PARK_MS,
+    onDeadline: () =>
+      abortParkedAnnounce(parked, "unbuilt announce waited too long", {
+        endPark: false,
+      }),
   });
   parked.hold = hold;
   hold.start();
   setAnnounceRampParkExpiry(() =>
-    abortParkedAnnounce(parked, "park watchdog expired", { endPark: false })
+    abortParkedAnnounce(parked, "unbuilt announce waited too long", {
+      endPark: false,
+    })
   );
 
   parked.seekNow = shouldSeekRampNow({
@@ -2763,7 +2786,10 @@ export async function parkRampForShortAnnounce({
   });
   if (parked.seekNow) {
     try {
-      await startQueuePlayback(livePos);
+      await startQueuePlayback(livePos, {
+        uri: ramp.publicUrl,
+        durationSec: ramp.durationSec,
+      });
     } catch (err) {
       console.warn("[dj-voice] park seek to ramp failed:", err.message);
     }
@@ -2773,30 +2799,50 @@ export async function parkRampForShortAnnounce({
 }
 
 /**
- * Unwind a park whose shout never landed: restore volume, let the room play
- * again if we were holding it, and drop the orphaned ramp when it is still
- * upcoming. Safe to call twice.
+ * Unwind a park whose shout never landed. Stop the hold (do not resume onto
+ * silence), drop the stall pad, and Play the request it was glued to.
+ * Safe to call twice.
  */
 export async function abortParkedAnnounce(
   parked,
   reason = "announce failed",
   { endPark = true } = {}
 ) {
-  if (!parked) return;
-  const held = !!parked.hold?.held;
+  if (!parked || parked.aborted) return;
+  parked.aborted = true;
+  const onStall = !!parked.hold?.held || !!parked.seekNow;
   try {
-    await parked.hold?.release?.(reason);
+    await parked.hold?.stop?.();
   } catch {
-    /* best-effort resume */
+    /* hold already finished */
   }
-  // If we were paused on the pad, releasing just resumed onto it — leave it to
-  // play out (a few seconds of silence) rather than deleting it live.
-  if (!held && parked.rampUrl) {
+  if (parked.rampUrl) {
     try {
       const { releaseParkedRamp } = await import("./sonos.js");
-      await releaseParkedRamp({ rampUrl: parked.rampUrl });
+      await releaseParkedRamp({
+        rampUrl: parked.rampUrl,
+        force: onStall,
+      });
     } catch (err) {
       console.warn("[dj-voice] parked ramp cleanup failed:", err?.message || err);
+    }
+  }
+  // Only Seek the request when the stall already owns the playhead.
+  // Mid-song abort just strips the unused pad and lets the current track finish.
+  if (onStall && parked.requestUri) {
+    try {
+      const sonos = await import("./sonos.js");
+      const live = await sonos.findUpcomingTrackPosition({
+        uri: parked.requestUri,
+        includeCurrent: true,
+      });
+      if (live) await sonos.play({ trackNumber: live });
+      else await sonos.play();
+    } catch (err) {
+      console.warn(
+        "[dj-voice] could not start the request after aborting the park:",
+        err.message
+      );
     }
   }
   if (endPark) {
@@ -2945,13 +2991,20 @@ async function beginAnnounceVolume({
   rampSec,
   restoreSec,
 } = {}) {
+  setDjVolumeHandoffArmed(true);
   const tiers = volumeBumpTiers();
   const sonos = await import("./sonos.js");
 
-  let musicVolume = sonos.getCachedGroupVolume();
+  // A stacked shout must not capture the still-boosted live level as its
+  // baseline — that ratchets the party louder all night. A finished session
+  // must not pin later shouts to the first volume of the night either.
+  const inherited = inheritAnnounceMusicBaseline();
+  let musicVolume = inherited ?? sonos.getCachedGroupVolume();
   try {
-    musicVolume = Number(await sonos.getGroupVolume());
-    if (!Number.isFinite(musicVolume)) musicVolume = sonos.getCachedGroupVolume();
+    if (inherited == null) {
+      musicVolume = Number(await sonos.getGroupVolume());
+      if (!Number.isFinite(musicVolume)) musicVolume = sonos.getCachedGroupVolume();
+    }
   } catch (err) {
     console.warn(
       `[dj-volume] baseline read failed; using last known ${musicVolume ?? "none"}: ${err?.message || err}`
@@ -2984,7 +3037,8 @@ async function beginAnnounceVolume({
       announceVolume,
       calculateTarget: (baseline) => announceVolumeFromMusic(baseline, tiers),
     },
-    io
+    io,
+    { graceMs: MAX_HANDOFF_ARMED_MS, waitMs: 1000 }
   )
     .then(({ reason }) =>
       console.log(`[dj-volume] announce volume finished (${reason})`)
@@ -3475,19 +3529,52 @@ export async function previewTtsVoice(
 }
 
 async function startQueuePlayback(trackNumber = 1, announce = null) {
-  // SwitchToQueue â†’ SeekTrack(N) â†’ Play. Seek is required after inserting TTS
-  // at the front, otherwise the playhead can stay on the first Spotify track.
   await new Promise((r) => setTimeout(r, 200));
-  const { play, pauseQueueTrim } = await import("./sonos.js");
-  pauseQueueTrim(25000);
-  await play({ trackNumber });
+  const sonos = await import("./sonos.js");
+  sonos.pauseQueueTrim(25000);
+  let n = Number(trackNumber) || 1;
+  if (announce?.uri) {
+    try {
+      const ctx = await sonos.getAnnouncePlaybackContext();
+      const target = resolveAnnouncePlayTarget({
+        items: ctx.items,
+        clipUrl: announce.uri,
+        currentTrack: ctx.track,
+        currentUri: ctx.currentUri,
+        playingFromQueue: ctx.playingFromQueue,
+      });
+      if (!target.found) {
+        console.warn(
+          "[dj-voice] refusing announce Play: baked clip not in the live queue"
+        );
+        return;
+      }
+      if (target.alreadyOnTarget) {
+        await sonos.resumeQueuePlayback();
+        await seedAnnouncePlayback(announce, target.trackNumber || n);
+        return;
+      }
+      n = target.trackNumber;
+    } catch (err) {
+      console.warn(
+        "[dj-voice] live announce locate failed; refusing stored index:",
+        err.message
+      );
+      return;
+    }
+  }
+  await sonos.play({ trackNumber: n });
+  await seedAnnouncePlayback(announce, n);
+}
+
+async function seedAnnouncePlayback(announce, queueTrack) {
   try {
     const http = await import("./now-playing-http.js");
     if (announce?.uri) {
       http.seedAnnounceNowPlaying({
         uri: announce.uri,
         durationSec: announce.durationSec,
-        queueTrack: trackNumber,
+        queueTrack,
       });
     } else {
       http.nudgeNowPlayingTransition();
@@ -4012,8 +4099,8 @@ async function announceOnSonosUnlocked(
     // Only start as a recovery if we never reached Play — avoids DJ-twice.
     if (startPlayback && !didStart && !preempted()) {
       try {
-        // Best-effort recovery Play; prefer position 1 (fresh-set path).
-        await startQueuePlayback(1);
+        const { resumeQueuePlayback } = await import("./sonos.js");
+        await resumeQueuePlayback();
       } catch {
         /* ignore */
       }

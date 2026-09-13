@@ -726,8 +726,17 @@ async function getQueueStatusRaw() {
   const track = Number(pos.Track) || 0;
   const upcoming =
     playingFromQueue && track >= 1 ? Math.max(0, total - track) : total;
+  const meta = typeof pos.TrackMetaData === "object" ? pos.TrackMetaData : null;
 
-  return { isPlaying, playingFromQueue, total, track, upcoming };
+  return {
+    isPlaying,
+    playingFromQueue,
+    total,
+    track,
+    upcoming,
+    currentUri: String(pos.TrackURI || ""),
+    currentTitle: meta?.Title ?? "",
+  };
 }
 
 // Public, coalesced readers. Every client polling within the TTL window shares a
@@ -822,6 +831,7 @@ export async function findUpcomingTrackPosition({
   artist = "",
   uri = null,
   expected = null,
+  includeCurrent = false,
 } = {}) {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
@@ -841,7 +851,9 @@ export async function findUpcomingTrackPosition({
     uri,
     expected,
     currentTrack: track,
+    currentUri: String(pos.TrackURI || ""),
     playingFromQueue,
+    includeCurrent,
   });
 }
 

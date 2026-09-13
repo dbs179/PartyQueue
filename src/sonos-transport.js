@@ -1,5 +1,10 @@
 import { withSonosTransportLane } from "./sonos-lock.js";
-import { getManager, resolveCoordinator } from "./sonos-core.js";
+import {
+  getManager,
+  resolveCoordinator,
+  clearZoneCache,
+  isTransportRefusalError,
+} from "./sonos-core.js";
 import {
   invalidateSonosSnapshots,
   parseSonosTime,
@@ -26,6 +31,7 @@ import {
   findNextMusicTrackNumber,
   formatSonosRelTime,
 } from "./skip-announce-policy.js";
+import { isDjVolumeHandoffArmed } from "./dj-volume-handoff-state.js";
 
 /**
  * If the coordinator is in a Shuffle PlayMode, force ordered playback
@@ -113,6 +119,7 @@ export async function getAnnouncePlaybackContext() {
     remainingSec,
     positionSec,
     durationSec,
+    items,
   };
 }
 
@@ -121,6 +128,19 @@ export async function play(...args) {
 }
 
 async function playUnlocked({ trackNumber } = {}) {
+  try {
+    return await playOnce({ trackNumber });
+  } catch (err) {
+    if (!isTransportRefusalError(err)) throw err;
+    console.warn(
+      `[play] ${err.message}; invalidating topology and retrying once`
+    );
+    clearZoneCache();
+    return playOnce({ trackNumber });
+  }
+}
+
+async function playOnce({ trackNumber } = {}) {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
 
@@ -130,24 +150,35 @@ async function playUnlocked({ trackNumber } = {}) {
   // resuming after pause), skip the switch — re-setting the AVTransport URI
   // resets Sonos to queue track 1, which replayed an earlier song on resume.
   let onQueue = false;
+  let currentTrack = 0;
   try {
-    const media = await coordinator.AVTransportService.GetMediaInfo({
-      InstanceID: 0,
-    });
+    const [media, pos] = await Promise.all([
+      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }),
+      coordinator.AVTransportService.GetPositionInfo().catch(() => ({
+        Track: 0,
+      })),
+    ]);
     onQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
+    currentTrack = Number(pos.Track) || 0;
   } catch {
     /* best-effort — fall back to switching below */
   }
   if (!onQueue) await coordinator.SwitchToQueue();
   await ensureOrderedPlayModeOn(coordinator);
   const n = Number(trackNumber);
-  if (Number.isFinite(n) && n >= 1) {
+  const alreadyOnTarget =
+    onQueue && Number.isFinite(n) && n >= 1 && currentTrack === n;
+  if (Number.isFinite(n) && n >= 1 && !alreadyOnTarget) {
     try {
       await coordinator.SeekTrack(n);
       // Seek often leaves the transport paused/idle until a later Play.
       await new Promise((r) => setTimeout(r, 250));
     } catch (err) {
+      if (isTransportRefusalError(err)) throw err;
       console.error("[play] SeekTrack failed:", err.message);
+      // Playing the leftover row is last night's skip: the DJ clip sits
+      // in the queue while the room stays on Home Team / American Pie.
+      throw err;
     }
   }
   await coordinator.Play();
@@ -160,8 +191,8 @@ async function playUnlocked({ trackNumber } = {}) {
     if (state === "STOPPED" || state === "PAUSED_PLAYBACK") {
       await coordinator.Play();
     }
-  } catch {
-    /* ignore — first Play is best-effort */
+  } catch (err) {
+    if (isTransportRefusalError(err)) throw err;
   }
 
   invalidateSonosSnapshots();
@@ -308,7 +339,10 @@ async function nextUnlocked(opts = {}) {
       // does not. Re-arm before we roll into the ramp so volume still bumps.
       // Use phase (not volumeLocked): a waiting handoff is unlocked until the
       // ramp pad is seen, but must not be superseded here.
-      if (getDjVolumeHandoffState().phase === "idle") {
+      if (
+        getDjVolumeHandoffState().phase === "idle" &&
+        !isDjVolumeHandoffArmed()
+      ) {
         try {
           const { rearmDjVolumeHandoffFromQueue } = await import(
             "./dj-voice.js"

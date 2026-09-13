@@ -13,6 +13,7 @@ import {
   originSnapshot,
   originMetaForOccurrence,
 } from "./queue-origin.js";
+import { isBakedAnnounceUri } from "./dj-announce-bake.js";
 
 // Pure: pick the zone group that matches a target room name (coordinator or any
 // member, case-insensitive). Returns null when no match; callers fall back.
@@ -186,7 +187,17 @@ export function shoutPlaybackHoldDecision({
 // !playingFromQueue, which deleted searched songs during DJ pause/transition
 // windows. Exported for unit testing.
 export function shouldClearQueueForRandomDj(status) {
-  return (Number(status?.total) || 0) === 0;
+  const total = Number(status?.total) || 0;
+  if (total > 0) return false;
+  const uri = String(status?.currentUri || "");
+  const title = String(status?.currentTitle || "");
+  // GetQueue said 0 but the playhead is still on a DJ/pad row — believe the
+  // playhead. Clearing then wipes a live party (ramps + requests).
+  if (isAnnounceQueuePad(uri, title)) return false;
+  // Empty GetQueue + leftover music pointer is a ghost playhead. Stop/clear
+  // is a no-op wipe and resets the pointer so a fresh set is not sitting
+  // behind last night's song (American Pie / Home Team).
+  return true;
 }
 
 /**
@@ -232,7 +243,10 @@ export function randomDjAnnouncePlan({
 }
 
 export function isDjVoiceUri(uri) {
-  return /tts_proxy|\/media\/tts\//i.test(String(uri || ""));
+  return (
+    isBakedAnnounceUri(uri) ||
+    /tts_proxy|\/media\/tts\//i.test(String(uri || ""))
+  );
 }
 
 // Quiet pads around a DJ clip (pre-ramp + post-restore). Still /media/tts
@@ -353,6 +367,17 @@ export function clipUrlMatchesQueueUri(uri, clipUrl) {
   return !!fileName && value.includes(fileName);
 }
 
+/** True when a queue row is the same song or clip as `wantUri`. */
+export function queueItemMatchesWantedUri(item, wantUri) {
+  const itUri = item?.TrackUri ?? item?.uri ?? "";
+  const want = String(wantUri || "").trim();
+  if (!want || !itUri) return false;
+  if (itUri === want) return true;
+  const wantId = spotifyTrackId(want);
+  if (wantId && spotifyTrackId(itUri) === wantId) return true;
+  return clipUrlMatchesQueueUri(itUri, want);
+}
+
 /**
  * Contiguous upcoming announce-pad run that contains `clipUrl` (typically a
  * waiting refill TTS). Skips a block that is already playing so Skip / restore
@@ -401,14 +426,30 @@ export function findUpcomingTrackPositionInItems(
     uri = null,
     expected = null,
     currentTrack = 0,
+    currentUri = "",
     playingFromQueue = false,
     includeCurrent = false,
   } = {}
 ) {
   const list = Array.isArray(items) ? items : [];
   const track = Math.floor(Number(currentTrack) || 0);
-  const start =
-    playingFromQueue && track >= 1 ? (includeCurrent ? track - 1 : track) : 0;
+  const playheadItem =
+    playingFromQueue && track >= 1 && track <= list.length
+      ? list[track - 1]
+      : null;
+  const playheadUri = String(currentUri || "").trim();
+  const playheadMatches =
+    !!playheadItem &&
+    (!playheadUri ||
+      queueItemMatchesWantedUri(playheadItem, playheadUri));
+  // A leftover pointer (American Pie after Clear) can still report an
+  // in-range Track number. Searching "after the playhead" then skips the
+  // new request and the shout lands on filler.
+  const playheadLive = !!playheadItem && (!playheadUri || playheadMatches);
+  let start = 0;
+  if (playheadLive) {
+    start = includeCurrent ? track - 1 : track;
+  }
   const wantUri = String(uri || "").trim();
   const wantId = spotifyTrackId(wantUri);
   const wantExpected = Number(expected);

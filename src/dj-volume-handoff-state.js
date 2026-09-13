@@ -45,3 +45,8 @@ export function setDjVolumeHandoffArmed(armed, now = Date.now) {
   if (!next) volumeHandoffArmedAt = 0;
   volumeHandoffArmed = next;
 }
+
+export const isAnnounceArmed = isDjVolumeHandoffArmed;
+export const setAnnounceArmed = setDjVolumeHandoffArmed;
+export const isAnnounceActive = isDjVolumeHandoffActive;
+export const setAnnounceActive = setDjVolumeHandoffActive;

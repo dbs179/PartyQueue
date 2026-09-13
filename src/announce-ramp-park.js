@@ -9,8 +9,8 @@
 
 import crypto from "node:crypto";
 
-/** A shout that cannot build its clip within this window has already failed. */
-export const MAX_ANNOUNCE_PARK_MS = 45_000;
+/** Wait this long for an unbuilt announce, then skip it and play the request. */
+export const MAX_ANNOUNCE_PARK_MS = 10_000;
 
 let parkCount = 0;
 let parkedRampUrl = null;

@@ -103,6 +103,31 @@ test("the pad is matched by its per-announce token, not just the file name", asy
   assert.deepEqual(calls, []);
 });
 
+test("a hold with a deadline handler skips to the request instead of resuming the pad", async () => {
+  const calls = [];
+  let clock = 0;
+  const io = {
+    now: () => clock,
+    read: async () => ({ uri: PAD, state: "PLAYING" }),
+    pause: async () => calls.push("pause"),
+    resume: async () => calls.push("resume"),
+    sleep: async (ms) => {
+      clock += ms;
+    },
+  };
+  const hold = createStallHold({
+    padUrl: PAD,
+    io,
+    maxHoldMs: 1000,
+    onDeadline: async () => {
+      calls.push("to-request");
+    },
+    logger: quietLogger,
+  });
+  await hold.start();
+  assert.deepEqual(calls, ["pause", "to-request"]);
+});
+
 test("a hold that outlives its deadline resumes the room on its own", async () => {
   // Free-running sleep here on purpose: the point is that the watcher reaches
   // its own deadline without anyone releasing it.

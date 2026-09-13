@@ -199,6 +199,42 @@ test("the insert lands after an announce that supersede chose to protect", async
   assert.equal(result.clipPos, 5, "must not land on top of the protected block");
 });
 
+test("a shout glues to the request even when filler shifted the stored index", async () => {
+  const enqueued = [];
+  const result = await insertAnnounceClip({
+    queuePosition: 1,
+    requestUri: "spotify:track:screamager",
+    preemptGeneration: queueWorkGeneration(),
+    clip: announce(),
+    ops: {
+      ...noopOps,
+      readItems: async () => ({
+        items: [
+          {
+            TrackUri: "x-sonos-spotify:spotify:track:american-pie",
+            Title: "American Pie",
+          },
+          {
+            TrackUri: "x-sonos-spotify:spotify:track:filler",
+            Title: "Filler",
+          },
+          {
+            TrackUri: "x-sonos-spotify:spotify:track:screamager",
+            Title: "Screamager",
+          },
+        ],
+        currentTrack: 1,
+        currentUri: "x-sonos-spotify:spotify:track:american-pie",
+        playingFromQueue: true,
+      }),
+      enqueue: async (_url, opts) => enqueued.push(opts.position),
+    },
+  });
+
+  assert.equal(result.clipPos, 3);
+  assert.deepEqual(enqueued, [3]);
+});
+
 test("the request position is re-resolved under the lock before inserting", async () => {
   const result = await insertAnnounceClip({
     queuePosition: 2,

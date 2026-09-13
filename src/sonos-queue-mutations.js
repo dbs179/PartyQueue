@@ -771,11 +771,17 @@ async function readQueueContext(readItems) {
   if (readItems) {
     const raw = await readItems();
     if (Array.isArray(raw)) {
-      return { items: raw, currentTrack: 0, playingFromQueue: false };
+      return {
+        items: raw,
+        currentTrack: 0,
+        currentUri: "",
+        playingFromQueue: false,
+      };
     }
     return {
       items: Array.isArray(raw?.items) ? raw.items : [],
       currentTrack: Number(raw?.currentTrack) || 0,
+      currentUri: String(raw?.currentUri || ""),
       playingFromQueue: !!raw?.playingFromQueue,
     };
   }
@@ -791,6 +797,7 @@ async function readQueueContext(readItems) {
   return {
     items: Array.isArray(queue.Result) ? queue.Result : [],
     currentTrack: Number(pos.Track) || 0,
+    currentUri: String(pos.TrackURI || ""),
     playingFromQueue: /^x-rincon-queue:/.test(media.CurrentURI || ""),
   };
 }
@@ -826,7 +833,7 @@ async function parkAnnounceRampUnlocked({
   let rampPos = Number(queuePosition) || 1;
   if (requestUri || readItems) {
     try {
-      const { items, currentTrack, playingFromQueue } =
+      const { items, currentTrack, currentUri, playingFromQueue } =
         await readQueueContext(readItems);
       // includeCurrent: the request may already have started playing (the
       // tease we are here to undo), so the ramp goes in at its own slot.
@@ -834,6 +841,7 @@ async function parkAnnounceRampUnlocked({
         uri: requestUri,
         expected: rampPos,
         currentTrack,
+        currentUri,
         playingFromQueue,
         includeCurrent: true,
       });
@@ -847,6 +855,14 @@ async function parkAnnounceRampUnlocked({
   }
 
   await enqueue(ramp.url, clipEnqueueOpts(ramp, rampPos));
+  try {
+    const { setDjVolumeHandoffArmed } = await import(
+      "./dj-volume-handoff-state.js"
+    );
+    setDjVolumeHandoffArmed(true);
+  } catch {
+    /* trim still runs if the flag module is unavailable */
+  }
   beginAnnounceRampPark({
     rampUrl: ramp.url,
     requestUri: requestUri || null,
@@ -930,6 +946,14 @@ async function completeParkedAnnounceUnlocked({
 
   const clipPos = rampPos + 1;
   await enqueue(clip.url, clipEnqueueOpts(clip, clipPos));
+  try {
+    const { setDjVolumeHandoffArmed } = await import(
+      "./dj-volume-handoff-state.js"
+    );
+    setDjVolumeHandoffArmed(true);
+  } catch {
+    /* trim still runs if the flag module is unavailable */
+  }
   endAnnounceRampPark();
   console.log(
     `[dj-voice] completed parked announce stall@${rampPos} announce@${clipPos}`
@@ -938,16 +962,16 @@ async function completeParkedAnnounceUnlocked({
 }
 
 /**
- * Drop a parked ramp that never got its DJ clip. Only removes it when it is
- * still upcoming — if the room is already holding on that silence we leave it
- * to play out (3s) rather than deleting the track under the playhead.
+ * Drop a parked ramp that never got its DJ clip. Upcoming ramps are always
+ * safe to remove. A ramp that is current is left alone unless `force` — the
+ * 10s unbuilt-announce watchdog uses that to jump to the request.
  * @returns {Promise<{ removed: boolean, reason?: string, position?: number }>}
  */
 export async function releaseParkedRamp(opts) {
   return withSonosWriteLock(() => releaseParkedRampUnlocked(opts));
 }
 
-async function releaseParkedRampUnlocked({ rampUrl, ops = {} } = {}) {
+async function releaseParkedRampUnlocked({ rampUrl, force = false, ops = {} } = {}) {
   if (!rampUrl) return { removed: false, reason: "no-ramp-url" };
   const readItems = ops.readItems;
   const removeRange = ops.removeRange;
@@ -960,7 +984,7 @@ async function releaseParkedRampUnlocked({ rampUrl, ops = {} } = {}) {
     });
     if (!pos) return { removed: false, reason: "not-found" };
     const track = Math.floor(Number(currentTrack) || 0);
-    if (playingFromQueue && track >= 1 && pos <= track) {
+    if (!force && playingFromQueue && track >= 1 && pos <= track) {
       return { removed: false, reason: "ramp-is-current", position: pos };
     }
     if (removeRange) {
@@ -1024,20 +1048,30 @@ async function insertAnnounceClipUnlocked({
 
   pauseTrim(25000);
   let clipPos = Number(queuePosition) || 1;
+  const readItems = ops.readItems;
 
-  // Re-resolve the request under this write lock so the announce stays glued to
-  // it if another add shifted positions during script/TTS. Guest songs are
-  // never reordered (lead buffer is a no-op).
+  // Always re-glue by URI / Spotify id. Never-Ending can append filler during
+  // TTS; a stored index then puts the shout in front of the wrong song.
+  // Lead buffer is a separate filler-only reorder and must not gate this.
+  if (requestUri || readItems) {
+    try {
+      const { items, currentTrack, currentUri, playingFromQueue } =
+        await readQueueContext(readItems);
+      const live = findUpcomingTrackPositionInItems(items, {
+        uri: requestUri,
+        expected: clipPos,
+        currentTrack,
+        currentUri,
+        playingFromQueue,
+      });
+      if (live) clipPos = live;
+    } catch (err) {
+      console.warn("[announce-block] request glue read failed:", err.message);
+    }
+  }
+
   if (applyLeadBuffer) {
     try {
-      if (requestUri) {
-        const m = await getManager();
-        const coordinator = await resolveCoordinator(m);
-        const queue = await coordinator.GetQueue().catch(() => ({ Result: [] }));
-        const items = Array.isArray(queue.Result) ? queue.Result : [];
-        const live = resolveQueuePosition(items, requestUri, clipPos);
-        if (live) clipPos = live;
-      }
       const lead = await ensureLeadBuffer(clipPos);
       if (Number.isFinite(lead?.absoluteQueuePosition)) {
         if (lead.absoluteQueuePosition !== clipPos) {
@@ -1089,6 +1123,14 @@ async function insertAnnounceClipUnlocked({
     durationSec: clip.durationSec,
     position: clipPos,
   });
+  try {
+    const { setDjVolumeHandoffArmed } = await import(
+      "./dj-volume-handoff-state.js"
+    );
+    setDjVolumeHandoffArmed(true);
+  } catch {
+    /* trim still runs if the flag module is unavailable */
+  }
 
   if (preempted()) {
     // The announce is in and whole — one row cannot be half-inserted — so there

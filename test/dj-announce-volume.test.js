@@ -1,12 +1,27 @@
-import { test } from "node:test";
+import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
   announceVolumeAt,
+  inheritAnnounceMusicBaseline,
+  lastAnnounceMusicBaseline,
+  resetAnnounceVolumeForTests,
   runAnnounceVolume,
   uriMatchesClip,
   ANNOUNCE_PHASE,
 } from "../src/dj-announce-volume.js";
+import {
+  isDjVolumeHandoffActive,
+  isDjVolumeHandoffArmed,
+  setDjVolumeHandoffActive,
+  setDjVolumeHandoffArmed,
+} from "../src/dj-volume-handoff-state.js";
+
+afterEach(() => {
+  setDjVolumeHandoffArmed(false);
+  setDjVolumeHandoffActive(false);
+  resetAnnounceVolumeForTests();
+});
 
 const CLIP = "http://pq.local:8088/media/tts/dj-announce-abc123.mp3";
 
@@ -252,6 +267,24 @@ test("a failing setVolume during the announce does not crash the driver", async 
   assert.equal(volumes.at(-1), 8, "restore must run even when the boost threw");
 });
 
+test("the volume driver arms trim while it waits and locks while the clip plays", async () => {
+  const { io } = fakeIo([
+    [CLIP, 0],
+    [CLIP, 3],
+    [CLIP, 24],
+  ]);
+  let sawActive = false;
+  const innerRead = io.read;
+  io.read = async () => {
+    if (isDjVolumeHandoffArmed() && isDjVolumeHandoffActive()) sawActive = true;
+    return innerRead();
+  };
+  await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io);
+  assert.equal(sawActive, true);
+  assert.equal(isDjVolumeHandoffActive(), false);
+  assert.equal(isDjVolumeHandoffArmed(), false);
+});
+
 test("a throwing transport read does not abort the volume loop", async () => {
   const volumes = [];
   let i = 0;
@@ -282,4 +315,86 @@ test("a throwing transport read does not abort the volume loop", async () => {
   assert.equal(result.sawClip, true);
   assert.ok(volumes.includes(20));
   assert.equal(volumes.at(-1), 8);
+});
+
+test("a stacked shout inherits the running music baseline, not a finished one", () => {
+  assert.equal(
+    inheritAnnounceMusicBaseline({ running: false, lastBaseline: 8 }),
+    null
+  );
+  assert.equal(
+    inheritAnnounceMusicBaseline({ running: true, lastBaseline: 8 }),
+    8
+  );
+  assert.equal(
+    inheritAnnounceMusicBaseline({ running: true, lastBaseline: null }),
+    null
+  );
+});
+
+test("a newer announce supersedes the previous volume session without restoring", async () => {
+  const CLIP2 = "http://pq.local:8088/media/tts/dj-announce-def456.mp3";
+  const volumesA = [];
+  const volumesB = [];
+  let aStep = 0;
+  let bStep = 0;
+  let releaseB;
+  const bMayStart = new Promise((r) => {
+    releaseB = r;
+  });
+
+  const ioA = {
+    now: (() => {
+      let t = 0;
+      return () => (t += 50);
+    })(),
+    read: async () => {
+      if (aStep === 1) releaseB();
+      return { uri: CLIP, positionSec: Math.min(12, aStep * 3) };
+    },
+    setVolume: async (v) => volumesA.push(v),
+    sleep: async () => {
+      aStep += 1;
+      await new Promise((r) => setTimeout(r, 15));
+    },
+  };
+
+  const ioB = {
+    now: (() => {
+      let t = 0;
+      return () => (t += 150);
+    })(),
+    read: async () => {
+      const steps = [
+        [CLIP2, 0],
+        [CLIP2, 3],
+        [CLIP2, 24],
+      ];
+      const [uri, positionSec] = steps[Math.min(bStep, steps.length - 1)];
+      return { uri, positionSec };
+    },
+    setVolume: async (v) => volumesB.push(v),
+    sleep: async () => {
+      bStep += 1;
+    },
+  };
+
+  const pA = runAnnounceVolume({ clipUrl: CLIP, ...shape }, ioA, {
+    graceMs: 8000,
+    maxMs: 8000,
+  });
+  await bMayStart;
+  const aLenWhenBStarted = volumesA.length;
+  const pB = runAnnounceVolume({ clipUrl: CLIP2, ...shape }, ioB);
+  const [a, b] = await Promise.all([pA, pB]);
+
+  assert.equal(a.reason, "superseded");
+  assert.equal(b.reason, "complete");
+  assert.equal(volumesB.at(-1), 8);
+  assert.equal(lastAnnounceMusicBaseline(), 8);
+  const aAfterB = volumesA.slice(aLenWhenBStarted);
+  assert.ok(
+    !aAfterB.includes(8),
+    "the old session must not restore music volume after it lost the room"
+  );
 });

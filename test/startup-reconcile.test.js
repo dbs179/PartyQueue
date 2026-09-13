@@ -47,6 +47,16 @@ test("shouldStripOrphanAnnouncePads is true for a lone orphan pad", () => {
   assert.equal(shouldStripOrphanAnnouncePads(items, 1, true), true);
 });
 
+test("shouldStripOrphanAnnouncePads is false for a baked announce", () => {
+  const baked = "http://partyqueue/media/tts/dj-announce-0123456789abcdef.mp3";
+  const items = [
+    { TrackUri: SONG_A, Title: "Playing" },
+    { TrackUri: baked, Title: "DJ Holy Roller", Duration: "0:00:24" },
+    { TrackUri: SONG_B, Title: "Next" },
+  ];
+  assert.equal(shouldStripOrphanAnnouncePads(items, 1, true), false);
+});
+
 test("shouldStripOrphanAnnouncePads is false when there are no pads", () => {
   const items = [
     { TrackUri: SONG_A, Title: "Playing" },

@@ -76,10 +76,6 @@ test("a baked announce is recognisable from its URI alone", () => {
 });
 
 test("a baked announce classifies as a DJ row, not as a song or a silence pad", () => {
-  // This is what keeps trim from eating it, keeps it out of the guest queue
-  // list, and makes Skip treat it as an announce. It holds because the clip is
-  // served from /media/tts — so a future move to another path would silently
-  // turn announces into ordinary songs.
   const url = `http://pq.local:8088/media/tts/${bakedAnnounceName({
     leadFile: "x.mp3",
     rampSec: 3,
@@ -90,6 +86,8 @@ test("a baked announce classifies as a DJ row, not as a song or a silence pad", 
   assert.ok(isDjVoiceUri(url), "must count as DJ voice");
   assert.ok(!isDjSilenceUri(url), "must not be mistaken for a bare silence pad");
   assert.ok(!isAnnounceQueuePad("x-sonos-spotify:spotify:track:abc"));
+  // Filename marker, not the /media/tts path — a moved host still counts.
+  assert.ok(isDjVoiceUri(`http://other.local/clips/${url.split("/").pop()}`));
 });
 
 test("baking concatenates ramp, lead and restore in play order", async () => {

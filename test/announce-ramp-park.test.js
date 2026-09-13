@@ -13,6 +13,7 @@ import {
   onAnnounceRampParkEnd,
   resetAnnounceRampParkForTests,
   announceRampToken,
+  MAX_ANNOUNCE_PARK_MS,
 } from "../src/announce-ramp-park.js";
 import { queueWorkGeneration } from "../src/queue-preempt.js";
 
@@ -31,6 +32,10 @@ function media(url) {
     durationSec: 3,
   };
 }
+
+test("an unbuilt announce may only stall the party for ten seconds", () => {
+  assert.equal(MAX_ANNOUNCE_PARK_MS, 10_000);
+});
 
 test("parkAnnounceRamp inserts the ramp before the live request and freezes", async () => {
   const enqueued = [];
@@ -233,6 +238,28 @@ test("releaseParkedRamp removes an orphaned upcoming ramp", async () => {
         playingFromQueue: true,
         items: [
           { TrackUri: "spotify:track:cur" },
+          { TrackUri: RAMP },
+          { TrackUri: "spotify:track:tnt" },
+        ],
+      }),
+      removeRange: async (range) => removed.push(range),
+    },
+  });
+  assert.equal(result.removed, true);
+  assert.deepEqual(removed, [{ StartingIndex: 2, NumberOfTracks: 1 }]);
+});
+
+test("releaseParkedRamp can force-drop a current ramp so the request can play", async () => {
+  const removed = [];
+  const result = await releaseParkedRamp({
+    rampUrl: RAMP,
+    force: true,
+    ops: {
+      readItems: async () => ({
+        currentTrack: 2,
+        playingFromQueue: true,
+        items: [
+          { TrackUri: "spotify:track:prev" },
           { TrackUri: RAMP },
           { TrackUri: "spotify:track:tnt" },
         ],

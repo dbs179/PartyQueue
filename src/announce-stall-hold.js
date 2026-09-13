@@ -29,7 +29,8 @@ export function createStallHold({
   padUrl,
   io,
   pollMs = 200,
-  maxHoldMs = 90_000,
+  maxHoldMs = 10_000,
+  onDeadline = null,
   logger = console,
 }) {
   const now = io.now ?? Date.now;
@@ -78,8 +79,20 @@ export function createStallHold({
     }
     if (!done && held) {
       // Self-heal: never leave the party paused because an announce died.
-      logger.warn?.("[stall] hold exceeded its deadline — resuming the room");
-      await resume("deadline");
+      logger.warn?.("[stall] hold exceeded its deadline — skipping to the request");
+      if (typeof onDeadline === "function") {
+        done = true;
+        try {
+          await onDeadline();
+        } catch (err) {
+          logger.warn?.(
+            `[stall] deadline handler failed; resuming: ${err?.message || err}`
+          );
+          await resume("deadline");
+        }
+      } else {
+        await resume("deadline");
+      }
     }
   }
 

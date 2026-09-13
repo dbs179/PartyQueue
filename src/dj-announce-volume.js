@@ -1,3 +1,9 @@
+import {
+  MAX_HANDOFF_ARMED_MS,
+  setDjVolumeHandoffActive,
+  setDjVolumeHandoffArmed,
+} from "./dj-volume-handoff-state.js";
+
 // Volume control for a single-row baked announce.
 //
 // The old handoff had to chase the playhead across a ramp pad, one or two TTS
@@ -8,6 +14,40 @@
 // With the pads baked into the clip there is nothing to chase. The whole
 // behaviour is a function of how far into the one row we are, so this module
 // issues exactly one kind of command: SetVolume.
+
+let announceVolumeRunning = false;
+let announceVolumeGeneration = 0;
+let lastMusicBaseline = null;
+
+/** True while RelTime volume is polling for a baked announce. */
+export function isAnnounceVolumeRunning() {
+  return announceVolumeRunning;
+}
+
+/** Music level the current (or last) volume session is restoring to. */
+export function lastAnnounceMusicBaseline() {
+  return lastMusicBaseline;
+}
+
+/**
+ * Baseline for a new shout. Only inherit while another session is still
+ * running — otherwise a finished night's first volume becomes every later
+ * shout's floor, even after the host turned the room down.
+ */
+export function inheritAnnounceMusicBaseline({
+  running = announceVolumeRunning,
+  lastBaseline = lastMusicBaseline,
+} = {}) {
+  if (running && lastBaseline != null) return lastBaseline;
+  return null;
+}
+
+/** Test helper — drop session bookkeeping between cases. */
+export function resetAnnounceVolumeForTests() {
+  announceVolumeRunning = false;
+  announceVolumeGeneration = 0;
+  lastMusicBaseline = null;
+}
 
 /** Phases of a baked announce, by position within the clip. */
 export const ANNOUNCE_PHASE = {
@@ -120,8 +160,9 @@ function lerpVolume(from, to, t) {
  */
 export async function runAnnounceVolume(announce, io, opts = {}) {
   const pollMs = opts.pollMs ?? 150;
+  const waitMs = opts.waitMs ?? pollMs;
   const graceMs = opts.graceMs ?? 4000;
-  const maxMs = opts.maxMs ?? 5 * 60_000;
+  const maxMs = opts.maxMs ?? MAX_HANDOFF_ARMED_MS;
   const logger = opts.logger ?? console;
   const now = io.now ?? Date.now;
 
@@ -164,8 +205,21 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
     }
   };
 
+  const generation = ++announceVolumeGeneration;
+  announceVolumeRunning = true;
+  setDjVolumeHandoffArmed(true);
+  const rememberBaseline = (level) => {
+    if (generation === announceVolumeGeneration && level != null) {
+      lastMusicBaseline = level;
+    }
+  };
+  rememberBaseline(musicVolume);
   try {
     while (now() - started < maxMs) {
+      if (generation !== announceVolumeGeneration) {
+        reason = "superseded";
+        break;
+      }
       let uri;
       let positionSec;
       try {
@@ -177,10 +231,12 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
       }
       if (matches(uri)) {
         sawClip = true;
+        setDjVolumeHandoffActive(true);
         if (!(await ensureLevels())) {
           await io.sleep(pollMs);
           continue;
         }
+        rememberBaseline(musicVolume);
         const at = announceVolumeAt({
           positionSec,
           durationSec: announce.durationSec,
@@ -205,12 +261,18 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
         reason = "never-started";
         break;
       }
-      await io.sleep(pollMs);
+      await io.sleep(sawClip ? pollMs : waitMs);
     }
     if (now() - started >= maxMs) reason = "timeout";
   } finally {
-    // Unconditional: a throw anywhere above must not strand the party volume.
-    if (sawClip && musicVolume != null) {
+    const superseded = generation !== announceVolumeGeneration;
+    if (!superseded) {
+      announceVolumeRunning = false;
+      setDjVolumeHandoffActive(false);
+      if (sawClip) setDjVolumeHandoffArmed(false);
+    }
+    // A newer announce owns the room — restoring here would fight its ramp.
+    if (!superseded && sawClip && musicVolume != null) {
       try {
         await io.setVolume(clampVolume(musicVolume), true);
       } catch (err) {
@@ -219,6 +281,7 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
         );
       }
     }
+    if (superseded) reason = "superseded";
   }
   return { reason, sawClip };
 }

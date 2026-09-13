@@ -11,7 +11,6 @@ import { getSonosHost } from "./sonos-config.js";
 import {
   isPlayerSkipped,
   markPlayerReachable,
-  noteSpeakerFailure,
 } from "./sonos-reachability.js";
 import { envTimeoutMs, withTimeout } from "./with-timeout.js";
 
@@ -417,6 +416,17 @@ export async function resolveCoordinator(m, opts = {}) {
 // speaker that isn't the coordinator" (happens when our topology was stale).
 export function isNotCoordinatorError(err) {
   return /\b800\b/.test(err?.message ?? "");
+}
+
+/** Play/Seek refusals when the coordinator changed under us (701/711). */
+export function isTransportRefusalError(err) {
+  const msg = String(err?.message ?? err ?? "");
+  return (
+    /\b701\b/.test(msg) ||
+    /\b711\b/.test(msg) ||
+    /Transition not available/i.test(msg) ||
+    /Illegal seek target/i.test(msg)
+  );
 }
 
 export function clearZoneCache() {

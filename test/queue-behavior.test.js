@@ -246,6 +246,31 @@ test("shouldClearQueueForRandomDj treats missing/invalid total as empty", () => 
   assert.equal(shouldClearQueueForRandomDj({ total: "x" }), true);
 });
 
+test("shouldClearQueueForRandomDj does not clear when GetQueue lied empty", () => {
+  const baked =
+    "http://pq.local:8088/media/tts/dj-announce-0123456789abcdef.mp3";
+  assert.equal(
+    shouldClearQueueForRandomDj({
+      total: 0,
+      currentUri: baked,
+      currentTitle: "DJ Holy Roller",
+      playingFromQueue: true,
+      track: 1,
+    }),
+    false
+  );
+  assert.equal(
+    shouldClearQueueForRandomDj({
+      total: 0,
+      playingFromQueue: true,
+      track: 2,
+      currentUri: "x-sonos-spotify:spotify:track:abc",
+    }),
+    true,
+    "leftover music pointer on an empty GetQueue must Stop so a fresh set is not sitting behind last night's song"
+  );
+});
+
 // randomDjAnnouncePlan: fresh set vs set-announce before appended Random batch.
 
 test("randomDjAnnouncePlan fresh-set when queue was empty and idle", () => {
@@ -492,6 +517,24 @@ test("findInsertPosition walks past DJ ramp/TTS pads to the request block", () =
   assert.equal(pos, 5);
 });
 
+test("findInsertPosition inserts before a baked announce glued to filler", () => {
+  const list = [
+    { TrackUri: "spotify:track:cur", Title: "Cur", Artist: "A" },
+    {
+      TrackUri: "http://10.10.10.10:8088/media/tts/dj-announce-0123456789abcdef.mp3",
+      Title: "DJ Holy Roller",
+      Artist: "PartyQueue",
+    },
+    { TrackUri: "spotify:track:f1", Title: "Filler", Artist: "C" },
+  ];
+  const pos = findInsertPosition(list, {
+    currentTrack: 1,
+    playingFromQueue: true,
+    searchedIds: new Set(),
+  });
+  assert.equal(pos, 2);
+});
+
 test("findInsertPosition inserts before announce pads glued to filler", () => {
   // Pending Random refill: [cur, ramp, DJ, filler] → request before the
   // announce block so the DJ does not intro Random then play the Set Request.
@@ -616,6 +659,47 @@ test("findUpcomingTrackPositionInItems prefers URI over title", () => {
       playingFromQueue: true,
     }),
     3
+  );
+});
+
+test("findUpcomingTrackPositionInItems matches a Sonos-rewritten Spotify URI", () => {
+  const list = [
+    { TrackUri: "x-sonos-spotify:spotify:track:req", Title: "Screamager" },
+    { TrackUri: "x-sonos-spotify:spotify:track:fill", Title: "Filler" },
+  ];
+  assert.equal(
+    findUpcomingTrackPositionInItems(list, {
+      uri: "spotify:track:req",
+      currentTrack: 0,
+    }),
+    1
+  );
+});
+
+test("findUpcomingTrackPositionInItems finds a request behind a leftover playhead", () => {
+  const list = [
+    { TrackUri: "x-sonos-spotify:spotify:track:req", Title: "Screamager" },
+    { TrackUri: "x-sonos-spotify:spotify:track:fill", Title: "Filler" },
+  ];
+  assert.equal(
+    findUpcomingTrackPositionInItems(list, {
+      uri: "spotify:track:req",
+      expected: 1,
+      currentTrack: 2,
+      currentUri: "x-sonos-spotify:spotify:track:american-pie",
+      playingFromQueue: true,
+    }),
+    1,
+    "ghost playhead must not hide the new request at #1"
+  );
+  assert.equal(
+    findUpcomingTrackPositionInItems(list, {
+      uri: "spotify:track:req",
+      currentTrack: 5,
+      playingFromQueue: true,
+    }),
+    1,
+    "Track past GetQueue length is last night's leftover pointer"
   );
 });
 

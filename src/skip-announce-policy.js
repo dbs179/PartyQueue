@@ -1,12 +1,14 @@
 /**
- * Pure Skip policy around DJ announce blocks (ramp → TTS → restore, or
- * ramp → lead TTS → punch TTS → restore when Holy Roller and Sister Static
- * banter in the same set intro).
+ * Pure Skip policy around DJ announce blocks.
  *
- * 1. Music with next item an announce pad → seek near end of the song so the
- *    natural handoff runs (avoids Sonos Next() restarting HTTP TTS).
- * 2. Already on announce pads (or volume-locked on a pad/clip) → jump the
- *    whole block to the next real music track.
+ * Core rule: Skip always goes to the next track. A song skip uses Sonos Next
+ * — if that next row is a built announce, the announce plays. An announce skip
+ * (already on a pad/clip, or volume-locked) jumps to the next real song, never
+ * over a later request.
+ *
+ * An announce that is not built yet is a stall pad. Next onto that pad holds;
+ * Skip while holding goes to the request. The 10s park watchdog is what
+ * skips an unbuilt announce automatically.
  */
 
 import {
@@ -18,6 +20,7 @@ import {
   isRampSilenceUri,
   isRestoreSilenceUri,
 } from "./dj-volume-handoff.js";
+import { isBakedAnnounceUri } from "./dj-announce-bake.js";
 
 /** Seconds before track end when "skip into announce" seeks. */
 export const SEEK_END_LEAD_SEC = 1;
@@ -112,28 +115,16 @@ export function findNextMusicTrackNumber(items, currentTrack1Based) {
 export function decideSkipAnnounceAction(ctx = {}) {
   const currentUri = ctx.currentUri ?? "";
   const currentTitle = ctx.currentTitle ?? "";
-  const nextUri = ctx.nextUri ?? "";
-  const nextTitle = ctx.nextTitle ?? "";
   const onPad = isAnnounceQueuePad(currentUri, currentTitle);
-  // Volume lock means handoff owns the room — never raw-Next through a pad/clip.
+  // Already on the DJ/stall — Skip means the song it introduces, not the
+  // next pad in a leftover 3-row block.
   if (onPad || !!ctx.volumeLocked) {
     return { action: "jumpAnnounce" };
   }
-  if (!isAnnounceQueuePad(nextUri, nextTitle)) {
-    return { action: "normalNext" };
-  }
-
-  const durationSec = Number(ctx.durationSec);
-  const positionSec = Number(ctx.positionSec);
-  if (!Number.isFinite(durationSec) || durationSec <= SEEK_END_LEAD_SEC + 1) {
-    // No usable duration — jump the block instead of Next() onto a pad.
-    return { action: "jumpAnnounce" };
-  }
-
-  const targetSec = Math.max(0, durationSec - SEEK_END_LEAD_SEC);
-  const alreadyNearEnd =
-    Number.isFinite(positionSec) && positionSec >= targetSec - 0.25;
-  return { action: "seekNearEnd", targetSec, alreadyNearEnd };
+  // Song → anything: Next one row. A built announce plays; a stall pad
+  // holds; a request plays. Never seek-near-end (that stays on this song)
+  // and never jump over a waiting announce to its request.
+  return { action: "normalNext" };
 }
 
 /**
@@ -176,10 +167,41 @@ export function findUpcomingAnnounceHandoffPlan(items, currentTrack1Based) {
   let rampPosition = null;
   let silenceSec = 3;
   const firstUri = queueItemUri(list[i]);
+  if (isBakedAnnounceUri(firstUri)) {
+    const ttsPosition = i + 1;
+    return {
+      rampPosition: null,
+      ttsPosition,
+      tts2Position: null,
+      restorePosition: null,
+      musicPosition:
+        findNextMusicTrackNumber(list, ttsPosition) ?? ttsPosition + 1,
+      ttsUri: firstUri,
+      silenceSec,
+      approxDurationSec:
+        queueItemDurationSec(list[i]) || DEFAULT_ANNOUNCE_DURATION_SEC,
+    };
+  }
   if (isRampSilenceUri(firstUri)) {
     rampPosition = i + 1;
     silenceSec = parseSilencePadSec(firstUri) || silenceSec;
     i += 1;
+    if (i < list.length && isBakedAnnounceUri(queueItemUri(list[i]))) {
+      const ttsUri = queueItemUri(list[i]);
+      const ttsPosition = i + 1;
+      return {
+        rampPosition,
+        ttsPosition,
+        tts2Position: null,
+        restorePosition: null,
+        musicPosition:
+          findNextMusicTrackNumber(list, ttsPosition) ?? ttsPosition + 1,
+        ttsUri,
+        silenceSec,
+        approxDurationSec:
+          queueItemDurationSec(list[i]) || DEFAULT_ANNOUNCE_DURATION_SEC,
+      };
+    }
   }
 
   if (i >= list.length) return null;
@@ -264,7 +286,10 @@ export function locateAnnounceBlockByClipUrl(
   const start = playingFromQueue && track >= 1 ? Math.max(0, track - 1) : 0;
   const isWanted = (index) => {
     const uri = queueItemUri(list[index]);
-    return isDjClipUri(uri) && clipUrlMatchesQueueUri(uri, want);
+    return (
+      (isDjClipUri(uri) || isBakedAnnounceUri(uri)) &&
+      clipUrlMatchesQueueUri(uri, want)
+    );
   };
 
   let hit = -1;
@@ -279,9 +304,24 @@ export function locateAnnounceBlockByClipUrl(
   }
   if (hit < 0) return null;
 
+  const hitUri = queueItemUri(list[hit]);
   const ttsPosition = hit + 1;
   const rampPosition =
     hit >= 1 && isRampSilenceUri(queueItemUri(list[hit - 1])) ? hit : null;
+
+  // One baked row is the whole announce. Do not walk the next song — or a
+  // stacked neighbour shout — as a punch/restore pad.
+  if (isBakedAnnounceUri(hitUri)) {
+    return {
+      rampPosition,
+      ttsPosition,
+      tts2Position: null,
+      restorePosition: null,
+      musicPosition: findNextMusicTrackNumber(list, ttsPosition),
+      blockStart: rampPosition ?? ttsPosition,
+      blockEnd: ttsPosition,
+    };
+  }
 
   // Banter: Sister Static's punch clip sits between the lead and the restore.
   let tts2Position = null;
@@ -304,5 +344,87 @@ export function locateAnnounceBlockByClipUrl(
     musicPosition: findNextMusicTrackNumber(list, ttsPosition),
     blockStart: rampPosition ?? ttsPosition,
     blockEnd: restorePosition ?? tts2Position ?? ttsPosition,
+  };
+}
+
+/**
+ * Live Play target for a baked announce or stall pad, by URL only.
+ * If the row is gone, refuse — never fall back to a stored index.
+ *
+ * @param {{
+ *   items?: Array,
+ *   clipUrl?: string,
+ *   currentTrack?: number,
+ *   currentUri?: string,
+ *   playingFromQueue?: boolean,
+ * }} [opts]
+ * @returns {{
+ *   found: boolean,
+ *   alreadyOnTarget: boolean,
+ *   trackNumber: number|null,
+ *   musicPosition: number|null,
+ * }}
+ */
+export function resolveAnnouncePlayTarget({
+  items,
+  clipUrl,
+  currentTrack = 0,
+  currentUri = "",
+  playingFromQueue = false,
+} = {}) {
+  const want = String(clipUrl || "").trim();
+  if (!want) {
+    return {
+      found: false,
+      alreadyOnTarget: false,
+      trackNumber: null,
+      musicPosition: null,
+    };
+  }
+  const list = Array.isArray(items) ? items : [];
+  const track = Math.floor(Number(currentTrack) || 0);
+
+  if (clipUrlMatchesQueueUri(currentUri, want)) {
+    const located = locateAnnounceBlockByClipUrl(list, want, {
+      currentTrack,
+      playingFromQueue,
+    });
+    return {
+      found: true,
+      alreadyOnTarget: true,
+      trackNumber: located?.ttsPosition ?? (track >= 1 ? track : null),
+      musicPosition: located?.musicPosition ?? null,
+    };
+  }
+
+  const located = locateAnnounceBlockByClipUrl(list, want, {
+    currentTrack,
+    playingFromQueue,
+  });
+  if (located) {
+    return {
+      found: true,
+      alreadyOnTarget: false,
+      trackNumber: located.ttsPosition,
+      musicPosition: located.musicPosition,
+    };
+  }
+
+  for (let i = 0; i < list.length; i++) {
+    if (clipUrlMatchesQueueUri(queueItemUri(list[i]), want)) {
+      return {
+        found: true,
+        alreadyOnTarget: false,
+        trackNumber: i + 1,
+        musicPosition: findNextMusicTrackNumber(list, i + 1),
+      };
+    }
+  }
+
+  return {
+    found: false,
+    alreadyOnTarget: false,
+    trackNumber: null,
+    musicPosition: null,
   };
 }
