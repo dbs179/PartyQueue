@@ -126,6 +126,7 @@ import {
   buildSisterStaticPunchlinePrompt,
   BANTER_PUNCHLINE_MAX_WORDS,
 } from "./dj-sister-static.js";
+import { trimTtsTrailingInhale } from "./tts-inhale-trim.js";
 
 export { withTimeout };
 
@@ -3457,6 +3458,23 @@ export async function saveTtsClip(
   fs.writeFileSync(filePath, buf);
 
   let serveLocal = false;
+  try {
+    const inhale = await trimTtsTrailingInhale(filePath, {
+      ffmpegBin: resolveFfmpegBin(),
+    });
+    if (inhale.trimmed) {
+      serveLocal = true;
+      buf = fs.readFileSync(filePath);
+      console.log(
+        `[dj-voice] trimmed trailing ElevenLabs inhale (${inhale.removedSec}s)`
+      );
+    }
+  } catch (err) {
+    console.error(
+      `[dj-voice] inhale trim failed, using original clip:`,
+      err.message
+    );
+  }
   if (speed !== 1) {
     const spedPath = path.join(TTS_DIR, `${id}-sped.mp3`);
     try {
@@ -3488,7 +3506,7 @@ export async function saveTtsClip(
   return {
     fileName,
     filePath,
-    // HA proxy when possible; local URL when we tempo-shifted the file.
+    // HA proxy when possible; local URL after inhale-trim or a tempo shift.
     publicUrl: serveLocal ? localUrl : mediaUrl,
     localUrl,
     // Same-origin path for the browser (Preview button).
