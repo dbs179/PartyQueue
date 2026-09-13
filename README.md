@@ -1,6 +1,6 @@
 # PartyQueue
 
-**Version 11.1.0**
+**Version 12.0.6**
 
 PartyQueue lets everyone at your party help choose the music. Guests open a
 web page on their phones, search Spotify, and add songs to your Sonos queue.
@@ -189,10 +189,12 @@ example `http://YOUR_UNRAID_IP:8080`. PartyQueue uses it for:
 2. **Join** — Share the Join QR or LAN URL. Guests pick a display name, search
    Spotify, and add songs. Quotas (if enabled) show how many requests they have
    left.
-3. **Run the room** — Use play / pause / skip / volume on the main page. Random
-   adds a fresh batch; Never-Ending tops up while music is playing from the
-   queue. Same-artist showcase batches and Most Requested / Most Loved /
-   Most Hated sets are optional in the Booth.
+3. **Run the room** — Use play / pause / skip / volume on the main page. Skip
+   always goes to the next track — if that row is a DJ announce, the announce
+   plays; skip again to jump past it. Clear Queue empties Up Next and Now
+   Playing. Random adds a fresh batch; Never-Ending tops up while music is
+   playing from the queue. Same-artist showcase batches and Most Requested /
+   Most Loved / Most Hated sets are optional in the Booth.
 4. **Extras** — DJ Voice can announce requests and refills. Guests can dedicate
    songs from Up Next. Party Display (`#/display`) is meant for a TV or Fully
    Kiosk Browser. Stats stay on the main toolbar.
@@ -290,6 +292,11 @@ ElevenLabs or OpenAI TTS.
 6. Enable **DJ Voice** (and shout-outs / party summary if you want them) on the
    Booth home page.
 
+Each shout is baked into one Sonos queue row (the spoken clip, with a short
+volume ramp and restore). Guest requests stay ahead of Random filler. Now
+Playing shows the DJ as soon as the clip starts, then the song — including
+the album year. A leftover last-song title after Clear or Stop is ignored.
+
 During an announcement, PartyQueue temporarily adjusts the volume and then
 returns every speaker to its exact previous level before music continues.
 
@@ -369,6 +376,13 @@ code from `data/host-bootstrap-code.json`.
 
 Update PartyQueue and rebuild the Docker image. Current versions only refill
 while music is actively playing from the queue.
+
+### Now Playing still shows a song after Clear
+
+Update PartyQueue and rebuild the Docker image. Skip can paint the next song
+before Sonos catches up; Clear now drops that guess immediately. An idle empty
+queue also hides leftover Sonos metadata so the last title does not stay on
+screen with nothing playing.
 
 ### Host not allowed / Origin required
 

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   mediaIdentity,
+  nowPlayingTransportActive,
   parseSyncedLyrics,
   playbackIdentity,
   queueTrackAsNowPlaying,
@@ -155,4 +156,60 @@ test("resolveNowPlayingDisplay prefers optimistic next until transport catches u
   assert.equal(caughtUp.mode, "confirmed");
   assert.equal(caughtUp.display.title, "Next");
   assert.equal(caughtUp.display.updating, false);
+});
+
+test("nowPlayingTransportActive treats playing and transitioning as live", () => {
+  assert.equal(nowPlayingTransportActive({ isPlaying: true }), true);
+  assert.equal(nowPlayingTransportActive({ state: "TRANSITIONING" }), true);
+  assert.equal(
+    nowPlayingTransportActive({ isPlaying: false, state: "STOPPED" }),
+    false
+  );
+});
+
+test("resolveNowPlayingDisplay drops skip optimism when transport is idle", () => {
+  const confirmed = {
+    title: "Old",
+    artist: "A",
+    albumArt: "/old.jpg",
+    uri: "spotify:track:old",
+    durationSec: 180,
+  };
+  const optimistic = queueTrackAsNowPlaying({
+    title: "Left Behind",
+    artist: "The Plot In You",
+    albumArt: "/next.jpg",
+    uri: "spotify:track:left",
+    position: 2,
+  });
+  const cleared = resolveNowPlayingDisplay({
+    transport: {
+      ...confirmed,
+      metadataPending: false,
+      isPlaying: false,
+      queuePlaying: false,
+      state: "STOPPED",
+    },
+    lastConfirmed: confirmed,
+    optimistic,
+  });
+  assert.equal(cleared.mode, "confirmed");
+  assert.equal(cleared.display.title, "Old");
+  assert.equal(cleared.display.optimistic, undefined);
+
+  const idleEmpty = resolveNowPlayingDisplay({
+    transport: {
+      isPlaying: false,
+      queuePlaying: false,
+      state: "STOPPED",
+      title: null,
+      artist: null,
+      uri: null,
+      metadataPending: false,
+    },
+    lastConfirmed: confirmed,
+    optimistic,
+  });
+  assert.equal(idleEmpty.mode, "confirmed");
+  assert.equal(idleEmpty.display.title, null);
 });

@@ -163,6 +163,25 @@ export function isTransportPlaying(state) {
 }
 
 /**
+ * After Clear / last-track Stop, Sonos often keeps the last song's DIDL on an
+ * empty x-rincon-queue URI (NrTracks=0). That leftover must not stay on Now
+ * Playing while the room is idle.
+ */
+export function shouldHideGhostNowPlaying({
+  playingFromQueue = false,
+  state = "",
+  nrTracks = null,
+  currentUri = "",
+} = {}) {
+  const n = Number(nrTracks);
+  if (!Number.isFinite(n) || n > 0) return false;
+  if (isTransportPlaying(state)) return false;
+  if (playingFromQueue) return true;
+  // Wipe sometimes clears CurrentURI but leaves TrackMetaData on the last song.
+  return !String(currentUri || "").trim();
+}
+
+/**
  * Empty-queue DJ hold / Play-from-shout is only safe when nothing is playing.
  * Set Request and mid-party adds must never Pause a song in progress.
  */

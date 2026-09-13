@@ -1,3 +1,13 @@
+/** Playing or mid-skip — idle STOPPED leftovers must not hold a skip guess. */
+export function nowPlayingTransportActive(snapshot) {
+  const state = String(snapshot?.state || "");
+  return (
+    snapshot?.isPlaying === true ||
+    state === "PLAYING" ||
+    state === "TRANSITIONING"
+  );
+}
+
 export function mediaIdentity(np) {
   if (!np) return "";
   const uri = String(np.uri || "").trim();
@@ -145,7 +155,12 @@ export function resolveNowPlayingDisplay({
       !transportMedia ||
       (!!confirmedMedia && transportMedia === confirmedMedia);
 
-    if (transportStillPrior) {
+    if (
+      transportStillPrior &&
+      (!transport ||
+        !!transport.metadataPending ||
+        nowPlayingTransportActive(transport))
+    ) {
       return {
         display: {
           ...optimistic,

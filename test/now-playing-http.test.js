@@ -260,6 +260,22 @@ test("HTTP nowplaying route uses transition-aware reader for SSE parity", () => 
   );
 });
 
+test("Clear Queue immediately drops skip optimism and paints idle Now Playing", () => {
+  const src = fs.readFileSync(
+    path.join(here, "..", "public", "js", "app.js"),
+    "utf8"
+  );
+  assert.match(src, /function resetNowPlayingToIdle\(/);
+  assert.match(
+    src,
+    /showToast\("Queue cleared"\);\s*resetNowPlayingToIdle\(\);\s*refreshSonos\(\)/
+  );
+  assert.match(
+    src,
+    /if \(optimisticNp && !nowPlayingTransportActive\(transport\)\) \{\s*optimisticNp = null;/
+  );
+});
+
 test("transport convergence uses the snapshot captured before the Sonos command", () => {
   const src = fs.readFileSync(
     path.join(here, "..", "src", "routes", "transport.js"),

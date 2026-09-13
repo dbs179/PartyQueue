@@ -13,6 +13,7 @@ export {
   isShufflePlayMode,
   orderedPlayMode,
   shouldClearQueueForRandomDj,
+  shouldHideGhostNowPlaying,
   randomDjAnnouncePlan,
   findInsertPosition,
   findUpcomingAnnouncePadIndices,

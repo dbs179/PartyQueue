@@ -5,6 +5,7 @@ import {
   playbackIdentity,
   queueTrackAsNowPlaying,
   resolveNowPlayingDisplay,
+  nowPlayingTransportActive,
 } from "./now-playing-utils.js";
 import { showToast } from "./toast.js";
 import { wirePanelCollapse } from "./panel-collapse.js";
@@ -2873,6 +2874,7 @@ clearBtn.addEventListener("click", async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Could not clear the queue.");
     showToast("Queue cleared");
+    resetNowPlayingToIdle();
     refreshSonos();
   } catch (err) {
     showToast(err.message, true);
@@ -3126,6 +3128,21 @@ function beginOptimisticSkipFromQueue() {
   return true;
 }
 
+function resetNowPlayingToIdle() {
+  optimisticNp = null;
+  lastConfirmedNp = null;
+  renderNowPlaying({
+    isPlaying: false,
+    queuePlaying: false,
+    state: "STOPPED",
+    title: null,
+    artist: null,
+    album: null,
+    albumArt: null,
+    uri: null,
+  });
+}
+
 function adoptTransportConfirmation(transport) {
   if (!transport) return;
   if (transport.metadataPending) return;
@@ -3134,6 +3151,11 @@ function adoptTransportConfirmation(transport) {
     lastConfirmedNp = null;
     optimisticNp = null;
     return;
+  }
+  // Skip then Clear (or last-track Stop): do not keep the next-song guess
+  // just because Sonos still names the song we skipped away from.
+  if (optimisticNp && !nowPlayingTransportActive(transport)) {
+    optimisticNp = null;
   }
 
   if (optimisticNp) {

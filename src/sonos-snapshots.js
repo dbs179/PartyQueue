@@ -23,6 +23,7 @@ import {
   queueTrackFromPlaylist,
   visibleUpcomingQueueItems,
   upcomingGenreHintFromQueueItems,
+  shouldHideGhostNowPlaying,
 } from "./sonos-queue-policy.js";
 import { spotifyTrackId } from "./sampler.js";
 import { recordPlayed } from "./play-history.js";
@@ -648,6 +649,40 @@ async function readSonosNowPlayingSnapshot() {
     })(),
   };
 
+  // Clear / last-track Stop leaves DIDL on an empty queue URI. Guests would
+  // see "Left Behind" (or last night's song) with nothing actually playing.
+  if (
+    shouldHideGhostNowPlaying({
+      playingFromQueue,
+      state,
+      nrTracks: media.NrTracks,
+      currentUri: media.CurrentURI,
+    })
+  ) {
+    Object.assign(soapSnapshot, {
+      title: null,
+      artist: null,
+      album: null,
+      uri: null,
+      albumArt: null,
+      queueTrack: 0,
+      durationSec: null,
+      positionSec: 0,
+      djVoice: false,
+      djSilence: false,
+      origin: null,
+      searched: false,
+      discovered: false,
+      moodPick: false,
+      mood: null,
+      genreLane: null,
+      reactionSet: null,
+      requestedBy: null,
+      requestedByUser: null,
+      dedication: null,
+    });
+  }
+
   // Stale last-song SOAP still loses to the hold. A song past the announce
   // row wins — otherwise a 47s baked clip keeps Holy Roller on screen
   // after Thunderstruck has already started.
@@ -657,14 +692,19 @@ async function readSonosNowPlayingSnapshot() {
   if (announceHoldIsLive()) dropAnnounceHold();
 
   // Warm lyrics for the current track in the shared server cache (overlay-ready).
-  if (hasTrack && !djClip && !silenceBridge && title && artist) {
+  if (
+    soapSnapshot.title &&
+    soapSnapshot.artist &&
+    !soapSnapshot.djVoice &&
+    !soapSnapshot.djSilence
+  ) {
     scheduleLyricsWarm(
       {
-        title,
-        artist,
-        album: album || "",
-        duration: durationSec,
-        uri,
+        title: soapSnapshot.title,
+        artist: soapSnapshot.artist,
+        album: soapSnapshot.album || "",
+        duration: soapSnapshot.durationSec,
+        uri: soapSnapshot.uri,
       },
       "current"
     );

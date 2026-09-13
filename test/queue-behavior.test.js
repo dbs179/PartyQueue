@@ -15,6 +15,7 @@ import {
   clipUrlMatchesQueueUri,
   findUpcomingTrackPositionInItems,
   shouldClearQueueForRandomDj,
+  shouldHideGhostNowPlaying,
   randomDjAnnouncePlan,
   songMatchKey,
 } from "../src/sonos.js";
@@ -268,6 +269,56 @@ test("shouldClearQueueForRandomDj does not clear when GetQueue lied empty", () =
     }),
     true,
     "leftover music pointer on an empty GetQueue must Stop so a fresh set is not sitting behind last night's song"
+  );
+});
+
+test("shouldHideGhostNowPlaying hides leftover DIDL on an empty idle queue", () => {
+  assert.equal(
+    shouldHideGhostNowPlaying({
+      playingFromQueue: true,
+      state: "STOPPED",
+      nrTracks: 0,
+      currentUri: "x-rincon-queue:RINCON_ABC#0",
+    }),
+    true
+  );
+  assert.equal(
+    shouldHideGhostNowPlaying({
+      playingFromQueue: false,
+      state: "STOPPED",
+      nrTracks: 0,
+      currentUri: "",
+    }),
+    true
+  );
+  assert.equal(
+    shouldHideGhostNowPlaying({
+      playingFromQueue: true,
+      state: "PLAYING",
+      nrTracks: 0,
+      currentUri: "x-rincon-queue:RINCON_ABC#0",
+    }),
+    false,
+    "never hide a live playhead — GetMediaInfo can lag behind GetPositionInfo"
+  );
+  assert.equal(
+    shouldHideGhostNowPlaying({
+      playingFromQueue: false,
+      state: "PAUSED_PLAYBACK",
+      nrTracks: 1,
+      currentUri: "x-sonosapi-stream:s123",
+    }),
+    false,
+    "radio / line-in keep their station metadata"
+  );
+  assert.equal(
+    shouldHideGhostNowPlaying({
+      playingFromQueue: true,
+      state: "STOPPED",
+      nrTracks: 4,
+      currentUri: "x-rincon-queue:RINCON_ABC#0",
+    }),
+    false
   );
 });
 
