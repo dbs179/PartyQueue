@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   announceHoldIsLive,
+  announceHoldShouldYieldTo,
   announceNowPlayingHoldForTests,
   getNowPlaying,
   holdAnnounceNowPlaying,
@@ -60,6 +61,58 @@ test("Play-style invalidation keeps a live announce on screen", async () => {
   const np = await getNowPlaying();
   assert.equal(np.djVoice, true);
   assert.equal(np.uri, CLIP);
+});
+
+test("hold yields once Sonos is past the announce row on a song", () => {
+  holdAnnounceNowPlaying({ uri: CLIP, durationSec: 47, queueTrack: 2 });
+  assert.equal(
+    announceHoldShouldYieldTo({
+      uri: "x-sonos-spotify:spotify:track:thunderstruck",
+      queueTrack: 3,
+      title: "Thunderstruck",
+      artist: "AC/DC",
+    }),
+    true,
+    "Thunderstruck past the DJ row must knock the hold down"
+  );
+});
+
+test("hold keeps the DJ when SOAP is still the previous song", () => {
+  holdAnnounceNowPlaying({ uri: CLIP, durationSec: 47, queueTrack: 2 });
+  assert.equal(
+    announceHoldShouldYieldTo({
+      uri: "x-sonos-spotify:spotify:track:previous",
+      queueTrack: 1,
+      title: "Home Team",
+      artist: "Whoever",
+    }),
+    false
+  );
+});
+
+test("hold keeps the DJ when SOAP is still on the announce index", () => {
+  holdAnnounceNowPlaying({ uri: CLIP, durationSec: 47, queueTrack: 2 });
+  assert.equal(
+    announceHoldShouldYieldTo({
+      uri: "x-sonos-spotify:spotify:track:previous",
+      queueTrack: 2,
+      title: "Home Team",
+    }),
+    false,
+    "stale last-song metadata at the announce index must not win"
+  );
+});
+
+test("hold keeps the DJ when SOAP is the announce URI", () => {
+  holdAnnounceNowPlaying({ uri: CLIP, durationSec: 47, queueTrack: 2 });
+  assert.equal(
+    announceHoldShouldYieldTo({
+      uri: CLIP,
+      queueTrack: 2,
+      djVoice: true,
+    }),
+    false
+  );
 });
 
 test("volume snapshot busts keep the announce hold", async () => {

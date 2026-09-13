@@ -58,6 +58,7 @@ export {
   resetAnnounceNowPlayingHoldForTests,
   announceNowPlayingHoldForTests,
   announceHoldIsLive,
+  announceHoldShouldYieldTo,
   shouldPreserveAnnounceHoldOnPlay,
   getQueueList,
   listGroups,

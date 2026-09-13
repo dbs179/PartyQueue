@@ -6,6 +6,7 @@ import {
 } from "./sonos-cache.js";
 import {
   getManager,
+  hasReadySonosManager,
   resolveCoordinator,
   getZoneGroups,
   deviceForMember,
@@ -16,6 +17,7 @@ import {
   isDjVoiceUri,
   isDjSilenceUri,
   isDjSilenceTrack,
+  clipUrlMatchesQueueUri,
   findUpcomingTrackPositionInItems,
   queueTrackGenreFields,
   queueTrackFromPlaylist,
@@ -102,6 +104,43 @@ export function shouldPreserveAnnounceHoldOnPlay(trackNumber) {
 
 function liveAnnounceSnapshot() {
   return announceHoldIsLive() ? snapshotFromAnnounceHold() : null;
+}
+
+/**
+ * Drop the DJ hold once Sonos is actually on the next song. The hold exists
+ * so a stale last-song SOAP cannot win during Seek/Play — not so Now Playing
+ * stays on Holy Roller for the whole baked duration after Thunderstruck starts.
+ *
+ * Yield when the live queue index is past the announce row and the URI is
+ * music. Keep the hold when SOAP is still the previous song, still the
+ * announce, or still on the announce index with leftover metadata.
+ */
+export function announceHoldShouldYieldTo(live) {
+  if (!announceHoldIsLive()) return true;
+  if (!live) return false;
+  const hold = announceNowPlayingHold;
+  const liveUri = String(live.uri || "");
+  if (clipUrlMatchesQueueUri(liveUri, hold.uri)) return false;
+  if (
+    live.djVoice ||
+    live.djSilence ||
+    isDjVoiceUri(liveUri) ||
+    isDjSilenceTrack(liveUri, live.title)
+  ) {
+    return false;
+  }
+  const heldTrack = Number(hold.queueTrack) || 0;
+  const liveTrack = Number(live.queueTrack) || 0;
+  if (heldTrack >= 1 && liveTrack >= 1) {
+    return liveTrack > heldTrack;
+  }
+  const elapsed = (Date.now() - hold.startedAt) / 1000;
+  return elapsed >= hold.durationSec && !!(live.title || live.artist);
+}
+
+function dropAnnounceHold() {
+  announceNowPlayingHold = null;
+  getNowPlaying.bust();
 }
 
 export function buildDjNowPlayingSnapshot({
@@ -387,9 +426,23 @@ function scheduleLyricsWarm(q, slot) {
 }
 
 async function getNowPlayingRaw() {
-  const held = liveAnnounceSnapshot();
-  if (held) return held;
+  // Unit tests (and a brand-new process) have no manager yet. Serve the
+  // seeded DJ without kicking off discovery. Live parties already have a
+  // manager from the song that just finished, so we still read Sonos.
+  if (liveAnnounceSnapshot() && !hasReadySonosManager()) {
+    return liveAnnounceSnapshot();
+  }
 
+  try {
+    return await readSonosNowPlayingSnapshot();
+  } catch (err) {
+    const held = liveAnnounceSnapshot();
+    if (held) return held;
+    throw err;
+  }
+}
+
+async function readSonosNowPlayingSnapshot() {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
 
@@ -524,26 +577,7 @@ async function getNowPlayingRaw() {
   const positionSec = livePositionSec;
   const durationSec = parseSonosTime(pos.TrackDuration);
 
-  // A hold that landed while this SOAP was in flight must still win —
-  // otherwise the last song stays on screen until the next poll.
-  const wonHold = liveAnnounceSnapshot();
-  if (wonHold) return wonHold;
-
-  // Warm lyrics for the current track in the shared server cache (overlay-ready).
-  if (hasTrack && !djClip && !silenceBridge && title && artist) {
-    scheduleLyricsWarm(
-      {
-        title,
-        artist,
-        album: album || "",
-        duration: durationSec,
-        uri,
-      },
-      "current"
-    );
-  }
-
-  return {
+  const soapSnapshot = {
     isPlaying: state === "PLAYING",
     queuePlaying: state === "PLAYING" && playingFromQueue,
     queueTrack: Number(pos.Track) || 0,
@@ -613,6 +647,30 @@ async function getNowPlayingRaw() {
       };
     })(),
   };
+
+  // Stale last-song SOAP still loses to the hold. A song past the announce
+  // row wins — otherwise a 47s baked clip keeps Holy Roller on screen
+  // after Thunderstruck has already started.
+  if (!announceHoldShouldYieldTo(soapSnapshot)) {
+    return liveAnnounceSnapshot() || soapSnapshot;
+  }
+  if (announceHoldIsLive()) dropAnnounceHold();
+
+  // Warm lyrics for the current track in the shared server cache (overlay-ready).
+  if (hasTrack && !djClip && !silenceBridge && title && artist) {
+    scheduleLyricsWarm(
+      {
+        title,
+        artist,
+        album: album || "",
+        duration: durationSec,
+        uri,
+      },
+      "current"
+    );
+  }
+
+  return soapSnapshot;
 }
 
 /** Parse Sonos AVTransport time strings ("0:03:45", "00:03:45.123") to seconds. */

@@ -826,6 +826,45 @@ it("picks the on-time Maps mix over a Deluxe search hit that starts 30s late", (
   );
 });
 
+it("prefers a uniquely timed live LRC over a cloned 0:21 karaoke file", () => {
+  const cloneAt21 = (album) => ({
+    trackName: "Turn The Page (Live)",
+    artistName: "Bob Seger",
+    albumName: album,
+    duration: 303,
+    syncedLyrics:
+      "[00:21.52]On a long and lonesome highway\n[04:45.94]Oh, tonight",
+    plainLyrics: "On a long and lonesome highway",
+  });
+  const greatestHits = {
+    trackName: "Turn The Page - Live",
+    artistName: "Bob Seger",
+    albumName: "Greatest Hits",
+    duration: 303,
+    syncedLyrics:
+      "[00:11.37]On a long and lonesome highway\n[04:38.25]Oh, tonight",
+    plainLyrics: "On a long and lonesome highway",
+  };
+  const results = [
+    cloneAt21("Ultimate Hits (1)"),
+    cloneAt21("'Live' Bullet {live}"),
+    cloneAt21("Ultimate Hits: Rock And Roll Never Forgets"),
+    cloneAt21("Greatest Hits (Deluxe)"),
+    cloneAt21("Boston Music Hall Live 1977"),
+    greatestHits,
+  ];
+  const title = "Turn The Page - Live";
+  assert.equal(
+    pickBestSearchHit(results, 302, "", title),
+    greatestHits,
+    "cloned 0:21 majority must lose to the uniquely timed live file"
+  );
+  assert.equal(
+    pickBestSearchHit(results, 302, "Greatest Hits", title),
+    greatestHits
+  );
+});
+
 it("prefers duration-matched plain Folsom lyrics over a 170s studio karaoke file", () => {
   const studioSynced = {
     trackName: "Folsom Prison Blues",

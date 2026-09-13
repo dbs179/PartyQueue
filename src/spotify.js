@@ -1045,6 +1045,7 @@ export async function getTracksByIds(ids) {
       const info = {
         title: t.name ?? "",
         artist: t.artists?.map((a) => a.name).join(", ") ?? "",
+        album: t.album?.name ?? "",
         image: pickImage(t.album?.images),
       };
       setTrackInfoCache(t.id, info);

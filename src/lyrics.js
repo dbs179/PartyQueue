@@ -14,6 +14,8 @@ import {
   artistCreditVariants,
   titleLookupVariants,
 } from "./lyrics-variants.js";
+import { spotifyTrackId } from "./sampler.js";
+import { getTracksByIds } from "./spotify.js";
 
 const LRCLIB_BASE = "https://lrclib.net";
 const FOUND_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -21,7 +23,7 @@ const MISS_CACHE_TTL_MS = 30 * 60 * 1000;
 /** Duration-blind picks stay sticky for one URI — keep them brief. */
 const PROVISIONAL_CACHE_TTL_MS = 20_000;
 const CACHE_MAX = 200;
-const CACHE_VERSION = "l2";
+const CACHE_VERSION = "l3";
 /** Synced LRC farther than this from the playing length is the wrong mix. */
 const SYNC_DURATION_SLACK_SEC = 6;
 const LOOKUP_BUDGET_MS = 10_000;
@@ -314,6 +316,52 @@ function albumMatchScore(hitAlbum, queryAlbum) {
   return 0;
 }
 
+function hasLiveMarker(value) {
+  return /\blive\b/i.test(String(value || ""));
+}
+
+/** Query says Live — prefer hits that still say Live, dock studio rows. */
+function liveTitleScore(hitTitle, queryTitle) {
+  if (!hasLiveMarker(queryTitle)) return 0;
+  return hasLiveMarker(hitTitle) ? 12 : -8;
+}
+
+/**
+ * Same first/last timestamps pasted onto many albums (Seger Turn the Page
+ * live: vocals at 0:21 on Ultimate Hits, Greatest Hits Deluxe, Boston 1977…).
+ * Consensus then treats the clone as truth and karaoke runs ~10s late.
+ */
+function spanClonePenalty(record, pool) {
+  const span = record?.syncedLyrics ? lrcTimestampSpan(record.syncedLyrics) : null;
+  if (!span) return 0;
+  let hits = 0;
+  const albums = new Set();
+  for (const other of pool) {
+    const otherSpan = other?.syncedLyrics
+      ? lrcTimestampSpan(other.syncedLyrics)
+      : null;
+    if (!otherSpan) continue;
+    if (Math.abs(otherSpan.first - span.first) > 0.5) continue;
+    if (Math.abs(otherSpan.last - span.last) > 0.5) continue;
+    hits += 1;
+    const album = foldedText(other.albumName);
+    if (album) albums.add(album);
+  }
+  if (hits >= 4 || albums.size >= 3) return 45;
+  return 0;
+}
+
+async function albumFromSpotifyUri(uri) {
+  const id = spotifyTrackId(uri);
+  if (!id) return "";
+  try {
+    const map = await getTracksByIds([id]);
+    return String(map.get(id)?.album || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 function medianNumber(values) {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -389,7 +437,7 @@ export function fitLyricsToDuration(result, duration) {
   };
 }
 
-export function pickBestSearchHit(results, duration, album) {
+export function pickBestSearchHit(results, duration, album, title) {
   if (!Array.isArray(results) || !results.length) return null;
   const pool = results.filter(
     (r) => r && (r.plainLyrics || r.syncedLyrics || r.instrumental)
@@ -427,6 +475,7 @@ export function pickBestSearchHit(results, duration, album) {
       score += Math.max(0, 40 - delta * 4);
     }
     score += albumMatchScore(r.albumName, album);
+    score += liveTitleScore(r.trackName, title);
     // Community LRCs for the "same" song often belong to another mix.
     // Prefer timestamps that fit the playing length over a closer duration
     // label with lines that run past the end (karaoke looks "way off").
@@ -444,6 +493,7 @@ export function pickBestSearchHit(results, duration, album) {
       if (drift <= 4) score += 20;
       else if (drift > 12) score -= 50;
     }
+    score -= spanClonePenalty(r, pool);
     if (score > bestScore) {
       bestScore = score;
       best = r;
@@ -494,7 +544,7 @@ async function lookupLrclib(query, deadline) {
     try {
       const results = await lrclibFetch(`/api/search?${searchParams}`, deadline);
       sawSuccess = true;
-      const hit = pickBestSearchHit(results, duration, album);
+      const hit = pickBestSearchHit(results, duration, album, title);
       if (isRicherLrclibHit(hit, record)) {
         record = hit;
       }
@@ -526,7 +576,7 @@ async function lookupLrclib(query, deadline) {
       const exact = await lrclibFetch(`/api/get?${params}`, deadline);
       sawSuccess = true;
       record =
-        pickBestSearchHit([record, exact].filter(Boolean), duration, album) ||
+        pickBestSearchHit([record, exact].filter(Boolean), duration, album, title) ||
         record;
     } catch (err) {
       sawError = true;
@@ -582,9 +632,12 @@ export async function lookupLyrics(q = {}) {
   if (!title || !artist) {
     return { found: false, error: "Missing title or artist." };
   }
-  const album = String(q.album || "").trim();
+  let album = String(q.album || "").trim();
   const duration = playingDuration(q.duration);
   const uri = String(q.uri || "").trim();
+  if (!album && uri) {
+    album = await albumFromSpotifyUri(uri);
+  }
   const query = { title, artist, album, duration, uri };
 
   const key = cacheKey(query);

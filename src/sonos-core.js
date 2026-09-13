@@ -137,6 +137,11 @@ export function resolveRegion() {
     : SPOTIFY_REGION_US;
 }
 
+/** True when a household manager is already connected (no discovery). */
+export function hasReadySonosManager() {
+  return !!manager;
+}
+
 export async function getManager() {
   if (manager) return manager;
   // Guard against concurrent requests triggering multiple discoveries.
