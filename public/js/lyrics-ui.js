@@ -5,7 +5,7 @@ import {
   serverPlaybackPosition,
   playbackIdentity,
 } from "./now-playing-utils.js";
-import { escapeHtml, formatTrackTime } from "./format.js";
+import { escapeHtml, formatTrackTime, nowPlayingTitleWithYear } from "./format.js";
 import { prefersReducedMotion } from "./modal.js";
 
 export const LYRICS_LEAD_SEC = 0.75;
@@ -574,7 +574,7 @@ export function createLyricsUi(els, deps) {
   function fillNpOverlayMeta(np) {
     if (!npFsTitle) return;
     const hasTrack = np && (np.title || np.artist);
-    npFsTitle.textContent = hasTrack ? np.title || "" : "";
+    npFsTitle.textContent = hasTrack ? nowPlayingTitleWithYear(np) : "";
     if (npFsArtist) npFsArtist.textContent = hasTrack ? np.artist || "" : "";
     if (npFsAlbum) npFsAlbum.textContent = hasTrack ? np.album || "" : "";
     bindArtwork(npFsArt, np);

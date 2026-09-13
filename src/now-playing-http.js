@@ -7,6 +7,7 @@ import { getReactions } from "./reactions.js";
 import { noteReactionPlayTrack } from "./reaction-play.js";
 import { originSnapshot } from "./queue-origin.js";
 import { spotifyTrackId } from "./sampler.js";
+import { getTracksByIds } from "./spotify.js";
 import {
   createNowPlayingTransitionTracker,
   TRANSITION_CONFIRM_MS,
@@ -203,13 +204,31 @@ export async function enrichNowPlaying(np) {
   const playId = trackId
     ? noteReactionPlayTrack(trackId, Date.now(), np?.positionSec)
     : "";
+  const year = await nowPlayingReleaseYear(np, trackId);
   return {
     ...publicNp,
     mixGenreLane,
     mixGenreLabel,
+    year,
     reactionPlayId: playId || undefined,
     reactions: trackId ? getReactions(trackId, "", playId) : getReactions(""),
   };
+}
+
+async function nowPlayingReleaseYear(np, trackId) {
+  if (np?.djVoice || np?.djSilence) return null;
+  const already = Number(np?.year);
+  if (Number.isFinite(already) && already >= 1900 && already <= 2100) {
+    return already;
+  }
+  if (!trackId) return null;
+  try {
+    const map = await getTracksByIds([trackId]);
+    const y = Number(map.get(trackId)?.year);
+    return Number.isFinite(y) && y >= 1900 && y <= 2100 ? y : null;
+  } catch {
+    return null;
+  }
 }
 
 export function addPositionAge(np, sentAt = Date.now()) {

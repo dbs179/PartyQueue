@@ -363,7 +363,7 @@ export async function getPlaylistTracks(playlistId) {
   return out;
 }
 
-function releaseYear(releaseDate) {
+export function releaseYear(releaseDate) {
   const y = Number(String(releaseDate || "").slice(0, 4));
   return Number.isFinite(y) && y >= 1900 && y <= 2100 ? y : null;
 }
@@ -1046,6 +1046,7 @@ export async function getTracksByIds(ids) {
         title: t.name ?? "",
         artist: t.artists?.map((a) => a.name).join(", ") ?? "",
         album: t.album?.name ?? "",
+        year: releaseYear(t.album?.release_date),
         image: pickImage(t.album?.images),
       };
       setTrackInfoCache(t.id, info);

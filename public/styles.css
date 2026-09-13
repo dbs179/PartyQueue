@@ -1311,9 +1311,12 @@ button.guest-name:focus-visible {
 .np-title {
   font-weight: 700;
   font-size: 1.1rem;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .np-artist {

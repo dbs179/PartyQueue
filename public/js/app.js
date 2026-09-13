@@ -32,6 +32,7 @@ import {
   paintOriginToneClass,
 } from "./now-playing-origin.js";
 import { trackIdFromUri } from "./search-track.js";
+import { nowPlayingTitleWithYear } from "./format.js";
 import { createSearchUi } from "./search-ui.js";
 import { createReactionsUi } from "./reactions-ui.js";
 import { createQueueUi } from "./queue-ui.js";
@@ -3039,7 +3040,7 @@ function renderKaraokeNowPlaying(np, hasTrack) {
     return;
   }
   karaokeEmpty.hidden = true;
-  karaokeTitle.textContent = np.title || "";
+    karaokeTitle.textContent = nowPlayingTitleWithYear(np);
   if (karaokeArtist) karaokeArtist.textContent = np.artist || "";
   bindNowPlayingArtwork(karaokeArt, np);
 }
@@ -3062,7 +3063,7 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
   }
 
   displayEmpty.hidden = true;
-  displayTitle.textContent = np.title || "";
+    displayTitle.textContent = nowPlayingTitleWithYear(np);
   if (displayArtist) displayArtist.textContent = np.artist || "";
   if (displayAlbum) displayAlbum.textContent = np.album || "";
   bindNowPlayingArtwork(displayArt, np);
@@ -3249,7 +3250,7 @@ function renderNowPlaying(transport) {
     npTitle.hidden = false;
     npArtist.hidden = false;
     npAlbum.hidden = false;
-    npTitle.textContent = np.title || "";
+    npTitle.textContent = nowPlayingTitleWithYear(np);
     npArtist.textContent = np.artist || "";
     npAlbum.textContent = np.album || "";
     bindNowPlayingArtwork(npArt, np);

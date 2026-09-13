@@ -7,6 +7,7 @@ import {
   escapeHtml,
   formatTrackTime,
   formatDisplayClock,
+  nowPlayingTitleWithYear,
 } from "../public/js/format.js";
 
 test("formatDuration renders hours, minutes, and seconds", () => {
@@ -43,6 +44,26 @@ test("formatTrackTime renders mm:ss and h:mm:ss", () => {
   assert.equal(formatTrackTime(65), "1:05");
   assert.equal(formatTrackTime(3661), "1:01:01");
   assert.equal(formatTrackTime("nope"), "0:00");
+});
+
+test("nowPlayingTitleWithYear is Title (Release Year)", () => {
+  assert.equal(
+    nowPlayingTitleWithYear({ title: "Thunderstruck", year: 1990 }),
+    "Thunderstruck (1990)"
+  );
+  assert.equal(
+    nowPlayingTitleWithYear({ title: "Thunderstruck" }),
+    "Thunderstruck"
+  );
+  assert.equal(
+    nowPlayingTitleWithYear({
+      title: "Sister Static",
+      year: 1990,
+      djVoice: true,
+    }),
+    "Sister Static"
+  );
+  assert.equal(nowPlayingTitleWithYear({ title: "", year: 1990 }), "");
 });
 
 test("formatDisplayClock uses local hours and minutes", () => {

@@ -70,6 +70,16 @@ export function formatDisplayClock(now = new Date(), locale) {
   }
 }
 
+/** "Song Title (1990)" for Now Playing on PC, phone, and Party Display. */
+export function nowPlayingTitleWithYear(np) {
+  const title = String(np?.title || "").trim();
+  if (!title) return "";
+  if (np?.djVoice || np?.djSilence) return title;
+  const year = Number(np?.year);
+  if (!Number.isFinite(year) || year < 1900 || year > 2100) return title;
+  return `${title} (${year})`;
+}
+
 /** mm:ss or h:mm:ss for Now Playing / Party Display progress. */
 export function formatTrackTime(value) {
   const total = Math.max(0, Math.floor(Number(value) || 0));

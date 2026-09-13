@@ -6,6 +6,24 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+test("enrichNowPlaying keeps an already-known release year and hides it on DJ clips", async () => {
+  const { enrichNowPlaying } = await import("../src/now-playing-http.js");
+  const song = await enrichNowPlaying({
+    title: "Thunderstruck",
+    artist: "AC/DC",
+    uri: "spotify:track:abc",
+    year: 1990,
+  });
+  assert.equal(song.year, 1990);
+  const dj = await enrichNowPlaying({
+    title: "DJ Holy Roller",
+    artist: "Live from the Booth",
+    djVoice: true,
+    year: 1990,
+  });
+  assert.equal(dj.year, null);
+});
+
 test("enrichNowPlaying stays track-scoped (party flags live on /api/party)", async () => {
   const { enrichNowPlaying } = await import("../src/now-playing-http.js");
   const enriched = await enrichNowPlaying({

@@ -470,6 +470,10 @@ test("the fingerprint ignores party-settings fields and reacts to track changes"
     nowPlayingSignature({ ...base, reactionPlayId: "abc:1" }),
     nowPlayingSignature({ ...base, reactionPlayId: "abc:2" })
   );
+  assert.notEqual(
+    nowPlayingSignature(base),
+    nowPlayingSignature({ ...base, year: 1990 })
+  );
 });
 
 test("clock discontinuity detection tolerates normal Sonos time quantization", () => {

@@ -59,6 +59,7 @@ export function nowPlayingSignature(snapshot = null) {
     snapshot.title ?? "",
     snapshot.artist ?? "",
     snapshot.album ?? "",
+    snapshot.year ?? "",
     snapshot.albumArt ?? "",
     snapshot.state ?? "",
     snapshot.isPlaying ? 1 : 0,
