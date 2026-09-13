@@ -328,7 +328,8 @@ export function seedAnnounceNowPlaying(opts = {}) {
   const snapshot = holdAnnounceNowPlaying(opts);
   if (!snapshot) return null;
   nowPlayingMonitor.seed(snapshot);
-  nudgeNowPlayingTransition(snapshot);
+  // Do not run the skip-transition confirm dance. That waits on Sonos and
+  // is what kept the last song on screen after we already knew the DJ URI.
   return snapshot;
 }
 

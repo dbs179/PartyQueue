@@ -82,6 +82,28 @@ export function announceNowPlayingHoldForTests() {
     : null;
 }
 
+export function announceHoldIsLive(now = Date.now) {
+  const at = typeof now === "function" ? now() : now;
+  return !!(announceNowPlayingHold && at < announceNowPlayingHold.until);
+}
+
+/**
+ * Play of this announce must not drop the hold. Play of a different row
+ * (skip-to-request) must, or Now Playing stays on the DJ after the song starts.
+ */
+export function shouldPreserveAnnounceHoldOnPlay(trackNumber) {
+  if (!announceHoldIsLive()) return false;
+  const n = Number(trackNumber);
+  if (!Number.isFinite(n) || n < 1) return true;
+  const held = Number(announceNowPlayingHold?.queueTrack) || 0;
+  if (held < 1) return true;
+  return n === held;
+}
+
+function liveAnnounceSnapshot() {
+  return announceHoldIsLive() ? snapshotFromAnnounceHold() : null;
+}
+
 export function buildDjNowPlayingSnapshot({
   uri,
   durationSec,
@@ -152,6 +174,16 @@ export function holdAnnounceNowPlaying({
 } = {}) {
   const clipUrl = String(uri || "");
   if (!clipUrl) return null;
+  // Same clip already on screen — do not reset the progress clock.
+  if (
+    announceHoldIsLive() &&
+    String(announceNowPlayingHold.uri) === clipUrl
+  ) {
+    if (queueTrack != null && Number(queueTrack) >= 1) {
+      announceNowPlayingHold.queueTrack = Number(queueTrack);
+    }
+    return snapshotFromAnnounceHold();
+  }
   const duration = Math.max(1, Number(durationSec) || 20);
   const startedAt = Date.now();
   announceNowPlayingHold = {
@@ -355,10 +387,8 @@ function scheduleLyricsWarm(q, slot) {
 }
 
 async function getNowPlayingRaw() {
-  const hold = announceNowPlayingHold;
-  if (hold && Date.now() < hold.until) {
-    return snapshotFromAnnounceHold();
-  }
+  const held = liveAnnounceSnapshot();
+  if (held) return held;
 
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
@@ -493,6 +523,11 @@ async function getNowPlayingRaw() {
   // Sonos reports RelTime / TrackDuration as H:MM:SS (sometimes with decimals).
   const positionSec = livePositionSec;
   const durationSec = parseSonosTime(pos.TrackDuration);
+
+  // A hold that landed while this SOAP was in flight must still win —
+  // otherwise the last song stays on screen until the next poll.
+  const wonHold = liveAnnounceSnapshot();
+  if (wonHold) return wonHold;
 
   // Warm lyrics for the current track in the shared server cache (overlay-ready).
   if (hasTrack && !djClip && !silenceBridge && title && artist) {

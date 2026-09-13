@@ -6,9 +6,11 @@ import {
   isTransportRefusalError,
 } from "./sonos-core.js";
 import {
+  announceHoldIsLive,
   invalidateSonosSnapshots,
   parseSonosTime,
   clearLastHeardIf,
+  shouldPreserveAnnounceHoldOnPlay,
 } from "./sonos-snapshots.js";
 import { assertManualVolumeAvailable } from "./sonos-volume.js";
 import { spotifyTrackId } from "./sampler.js";
@@ -195,7 +197,9 @@ async function playOnce({ trackNumber } = {}) {
     if (isTransportRefusalError(err)) throw err;
   }
 
-  invalidateSonosSnapshots();
+  invalidateSonosSnapshots({
+    preserveAnnounceHold: shouldPreserveAnnounceHoldOnPlay(trackNumber),
+  });
   return { room: coordinator.Name };
 }
 
@@ -208,7 +212,9 @@ async function resumeQueuePlaybackUnlocked() {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
   await coordinator.Play();
-  invalidateSonosSnapshots();
+  invalidateSonosSnapshots({
+    preserveAnnounceHold: announceHoldIsLive(),
+  });
   return { room: coordinator.Name };
 }
 

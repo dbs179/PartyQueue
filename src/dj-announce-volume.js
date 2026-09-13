@@ -230,6 +230,15 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
         continue;
       }
       if (matches(uri)) {
+        if (!sawClip) {
+          try {
+            opts.onClipStart?.();
+          } catch (err) {
+            logger.warn?.(
+              `[dj-volume] onClipStart failed: ${err?.message || err}`
+            );
+          }
+        }
         sawClip = true;
         setDjVolumeHandoffActive(true);
         if (!(await ensureLevels())) {

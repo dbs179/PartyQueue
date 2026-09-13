@@ -57,6 +57,8 @@ export {
   buildDjNowPlayingSnapshot,
   resetAnnounceNowPlayingHoldForTests,
   announceNowPlayingHoldForTests,
+  announceHoldIsLive,
+  shouldPreserveAnnounceHoldOnPlay,
   getQueueList,
   listGroups,
   getQueueStatus,

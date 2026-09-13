@@ -3038,7 +3038,16 @@ async function beginAnnounceVolume({
       calculateTarget: (baseline) => announceVolumeFromMusic(baseline, tiers),
     },
     io,
-    { graceMs: MAX_HANDOFF_ARMED_MS, waitMs: 1000 }
+    {
+      graceMs: MAX_HANDOFF_ARMED_MS,
+      waitMs: 1000,
+      onClipStart: () => {
+        seedAnnouncePlayback(
+          { uri: clipUrl, durationSec },
+          undefined
+        );
+      },
+    }
   )
     .then(({ reason }) =>
       console.log(`[dj-volume] announce volume finished (${reason})`)
@@ -3529,6 +3538,11 @@ export async function previewTtsVoice(
 }
 
 async function startQueuePlayback(trackNumber = 1, announce = null) {
+  // Paint the DJ before any Seek/Play SOAP. Those calls plus the 450ms
+  // transport sleeps are why Now Playing sat on the last song.
+  if (announce?.uri) {
+    await seedAnnouncePlayback(announce, Number(trackNumber) || 1);
+  }
   await new Promise((r) => setTimeout(r, 200));
   const sonos = await import("./sonos.js");
   sonos.pauseQueueTrim(25000);
@@ -3555,6 +3569,7 @@ async function startQueuePlayback(trackNumber = 1, announce = null) {
         return;
       }
       n = target.trackNumber;
+      await seedAnnouncePlayback(announce, n);
     } catch (err) {
       console.warn(
         "[dj-voice] live announce locate failed; refusing stored index:",
@@ -4049,6 +4064,14 @@ async function announceOnSonosUnlocked(
       rampSec: baked.rampSec,
       restoreSec: baked.restoreSec,
     });
+    const willStart =
+      !!parked?.hold?.held || !!startPlayback || !!heldAtTrackEnd;
+    if (willStart) {
+      await seedAnnouncePlayback(
+        { uri: baked.publicUrl, durationSec: baked.durationSec },
+        startPos
+      );
+    }
     if (parked?.hold?.held) {
       // We are paused on the stall pad with the announce now sitting right
       // behind it. Let go and the room rolls straight into the DJ.
