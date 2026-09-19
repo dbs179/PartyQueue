@@ -58,6 +58,36 @@ export const ANNOUNCE_PHASE = {
 };
 
 /**
+ * Clip length the restore ramp should use.
+ *
+ * Prefer the shorter of the baked measurement and Sonos TrackDuration so an
+ * inflated value cannot schedule restore into the next song. Ignore a tiny
+ * Sonos stub (HTTP streams often report a few seconds first) so we do not
+ * dump volume during the DJ's first words.
+ *
+ * @param {number} announceDurationSec
+ * @param {number} liveDurationSec
+ * @returns {number}
+ */
+export function resolveAnnounceClipDuration(
+  announceDurationSec,
+  liveDurationSec
+) {
+  const baked = Number(announceDurationSec);
+  const live = Number(liveDurationSec);
+  const bakedOk = Number.isFinite(baked) && baked > 0;
+  const liveOk = Number.isFinite(live) && live > 0;
+  if (bakedOk && liveOk) {
+    const floor = Math.max(4, baked * 0.5);
+    if (live < baked && live >= floor) return live;
+    return baked;
+  }
+  if (bakedOk) return baked;
+  if (liveOk) return live;
+  return 0;
+}
+
+/**
  * Where we are inside a baked announce, and what the group volume should be.
  *
  * Ramps are linear across the silent pads, so the level is already correct by
@@ -248,11 +278,10 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
           continue;
         }
         rememberBaseline(musicVolume);
-        const liveDuration = Number(durationSec);
-        const clipDuration =
-          Number.isFinite(liveDuration) && liveDuration > 0
-            ? liveDuration
-            : announce.durationSec;
+        const clipDuration = resolveAnnounceClipDuration(
+          announce.durationSec,
+          durationSec
+        );
         const at = announceVolumeAt({
           positionSec,
           durationSec: clipDuration,

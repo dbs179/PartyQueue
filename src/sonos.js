@@ -63,6 +63,8 @@ export {
   NOW_PLAYING_IDLE_HOLD_MS,
   resetAnnounceNowPlayingHoldForTests,
   announceNowPlayingHoldForTests,
+  lastMusicNowPlayingForTests,
+  rememberLastMusicNowPlayingForTests,
   announceHoldIsLive,
   announceHoldShouldYieldTo,
   shouldPreserveAnnounceHoldOnPlay,

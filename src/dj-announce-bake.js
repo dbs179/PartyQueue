@@ -136,6 +136,9 @@ export function durationSecFromFfmpegInfo(text) {
   return Number.isFinite(sec) && sec > 0 ? sec : null;
 }
 
+/** Kill a wedged `ffmpeg -i` rather than stall the announce insert. */
+export const PROBE_AUDIO_TIMEOUT_MS = 4000;
+
 /**
  * Measure an audio file with ffmpeg. Byte-length guesses assume 64 kbps and
  * roughly double a 128 kbps ElevenLabs clip — which is how the restore ramp
@@ -146,22 +149,44 @@ export function durationSecFromFfmpegInfo(text) {
  *
  * @param {string} filePath
  * @param {string} [ffmpegBin]
+ * @param {number} [timeoutMs]
  * @returns {Promise<number|null>}
  */
-export function probeAudioDurationSec(filePath, ffmpegBin = "ffmpeg") {
+export function probeAudioDurationSec(
+  filePath,
+  ffmpegBin = "ffmpeg",
+  timeoutMs = PROBE_AUDIO_TIMEOUT_MS
+) {
   const target = String(filePath || "");
   if (!target) return Promise.resolve(null);
+  const waitMs = Math.max(250, Number(timeoutMs) || PROBE_AUDIO_TIMEOUT_MS);
   return new Promise((resolve) => {
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
     const child = spawn(ffmpegBin, ["-i", target], {
       stdio: ["ignore", "ignore", "pipe"],
     });
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* already exited */
+      }
+      done(null);
+    }, waitMs);
+    timer.unref?.();
     let stderr = "";
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
       if (stderr.length > 8000) stderr = stderr.slice(-8000);
     });
-    child.on("error", () => resolve(null));
-    child.on("close", () => resolve(durationSecFromFfmpegInfo(stderr)));
+    child.on("error", () => done(null));
+    child.on("close", () => done(durationSecFromFfmpegInfo(stderr)));
   });
 }
 
@@ -174,6 +199,36 @@ function applyMeasuredDuration(result, measured) {
     duration - (Number(result.rampSec) || 0) - (Number(result.restoreSec) || 0)
   );
   return result;
+}
+
+function applyMeasuredParts(result, { baked, lead, punch } = {}) {
+  if (Number.isFinite(lead) && lead > 0) result.leadSec = lead;
+  if (Number.isFinite(punch) && punch > 0) result.punchSec = punch;
+  if (Number.isFinite(baked) && baked > 0) {
+    return applyMeasuredDuration(result, baked);
+  }
+  const speech = (Number(result.leadSec) || 0) + (Number(result.punchSec) || 0);
+  if (speech > 0) {
+    result.speechSec = speech;
+    result.durationSec =
+      (Number(result.rampSec) || 0) + speech + (Number(result.restoreSec) || 0);
+  }
+  return result;
+}
+
+async function measureBakeParts({
+  outputPath,
+  leadPath,
+  punchPath = null,
+  ffmpegBin,
+  probeDuration,
+}) {
+  const [baked, lead, punch] = await Promise.all([
+    probeDuration(outputPath, ffmpegBin),
+    probeDuration(leadPath, ffmpegBin),
+    punchPath ? probeDuration(punchPath, ffmpegBin) : Promise.resolve(null),
+  ]);
+  return { baked, lead, punch };
 }
 
 /**
@@ -223,6 +278,8 @@ export async function bakeAnnounceClip({
     restoreSec,
   });
   const outputPath = path.join(ttsDir, fileName);
+  const leadPath = path.join(ttsDir, leadFile);
+  const punchPath = punchFile ? path.join(ttsDir, punchFile) : null;
   const speechSec = (Number(leadSec) || 0) + (Number(punchSec) || 0);
   const result = {
     fileName,
@@ -230,25 +287,36 @@ export async function bakeAnnounceClip({
     publicUrl: `${publicBaseUrl}/media/tts/${fileName}`,
     rampSec: Number(rampSec) || 0,
     restoreSec: Number(restoreSec) || 0,
+    leadSec: Number(leadSec) || 0,
+    punchSec: Number(punchSec) || 0,
     speechSec,
     durationSec: (Number(rampSec) || 0) + speechSec + (Number(restoreSec) || 0),
     cached: false,
   };
 
+  const applyProbe = async () =>
+    applyMeasuredParts(
+      result,
+      await measureBakeParts({
+        outputPath,
+        leadPath,
+        punchPath,
+        ffmpegBin,
+        probeDuration,
+      })
+    );
+
   // A zero-byte file means a previous bake died mid-write; treat it as a miss.
   const existing = fs.existsSync(outputPath) ? fs.statSync(outputPath) : null;
   if (existing && existing.size > 0) {
     result.cached = true;
-    return applyMeasuredDuration(
-      result,
-      await probeDuration(outputPath, ffmpegBin)
-    );
+    return applyProbe();
   }
 
   const inputs = [
     path.join(ttsDir, rampFile),
-    path.join(ttsDir, leadFile),
-    ...(punchFile ? [path.join(ttsDir, punchFile)] : []),
+    leadPath,
+    ...(punchPath ? [punchPath] : []),
     path.join(ttsDir, restoreFile),
   ];
   for (const input of inputs) {
@@ -262,8 +330,5 @@ export async function bakeAnnounceClip({
   const tempPath = `${outputPath}.part`;
   await concat(inputs, tempPath, ffmpegBin);
   fs.renameSync(tempPath, outputPath);
-  return applyMeasuredDuration(
-    result,
-    await probeDuration(outputPath, ffmpegBin)
-  );
+  return applyProbe();
 }

@@ -10,6 +10,7 @@ import {
   holdIdleNowPlaying,
   idleNowPlayingHoldForTests,
   invalidateSonosSnapshots,
+  rememberLastMusicNowPlayingForTests,
   resetAnnounceNowPlayingHoldForTests,
   shouldPreserveAnnounceHoldOnPlay,
 } from "../src/sonos.js";
@@ -201,6 +202,39 @@ test("hold yields when the next song compacted below the announce index", () => 
     }),
     true,
     "Drown at track 1 after the DJ row is stripped must knock the hold down"
+  );
+});
+
+test("remembered last music fills previous when the seed raced onto the DJ", () => {
+  rememberLastMusicNowPlayingForTests({
+    uri: "x-sonos-spotify:spotify:track:previous",
+    title: "Home Team",
+    artist: "Whoever",
+  });
+  holdAnnounceNowPlaying({ uri: CLIP, durationSec: 47, queueTrack: 2 });
+  assert.equal(
+    announceNowPlayingHoldForTests()?.previousUri,
+    "x-sonos-spotify:spotify:track:previous"
+  );
+  assert.equal(
+    announceHoldShouldYieldTo({
+      uri: "x-sonos-spotify:spotify:track:drown",
+      queueTrack: 1,
+      title: "Drown",
+      artist: "Bring Me The Horizon",
+    }),
+    true,
+    "missing explicit previous must not keep Holy Roller over compacted Drown"
+  );
+  assert.equal(
+    announceHoldShouldYieldTo({
+      uri: "x-sonos-spotify:spotify:track:previous",
+      queueTrack: 1,
+      title: "Home Team",
+      artist: "Whoever",
+    }),
+    false,
+    "Seek leftover last-song SOAP must still lose to the DJ"
   );
 });
 

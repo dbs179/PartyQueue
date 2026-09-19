@@ -45,7 +45,7 @@ import {
   MAX_HANDOFF_ARMED_MS,
   setDjVolumeHandoffArmed,
 } from "./dj-volume-handoff-state.js";
-import { bakeAnnounceClip, isBakedAnnounceUri } from "./dj-announce-bake.js";
+import { bakeAnnounceClip, isBakedAnnounceUri, probeAudioDurationSec } from "./dj-announce-bake.js";
 import {
   inheritAnnounceMusicBaseline,
   runAnnounceVolume,
@@ -136,6 +136,13 @@ const TTS_DIR = path.join(__dirname, "..", "data", "tts");
 // ElevenLabs HA proxy clips are typically ~64–72 kbps. Use a conservative
 // estimate so Sonos metadata and the handoff deadline never truncate long clips.
 const TTS_BYTES_PER_SEC = 8000;
+const ELEVENLABS_TTS_BYTES_PER_SEC = 16000;
+
+function ttsBytesPerSec(provider) {
+  return String(provider || "").includes("eleven")
+    ? ELEVENLABS_TTS_BYTES_PER_SEC
+    : TTS_BYTES_PER_SEC;
+}
 
 function ttsSettings() {
   return getDjVoiceSettings();
@@ -3501,10 +3508,12 @@ export async function saveTtsClip(
   pruneTtsFiles();
 
   const localUrl = `${getPublicBaseUrl()}/media/tts/${fileName}`;
-  const approxDurationSec = Math.max(
+  const byteGuess = Math.max(
     2,
-    buf.length / TTS_BYTES_PER_SEC / Math.max(0.25, serveLocal ? speed : 1)
+    buf.length / ttsBytesPerSec(provider) / Math.max(0.25, serveLocal ? speed : 1)
   );
+  const measured = await probeAudioDurationSec(filePath, resolveFfmpegBin());
+  const approxDurationSec = measured || byteGuess;
   return {
     fileName,
     filePath,
@@ -3987,7 +3996,8 @@ async function announceOnSonosUnlocked(
     // Now Playing / DJ Script look up copy by the URI Sonos is playing. That
     // is the baked file, not the raw TTS clip we remembered a few lines above.
     try {
-      const leadSec = Number(clip.approxDurationSec) || 8;
+      const leadSec =
+        Number(baked.leadSec) || Number(clip.approxDurationSec) || 8;
       rememberDjClipScript(baked.publicUrl, message, {
         alsoUris: [baked.fileName, clip.publicUrl, clip.fileName].filter(Boolean),
         personaId: leadPersona.id || DJ_PERSONA_HOLY_ROLLER,

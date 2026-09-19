@@ -6,6 +6,7 @@ import {
   inheritAnnounceMusicBaseline,
   lastAnnounceMusicBaseline,
   resetAnnounceVolumeForTests,
+  resolveAnnounceClipDuration,
   runAnnounceVolume,
   uriMatchesClip,
   ANNOUNCE_PHASE,
@@ -201,6 +202,22 @@ test("live clip duration wins so restore is not scheduled 20s into the next song
 
   assert.equal(result.reason, "complete");
   assert.deepEqual(volumes, [8, 20, 14, 8, 8]);
+});
+
+test("resolveAnnounceClipDuration prefers the shorter trusted length", () => {
+  assert.equal(resolveAnnounceClipDuration(49, 27.5), 27.5);
+  assert.equal(
+    resolveAnnounceClipDuration(27.5, 49),
+    27.5,
+    "inflated Sonos TrackDuration must not delay restore"
+  );
+  assert.equal(
+    resolveAnnounceClipDuration(27.5, 3),
+    27.5,
+    "a tiny HTTP-stream stub must not dump volume during speech"
+  );
+  assert.equal(resolveAnnounceClipDuration(27.5, 0), 27.5);
+  assert.equal(resolveAnnounceClipDuration(0, 27.5), 27.5);
 });
 
 test("a missing baseline is read when the clip actually starts, not before Play", async () => {
@@ -440,4 +457,16 @@ test("transport ticks expose TrackDuration so restore can use the real clip leng
     /durationSec:\s*parseSonosTime\(pos\.TrackDuration\)/
   );
   assert.match(voiceSrc, /durationSec:\s*Number\(tick\?\.durationSec\) \|\| 0/);
+  const volumeSrc = fs.readFileSync(
+    path.join(here, "..", "src", "dj-announce-volume.js"),
+    "utf8"
+  );
+  assert.match(volumeSrc, /resolveAnnounceClipDuration\(/);
+  assert.match(
+    voiceSrc,
+    /punchStartsAtSec:\s*[\s\S]*baked\.rampSec \+ leadSec/
+  );
+  assert.match(voiceSrc, /Number\(baked\.leadSec\)/);
+  assert.match(voiceSrc, /ttsBytesPerSec\(provider\)/);
+  assert.match(voiceSrc, /probeAudioDurationSec\(filePath/);
 });

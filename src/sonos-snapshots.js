@@ -76,6 +76,8 @@ const TRANSPORT_TICK_TIMEOUT_MS = envTimeoutMs(
 let announceNowPlayingHold = null;
 /** After Clear, keep leftover PLAYING SOAP from restoring the last title. */
 let nowPlayingIdleHold = null;
+/** Last non-DJ music SOAP. Seeds announce previous when the monitor is already on the DJ. */
+let lastMusicNowPlaying = null;
 
 /** Cover the 400ms/1600ms mutation follow-ups without waiting on Sonos. */
 export const NOW_PLAYING_IDLE_HOLD_MS = 2500;
@@ -83,6 +85,7 @@ export const NOW_PLAYING_IDLE_HOLD_MS = 2500;
 export function resetAnnounceNowPlayingHoldForTests() {
   announceNowPlayingHold = null;
   nowPlayingIdleHold = null;
+  lastMusicNowPlaying = null;
 }
 
 export function announceNowPlayingHoldForTests() {
@@ -91,8 +94,54 @@ export function announceNowPlayingHoldForTests() {
         uri: announceNowPlayingHold.uri,
         until: announceNowPlayingHold.until,
         queueTrack: announceNowPlayingHold.queueTrack,
+        previousUri: announceNowPlayingHold.previousUri || "",
+        previousTitle: announceNowPlayingHold.previousTitle || null,
       }
     : null;
+}
+
+export function lastMusicNowPlayingForTests() {
+  return lastMusicNowPlaying ? { ...lastMusicNowPlaying } : null;
+}
+
+export function rememberLastMusicNowPlayingForTests(snapshot) {
+  lastMusicNowPlaying = snapshot
+    ? {
+        uri: String(snapshot.uri || ""),
+        title: snapshot.title || null,
+        artist: snapshot.artist || null,
+      }
+    : null;
+}
+
+function rememberMusicNowPlaying(snapshot) {
+  if (announceHoldIsLive()) return;
+  if (!snapshot || snapshot.djVoice || snapshot.djSilence) return;
+  const uri = String(snapshot.uri || "");
+  if (isDjVoiceUri(uri) || isDjSilenceTrack(uri, snapshot.title)) return;
+  if (!(uri || snapshot.title || snapshot.artist)) return;
+  lastMusicNowPlaying = {
+    uri,
+    title: snapshot.title || null,
+    artist: snapshot.artist || null,
+  };
+}
+
+function musicIdentityFrom(source) {
+  if (!source || typeof source !== "object") {
+    return { uri: "", title: null, artist: null };
+  }
+  return {
+    uri: String(source.uri || source.previousUri || ""),
+    title: source.title || source.previousTitle || null,
+    artist: source.artist || source.previousArtist || null,
+  };
+}
+
+function resolveAnnouncePrevious(explicit) {
+  const fromOpt = musicIdentityFrom(explicit);
+  if (fromOpt.uri || fromOpt.title) return fromOpt;
+  return musicIdentityFrom(lastMusicNowPlaying);
 }
 
 export function idleNowPlayingHoldForTests() {
@@ -157,8 +206,9 @@ function isHeldPreviousSong(live, hold) {
  * kept Holy Roller on screen for the first ~15s of the song.
  *
  * Keep the hold when SOAP is still the announce, a silence pad, or the
- * previous song. Without a stored previous identity, a lower index is still
- * treated as leftover last-song SOAP.
+ * previous song. Previous is filled from the last music SOAP when the
+ * seed raced and the monitor was already on the DJ. Without that identity,
+ * a lower index is still treated as leftover last-song SOAP.
  */
 export function announceHoldShouldYieldTo(live) {
   if (!announceHoldIsLive()) return true;
@@ -340,12 +390,10 @@ export function holdAnnounceNowPlaying({
   const clipUrl = String(uri || "");
   if (!clipUrl) return null;
   const nextTrack = Number(queueTrack);
-  const previousUri =
-    previous && typeof previous === "object" ? String(previous.uri || "") : "";
-  const previousTitle =
-    previous && typeof previous === "object" ? previous.title || null : null;
-  const previousArtist =
-    previous && typeof previous === "object" ? previous.artist || null : null;
+  const resolvedPrevious = resolveAnnouncePrevious(previous);
+  const previousUri = resolvedPrevious.uri;
+  const previousTitle = resolvedPrevious.title;
+  const previousArtist = resolvedPrevious.artist;
   // Same clip already on screen — do not reset the progress clock.
   if (
     announceHoldIsLive() &&
@@ -788,6 +836,8 @@ async function readSonosNowPlayingSnapshot() {
       };
     })(),
   };
+
+  rememberMusicNowPlaying(soapSnapshot);
 
   // Clear / last-track Stop leaves DIDL on an empty queue URI. Guests would
   // see "Left Behind" (or last night's song) with nothing actually playing.

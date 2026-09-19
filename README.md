@@ -1,6 +1,6 @@
 # PartyQueue
 
-**Version 12.0.9**
+**Version 12.0.10**
 
 PartyQueue lets everyone at your party help choose the music. Guests open a
 web page on their phones, search Spotify, and add songs to your Sonos queue.

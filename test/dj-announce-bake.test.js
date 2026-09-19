@@ -245,6 +245,31 @@ test("a cached bake still re-measures the file so restore is not 20s late", asyn
   assert.equal(cached.speechSec, 21.5);
 });
 
+test("a failed baked probe still uses measured lead and punch durations", async () => {
+  const dir = makeDir(PADS);
+  const result = await bakeAnnounceClip({
+    ...base(dir),
+    punchFile: "punch.mp3",
+    punchSec: 40,
+    leadSec: 43,
+    concat: async (_inputs, out) => {
+      fs.writeFileSync(out, "BAKED");
+    },
+    probeDuration: async (filePath) => {
+      const name = path.basename(filePath);
+      if (name.startsWith(BAKED_PREFIX)) return null;
+      if (name === "lead.mp3") return 12;
+      if (name === "punch.mp3") return 6;
+      return null;
+    },
+  });
+
+  assert.equal(result.leadSec, 12);
+  assert.equal(result.punchSec, 6);
+  assert.equal(result.speechSec, 18);
+  assert.equal(result.durationSec, 24);
+});
+
 test("a missing source clip fails loudly instead of baking silence", async () => {
   const dir = makeDir({ "silence-ramp-3s.mp3": "RAMP", "silence-3s.mp3": "R" });
   await assert.rejects(
