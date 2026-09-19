@@ -3020,6 +3020,7 @@ async function beginAnnounceVolume({
       return {
         uri: tick?.uri ?? "",
         positionSec: Number(tick?.positionSec) || 0,
+        durationSec: Number(tick?.durationSec) || 0,
         queueTrack: Number(tick?.queueTrack) || 0,
       };
     },

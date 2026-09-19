@@ -119,8 +119,8 @@ function fakeIo(steps) {
       })(),
       read: async () => {
         reads.count += 1;
-        const [uri, positionSec] = step();
-        return { uri, positionSec };
+        const [uri, positionSec, durationSec] = step();
+        return { uri, positionSec, durationSec };
       },
       setVolume: async (v) => volumes.push(v),
       sleep: async () => {
@@ -178,6 +178,29 @@ test("a skipped announce still puts the music volume back", async () => {
 
   assert.equal(result.reason, "left-playhead");
   assert.equal(volumes.at(-1), 8, "must end on the music volume");
+});
+
+test("live clip duration wins so restore is not scheduled 20s into the next song", async () => {
+  const { io, volumes } = fakeIo([
+    [CLIP, 0, 27.5],
+    [CLIP, 3, 27.5],
+    [CLIP, 26, 27.5],
+    [CLIP, 27.5, 27.5],
+  ]);
+  const result = await runAnnounceVolume(
+    {
+      clipUrl: CLIP,
+      durationSec: 49,
+      rampSec: 3,
+      restoreSec: 3,
+      musicVolume: 8,
+      announceVolume: 20,
+    },
+    io
+  );
+
+  assert.equal(result.reason, "complete");
+  assert.deepEqual(volumes, [8, 20, 14, 8, 8]);
 });
 
 test("a missing baseline is read when the clip actually starts, not before Play", async () => {
@@ -397,4 +420,24 @@ test("a newer announce supersedes the previous volume session without restoring"
     !aAfterB.includes(8),
     "the old session must not restore music volume after it lost the room"
   );
+});
+
+test("transport ticks expose TrackDuration so restore can use the real clip length", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const tickSrc = fs.readFileSync(
+    path.join(here, "..", "src", "sonos-snapshots.js"),
+    "utf8"
+  );
+  const voiceSrc = fs.readFileSync(
+    path.join(here, "..", "src", "dj-voice.js"),
+    "utf8"
+  );
+  assert.match(
+    tickSrc,
+    /durationSec:\s*parseSonosTime\(pos\.TrackDuration\)/
+  );
+  assert.match(voiceSrc, /durationSec:\s*Number\(tick\?\.durationSec\) \|\| 0/);
 });

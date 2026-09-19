@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   bakeAnnounceClip,
   bakedAnnounceName,
+  durationSecFromFfmpegInfo,
   isBakedAnnounceUri,
   BAKED_PREFIX,
 } from "../src/dj-announce-bake.js";
@@ -40,6 +41,7 @@ const base = (dir) => ({
   restoreSec: 3,
   leadSec: 12,
   publicBaseUrl: "http://pq.local:8088",
+  probeDuration: async () => null,
 });
 
 test("the baked name is stable for the same parts and differs when any part changes", () => {
@@ -193,6 +195,54 @@ test("a failed encode leaves no file that a later run would treat as cached", as
     restoreSec: 3,
   });
   assert.equal(fs.existsSync(path.join(dir, name)), false);
+});
+
+test("ffmpeg Duration lines parse to seconds", () => {
+  assert.equal(
+    durationSecFromFfmpegInfo(
+      "Duration: 00:00:27.58, start: 0.000000, bitrate: 128 kb/s"
+    ),
+    27.58
+  );
+  assert.equal(durationSecFromFfmpegInfo("no duration here"), null);
+});
+
+test("a measured bake duration wins over the inflated TTS byte-length guess", async () => {
+  const dir = makeDir(PADS);
+  const result = await bakeAnnounceClip({
+    ...base(dir),
+    leadSec: 43.165,
+    concat: async (_inputs, out) => {
+      fs.writeFileSync(out, "BAKED");
+    },
+    probeDuration: async () => 27.58,
+  });
+
+  assert.equal(result.durationSec, 27.58);
+  assert.equal(result.speechSec, 21.58);
+});
+
+test("a cached bake still re-measures the file so restore is not 20s late", async () => {
+  const dir = makeDir(PADS);
+  const concat = async (_inputs, out) => {
+    fs.writeFileSync(out, "BAKED");
+  };
+  await bakeAnnounceClip({
+    ...base(dir),
+    leadSec: 43,
+    concat,
+    probeDuration: async () => 27.5,
+  });
+  const cached = await bakeAnnounceClip({
+    ...base(dir),
+    leadSec: 43,
+    concat,
+    probeDuration: async () => 27.5,
+  });
+
+  assert.equal(cached.cached, true);
+  assert.equal(cached.durationSec, 27.5);
+  assert.equal(cached.speechSec, 21.5);
 });
 
 test("a missing source clip fails loudly instead of baking silence", async () => {

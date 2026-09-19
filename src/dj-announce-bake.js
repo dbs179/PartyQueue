@@ -122,11 +122,68 @@ export function concatWithFfmpeg(inputs, outputPath, ffmpegBin = "ffmpeg") {
 }
 
 /**
+ * Parse `Duration: HH:MM:SS.xx` from ffmpeg/ffprobe info text.
+ * @param {string} text
+ * @returns {number|null}
+ */
+export function durationSecFromFfmpegInfo(text) {
+  const match = String(text || "").match(
+    /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i
+  );
+  if (!match) return null;
+  const sec =
+    Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+  return Number.isFinite(sec) && sec > 0 ? sec : null;
+}
+
+/**
+ * Measure an audio file with ffmpeg. Byte-length guesses assume 64 kbps and
+ * roughly double a 128 kbps ElevenLabs clip — which is how the restore ramp
+ * landed 20s into the next song.
+ *
+ * `ffmpeg -i` always exits non-zero when no output is given; duration is on
+ * stderr either way.
+ *
+ * @param {string} filePath
+ * @param {string} [ffmpegBin]
+ * @returns {Promise<number|null>}
+ */
+export function probeAudioDurationSec(filePath, ffmpegBin = "ffmpeg") {
+  const target = String(filePath || "");
+  if (!target) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const child = spawn(ffmpegBin, ["-i", target], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+      if (stderr.length > 8000) stderr = stderr.slice(-8000);
+    });
+    child.on("error", () => resolve(null));
+    child.on("close", () => resolve(durationSecFromFfmpegInfo(stderr)));
+  });
+}
+
+function applyMeasuredDuration(result, measured) {
+  const duration = Number(measured);
+  if (!Number.isFinite(duration) || duration <= 0) return result;
+  result.durationSec = duration;
+  result.speechSec = Math.max(
+    0,
+    duration - (Number(result.rampSec) || 0) - (Number(result.restoreSec) || 0)
+  );
+  return result;
+}
+
+/**
  * Produce (or reuse) the one-file announce.
  *
  * `rampSec` is the silence before the DJ speaks and `restoreSec` the silence
- * after; both are returned so the volume handoff knows the windows without
- * having to re-measure the audio.
+ * after. Duration is measured from the baked file: a 128 kbps ElevenLabs clip
+ * is about twice as long by byte-length as our 64 kbps guess, and that lag
+ * is what kept the restore ramp (and Now Playing) on the DJ after the song
+ * started.
  *
  * @param {{
  *   ttsDir: string,
@@ -141,6 +198,7 @@ export function concatWithFfmpeg(inputs, outputPath, ffmpegBin = "ffmpeg") {
  *   publicBaseUrl: string,
  *   ffmpegBin?: string,
  *   concat?: (inputs: string[], out: string, bin: string) => Promise<void>,
+ *   probeDuration?: (filePath: string, bin: string) => Promise<number|null>,
  * }} opts
  */
 export async function bakeAnnounceClip({
@@ -156,6 +214,7 @@ export async function bakeAnnounceClip({
   publicBaseUrl,
   ffmpegBin = "ffmpeg",
   concat = concatWithFfmpeg,
+  probeDuration = probeAudioDurationSec,
 }) {
   const fileName = bakedAnnounceName({
     leadFile,
@@ -180,7 +239,10 @@ export async function bakeAnnounceClip({
   const existing = fs.existsSync(outputPath) ? fs.statSync(outputPath) : null;
   if (existing && existing.size > 0) {
     result.cached = true;
-    return result;
+    return applyMeasuredDuration(
+      result,
+      await probeDuration(outputPath, ffmpegBin)
+    );
   }
 
   const inputs = [
@@ -200,5 +262,8 @@ export async function bakeAnnounceClip({
   const tempPath = `${outputPath}.part`;
   await concat(inputs, tempPath, ffmpegBin);
   fs.renameSync(tempPath, outputPath);
-  return result;
+  return applyMeasuredDuration(
+    result,
+    await probeDuration(outputPath, ffmpegBin)
+  );
 }

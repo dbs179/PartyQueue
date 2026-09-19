@@ -1024,9 +1024,10 @@ export async function getNowPlayingFresh() {
 
 /**
  * Minimal live transport read: only the fields the DJ volume handoff watch loop
- * inspects (uri / state / positionSec). The full now-playing snapshot is five
- * SOAP calls plus an entire GetQueue while a silence pad is current — far too
- * much to run against the party coordinator at the handoff's poll rate.
+ * inspects (uri / state / positionSec / durationSec). The full now-playing
+ * snapshot is five SOAP calls plus an entire GetQueue while a silence pad is
+ * current — far too much to run against the party coordinator at the handoff's
+ * poll rate.
  */
 export async function getTransportTick() {
   try {
@@ -1045,6 +1046,7 @@ export async function getTransportTick() {
       uri: pos.TrackURI ?? null,
       state: transport.CurrentTransportState,
       positionSec: parseSonosTime(pos.RelTime),
+      durationSec: parseSonosTime(pos.TrackDuration),
       queueTrack: Number(pos.Track) || 0,
     };
   } catch (err) {

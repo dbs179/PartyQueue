@@ -138,7 +138,7 @@ function lerpVolume(from, to, t) {
  * only unrecoverable outcome here is leaving the party boosted or muted.
  *
  * `io` is injected so this is testable without Sonos:
- *   read()              -> { uri, positionSec }  one transport read per poll
+ *   read()              -> { uri, positionSec, durationSec? }  one transport read per poll
  *   setVolume(n, exact) -> void   exact writes read back; ramp steps do not
  *   getVolume()         -> number  used only when the baseline was unknown
  *   sleep(ms)           -> Promise
@@ -223,8 +223,9 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
       let uri;
       let positionSec;
       let queueTrack;
+      let durationSec;
       try {
-        ({ uri, positionSec, queueTrack } = (await io.read()) ?? {});
+        ({ uri, positionSec, queueTrack, durationSec } = (await io.read()) ?? {});
       } catch (err) {
         logger.warn?.(`[dj-volume] transport read failed: ${err?.message || err}`);
         await io.sleep(pollMs);
@@ -247,9 +248,14 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
           continue;
         }
         rememberBaseline(musicVolume);
+        const liveDuration = Number(durationSec);
+        const clipDuration =
+          Number.isFinite(liveDuration) && liveDuration > 0
+            ? liveDuration
+            : announce.durationSec;
         const at = announceVolumeAt({
           positionSec,
-          durationSec: announce.durationSec,
+          durationSec: clipDuration,
           rampSec: announce.rampSec,
           restoreSec: announce.restoreSec,
           musicVolume,
