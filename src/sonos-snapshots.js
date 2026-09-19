@@ -74,14 +74,30 @@ const TRANSPORT_TICK_TIMEOUT_MS = envTimeoutMs(
 
 /** After Play starts a baked announce, serve this instead of a stale song SOAP. */
 let announceNowPlayingHold = null;
+/** After Clear, keep leftover PLAYING SOAP from restoring the last title. */
+let nowPlayingIdleHold = null;
+
+/** Cover the 400ms/1600ms mutation follow-ups without waiting on Sonos. */
+export const NOW_PLAYING_IDLE_HOLD_MS = 2500;
 
 export function resetAnnounceNowPlayingHoldForTests() {
   announceNowPlayingHold = null;
+  nowPlayingIdleHold = null;
 }
 
 export function announceNowPlayingHoldForTests() {
   return announceNowPlayingHold
-    ? { uri: announceNowPlayingHold.uri, until: announceNowPlayingHold.until }
+    ? {
+        uri: announceNowPlayingHold.uri,
+        until: announceNowPlayingHold.until,
+        queueTrack: announceNowPlayingHold.queueTrack,
+      }
+    : null;
+}
+
+export function idleNowPlayingHoldForTests() {
+  return nowPlayingIdleHold
+    ? { until: nowPlayingIdleHold.until, room: nowPlayingIdleHold.room }
     : null;
 }
 
@@ -107,14 +123,37 @@ function liveAnnounceSnapshot() {
   return announceHoldIsLive() ? snapshotFromAnnounceHold() : null;
 }
 
+function isHeldPreviousSong(live, hold) {
+  const prevUri = String(hold?.previousUri || "");
+  const liveUri = String(live?.uri || "");
+  if (prevUri && liveUri && clipUrlMatchesQueueUri(liveUri, prevUri)) {
+    return true;
+  }
+  if (prevUri && liveUri && prevUri === liveUri) return true;
+  const prevTitle = String(hold?.previousTitle || "")
+    .trim()
+    .toLowerCase();
+  const liveTitle = String(live?.title || "")
+    .trim()
+    .toLowerCase();
+  if (!prevTitle || !liveTitle || prevTitle !== liveTitle) return false;
+  const prevArtist = String(hold?.previousArtist || "")
+    .trim()
+    .toLowerCase();
+  const liveArtist = String(live?.artist || "")
+    .trim()
+    .toLowerCase();
+  return !prevArtist || prevArtist === liveArtist;
+}
+
 /**
  * Drop the DJ hold once Sonos is actually on the next song. The hold exists
  * so a stale last-song SOAP cannot win during Seek/Play — not so Now Playing
  * stays on Holy Roller for the whole baked duration after Thunderstruck starts.
  *
- * Yield when the live queue index is past the announce row and the URI is
- * music. Keep the hold when SOAP is still the previous song, still the
- * announce, or still on the announce index with leftover metadata.
+ * Yield when the live URI is music (past the announce row, or the same index
+ * after the announce row is trimmed). Keep the hold when SOAP is still the
+ * previous song, still the announce, or leftover pre-announce metadata.
  */
 export function announceHoldShouldYieldTo(live) {
   if (!announceHoldIsLive()) return true;
@@ -130,18 +169,96 @@ export function announceHoldShouldYieldTo(live) {
   ) {
     return false;
   }
+  if (isHeldPreviousSong(live, hold)) return false;
   const heldTrack = Number(hold.queueTrack) || 0;
   const liveTrack = Number(live.queueTrack) || 0;
+  const hasMusic = !!(live.title || live.artist || liveUri);
   if (heldTrack >= 1 && liveTrack >= 1) {
-    return liveTrack > heldTrack;
+    if (liveTrack > heldTrack) return true;
+    if (liveTrack < heldTrack) return false;
+    // Same index after compaction / pad strip: a new song URI wins immediately.
+    return hasMusic;
   }
+  if (hasMusic) return true;
   const elapsed = (Date.now() - hold.startedAt) / 1000;
-  return elapsed >= hold.durationSec && !!(live.title || live.artist);
+  return elapsed >= hold.durationSec && hasMusic;
 }
 
 function dropAnnounceHold() {
+  if (!announceNowPlayingHold) {
+    getNowPlaying.bust();
+    return;
+  }
   announceNowPlayingHold = null;
   getNowPlaying.bust();
+  void import("./now-playing-http.js")
+    .then((http) => http.nudgeNowPlayingStream())
+    .catch(() => {
+      /* monitor nudge is best-effort */
+    });
+}
+
+function idleMediaFields() {
+  return {
+    title: null,
+    artist: null,
+    album: null,
+    uri: null,
+    albumArt: null,
+    queueTrack: 0,
+    durationSec: null,
+    positionSec: 0,
+    djVoice: false,
+    djSilence: false,
+    origin: null,
+    searched: false,
+    discovered: false,
+    moodPick: false,
+    mood: null,
+    genreLane: null,
+    reactionSet: null,
+    requestedBy: null,
+    requestedByUser: null,
+    dedication: null,
+  };
+}
+
+export function buildIdleNowPlayingSnapshot({ room = null } = {}) {
+  return {
+    isPlaying: false,
+    queuePlaying: false,
+    queueTrack: 0,
+    state: "STOPPED",
+    muted: false,
+    shuffle: false,
+    ...idleMediaFields(),
+    positionObservedAt: Date.now(),
+    room,
+  };
+}
+
+export function idleHoldIsLive(now = Date.now) {
+  const at = typeof now === "function" ? now() : now;
+  return !!(nowPlayingIdleHold && at < nowPlayingIdleHold.until);
+}
+
+/**
+ * Paint "nothing is playing" immediately after Clear so leftover Sonos DIDL
+ * cannot keep the last title on every open phone and TV.
+ */
+export function holdIdleNowPlaying({
+  room = null,
+  durationMs = NOW_PLAYING_IDLE_HOLD_MS,
+} = {}) {
+  announceNowPlayingHold = null;
+  const holdMs = Math.max(400, Number(durationMs) || NOW_PLAYING_IDLE_HOLD_MS);
+  nowPlayingIdleHold = {
+    until: Date.now() + holdMs,
+    room,
+  };
+  const snapshot = buildIdleNowPlayingSnapshot({ room });
+  getNowPlaying.seed(snapshot);
+  return snapshot;
 }
 
 export function buildDjNowPlayingSnapshot({
@@ -157,7 +274,7 @@ export function buildDjNowPlayingSnapshot({
   return {
     isPlaying: true,
     queuePlaying: true,
-    queueTrack: Number(queueTrack) || 1,
+    queueTrack: Number(queueTrack) >= 1 ? Number(queueTrack) : 1,
     state: "PLAYING",
     muted: false,
     shuffle: false,
@@ -209,18 +326,31 @@ function snapshotFromAnnounceHold() {
 export function holdAnnounceNowPlaying({
   uri,
   durationSec,
-  queueTrack = 1,
+  queueTrack,
   room = null,
+  previous = null,
 } = {}) {
   const clipUrl = String(uri || "");
   if (!clipUrl) return null;
+  const nextTrack = Number(queueTrack);
+  const previousUri =
+    previous && typeof previous === "object" ? String(previous.uri || "") : "";
+  const previousTitle =
+    previous && typeof previous === "object" ? previous.title || null : null;
+  const previousArtist =
+    previous && typeof previous === "object" ? previous.artist || null : null;
   // Same clip already on screen — do not reset the progress clock.
   if (
     announceHoldIsLive() &&
     String(announceNowPlayingHold.uri) === clipUrl
   ) {
-    if (queueTrack != null && Number(queueTrack) >= 1) {
-      announceNowPlayingHold.queueTrack = Number(queueTrack);
+    if (Number.isFinite(nextTrack) && nextTrack >= 1) {
+      announceNowPlayingHold.queueTrack = nextTrack;
+    }
+    if (previousUri && !announceNowPlayingHold.previousUri) {
+      announceNowPlayingHold.previousUri = previousUri;
+      announceNowPlayingHold.previousTitle = previousTitle;
+      announceNowPlayingHold.previousArtist = previousArtist;
     }
     return snapshotFromAnnounceHold();
   }
@@ -229,8 +359,11 @@ export function holdAnnounceNowPlaying({
   announceNowPlayingHold = {
     uri: clipUrl,
     durationSec: duration,
-    queueTrack,
+    queueTrack: Number.isFinite(nextTrack) && nextTrack >= 1 ? nextTrack : 0,
     room,
+    previousUri,
+    previousTitle,
+    previousArtist,
     startedAt,
     until: startedAt + (duration + 1) * 1000,
   };
@@ -657,30 +790,18 @@ async function readSonosNowPlayingSnapshot() {
       state,
       nrTracks: media.NrTracks,
       currentUri: media.CurrentURI,
+      forceIdle: idleHoldIsLive(),
     })
   ) {
-    Object.assign(soapSnapshot, {
-      title: null,
-      artist: null,
-      album: null,
-      uri: null,
-      albumArt: null,
-      queueTrack: 0,
-      durationSec: null,
-      positionSec: 0,
-      djVoice: false,
-      djSilence: false,
-      origin: null,
-      searched: false,
-      discovered: false,
-      moodPick: false,
-      mood: null,
-      genreLane: null,
-      reactionSet: null,
-      requestedBy: null,
-      requestedByUser: null,
-      dedication: null,
-    });
+    Object.assign(soapSnapshot, idleMediaFields());
+  } else if (
+    idleHoldIsLive() &&
+    (state === "PLAYING" || state === "TRANSITIONING") &&
+    soapSnapshot.uri &&
+    !soapSnapshot.djVoice &&
+    !soapSnapshot.djSilence
+  ) {
+    nowPlayingIdleHold = null;
   }
 
   // Stale last-song SOAP still loses to the hold. A song past the announce
@@ -917,6 +1038,7 @@ export async function getTransportTick() {
       uri: pos.TrackURI ?? null,
       state: transport.CurrentTransportState,
       positionSec: parseSonosTime(pos.RelTime),
+      queueTrack: Number(pos.Track) || 0,
     };
   } catch (err) {
     noteSonosReadFailure();
@@ -938,7 +1060,10 @@ export function onSonosSnapshotsInvalidated(listener) {
   return () => snapshotInvalidationListeners.delete(listener);
 }
 
-export function invalidateSonosSnapshots({ preserveAnnounceHold = false } = {}) {
+export function invalidateSonosSnapshots({
+  preserveAnnounceHold = false,
+  seedIdle = false,
+} = {}) {
   if (!preserveAnnounceHold) announceNowPlayingHold = null;
   getNowPlaying.bust();
   getQueueList.bust();
@@ -946,9 +1071,11 @@ export function invalidateSonosSnapshots({ preserveAnnounceHold = false } = {}) 
   // stale "playing + upcoming≤1" snapshot can refill an empty queue.
   getQueueStatus.bust();
   listGroups.bust();
+  // Seed after bust so GET /api/nowplaying cannot reuse leftover SOAP.
+  if (seedIdle) holdIdleNowPlaying();
   for (const listener of [...snapshotInvalidationListeners]) {
     try {
-      listener();
+      listener({ preserveAnnounceHold, seedIdle });
     } catch {
       /* invalidation must never fail a Sonos mutation */
     }

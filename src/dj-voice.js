@@ -3020,6 +3020,7 @@ async function beginAnnounceVolume({
       return {
         uri: tick?.uri ?? "",
         positionSec: Number(tick?.positionSec) || 0,
+        queueTrack: Number(tick?.queueTrack) || 0,
       };
     },
     setVolume: (level, exact) =>
@@ -3042,10 +3043,10 @@ async function beginAnnounceVolume({
     {
       graceMs: MAX_HANDOFF_ARMED_MS,
       waitMs: 1000,
-      onClipStart: () => {
+      onClipStart: ({ queueTrack } = {}) => {
         seedAnnouncePlayback(
           { uri: clipUrl, durationSec },
-          undefined
+          Number(queueTrack) >= 1 ? Number(queueTrack) : undefined
         );
       },
     }

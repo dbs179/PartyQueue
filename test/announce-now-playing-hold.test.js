@@ -7,6 +7,8 @@ import {
   announceNowPlayingHoldForTests,
   getNowPlaying,
   holdAnnounceNowPlaying,
+  holdIdleNowPlaying,
+  idleNowPlayingHoldForTests,
   invalidateSonosSnapshots,
   resetAnnounceNowPlayingHoldForTests,
   shouldPreserveAnnounceHoldOnPlay,
@@ -91,7 +93,16 @@ test("hold keeps the DJ when SOAP is still the previous song", () => {
 });
 
 test("hold keeps the DJ when SOAP is still on the announce index", () => {
-  holdAnnounceNowPlaying({ uri: CLIP, durationSec: 47, queueTrack: 2 });
+  holdAnnounceNowPlaying({
+    uri: CLIP,
+    durationSec: 47,
+    queueTrack: 2,
+    previous: {
+      uri: "x-sonos-spotify:spotify:track:previous",
+      title: "Home Team",
+      artist: "Whoever",
+    },
+  });
   assert.equal(
     announceHoldShouldYieldTo({
       uri: "x-sonos-spotify:spotify:track:previous",
@@ -122,4 +133,62 @@ test("volume snapshot busts keep the announce hold", async () => {
   const np = await getNowPlaying();
   assert.equal(np.djVoice, true);
   assert.equal(np.uri, CLIP);
+});
+
+test("hold yields when the next song is at the compacted announce index", () => {
+  holdAnnounceNowPlaying({
+    uri: CLIP,
+    durationSec: 47,
+    queueTrack: 2,
+    previous: {
+      uri: "x-sonos-spotify:spotify:track:previous",
+      title: "Home Team",
+      artist: "Whoever",
+    },
+  });
+  assert.equal(
+    announceHoldShouldYieldTo({
+      uri: "x-sonos-spotify:spotify:track:thunderstruck",
+      queueTrack: 2,
+      title: "Thunderstruck",
+      artist: "AC/DC",
+    }),
+    true,
+    "Thunderstruck at the trimmed announce index must knock the hold down"
+  );
+});
+
+test("re-seed without queueTrack keeps the held index so yield still works", () => {
+  holdAnnounceNowPlaying({ uri: CLIP, durationSec: 47, queueTrack: 3 });
+  holdAnnounceNowPlaying({ uri: CLIP, durationSec: 47 });
+  assert.equal(announceNowPlayingHoldForTests()?.queueTrack, 3);
+  assert.equal(
+    announceHoldShouldYieldTo({
+      uri: "x-sonos-spotify:spotify:track:thunderstruck",
+      queueTrack: 4,
+      title: "Thunderstruck",
+    }),
+    true
+  );
+});
+
+test("Clear seeds idle Now Playing and drops the announce hold", async () => {
+  holdAnnounceNowPlaying({ uri: CLIP, durationSec: 24, queueTrack: 1 });
+  invalidateSonosSnapshots({ seedIdle: true });
+  assert.equal(announceNowPlayingHoldForTests(), null);
+  assert.ok(idleNowPlayingHoldForTests()?.until > Date.now());
+  const np = await getNowPlaying();
+  assert.equal(np.title, null);
+  assert.equal(np.uri, null);
+  assert.equal(np.isPlaying, false);
+  assert.equal(np.state, "STOPPED");
+});
+
+test("holdIdleNowPlaying paints an empty snapshot immediately", async () => {
+  const seeded = holdIdleNowPlaying({ room: "Living Room" });
+  assert.equal(seeded.title, null);
+  assert.equal(seeded.isPlaying, false);
+  const np = await getNowPlaying();
+  assert.equal(np.room, "Living Room");
+  assert.equal(np.uri, null);
 });

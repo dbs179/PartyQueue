@@ -276,6 +276,20 @@ test("Clear Queue immediately drops skip optimism and paints idle Now Playing", 
   );
 });
 
+test("Clear Queue seeds idle Now Playing for every SSE client", () => {
+  const httpSrc = fs.readFileSync(
+    path.join(here, "..", "src", "now-playing-http.js"),
+    "utf8"
+  );
+  const clearSrc = fs.readFileSync(
+    path.join(here, "..", "src", "sonos-queue-mutations.js"),
+    "utf8"
+  );
+  assert.match(httpSrc, /export function seedIdleNowPlaying\(/);
+  assert.match(httpSrc, /if \(info\.seedIdle\) seedIdleNowPlaying\(\)/);
+  assert.match(clearSrc, /invalidateSonosSnapshots\(\{\s*seedIdle:\s*true\s*\}\)/);
+});
+
 test("transport convergence uses the snapshot captured before the Sonos command", () => {
   const src = fs.readFileSync(
     path.join(here, "..", "src", "routes", "transport.js"),

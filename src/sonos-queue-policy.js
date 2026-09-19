@@ -172,9 +172,13 @@ export function shouldHideGhostNowPlaying({
   state = "",
   nrTracks = null,
   currentUri = "",
+  forceIdle = false,
 } = {}) {
   const n = Number(nrTracks);
   if (!Number.isFinite(n) || n > 0) return false;
+  // Host Clear seeds idle immediately; leftover PLAYING+NrTracks=0 SOAP must
+  // not restore the last title during that window.
+  if (forceIdle) return true;
   if (isTransportPlaying(state)) return false;
   if (playingFromQueue) return true;
   // Wipe sometimes clears CurrentURI but leaves TrackMetaData on the last song.

@@ -1636,7 +1636,7 @@ async function clearQueueUnlocked() {
     }
   }
 
-  invalidateSonosSnapshots();
+  invalidateSonosSnapshots({ seedIdle: true });
   return {
     room: coordinator.Name,
     group: coordinator.GroupName,

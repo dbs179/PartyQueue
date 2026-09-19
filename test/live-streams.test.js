@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   shouldPollView,
   shouldLoadSonosGroups,
@@ -14,6 +17,8 @@ import {
   NOW_PLAYING_STALE_MESSAGE,
   FOREGROUND_RESUME_DEBOUNCE_MS,
   FOCUS_RESUME_FRESH_MS,
+  STALE_NOW_PLAYING_MS,
+  nowPlayingStreamIsStale,
 } from "../public/js/live-streams.js";
 
 function makeStatusEl() {
@@ -747,4 +752,44 @@ test("force reconnect closes a zombie EventSource and fetches without cache", as
   live.closeNowPlayingStream();
   live.closeQueueStream();
   live.closePartyStream();
+});
+
+test("nowPlayingStreamIsStale ignores queue-age and 10s clock sync", () => {
+  assert.equal(nowPlayingStreamIsStale(0, 50_000), false);
+  assert.equal(nowPlayingStreamIsStale(1_000, 10_000), false);
+  assert.equal(
+    nowPlayingStreamIsStale(1_000, 1_000 + STALE_NOW_PLAYING_MS - 1),
+    false
+  );
+  assert.equal(
+    nowPlayingStreamIsStale(1_000, 1_000 + STALE_NOW_PLAYING_MS),
+    true
+  );
+  assert.ok(STALE_NOW_PLAYING_MS > 10_000);
+  assert.ok(STALE_NOW_PLAYING_MS < 45_000);
+});
+
+test("queue SSE events do not keep a silent Now Playing stream alive", () => {
+  const src = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public", "js", "live-streams.js"),
+    "utf8"
+  );
+  assert.match(src, /function noteNowPlayingStreamEvent\(/);
+  assert.match(src, /nowPlayingStreamIsStale\(lastNowPlayingEventAt\)/);
+  assert.match(
+    src,
+    /closeNowPlayingStream\(\);\s*openNowPlayingStream\(\)/
+  );
+  const queueFn = src.slice(
+    src.indexOf("function applyQueueStreamSnapshot"),
+    src.indexOf("async function loadQueue")
+  );
+  assert.match(queueFn, /noteLiveEvent\(\)/);
+  assert.doesNotMatch(queueFn, /noteNowPlayingStreamEvent/);
+  const partyFn = src.slice(
+    src.indexOf("function applyPartyStreamSnapshot"),
+    src.indexOf("async function loadPartySettings")
+  );
+  assert.match(partyFn, /noteLiveEvent\(\)/);
+  assert.doesNotMatch(partyFn, /noteNowPlayingStreamEvent/);
 });

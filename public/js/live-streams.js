@@ -20,7 +20,17 @@ export const FOREGROUND_RESUME_DEBOUNCE_MS = 1200;
 export const FOCUS_RESUME_FRESH_MS = 8000;
 /** Visible-only safety net for a zombie EventSource that never errors. */
 export const STALE_LIVE_MS = 45000;
-export const STALE_LIVE_CHECK_MS = 30000;
+export const STALE_LIVE_CHECK_MS = 5000;
+/** NP monitor clock-syncs every 10s; silence past this means the NP socket is dead. */
+export const STALE_NOW_PLAYING_MS = 15000;
+
+export function nowPlayingStreamIsStale(
+  lastNpEventAt,
+  at = Date.now(),
+  staleMs = STALE_NOW_PLAYING_MS
+) {
+  return Number(lastNpEventAt) > 0 && at - Number(lastNpEventAt) >= staleMs;
+}
 
 /** Shown on Up Next / Party Display when the queue stream is stale. */
 export const QUEUE_STALE_MESSAGE =
@@ -205,10 +215,17 @@ export function createLiveStreams(els, deps) {
   let partyStreamVersion = 0;
   let partyHttpRequest = 0;
   let lastLiveEventAt = 0;
+  let lastNowPlayingEventAt = 0;
+  let lastNpReconnectAt = 0;
   let staleWatchTimer = null;
 
   function noteLiveEvent() {
     lastLiveEventAt = Date.now();
+  }
+
+  function noteNowPlayingStreamEvent() {
+    lastNowPlayingEventAt = Date.now();
+    noteLiveEvent();
   }
 
   function stopStaleWatch() {
@@ -230,6 +247,17 @@ export function createLiveStreams(els, deps) {
       ) {
         // A live view with a missing stream: reopen rather than sit stale.
         syncPolling();
+        return;
+      }
+      if (
+        nowPlayingStreamIsStale(lastNowPlayingEventAt) &&
+        (!lastNpReconnectAt ||
+          Date.now() - lastNpReconnectAt >= STALE_NOW_PLAYING_MS)
+      ) {
+        lastNpReconnectAt = Date.now();
+        lastNowPlayingEventAt = Date.now();
+        closeNowPlayingStream();
+        openNowPlayingStream();
         return;
       }
       if (lastLiveEventAt && Date.now() - lastLiveEventAt > STALE_LIVE_MS) {
@@ -321,7 +349,7 @@ export function createLiveStreams(els, deps) {
     if (!next.accept) return;
     nowPlayingStreamCursor = next.cursor;
     nowPlayingStreamVersion += 1;
-    noteLiveEvent();
+    noteNowPlayingStreamEvent();
     noteNowPlayingActivity(snapshot);
     renderNowPlaying(snapshot);
   }
@@ -423,6 +451,7 @@ export function createLiveStreams(els, deps) {
     source.onopen = () => {
       if (nowPlayingSource !== source) return;
       nowPlayingStreamConnected = true;
+      lastNowPlayingEventAt = Date.now();
       stopNowPlayingFallback();
       setNowPlayingConnectionStatus("connected");
     };
@@ -437,7 +466,7 @@ export function createLiveStreams(els, deps) {
     });
     source.addEventListener("nowplaying-changed", () => {
       if (nowPlayingSource !== source) return;
-      noteLiveEvent();
+      noteNowPlayingStreamEvent();
       void loadNowPlaying(true);
     });
     source.onmessage = (event) => {

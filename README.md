@@ -1,6 +1,6 @@
 # PartyQueue
 
-**Version 12.0.6**
+**Version 12.0.7**
 
 PartyQueue lets everyone at your party help choose the music. Guests open a
 web page on their phones, search Spotify, and add songs to your Sonos queue.
@@ -294,8 +294,9 @@ ElevenLabs or OpenAI TTS.
 
 Each shout is baked into one Sonos queue row (the spoken clip, with a short
 volume ramp and restore). Guest requests stay ahead of Random filler. Now
-Playing shows the DJ as soon as the clip starts, then the song — including
-the album year. A leftover last-song title after Clear or Stop is ignored.
+Playing shows the DJ as soon as the clip starts, then the song when it is
+audible — including the album year. Clear Queue and an idle empty room drop
+the last title on every open phone and TV without a refresh.
 
 During an announcement, PartyQueue temporarily adjusts the volume and then
 returns every speaker to its exact previous level before music continues.
@@ -379,10 +380,10 @@ while music is actively playing from the queue.
 
 ### Now Playing still shows a song after Clear
 
-Update PartyQueue and rebuild the Docker image. Skip can paint the next song
-before Sonos catches up; Clear now drops that guess immediately. An idle empty
-queue also hides leftover Sonos metadata so the last title does not stay on
-screen with nothing playing.
+Update PartyQueue and rebuild the Docker image. Clear seeds an empty Now
+Playing on every open view right away, and leftover Sonos metadata on an idle
+empty queue is ignored. If one phone or TV still looks stuck, wait a few
+seconds for it to reconnect, or reopen that tab.
 
 ### Host not allowed / Origin required
 

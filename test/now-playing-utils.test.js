@@ -213,3 +213,39 @@ test("resolveNowPlayingDisplay drops skip optimism when transport is idle", () =
   assert.equal(idleEmpty.mode, "confirmed");
   assert.equal(idleEmpty.display.title, null);
 });
+
+test("resolveNowPlayingDisplay drops lastConfirmed when the queue is idle and empty", () => {
+  const confirmed = {
+    title: "Old",
+    artist: "A",
+    albumArt: "/old.jpg",
+    uri: "spotify:track:old",
+    durationSec: 180,
+  };
+  const pendingIdle = resolveNowPlayingDisplay({
+    transport: {
+      isPlaying: false,
+      queuePlaying: false,
+      state: "STOPPED",
+      title: null,
+      metadataPending: true,
+    },
+    lastConfirmed: confirmed,
+    queueEmpty: true,
+  });
+  assert.notEqual(pendingIdle.display?.title, "Old");
+
+  const stillPlayingLast = resolveNowPlayingDisplay({
+    transport: {
+      ...confirmed,
+      isPlaying: true,
+      queuePlaying: true,
+      state: "PLAYING",
+      metadataPending: false,
+    },
+    lastConfirmed: confirmed,
+    queueEmpty: true,
+  });
+  assert.equal(stillPlayingLast.mode, "confirmed");
+  assert.equal(stillPlayingLast.display.title, "Old");
+});

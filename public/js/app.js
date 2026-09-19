@@ -3145,6 +3145,12 @@ function resetNowPlayingToIdle() {
 
 function adoptTransportConfirmation(transport) {
   if (!transport) return;
+  const queueEmpty =
+    !Array.isArray(lastQueueTracks) || lastQueueTracks.length === 0;
+  if (queueEmpty && !nowPlayingTransportActive(transport)) {
+    lastConfirmedNp = null;
+    optimisticNp = null;
+  }
   if (transport.metadataPending) return;
   const hasTrack = !!(transport.title || transport.artist || transport.uri);
   if (!hasTrack) {
@@ -3188,6 +3194,8 @@ function renderNowPlaying(transport) {
     transport,
     lastConfirmed: lastConfirmedNp,
     optimistic: optimisticNp,
+    queueEmpty:
+      !Array.isArray(lastQueueTracks) || lastQueueTracks.length === 0,
   });
   nowPlayingDisplayMode = resolved.mode;
   if (resolved.confirmed) lastConfirmedNp = resolved.confirmed;
@@ -3305,6 +3313,13 @@ function applyQueueTracks(tracks) {
   queueUi.renderPartyDisplay(tracks);
   prefetchUpcomingAlbumArt(tracks);
   scheduleFairnessRefresh();
+  if (
+    (!Array.isArray(tracks) || tracks.length === 0) &&
+    lastTransportNp &&
+    !nowPlayingTransportActive(lastTransportNp)
+  ) {
+    renderNowPlaying(lastTransportNp);
+  }
 }
 
 

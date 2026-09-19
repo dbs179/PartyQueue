@@ -222,8 +222,9 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
       }
       let uri;
       let positionSec;
+      let queueTrack;
       try {
-        ({ uri, positionSec } = (await io.read()) ?? {});
+        ({ uri, positionSec, queueTrack } = (await io.read()) ?? {});
       } catch (err) {
         logger.warn?.(`[dj-volume] transport read failed: ${err?.message || err}`);
         await io.sleep(pollMs);
@@ -232,7 +233,7 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
       if (matches(uri)) {
         if (!sawClip) {
           try {
-            opts.onClipStart?.();
+            opts.onClipStart?.({ uri, positionSec, queueTrack });
           } catch (err) {
             logger.warn?.(
               `[dj-volume] onClipStart failed: ${err?.message || err}`

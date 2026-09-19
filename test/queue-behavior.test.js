@@ -314,6 +314,28 @@ test("shouldHideGhostNowPlaying hides leftover DIDL on an empty idle queue", () 
   assert.equal(
     shouldHideGhostNowPlaying({
       playingFromQueue: true,
+      state: "PLAYING",
+      nrTracks: 0,
+      currentUri: "x-rincon-queue:RINCON_ABC#0",
+      forceIdle: true,
+    }),
+    true,
+    "post-Clear PLAYING leftover on an empty queue must not restore the last title"
+  );
+  assert.equal(
+    shouldHideGhostNowPlaying({
+      playingFromQueue: true,
+      state: "PLAYING",
+      nrTracks: 4,
+      currentUri: "x-rincon-queue:RINCON_ABC#0",
+      forceIdle: true,
+    }),
+    false,
+    "forceIdle must not hide a queue that already has tracks"
+  );
+  assert.equal(
+    shouldHideGhostNowPlaying({
+      playingFromQueue: true,
       state: "STOPPED",
       nrTracks: 4,
       currentUri: "x-rincon-queue:RINCON_ABC#0",

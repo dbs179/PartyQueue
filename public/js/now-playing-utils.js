@@ -129,9 +129,17 @@ export function resolveNowPlayingDisplay({
   transport = null,
   lastConfirmed = null,
   optimistic = null,
+  queueEmpty = false,
 } = {}) {
   if (!transport && !lastConfirmed && !optimistic) {
     return { display: null, mode: "empty", confirmed: null };
+  }
+
+  // Empty Up Next + idle transport: never keep the last title in converging
+  // mode. A last song that is still PLAYING must not hit this path.
+  if (queueEmpty && (!transport || !nowPlayingTransportActive(transport))) {
+    optimistic = null;
+    lastConfirmed = null;
   }
 
   const transportMedia = mediaIdentity(transport);

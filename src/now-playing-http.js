@@ -18,6 +18,7 @@ import {
   getQueueList,
   onSonosSnapshotsInvalidated,
   holdAnnounceNowPlaying,
+  holdIdleNowPlaying,
 } from "./sonos.js";
 
 const GENRE_LABEL_BY_ID = new Map(GENRE_BUCKETS.map((b) => [b.id, b.label]));
@@ -334,8 +335,9 @@ export function broadcastNowPlayingMutation() {
   scheduleNowPlayingFollowupNudges();
 }
 
-const unsubscribeSonosStreamNudge = onSonosSnapshotsInvalidated(() => {
+const unsubscribeSonosStreamNudge = onSonosSnapshotsInvalidated((info = {}) => {
   nowPlayingMonitor.discardStalePoll?.();
+  if (info.seedIdle) seedIdleNowPlaying();
   broadcastNowPlayingMutation();
 });
 
@@ -344,11 +346,30 @@ const unsubscribeSonosStreamNudge = onSonosSnapshotsInvalidated(() => {
  * GetPositionInfo that still says the last song cannot own the booth.
  */
 export function seedAnnounceNowPlaying(opts = {}) {
-  const snapshot = holdAnnounceNowPlaying(opts);
+  const current = nowPlayingMonitor.latest;
+  const previous =
+    opts.previous ||
+    (current && !current.djVoice && !current.djSilence
+      ? {
+          uri: current.uri,
+          title: current.title,
+          artist: current.artist,
+        }
+      : null);
+  const snapshot = holdAnnounceNowPlaying({ ...opts, previous });
   if (!snapshot) return null;
   nowPlayingMonitor.seed(snapshot);
   // Do not run the skip-transition confirm dance. That waits on Sonos and
   // is what kept the last song on screen after we already knew the DJ URI.
+  return snapshot;
+}
+
+/** Clear Queue: paint idle on every SSE client before leftover SOAP arrives. */
+export function seedIdleNowPlaying(opts = {}) {
+  const snapshot = holdIdleNowPlaying(opts);
+  if (!snapshot) return null;
+  transitionTracker.reset();
+  nowPlayingMonitor.seed(snapshot);
   return snapshot;
 }
 
