@@ -8,6 +8,7 @@ import {
   getNowPlaying,
   holdAnnounceNowPlaying,
   holdIdleNowPlaying,
+  idleHoldShouldYieldTo,
   idleNowPlayingHoldForTests,
   invalidateSonosSnapshots,
   rememberLastMusicNowPlayingForTests,
@@ -271,4 +272,74 @@ test("holdIdleNowPlaying paints an empty snapshot immediately", async () => {
   const np = await getNowPlaying();
   assert.equal(np.room, "Living Room");
   assert.equal(np.uri, null);
+});
+
+test("idle hold keeps leftover PLAYING SOAP of the last song", () => {
+  rememberLastMusicNowPlayingForTests({
+    uri: "x-sonos-spotify:spotify:track:left-behind",
+    title: "Left Behind",
+    artist: "The Plot In You",
+  });
+  holdIdleNowPlaying();
+  assert.equal(
+    idleHoldShouldYieldTo(
+      {
+        uri: "x-sonos-spotify:spotify:track:left-behind",
+        title: "Left Behind",
+        artist: "The Plot In You",
+        state: "PLAYING",
+        isPlaying: true,
+      },
+      4
+    ),
+    false,
+    "GetMediaInfo still counting tracks must not restore the last title"
+  );
+  assert.equal(
+    idleHoldShouldYieldTo(
+      {
+        uri: "x-sonos-spotify:spotify:track:left-behind",
+        title: "Left Behind",
+        artist: "The Plot In You",
+        state: "PLAYING",
+        isPlaying: true,
+      },
+      0
+    ),
+    false,
+    "empty-queue PLAYING leftover must stay idle"
+  );
+});
+
+test("idle hold yields once a different song is actually playing", () => {
+  rememberLastMusicNowPlayingForTests({
+    uri: "x-sonos-spotify:spotify:track:left-behind",
+    title: "Left Behind",
+    artist: "The Plot In You",
+  });
+  holdIdleNowPlaying();
+  assert.equal(
+    idleHoldShouldYieldTo(
+      {
+        uri: "x-sonos-spotify:spotify:track:drown",
+        title: "Drown",
+        artist: "Bring Me The Horizon",
+        state: "PLAYING",
+        isPlaying: true,
+      },
+      3
+    ),
+    true
+  );
+});
+
+test("idle Now Playing survives a snapshot bust without Sonos", async () => {
+  holdIdleNowPlaying({ room: "Living Room" });
+  getNowPlaying.bust();
+  const np = await getNowPlaying();
+  assert.equal(np.title, null);
+  assert.equal(np.uri, null);
+  assert.equal(np.isPlaying, false);
+  assert.equal(np.state, "STOPPED");
+  assert.equal(np.room, "Living Room");
 });

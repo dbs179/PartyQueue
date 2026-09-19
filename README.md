@@ -1,6 +1,6 @@
 # PartyQueue
 
-**Version 12.0.10**
+**Version 12.0.11**
 
 PartyQueue lets everyone at your party help choose the music. Guests open a
 web page on their phones, search Spotify, and add songs to your Sonos queue.
@@ -381,9 +381,9 @@ while music is actively playing from the queue.
 ### Now Playing still shows a song after Clear
 
 Update PartyQueue and rebuild the Docker image. Clear seeds an empty Now
-Playing on every open view right away, and leftover Sonos metadata on an idle
-empty queue is ignored. If one phone or TV still looks stuck, wait a few
-seconds for it to reconnect, or reopen that tab.
+Playing on every open view right away, and leftover Sonos metadata (including
+a PLAYING last song while Stop catches up) is ignored. If one phone or TV
+still looks stuck, wait a few seconds for it to reconnect, or reopen that tab.
 
 ### Host not allowed / Origin required
 
