@@ -3290,6 +3290,9 @@ function renderNowPlaying(transport) {
     npTitle.hidden = true;
     npArtist.hidden = true;
     npAlbum.hidden = true;
+    npTitle.textContent = "";
+    npArtist.textContent = "";
+    npAlbum.textContent = "";
     bindNowPlayingArtwork(npArt, null);
     npEmpty.hidden = false;
     npEmpty.textContent = EMPTY_MESSAGE;

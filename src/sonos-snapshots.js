@@ -149,11 +149,16 @@ function isHeldPreviousSong(live, hold) {
 /**
  * Drop the DJ hold once Sonos is actually on the next song. The hold exists
  * so a stale last-song SOAP cannot win during Seek/Play — not so Now Playing
- * stays on Holy Roller for the whole baked duration after Thunderstruck starts.
+ * stays on Holy Roller for the whole baked duration after Drown starts.
  *
- * Yield when the live URI is music (past the announce row, or the same index
- * after the announce row is trimmed). Keep the hold when SOAP is still the
- * previous song, still the announce, or leftover pre-announce metadata.
+ * Yield as soon as the live URI is music that is not the previous song. After
+ * the announce row is trimmed, that song often lands *below* the held index
+ * (DJ was 2, Drown becomes 1). Treating any lower index as "still Seek"
+ * kept Holy Roller on screen for the first ~15s of the song.
+ *
+ * Keep the hold when SOAP is still the announce, a silence pad, or the
+ * previous song. Without a stored previous identity, a lower index is still
+ * treated as leftover last-song SOAP.
  */
 export function announceHoldShouldYieldTo(live) {
   if (!announceHoldIsLive()) return true;
@@ -170,18 +175,20 @@ export function announceHoldShouldYieldTo(live) {
     return false;
   }
   if (isHeldPreviousSong(live, hold)) return false;
+  const hasMusic = !!(live.title || live.artist || liveUri);
+  if (!hasMusic) return false;
+
   const heldTrack = Number(hold.queueTrack) || 0;
   const liveTrack = Number(live.queueTrack) || 0;
-  const hasMusic = !!(live.title || live.artist || liveUri);
-  if (heldTrack >= 1 && liveTrack >= 1) {
-    if (liveTrack > heldTrack) return true;
-    if (liveTrack < heldTrack) return false;
-    // Same index after compaction / pad strip: a new song URI wins immediately.
-    return hasMusic;
+  const previousKnown = !!(hold.previousUri || hold.previousTitle);
+
+  if (heldTrack >= 1 && liveTrack >= 1 && liveTrack < heldTrack && !previousKnown) {
+    return false;
   }
-  if (hasMusic) return true;
+  if (heldTrack >= 1 && liveTrack >= 1) return true;
+  if (previousKnown) return true;
   const elapsed = (Date.now() - hold.startedAt) / 1000;
-  return elapsed >= hold.durationSec && hasMusic;
+  return elapsed >= hold.durationSec;
 }
 
 function dropAnnounceHold() {
@@ -804,9 +811,9 @@ async function readSonosNowPlayingSnapshot() {
     nowPlayingIdleHold = null;
   }
 
-  // Stale last-song SOAP still loses to the hold. A song past the announce
-  // row wins — otherwise a 47s baked clip keeps Holy Roller on screen
-  // after Thunderstruck has already started.
+  // Stale last-song SOAP still loses to the hold. The next song wins as
+  // soon as SOAP reports it — including after compaction moves Drown
+  // below the held announce index.
   if (!announceHoldShouldYieldTo(soapSnapshot)) {
     return liveAnnounceSnapshot() || soapSnapshot;
   }

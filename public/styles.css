@@ -1319,6 +1319,11 @@ button.guest-name:focus-visible {
   overflow: hidden;
 }
 
+/* -webkit-box above beats the UA [hidden] { display: none }. */
+.np-title[hidden] {
+  display: none;
+}
+
 .np-artist {
   color: var(--text);
   opacity: 0.85;

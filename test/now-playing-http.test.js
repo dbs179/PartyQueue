@@ -274,6 +274,18 @@ test("Clear Queue immediately drops skip optimism and paints idle Now Playing", 
     src,
     /if \(optimisticNp && !nowPlayingTransportActive\(transport\)\) \{\s*optimisticNp = null;/
   );
+  assert.match(
+    src,
+    /npTitle\.hidden = true;\s*npArtist\.hidden = true;\s*npAlbum\.hidden = true;\s*npTitle\.textContent = "";/
+  );
+});
+
+test("idle Now Playing title is not kept visible by -webkit-box", () => {
+  const css = fs.readFileSync(
+    path.join(here, "..", "public", "styles.css"),
+    "utf8"
+  );
+  assert.match(css, /\.np-title\[hidden\]\s*\{\s*display:\s*none;/);
 });
 
 test("Clear Queue seeds idle Now Playing for every SSE client", () => {

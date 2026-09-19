@@ -92,6 +92,29 @@ test("hold keeps the DJ when SOAP is still the previous song", () => {
   );
 });
 
+test("hold keeps the previous song at a lower index when previous is stored", () => {
+  holdAnnounceNowPlaying({
+    uri: CLIP,
+    durationSec: 47,
+    queueTrack: 2,
+    previous: {
+      uri: "x-sonos-spotify:spotify:track:previous",
+      title: "Home Team",
+      artist: "Whoever",
+    },
+  });
+  assert.equal(
+    announceHoldShouldYieldTo({
+      uri: "x-sonos-spotify:spotify:track:previous",
+      queueTrack: 1,
+      title: "Home Team",
+      artist: "Whoever",
+    }),
+    false,
+    "Seek leftover last-song SOAP must not flash over the DJ"
+  );
+});
+
 test("hold keeps the DJ when SOAP is still on the announce index", () => {
   holdAnnounceNowPlaying({
     uri: CLIP,
@@ -155,6 +178,29 @@ test("hold yields when the next song is at the compacted announce index", () => 
     }),
     true,
     "Thunderstruck at the trimmed announce index must knock the hold down"
+  );
+});
+
+test("hold yields when the next song compacted below the announce index", () => {
+  holdAnnounceNowPlaying({
+    uri: CLIP,
+    durationSec: 47,
+    queueTrack: 2,
+    previous: {
+      uri: "x-sonos-spotify:spotify:track:previous",
+      title: "Home Team",
+      artist: "Whoever",
+    },
+  });
+  assert.equal(
+    announceHoldShouldYieldTo({
+      uri: "x-sonos-spotify:spotify:track:drown",
+      queueTrack: 1,
+      title: "Drown",
+      artist: "Bring Me The Horizon",
+    }),
+    true,
+    "Drown at track 1 after the DJ row is stripped must knock the hold down"
   );
 });
 
