@@ -45,7 +45,12 @@ import {
   MAX_HANDOFF_ARMED_MS,
   setDjVolumeHandoffArmed,
 } from "./dj-volume-handoff-state.js";
-import { bakeAnnounceClip, isBakedAnnounceUri, probeAudioDurationSec } from "./dj-announce-bake.js";
+import {
+  bakeAnnounceClip,
+  isBakedAnnounceUri,
+  probeAudioDurationSec,
+  punchStartsAtSecForBake,
+} from "./dj-announce-bake.js";
 import {
   inheritAnnounceMusicBaseline,
   runAnnounceVolume,
@@ -3996,15 +4001,12 @@ async function announceOnSonosUnlocked(
     // Now Playing / DJ Script look up copy by the URI Sonos is playing. That
     // is the baked file, not the raw TTS clip we remembered a few lines above.
     try {
-      const leadSec =
-        Number(baked.leadSec) || Number(clip.approxDurationSec) || 8;
       rememberDjClipScript(baked.publicUrl, message, {
         alsoUris: [baked.fileName, clip.publicUrl, clip.fileName].filter(Boolean),
         personaId: leadPersona.id || DJ_PERSONA_HOLY_ROLLER,
         // Banter lives in the same file; flip the booth once the punch starts.
         punchPersonaId: punchPersona?.id || null,
-        punchStartsAtSec:
-          punchPersona && clip2?.fileName ? baked.rampSec + leadSec : null,
+        punchStartsAtSec: punchStartsAtSecForBake(baked),
         punchScript: punchText || punchlineText || null,
       });
     } catch (err) {

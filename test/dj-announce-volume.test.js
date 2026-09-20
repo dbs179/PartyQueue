@@ -462,11 +462,8 @@ test("transport ticks expose TrackDuration so restore can use the real clip leng
     "utf8"
   );
   assert.match(volumeSrc, /resolveAnnounceClipDuration\(/);
-  assert.match(
-    voiceSrc,
-    /punchStartsAtSec:\s*[\s\S]*baked\.rampSec \+ leadSec/
-  );
-  assert.match(voiceSrc, /Number\(baked\.leadSec\)/);
+  assert.match(voiceSrc, /punchStartsAtSec:\s*punchStartsAtSecForBake\(baked\)/);
+  assert.match(voiceSrc, /punchStartsAtSecForBake/);
   assert.match(voiceSrc, /ttsBytesPerSec\(provider\)/);
   assert.match(voiceSrc, /probeAudioDurationSec\(filePath/);
 });

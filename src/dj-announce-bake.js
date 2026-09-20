@@ -201,6 +201,24 @@ function applyMeasuredDuration(result, measured) {
   return result;
 }
 
+/**
+ * When Sister Static is baked into the same row, Now Playing flips to her
+ * once the playhead reaches this offset. Uses the measured lead clip, not
+ * the 64 kbps byte-length guess — that guess was past the end of the file,
+ * so the booth never left Holy Roller's icon.
+ *
+ * @param {{ rampSec?: number, leadSec?: number, punchSec?: number }|null|undefined} baked
+ * @returns {number|null}
+ */
+export function punchStartsAtSecForBake(baked) {
+  const punch = Number(baked?.punchSec);
+  if (!(Number.isFinite(punch) && punch > 0)) return null;
+  const ramp = Number(baked?.rampSec) || 0;
+  const lead = Number(baked?.leadSec);
+  if (!(Number.isFinite(lead) && lead > 0)) return null;
+  return ramp + lead;
+}
+
 function applyMeasuredParts(result, { baked, lead, punch } = {}) {
   if (Number.isFinite(lead) && lead > 0) result.leadSec = lead;
   if (Number.isFinite(punch) && punch > 0) result.punchSec = punch;

@@ -9,6 +9,7 @@ import {
   bakedAnnounceName,
   durationSecFromFfmpegInfo,
   isBakedAnnounceUri,
+  punchStartsAtSecForBake,
   BAKED_PREFIX,
 } from "../src/dj-announce-bake.js";
 import {
@@ -279,4 +280,41 @@ test("a missing source clip fails loudly instead of baking silence", async () =>
     }),
     /missing lead\.mp3/
   );
+});
+
+test("punchStartsAtSecForBake flips after the measured lead, not the byte-length guess", () => {
+  assert.equal(
+    punchStartsAtSecForBake({ rampSec: 3, leadSec: 15.05, punchSec: 10.14 }),
+    18.05
+  );
+  assert.equal(
+    punchStartsAtSecForBake({ rampSec: 3, leadSec: 43, punchSec: 0 }),
+    null
+  );
+  assert.equal(punchStartsAtSecForBake({ rampSec: 3, leadSec: 15 }), null);
+});
+
+test("a banter bake measures the lead clip so Sister Static can take the booth", async () => {
+  const dir = makeDir(PADS);
+  const result = await bakeAnnounceClip({
+    ...base(dir),
+    punchFile: "punch.mp3",
+    punchSec: 20,
+    leadSec: 43,
+    concat: async (_inputs, out) => {
+      fs.writeFileSync(out, "BAKED");
+    },
+    probeDuration: async (filePath) => {
+      const name = path.basename(filePath);
+      if (name === "lead.mp3") return 15.05;
+      if (name === "punch.mp3") return 10.14;
+      if (name.startsWith(BAKED_PREFIX)) return 31.19;
+      return null;
+    },
+  });
+
+  assert.equal(result.leadSec, 15.05);
+  assert.equal(result.punchSec, 10.14);
+  assert.equal(result.durationSec, 31.19);
+  assert.equal(punchStartsAtSecForBake(result), 18.05);
 });
