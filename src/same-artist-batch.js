@@ -8,7 +8,10 @@
  */
 
 import { primaryArtist } from "./sampler.js";
-import { isOutOfSeasonHolidayTrack } from "./holiday-tracks.js";
+import {
+  isOutOfSeasonHolidayPlaylist,
+  isOutOfSeasonHolidayTrack,
+} from "./holiday-tracks.js";
 import { getRandomnessSettings } from "./settings.js";
 import { buildPlaylistPool } from "./spotify.js";
 import { artistMatchesGenres } from "./genres.js";
@@ -142,10 +145,12 @@ export function filterSameArtistUsable(playlists, opts = {}) {
       }))
       .filter((p) => p.tracks.length > 0);
   }
+  const now = opts.now instanceof Date ? opts.now : new Date();
+  usable = usable.filter((p) => !isOutOfSeasonHolidayPlaylist(p, now));
   usable = usable
     .map((p) => ({
       ...p,
-      tracks: (p.tracks || []).filter((t) => !isOutOfSeasonHolidayTrack(t)),
+      tracks: (p.tracks || []).filter((t) => !isOutOfSeasonHolidayTrack(t, now)),
     }))
     .filter((p) => p.tracks.length > 0);
   const activeMoodPack = eraMoodPack(opts.mood);

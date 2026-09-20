@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   listPoolArtists,
   filterPlaylistsByPrimaryArtist,
+  filterSameArtistUsable,
   pickShowcaseArtistFromPlaylists,
   sameArtistPoolReady,
   noteRandomSetBuilt,
@@ -113,4 +114,39 @@ test("sameArtistSetsUntil counts remaining sets and hides when off", () => {
   assert.equal(sameArtistSetsUntil({ enabled: true, everyN: 8, setsSince: 7 }), 1);
   assert.equal(sameArtistSetsUntil({ enabled: true, everyN: 8, setsSince: 8 }), 0);
   assert.equal(sameArtistSetsUntil({ enabled: true, everyN: 5, setsSince: 9 }), 0);
+});
+
+test("filterSameArtistUsable drops Christmas playlists outside the holiday window", () => {
+  const playlists = [
+    {
+      id: "xmas",
+      name: "Holidays - Christmas Music",
+      tracks: [{ artist: "Josh Groban", name: "Believe", uri: "spotify:track:believe" }],
+    },
+    {
+      id: "hits",
+      name: "Top Hits - 2025",
+      tracks: [
+        { artist: "Kelly Clarkson", name: "Since U Been Gone", uri: "spotify:track:gone" },
+        { artist: "Kelly Clarkson", name: "Underneath the Tree", uri: "spotify:track:tree" },
+      ],
+    },
+  ];
+  const september = filterSameArtistUsable(playlists, {
+    now: new Date("2026-09-20T12:00:00"),
+  });
+  assert.deepEqual(
+    september.map((p) => p.id),
+    ["hits"]
+  );
+  assert.deepEqual(
+    september[0].tracks.map((t) => t.name),
+    ["Since U Been Gone"]
+  );
+
+  const december = filterSameArtistUsable(playlists, {
+    now: new Date("2026-12-20T12:00:00"),
+  });
+  assert.equal(december.length, 2);
+  assert.ok(december.some((p) => p.id === "xmas"));
 });

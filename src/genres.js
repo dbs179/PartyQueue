@@ -17,6 +17,10 @@ import { fileURLToPath } from "node:url";
 import { buildPlaylistPool } from "./spotify.js";
 import { writeFileAtomic } from "./atomic-write.js";
 import { getLastfmApiKey } from "./lastfm.js";
+import {
+  isOutOfSeasonHolidayPlaylist,
+  isOutOfSeasonHolidayTrack,
+} from "./holiday-tracks.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_FILE =
@@ -530,6 +534,7 @@ export async function eligiblePoolSize({
     const allow = new Set(playlistIds);
     usable = usable.filter((p) => allow.has(p.id));
   }
+  usable = usable.filter((p) => !isOutOfSeasonHolidayPlaylist(p));
   const enabled =
     Array.isArray(genres) && genres.length ? new Set(genres) : null;
   const range =
@@ -539,6 +544,7 @@ export async function eligiblePoolSize({
     for (const t of pl.tracks || []) {
       const id = (t.uri || "").match(/spotify:track:([A-Za-z0-9]+)/)?.[1];
       if (!id) continue;
+      if (isOutOfSeasonHolidayTrack(t)) continue;
       if (range) {
         const y = Number(t.year);
         if (!Number.isFinite(y) || y < range[0] || y > range[1]) continue;

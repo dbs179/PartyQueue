@@ -363,3 +363,40 @@ test("sampleSongs skips Christmas tracks outside the holiday window", () => {
   assert.ok(idsOf(december).includes("tree"));
   assert.ok(idsOf(december).includes("gone"));
 });
+
+test("sampleSongs skips Christmas-named playlists outside the holiday window", () => {
+  const playlists = [
+    {
+      id: "xmas",
+      name: "Holidays - Christmas Music",
+      tracks: [
+        {
+          uri: "spotify:track:believe",
+          name: "Believe",
+          artist: "Josh Groban",
+        },
+      ],
+    },
+    {
+      id: "hits",
+      name: "Top Hits - 2025",
+      tracks: [
+        {
+          uri: "spotify:track:gone",
+          name: "Since U Been Gone",
+          artist: "Kelly Clarkson",
+        },
+      ],
+    },
+  ];
+  const september = sampleSongs(playlists, new Set(), 5, {
+    now: new Date("2026-09-20T12:00:00"),
+  });
+  assert.deepEqual(idsOf(september), ["gone"]);
+
+  const december = sampleSongs(playlists, new Set(), 5, {
+    now: new Date("2026-12-20T12:00:00"),
+  });
+  assert.ok(idsOf(december).includes("believe"));
+  assert.ok(idsOf(december).includes("gone"));
+});

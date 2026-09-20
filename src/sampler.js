@@ -9,7 +9,10 @@
 // doesn't keep leaning on the same songs and artists.
 
 import { isClosingTime } from "./closing-time.js";
-import { isOutOfSeasonHolidayTrack } from "./holiday-tracks.js";
+import {
+  isOutOfSeasonHolidayPlaylist,
+  isOutOfSeasonHolidayTrack,
+} from "./holiday-tracks.js";
 import { fitsExactLane, genreFlowScore } from "./genre-flow.js";
 
 // Pull the bare spotify:track:<id> out of whatever URI form Sonos stores in the
@@ -227,6 +230,7 @@ export function sampleSongs(playlists, exclude, want, opts = {}) {
     if (useFlow) {
       const candidates = [];
       for (const pl of shuffled(playlists)) {
+        if (isOutOfSeasonHolidayPlaylist(pl, now)) continue;
         const fresh = (pl.tracks || []).filter((t) => {
           const id = spotifyTrackId(t.uri);
           if (!id) return false;
@@ -281,6 +285,7 @@ export function sampleSongs(playlists, exclude, want, opts = {}) {
     } else {
       for (const pl of shuffled(playlists)) {
         if (chosen.length >= want) break;
+        if (isOutOfSeasonHolidayPlaylist(pl, now)) continue;
 
         const fresh = (pl.tracks || []).filter((t) => {
           const id = spotifyTrackId(t.uri);

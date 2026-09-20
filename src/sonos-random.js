@@ -67,6 +67,10 @@ import { getLaneHits, laneHitAsFillerItem } from "./lane-hits.js";
 import { markOrigin } from "./queue-origin.js";
 import { queueWorkWasPreempted } from "./queue-preempt.js";
 import { yieldToEventLoop } from "./yield-event-loop.js";
+import {
+  isOutOfSeasonHolidayPlaylist,
+  isOutOfSeasonHolidayTrack,
+} from "./holiday-tracks.js";
 
 // Add `count` random tracks drawn from the host's playlists. Picks one song per
 // randomly-chosen playlist (rotating playlists), avoids the same artist back-to-
@@ -155,6 +159,14 @@ async function buildRandomPlan(
       throw new Error("No non-explicit songs available with the current filters.");
     }
   }
+
+  usable = usable.filter((p) => !isOutOfSeasonHolidayPlaylist(p));
+  usable = usable
+    .map((p) => ({
+      ...p,
+      tracks: (p.tracks || []).filter((t) => !isOutOfSeasonHolidayTrack(t)),
+    }))
+    .filter((p) => p.tracks.length > 0);
 
   // Era mood: keep only playlist tracks released in the mood's window. Unlike
   // the genre filter, an empty result is NOT an error — the mood's whole point
