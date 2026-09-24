@@ -2,6 +2,13 @@ const DEFAULT_INTERVAL_MS = 1500;
 const DEFAULT_PAUSED_INTERVAL_MS = 5000;
 const DEFAULT_ERROR_INTERVAL_MS = 3000;
 const DEFAULT_CLOCK_SYNC_MS = 10_000;
+/**
+ * A reconnect may replay `latest` only while polls are clearly still running.
+ * Older than a paused interval plus the clock anchor means the monitor was
+ * asleep (tab hidden, last subscriber gone) and that snapshot is a previous
+ * track — pushing it paints a stale Now Playing over the live HTTP read.
+ */
+const SUBSCRIBER_REPLAY_MAX_AGE_MS = 12_000;
 
 /**
  * Sonos poll cadence for the NP monitor. Stay quick while playing / transitioning;
@@ -333,8 +340,19 @@ export function createSnapshotMonitor({
       throw new Error(`${monitorName} subscriber must be a function.`);
     }
     subscribers.add(listener);
-    if (latest) notify(listener, latest);
-    else schedule(0);
+    if (latest) {
+      const sentAt = Number(latest.streamSentAt) || 0;
+      const age = sentAt > 0 ? now() - sentAt : Number.POSITIVE_INFINITY;
+      if (age <= SUBSCRIBER_REPLAY_MAX_AGE_MS) {
+        // Mark the retained snapshot so a reconnect can prefer its live HTTP
+        // read over this replay when the two disagree.
+        notify(listener, { ...latest, streamReplay: true });
+      } else {
+        // Don't hand a new subscriber a track from several minutes ago.
+        // nudge() cancels a long error backoff and reads Sonos now.
+        nudge();
+      }
+    } else schedule(0);
 
     let subscribed = true;
     return () => {

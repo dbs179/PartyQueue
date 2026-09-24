@@ -172,6 +172,65 @@ test("bootstrap HTTP now-playing paints when SSE opens without a snapshot", asyn
   live.closeNowPlayingStream();
 });
 
+test("a retained SSE replay does not keep a stale Now Playing over the live read", async () => {
+  const paints = [];
+  let resolveFetch;
+  const fetchPromise = new Promise((resolve) => {
+    resolveFetch = resolve;
+  });
+  const live = createLiveStreams(
+    {},
+    {
+      fetch: async () => {
+        await fetchPromise;
+        return {
+          ok: true,
+          async json() {
+            return { title: "Give Me Back My Hometown", artist: "Eric Church" };
+          },
+        };
+      },
+      EventSource: class {
+        constructor() {
+          queueMicrotask(() => {
+            this.onopen?.();
+            this.onmessage?.({
+              data: JSON.stringify({
+                title: "DJ Holy Roller",
+                artist: "DJ Voice",
+                djVoice: true,
+                streamSession: "s1",
+                streamSequence: 4,
+                streamReplay: true,
+              }),
+            });
+          });
+        }
+        addEventListener() {}
+        close() {}
+      },
+      getVisibilityState: () => "visible",
+      getCurrentView: () => "main",
+      renderNowPlaying: (snap) => paints.push(snap.title),
+      applyQueueTracks: () => {},
+      applyPartySettings: () => {},
+      freezePlayhead: () => {},
+      isQueueEditMode: () => false,
+      setPendingStreamTracks: () => {},
+      clearPendingStreamTracks: () => {},
+      loadGroups: () => {},
+    }
+  );
+
+  live.openNowPlayingStream();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(paints, []);
+  resolveFetch();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(paints, ["Give Me Back My Hometown"]);
+  live.closeNowPlayingStream();
+});
+
 test("queue-status disconnected shows stale Up Next + Party Display banners", async () => {
   assert.match(QUEUE_STALE_MESSAGE, /last known/i);
 

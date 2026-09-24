@@ -190,6 +190,9 @@ export function createLiveStreams(els, deps) {
 
   let nowPlayingSource = null;
   let nowPlayingStreamConnected = false;
+  /** Live HTTP read opened with the socket. A retained SSE replay must not win. */
+  let nowPlayingBootstrapId = 0;
+  let nowPlayingBootstrapReplay = null;
   let nowPlayingFallbackTimer = null;
   let nowPlayingFallbackDelayTimer = null;
   let nowPlayingFallbackGen = 0;
@@ -345,6 +348,13 @@ export function createLiveStreams(els, deps) {
   }
 
   function applyNowPlayingStreamSnapshot(snapshot) {
+    // Reconnect pushes the monitor's retained snapshot immediately. That can
+    // be the DJ card from before the tab was hidden, and it used to cancel
+    // the live HTTP read that already knew the real track.
+    if (nowPlayingBootstrapId && snapshot?.streamReplay) {
+      nowPlayingBootstrapReplay = snapshot;
+      return;
+    }
     const next = advanceStreamCursor(nowPlayingStreamCursor, snapshot);
     if (!next.accept) return;
     nowPlayingStreamCursor = next.cursor;
@@ -406,17 +416,23 @@ export function createLiveStreams(els, deps) {
     }
   }
 
-  async function loadNowPlaying(force = false) {
+  async function loadNowPlaying(force = false, bootstrapId = 0) {
     const requestId = ++nowPlayingHttpRequest;
     const streamVersionAtStart = nowPlayingStreamVersion;
+    const ownsBootstrap =
+      bootstrapId !== 0 && bootstrapId === nowPlayingBootstrapId;
     try {
       const res = await liveFetch("/api/nowplaying");
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (ownsBootstrap) paintHeldNowPlayingReplay();
+        return;
+      }
       const snapshot = await res.json();
-      if (
-        requestId !== nowPlayingHttpRequest ||
-        nowPlayingStreamVersion !== streamVersionAtStart
-      ) {
+      if (requestId !== nowPlayingHttpRequest) return;
+      if (nowPlayingStreamVersion !== streamVersionAtStart) {
+        // A live SSE event during the fetch is newer than this read. A
+        // retained replay never bumps the version, so it cannot take this
+        // path and leave the previous DJ card on screen.
         return;
       }
       // SSE owns the paint while connected — unless a mutation (Node-RED
@@ -431,8 +447,21 @@ export function createLiveStreams(els, deps) {
       noteNowPlayingActivity(snapshot);
       renderNowPlaying(snapshot);
     } catch {
-      /* retain the last good stream or fallback snapshot */
+      if (ownsBootstrap) paintHeldNowPlayingReplay();
+    } finally {
+      if (ownsBootstrap && bootstrapId === nowPlayingBootstrapId) {
+        nowPlayingBootstrapId = 0;
+        nowPlayingBootstrapReplay = null;
+      }
     }
+  }
+
+  function paintHeldNowPlayingReplay() {
+    const replay = nowPlayingBootstrapReplay;
+    nowPlayingBootstrapReplay = null;
+    nowPlayingBootstrapId = 0;
+    if (!replay) return;
+    applyNowPlayingStreamSnapshot({ ...replay, streamReplay: false });
   }
 
   function openNowPlayingStream() {
@@ -440,7 +469,9 @@ export function createLiveStreams(els, deps) {
     // Force the bootstrap HTTP paint. EventSource onopen can mark the stream
     // "connected" before any snapshot arrives (closed Playwright fulfill,
     // proxy blip), and a non-forced fetch would then be discarded.
-    void loadNowPlaying(true);
+    const bootstrapId = ++nowPlayingBootstrapId;
+    nowPlayingBootstrapReplay = null;
+    void loadNowPlaying(true, bootstrapId);
     if (typeof EventSourceCtor !== "function") {
       startNowPlayingFallback();
       return;

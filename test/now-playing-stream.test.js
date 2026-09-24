@@ -175,7 +175,38 @@ test("a new subscriber immediately receives the shared latest snapshot", async (
   assert.equal(reads, 1);
   assert.equal(received.length, 1);
   assert.equal(received[0].title, "One");
+  assert.equal(received[0].streamReplay, true);
   unsubscribeFirst();
+  await monitor.stop();
+});
+
+test("a stale retained snapshot is not handed to a reconnecting subscriber", async () => {
+  let clock = 5_000;
+  let reads = 0;
+  const monitor = createNowPlayingMonitor({
+    autoSchedule: false,
+    now: () => clock,
+    logger: { warn() {} },
+    readSnapshot: async () => {
+      reads += 1;
+      return {
+        title: reads === 1 ? "DJ Holy Roller" : "Give Me Back My Hometown",
+      };
+    },
+  });
+  monitor.subscribe(() => {});
+  await monitor.pollNow();
+  assert.equal(monitor.latest.title, "DJ Holy Roller");
+
+  clock += 60_000;
+  const received = [];
+  monitor.subscribe((snapshot) => received.push(snapshot));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(reads, 2);
+  assert.equal(received.length, 1);
+  assert.equal(received[0].title, "Give Me Back My Hometown");
+  assert.equal(received[0].streamReplay, undefined);
   await monitor.stop();
 });
 
