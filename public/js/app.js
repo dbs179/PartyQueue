@@ -6,6 +6,7 @@ import {
   queueTrackAsNowPlaying,
   resolveNowPlayingDisplay,
   nowPlayingTransportActive,
+  nowPlayingArtBindPlan,
 } from "./now-playing-utils.js";
 import { showToast } from "./toast.js";
 import { wirePanelCollapse } from "./panel-collapse.js";
@@ -2937,30 +2938,39 @@ function bindNowPlayingArtwork(img, np) {
   if (!img) return;
   const key = playbackIdentity(np) || mediaIdentity(np);
   const url = String(np?.albumArt || "");
+  const hasTrack = !!(np && (np.title || np.artist));
   const alt = np?.album
     ? `Album art for ${np.album}`
     : np?.title
       ? `Artwork for ${np.title}`
       : "";
-  if (!url) {
-    // Keep prior pixels when the next cover is unknown; only clear on empty UI.
-    if (!np || !(np.title || np.artist)) {
-      artworkRequests.delete(img);
-      img.removeAttribute("src");
-      img.alt = "";
-      delete img.dataset.artIdentity;
-    }
+  const plan = nowPlayingArtBindPlan({
+    identity: key,
+    url,
+    hasTrack,
+    currentIdentity: img.dataset.artIdentity || "",
+    currentSrc: img.getAttribute("src") || "",
+  });
+  if (plan.action === "clear") {
+    artworkRequests.delete(img);
+    img.removeAttribute("src");
+    img.alt = "";
+    delete img.dataset.artIdentity;
     return;
   }
-  if (img.dataset.artIdentity === key && img.getAttribute("src") === url) {
+  if (plan.action === "keep" || plan.action === "skip") {
     img.alt = alt;
     return;
   }
 
   const request = { key, url };
   artworkRequests.set(img, request);
-  // Keep current pixels visible until the replacement decodes so track changes
-  // never flash an empty art frame.
+  // Track change: drop the previous cover immediately so the new title never
+  // sits next to the last song's art. Same-track art fill-in may keep pixels.
+  if (plan.hideCurrent) {
+    img.removeAttribute("src");
+    delete img.dataset.artIdentity;
+  }
   const preload = new Image();
   preload.decoding = "async";
   preload.src = url;
@@ -2983,8 +2993,6 @@ function bindNowPlayingArtwork(img, np) {
     })
     .catch(() => {
       if (artworkRequests.get(img) !== request) return;
-      // Keep prior pixels on failure. If nothing is showing yet, still bind the
-      // URL so the browser can retry / show a broken-image affordance.
       if (!img.getAttribute("src")) {
         img.src = url;
         img.alt = alt;

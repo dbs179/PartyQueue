@@ -51,3 +51,11 @@ test("clearQueueUnlocked cancels DJ volume handoff before wiping the queue", () 
   assert.ok(fn, "clearQueueUnlocked should exist");
   assert.match(fn[0], /cancelActiveDjVolumeHandoff\("queue cleared"\)/);
 });
+
+test("Play, Pause, Next, and Previous retry once on 701/711", () => {
+  assert.match(src, /retryOnTransportRefusal\("play"/);
+  assert.match(src, /retryOnTransportRefusal\("pause"/);
+  assert.match(src, /retryOnTransportRefusal\("next"/);
+  assert.match(src, /retryOnTransportRefusal\("previous"/);
+  assert.match(src, /clearZoneCache\(\)/);
+});

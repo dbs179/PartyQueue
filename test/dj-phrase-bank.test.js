@@ -116,6 +116,16 @@ describe("DJ phrase bank", () => {
     assert.ok(filterAsidesByFamilySafety(true).length >= 20);
   });
 
+  it("does not tease an unnamed next track in booth asides", () => {
+    for (const aside of DJ_BOOTH_ASIDES) {
+      assert.equal(
+        /\bnext (?:track|cue)\b/i.test(aside.text),
+        false,
+        aside.id
+      );
+    }
+  });
+
   it("filters phrase families without mutating the catalogs", () => {
     const startCount = DJ_SHARED_INTROS.length;
     const asideCount = DJ_BOOTH_ASIDES.length;

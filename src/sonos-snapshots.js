@@ -26,6 +26,7 @@ import {
   shouldHideGhostNowPlaying,
 } from "./sonos-queue-policy.js";
 import { spotifyTrackId } from "./sampler.js";
+import { buildAlbumArtProxyUrl } from "./album-art.js";
 import { recordPlayed } from "./play-history.js";
 import { memoryRequesterIdentityOf } from "./memory-requester.js";
 import {
@@ -626,12 +627,8 @@ function djVoiceDisplay(
   };
 }
 
-function albumArtUrl(albumArtUri, host) {
-  if (!albumArtUri) return null;
-  const absolute = albumArtUri.startsWith("http")
-    ? albumArtUri
-    : `http://${host}:1400${albumArtUri}`;
-  return `/api/albumart?u=${encodeURIComponent(absolute)}`;
+function albumArtUrl(albumArtUri, host, trackUri) {
+  return buildAlbumArtProxyUrl(albumArtUri, host, trackUri);
 }
 
 // ---- Shared read snapshots (now-playing + queue) --------------------------
@@ -774,7 +771,9 @@ async function readSonosNowPlayingSnapshot() {
         : null;
     artist = hasTrack ? meta.Artist ?? null : null;
     album = hasTrack ? meta.Album ?? null : null;
-    albumArt = hasTrack ? albumArtUrl(meta.AlbumArtUri, coordinator.Host) : null;
+    albumArt = hasTrack
+      ? albumArtUrl(meta.AlbumArtUri, coordinator.Host, uri)
+      : null;
   }
 
   // Record what actually started playing. Guest requests rely on this path
@@ -1018,7 +1017,7 @@ async function getQueueListRaw() {
       // Surfaced for now-playing prefetch (next 1–2 covers). Queue UI stays text-only.
       albumArt: djClip
         ? djPersona.albumArt
-        : albumArtUrl(t.AlbumArtUri, coordinator.Host),
+        : albumArtUrl(t.AlbumArtUri, coordinator.Host, uri),
       origin: source || null,
       searched: source === "searched",
       setRequest: source === "searched" ? !!meta?.setRequest : false,

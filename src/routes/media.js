@@ -30,9 +30,9 @@ import {
   deleteDjIcon,
   djIconExists,
 } from "../dj-icon.js";
-import { spotifyTrackId } from "../sampler.js";
 import { getTracksByIds } from "../spotify.js";
 import { isKnownSonosHost } from "../sonos.js";
+import { albumArtCacheKey, albumArtTrackId } from "../album-art.js";
 
 /** @param {unknown} raw @returns {"desktop"|"mobile"} */
 function bannerSlot(raw) {
@@ -182,30 +182,13 @@ export function registerMediaRoutes(app) {
 
   // Proxy album art from the Sonos speakers (port 1400) to avoid exposing
   // speaker IPs to clients and to work across subnets.
-  // Small in-memory cache of album-art bytes, keyed by the upstream URL. Art is
-  // immutable per URL, so once one client (or a poll) fetches a track's cover we
-  // serve it instantly to everyone and stop re-hitting the (slow) Sonos speaker.
+  // Bytes are keyed by Spotify track id when we have one, not the Sonos getaa
+  // URL — AlbumArtUri often lags the playing URI, and an immutable cache of the
+  // previous cover is what guests saw as a "stuck" Now Playing image.
   // The LRU is byte-bounded so unusually large images cannot consume unbounded RAM.
   const ART_CACHE_MAX_BYTES = 16 * 1024 * 1024;
   const artCache = createByteLruCache(ART_CACHE_MAX_BYTES);
   const artInFlight = createInFlightCoalescer();
-
-  /** Pull a Spotify track id out of a (possibly multi-encoded) Sonos getaa URL. */
-  function trackIdFromArtUrl(u) {
-    let s = String(u || "");
-    for (let i = 0; i < 4; i++) {
-      const id = spotifyTrackId(s);
-      if (id) return id;
-      try {
-        const next = decodeURIComponent(s);
-        if (next === s) break;
-        s = next;
-      } catch {
-        break;
-      }
-    }
-    return null;
-  }
 
   function sendCachedArt(res, key, hit) {
     res.set("Content-Type", hit.type);
@@ -233,24 +216,34 @@ export function registerMediaRoutes(app) {
     return { body, type };
   }
 
-  async function loadAlbumArt(key) {
-    const target = new URL(key);
+  async function loadAlbumArt(u, trackId) {
+    if (trackId) {
+      try {
+        const art = await fetchSpotifyArtBytes(trackId);
+        if (art) return art;
+      } catch (err) {
+        console.warn("[albumart] Spotify lookup failed:", err.message);
+      }
+      // Identified Spotify tracks must not fall through to a lagged getaa URL:
+      // that cached the previous cover onto the next song.
+      const error = new Error("Spotify artwork unavailable.");
+      error.status = 502;
+      throw error;
+    }
+
+    if (!u) {
+      const error = new Error("Album-art URL is required.");
+      error.status = 400;
+      throw error;
+    }
+
+    const target = new URL(u);
     const allowed =
       target.port === "1400" && (await isKnownSonosHost(target.hostname));
     if (!allowed) {
       const error = new Error("Album-art host is not allowed.");
       error.status = 403;
       throw error;
-    }
-
-    const trackId = trackIdFromArtUrl(key);
-    if (trackId) {
-      try {
-        const art = await fetchSpotifyArtBytes(trackId);
-        if (art) return art;
-      } catch (err) {
-        console.warn("[albumart] Spotify fallback failed:", err.message);
-      }
     }
 
     const upstream = await fetch(target.toString(), {
@@ -264,14 +257,16 @@ export function registerMediaRoutes(app) {
   }
 
   app.get("/api/albumart", asyncHandler(async (req, res) => {
-    const u = req.query.u;
-    if (!u) return res.status(400).end();
-    const key = String(u);
+    const u = req.query.u ? String(req.query.u) : "";
+    const t = req.query.t ? String(req.query.t) : "";
+    const key = albumArtCacheKey({ u, t });
+    if (!key) return res.status(400).end();
+    const trackId = albumArtTrackId(t, u);
 
     const hit = artCache.get(key);
     if (hit) return sendCachedArt(res, key, hit);
 
-    const pending = artInFlight.run(key, () => loadAlbumArt(key));
+    const pending = artInFlight.run(key, () => loadAlbumArt(u, trackId));
     try {
       const art = await pending;
       putArtCache(key, art);

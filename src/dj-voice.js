@@ -97,6 +97,7 @@ import {
   filterDescriptorsForMood,
   speakableDescriptor,
 } from "./dj-phrase-bank.js";
+import { lintAnnounceScript } from "./dj-announce-copy-lint.js";
 import {
   consumeDjNextSet,
   pickDjNextSetLines,
@@ -326,7 +327,14 @@ export function pickDjCharacterBit({
           familySafe: entry.familySafe,
         }))
       : DJ_CHARACTER_BIBLE.recurringBits;
-  const bank = sourceBits.filter((b) => (kids ? b.familySafe : true));
+  const bank = sourceBits.filter((b) => {
+    const line = String(b.line || b.text || "");
+    if (kids && !b.familySafe) return false;
+    // Set announces already name the first song; "next track" asides tease
+    // a title they never get, which is how this morning's clip went empty.
+    if (/\bnext (?:track|cue)\b/i.test(line)) return false;
+    return true;
+  });
   if (!bank.length) return null;
   const selected = reserve
       ? reserveDjPhrase(
@@ -2550,6 +2558,17 @@ export async function writeSetScript(summary = {}) {
         howMany,
         banList: characterKnobs.banList,
       });
+      const lintFails = lintAnnounceScript(line).filter(
+        (issue) => issue.severity === "fail"
+      );
+      if (lintFails.length) {
+        const ids = lintFails.map((issue) => issue.id).join(",");
+        console.warn(`[dj-voice] LLM copy failed lint (${ids}); using template`);
+        const fallback = buildSetScript({ ...payload, recordMemory: false });
+        console.log("[dj-voice] script via template (lint)");
+        rememberDjAnnounceScript(fallback);
+        return fallback;
+      }
       const bitKind = characterBitKind(
         characterMoment,
         characterKnobs.catchphrase

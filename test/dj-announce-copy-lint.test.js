@@ -48,6 +48,13 @@ describe("dj-announce-copy-lint", () => {
     assert.deepEqual(fails, []);
   });
 
+  it("flags an unnamed next-track tease leftover from booth asides", () => {
+    const ids = lintAnnounceScript(
+      "First up, HARDY with Give Heaven Some Hell. I have seen the next track. It means business. The rhythm picks up the thread."
+    ).map((issue) => issue.id);
+    assert.ok(ids.includes("teased-next-track"), ids.join(","));
+  });
+
   it("flags repeated intros and shared punchlines across a batch", () => {
     const report = lintAnnounceBatch([
       "Fresh signal from the booth. A sunny stretch, starting with Prince. Onward.",

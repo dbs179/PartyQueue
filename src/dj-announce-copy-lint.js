@@ -121,6 +121,14 @@ export function lintAnnounceScript(script) {
     }
   }
 
+  if (/\bi have seen the next track\b/i.test(text)) {
+    issues.push({
+      id: "teased-next-track",
+      severity: "fail",
+      detail: "teases the next track without naming it",
+    });
+  }
+
   const genres = text.match(GENRE_WORD) || [];
   const uniqueGenres = [...new Set(genres.map((g) => g.toLowerCase()))];
   if (uniqueGenres.length >= 2) {

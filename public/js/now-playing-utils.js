@@ -28,6 +28,27 @@ export function playbackIdentity(np) {
   return `${Number(np.queueTrack) || 0}|${mediaIdentity(np)}`;
 }
 
+/**
+ * Decide whether Now Playing art should load, skip, keep, or clear.
+ * Never keep another track's pixels next to a new title — that is the stale
+ * cover regression. Same-track gaps may keep the current frame.
+ */
+export function nowPlayingArtBindPlan({
+  identity = "",
+  url = "",
+  hasTrack = false,
+  currentIdentity = "",
+  currentSrc = "",
+} = {}) {
+  const sameTrack = !!identity && identity === currentIdentity;
+  if (!url) {
+    if (!hasTrack || !sameTrack) return { action: "clear" };
+    return { action: "keep" };
+  }
+  if (sameTrack && currentSrc === url) return { action: "skip" };
+  return { action: "load", hideCurrent: !sameTrack };
+}
+
 function parseTimestamp(token) {
   const match = String(token).match(/^(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?$/);
   if (!match) return null;

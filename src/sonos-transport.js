@@ -125,21 +125,25 @@ export async function getAnnouncePlaybackContext() {
   };
 }
 
+async function retryOnTransportRefusal(label, run) {
+  try {
+    return await run();
+  } catch (err) {
+    if (!isTransportRefusalError(err)) throw err;
+    console.warn(
+      `[${label}] ${err.message}; invalidating topology and retrying once`
+    );
+    clearZoneCache();
+    return run();
+  }
+}
+
 export async function play(...args) {
   return withSonosTransportLane(() => playUnlocked(...args));
 }
 
 async function playUnlocked({ trackNumber } = {}) {
-  try {
-    return await playOnce({ trackNumber });
-  } catch (err) {
-    if (!isTransportRefusalError(err)) throw err;
-    console.warn(
-      `[play] ${err.message}; invalidating topology and retrying once`
-    );
-    clearZoneCache();
-    return playOnce({ trackNumber });
-  }
+  return retryOnTransportRefusal("play", () => playOnce({ trackNumber }));
 }
 
 async function playOnce({ trackNumber } = {}) {
@@ -219,7 +223,9 @@ async function resumeQueuePlaybackUnlocked() {
 }
 
 export async function pause(...args) {
-  return withSonosTransportLane(() => pauseUnlocked(...args));
+  return withSonosTransportLane(() =>
+    retryOnTransportRefusal("pause", () => pauseUnlocked(...args))
+  );
 }
 
 async function pauseUnlocked() {
@@ -232,7 +238,9 @@ async function pauseUnlocked() {
 
 /** Raw Pause for DJ volume handoff pad holds (must not cancel that handoff). */
 export async function pausePlayback() {
-  return withSonosTransportLane(() => pausePlaybackUnlocked());
+  return withSonosTransportLane(() =>
+    retryOnTransportRefusal("pause", () => pausePlaybackUnlocked())
+  );
 }
 
 async function pausePlaybackUnlocked() {
@@ -255,7 +263,9 @@ async function pausePlaybackUnlocked() {
 // handoff advances — announce-aware Skip must never run from inside the
 // volume handoff (it would cancel itself and leave the room paused).
 export async function next(...args) {
-  return withSonosTransportLane(() => nextUnlocked(...args));
+  return withSonosTransportLane(() =>
+    retryOnTransportRefusal("next", () => nextUnlocked(...args))
+  );
 }
 
 /** Raw Sonos Next() for DJ volume handoff pad advances (no announce policy). */
@@ -448,7 +458,9 @@ async function nextUnlocked(opts = {}) {
 
 // Transport: go back to the previous track in the group's queue.
 export async function previous(...args) {
-  return withSonosTransportLane(() => previousUnlocked(...args));
+  return withSonosTransportLane(() =>
+    retryOnTransportRefusal("previous", () => previousUnlocked(...args))
+  );
 }
 
 async function previousUnlocked() {

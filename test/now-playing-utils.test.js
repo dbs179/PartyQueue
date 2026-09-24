@@ -8,6 +8,7 @@ import {
   queueTrackAsNowPlaying,
   resolveNowPlayingDisplay,
   serverPlaybackPosition,
+  nowPlayingArtBindPlan,
 } from "../public/js/now-playing-utils.js";
 
 test("playback identity distinguishes duplicate queue entries", () => {
@@ -248,4 +249,37 @@ test("resolveNowPlayingDisplay drops lastConfirmed when the queue is idle and em
   });
   assert.equal(stillPlayingLast.mode, "confirmed");
   assert.equal(stillPlayingLast.display.title, "Old");
+});
+
+test("nowPlayingArtBindPlan does not keep another track's cover", () => {
+  assert.equal(
+    nowPlayingArtBindPlan({
+      identity: "2|spotify:track:next|180",
+      url: "",
+      hasTrack: true,
+      currentIdentity: "1|spotify:track:old|180",
+      currentSrc: "/old.jpg",
+    }).action,
+    "clear"
+  );
+  assert.equal(
+    nowPlayingArtBindPlan({
+      identity: "2|spotify:track:next|180",
+      url: "/next.jpg",
+      hasTrack: true,
+      currentIdentity: "1|spotify:track:old|180",
+      currentSrc: "/old.jpg",
+    }).hideCurrent,
+    true
+  );
+  assert.equal(
+    nowPlayingArtBindPlan({
+      identity: "1|spotify:track:same|180",
+      url: "",
+      hasTrack: true,
+      currentIdentity: "1|spotify:track:same|180",
+      currentSrc: "/same.jpg",
+    }).action,
+    "keep"
+  );
 });
