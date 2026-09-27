@@ -7,6 +7,7 @@ import {
   isTransportRefusalError,
   orderTopologyProbeDevices,
   resetDeviceDriftForTests,
+  setZoneCacheAgeForTests,
   zoneCacheInfoForTests,
 } from "../src/sonos-core.js";
 import {
@@ -20,6 +21,7 @@ import {
 afterEach(() => {
   resetSpeakerReachabilityForTests();
   resetDeviceDriftForTests();
+  clearZoneCache();
 });
 
 test("isTransportRefusalError matches Sonos 701 and 711", () => {
@@ -51,6 +53,73 @@ function mockManager(results) {
     ],
   };
 }
+
+function countingManager(read) {
+  const calls = { n: 0 };
+  const m = {
+    Devices: [
+      {
+        Name: "Kitchen",
+        Host: "10.10.20.190",
+        GetZoneGroupState: async () => {
+          calls.n += 1;
+          return read(calls.n);
+        },
+      },
+    ],
+  };
+  return { m, calls };
+}
+
+test("two getZoneGroups calls after one success produce one GetZoneGroupState", async () => {
+  const groups = [{ id: "kitchen-group" }];
+  const { m, calls } = countingManager(() => groups);
+
+  assert.deepEqual(await getZoneGroups(m), groups);
+  assert.deepEqual(await getZoneGroups(m), groups);
+  assert.equal(calls.n, 1);
+});
+
+test("a call 30 seconds later still produces no new SOAP", async () => {
+  const groups = [{ id: "kitchen-group" }];
+  const { m, calls } = countingManager(() => groups);
+
+  await getZoneGroups(m);
+  setZoneCacheAgeForTests(30_000);
+  assert.ok(zoneCacheInfoForTests().ageMs >= 30_000);
+  assert.deepEqual(await getZoneGroups(m), groups);
+  assert.equal(calls.n, 1);
+});
+
+test("clearZoneCache then getZoneGroups reads again", async () => {
+  const { m, calls } = countingManager((n) => [{ id: `pass-${n}` }]);
+
+  assert.deepEqual(await getZoneGroups(m), [{ id: "pass-1" }]);
+  clearZoneCache();
+  assert.deepEqual(await getZoneGroups(m), [{ id: "pass-2" }]);
+  assert.equal(calls.n, 2);
+});
+
+test("fresh: true reads even when the cache is full", async () => {
+  const { m, calls } = countingManager((n) => [{ id: `pass-${n}` }]);
+
+  assert.deepEqual(await getZoneGroups(m), [{ id: "pass-1" }]);
+  assert.deepEqual(await getZoneGroups(m, { fresh: true }), [{ id: "pass-2" }]);
+  assert.equal(calls.n, 2);
+});
+
+test("a failed refresh returns the previous groups", async () => {
+  const first = [{ id: "kitchen-group" }];
+  const { m, calls } = countingManager((n) => {
+    if (n === 1) return first;
+    throw new Error("Sonos topology timed out after 4s");
+  });
+
+  assert.deepEqual(await getZoneGroups(m), first);
+  assert.deepEqual(await getZoneGroups(m, { fresh: true }), first);
+  assert.equal(calls.n, 2);
+  assert.equal(zoneCacheInfoForTests().hasCache, true);
+});
 
 test("clearZoneCache drops in-flight coalescing and bumps generation", async () => {
   clearZoneCache();

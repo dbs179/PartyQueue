@@ -190,7 +190,6 @@ export async function getManager() {
 let zoneCache = { at: 0, groups: null };
 let zoneInFlight = null;
 let zoneGeneration = 0;
-const ZONE_TTL_MS = 2000;
 
 /** Cool-off between device-list rebuilds triggered by topology drift. */
 export const DEVICE_DRIFT_REFRESH_MS = 60_000;
@@ -306,8 +305,10 @@ export async function getZoneGroups(
   m,
   { fresh = false, preferHost, preferRoom } = {}
 ) {
-  const now = Date.now();
-  if (!fresh && zoneCache.groups && now - zoneCache.at < ZONE_TTL_MS) {
+  // Hold the last good map until clearZoneCache(). Now-playing used to expire
+  // this every 2s and ask a speaker again; the house only changes when we
+  // group, ungroup, or retarget — and those paths already drop the cache.
+  if (!fresh && zoneCache.groups) {
     return zoneCache.groups;
   }
   // Collapse concurrent topology reads (many phones + DJ watch + autofill).
@@ -329,6 +330,16 @@ export async function getZoneGroups(
       // instance it already holds, and the rebuild happens on the next call.
       noteTopologyDeviceDrift(m, groups);
       return groups;
+    } catch (err) {
+      // A failed refresh is not "we have no house." Keep the last map so
+      // now-playing does not walk the failover list on a timer.
+      if (zoneCache.groups) {
+        console.warn(
+          `[sonos] topology refresh failed (${err?.message || err}); keeping last group map`
+        );
+        return zoneCache.groups;
+      }
+      throw err;
     } finally {
       if (zoneInFlight === request) zoneInFlight = null;
     }
@@ -448,5 +459,15 @@ export function zoneCacheInfoForTests() {
     generation: zoneGeneration,
     hasCache: !!zoneCache.groups,
     hasInFlight: !!zoneInFlight,
+    ageMs: zoneCache.groups ? Date.now() - zoneCache.at : 0,
+  };
+}
+
+/** Test helper — pretend the held map is this old. */
+export function setZoneCacheAgeForTests(ageMs) {
+  if (!zoneCache.groups) return;
+  zoneCache = {
+    ...zoneCache,
+    at: Date.now() - Math.max(0, Number(ageMs) || 0),
   };
 }
