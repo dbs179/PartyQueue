@@ -16,7 +16,7 @@
 
 import { getQueueList, getQueueStatus, trimPlayedTracks } from "./sonos.js";
 import { runAddTrueUp } from "./add-trueup.js";
-import { expireFailedAdds } from "./pending-adds.js";
+import { expireFailedAdds, expirePlacedAdds } from "./pending-adds.js";
 
 const PLAYING_MS = 45_000; // trim cadence while the queue is actively playing
 const IDLE_MS = 60_000; // nothing to trim (stopped / external source)
@@ -52,6 +52,11 @@ function schedule(ms) {
 // not so long that they clutter the party display all night.
 const FAILED_TTL_MS = 10 * 60_000;
 
+// A placed row only exists to cover the seconds before Sonos shows the song.
+// If the speaker still has not confirmed it after this long, the song has
+// almost certainly played and been trimmed - stop drawing a shadow of it.
+const PLACED_TTL_MS = 2 * 60_000;
+
 async function trueUpPendingAdds() {
   try {
     // getQueueList() is only reached when something is actually waiting, so a
@@ -61,6 +66,7 @@ async function trueUpPendingAdds() {
       console.log(`[maintenance] true-up confirmed ${confirmed} pending add(s)`);
     }
     expireFailedAdds(FAILED_TTL_MS);
+    expirePlacedAdds(PLACED_TTL_MS);
   } catch (err) {
     // Never let reconciliation break trimming - they are independent jobs.
     console.error("[maintenance] true-up failed:", err.message);

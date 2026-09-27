@@ -67,7 +67,8 @@ function normalizeEntry(raw) {
   if (!raw || typeof raw !== "object") return null;
   const uri = cleanText(raw.uri);
   if (!uri) return null;
-  const state = raw.state === "failed" ? "failed" : "pending";
+  const state =
+    raw.state === "failed" || raw.state === "placed" ? raw.state : "pending";
   const createdAt = Number(raw.createdAt) || 0;
   if (!createdAt) return null;
   return {
@@ -85,6 +86,7 @@ function normalizeEntry(raw) {
     attempts: Math.max(0, Math.floor(Number(raw.attempts) || 0)),
     lastError: cleanText(raw.lastError),
     failedAt: Number(raw.failedAt) || 0,
+    placedAt: Number(raw.placedAt) || 0,
     // Only meaningful within one process lifetime; Clear Queue / Party's Over
     // bump the generation to cancel work that predates them.
     preemptGeneration: Number(raw.preemptGeneration) || 0,
@@ -240,19 +242,57 @@ export function releasePlacing(id) {
 }
 
 /**
- * Confirm placement. Deletes the entry: Sonos owns the song from here, and a
- * record that no longer exists cannot be resurrected by the true-up.
+ * Confirm placement. The entry stops being placeable immediately, but it is
+ * kept - not deleted - until a live Sonos read actually shows the song.
  *
- * @returns {object|null} the retired entry, or null if it was already gone
+ * Deleting here used to make the song vanish off every phone for a few seconds:
+ * AddURIToQueue returning and getQueueList surfacing the new row are not the
+ * same instant, so between the two there was nothing to render. A song that
+ * disappears invites the guest to add it again, which is the duplicate this
+ * whole store exists to prevent.
+ *
+ * "placed" is display-only and cannot be resurrected: listPlaceable() ignores
+ * it, retryPendingAdd() refuses it, and it consumes no fairness quota. The
+ * true-up deletes it once the speaker confirms the song, expirePlacedAdds()
+ * if the speaker never does.
+ *
+ * @returns {object|null} the placed entry, or null if it was already gone
  */
 export function markPlaced(id) {
   load();
   placing.delete(id);
-  const at = entries.findIndex((e) => e.id === id);
+  const entry = entries.find((e) => e.id === id);
+  if (!entry) return null;
+  entry.state = "placed";
+  entry.placedAt = nowMs();
+  entry.updatedAt = entry.placedAt;
+  persist();
+  return snapshot(entry);
+}
+
+/** Drop a placed entry once Sonos has confirmed the song (see add-trueup.js). */
+export function retirePlacedAdd(id) {
+  load();
+  const at = entries.findIndex((e) => e.id === id && e.state === "placed");
   if (at === -1) return null;
   const [entry] = entries.splice(at, 1);
   persist();
-  return { ...entry, state: "placed" };
+  return entry;
+}
+
+/**
+ * Backstop for placed entries the speaker never confirmed - the song played and
+ * was trimmed before a true-up saw it, or the host removed it. Without this a
+ * shadow row could sit on the TV all night.
+ */
+export function expirePlacedAdds(maxAgeMs) {
+  load();
+  const cutoff = nowMs() - Math.max(0, Number(maxAgeMs) || 0);
+  const before = entries.length;
+  entries = entries.filter((e) => e.state !== "placed" || e.placedAt >= cutoff);
+  const removed = before - entries.length;
+  if (removed) persist();
+  return removed;
 }
 
 /**
@@ -294,6 +334,11 @@ export function retryPendingAdd(id, { user = null } = {}) {
   if (!entry) return { ok: false, error: "That request is no longer waiting." };
   if (user && !sameUser(entry.requestedByUser || entry.requestedBy, user)) {
     return { ok: false, error: "Only the person who asked for this song can retry it." };
+  }
+  // A placed entry is still on screen while we wait for Sonos to show the row,
+  // so Retry must not be able to queue the song a second time.
+  if (entry.state !== "failed") {
+    return { ok: false, error: "That song is already on its way." };
   }
   entry.state = "pending";
   entry.attempts = 0;

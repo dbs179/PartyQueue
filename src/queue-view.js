@@ -40,12 +40,18 @@ export const GUEST_FAILURE_REASON =
  * switch: rolling back must not leave a stale store file painting songs that
  * nothing is going to place.
  *
- * `snapshotRows` closes the handover gap. AddURIToQueue succeeding and
- * markPlaced() retiring the entry are not the same instant - on the first song
- * of the night the drainer holds idle for the DJ shout in between - so for a
- * second or so the song is in the Sonos queue AND still in the outbox, and the
- * guest sees it twice. Only entries actually mid-placement are suppressed, so
- * an add that is merely waiting its turn still shows up.
+ * `snapshotRows` is what keeps the handover from flickering. Handing a song to
+ * Sonos and Sonos showing it in getQueueList are not the same instant, so the
+ * outbox row has to cover the gap in both directions:
+ *
+ *   - the Sonos row is already there: hide our copy, or the guest sees the song
+ *     twice and one of them looks like a bug;
+ *   - the Sonos row has not appeared yet: keep showing ours, or the song blinks
+ *     out of the list and the guest adds it again.
+ *
+ * Only entries we have actually handed to the speaker are hidden. An add still
+ * waiting its turn is somebody's real request and must show even when another
+ * guest already queued the same song.
  */
 export function pendingViewRows(snapshotRows = []) {
   if (!asyncAddsEnabled()) return [];
@@ -54,7 +60,10 @@ export function pendingViewRows(snapshotRows = []) {
     const id = row?.id || spotifyTrackId(row?.uri);
     if (id) live.add(id);
   }
-  const landed = (entry) => entry.placing && entry.trackId && live.has(entry.trackId);
+  const landed = (entry) =>
+    (entry.placing || entry.state === "placed") &&
+    entry.trackId &&
+    live.has(entry.trackId);
   return listPendingAdds().filter((entry) => !landed(entry)).map((entry) => ({
     uri: entry.uri,
     id: entry.trackId,
@@ -64,7 +73,9 @@ export function pendingViewRows(snapshotRows = []) {
     requestedBy: entry.requestedBy,
     requestedByUser: entry.requestedByUser,
     dedication: entry.dedication,
-    pending: entry.state === "pending",
+    // A placed row reads as "Adding" too: the song is real but has no queue
+    // position yet, and the badge is what keeps delete/reorder off the row.
+    pending: entry.state !== "failed",
     failed: entry.state === "failed",
     failedReason: entry.state === "failed" ? GUEST_FAILURE_REASON : null,
     pendingId: entry.id,

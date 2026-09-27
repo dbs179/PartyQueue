@@ -19,7 +19,7 @@ import {
   isDjVolumeHandoffArmed,
   isDjVolumeHandoffActive,
 } from "./dj-volume-handoff-state.js";
-import { listPendingAdds, markPlaced } from "./pending-adds.js";
+import { listPendingAdds, markPlaced, retirePlacedAdd } from "./pending-adds.js";
 
 function sameUser(a, b) {
   if (!a || !b) return false;
@@ -38,10 +38,12 @@ function queueRows(snapshot) {
  * @returns {Promise<{ confirmed: number, waiting: number, skipped?: string }>}
  */
 export async function runAddTrueUp({ getQueueList }) {
-  const candidates = listPendingAdds().filter(
-    (e) => e.state === "pending" && !e.placing
-  );
-  if (!candidates.length) return { confirmed: 0, waiting: 0 };
+  const live = listPendingAdds();
+  const candidates = live.filter((e) => e.state === "pending" && !e.placing);
+  // Placed entries are the shadow rows covering the gap between handing a song
+  // to Sonos and Sonos showing it. Seeing the row is what retires them.
+  const placed = live.filter((e) => e.state === "placed");
+  if (!candidates.length && !placed.length) return { confirmed: 0, waiting: 0 };
 
   // The DJ machinery inserts and removes announce pads as it works, so the
   // queue is a moving target mid-handoff. Nothing here would corrupt it, but a
@@ -61,6 +63,17 @@ export async function runAddTrueUp({ getQueueList }) {
     const list = available.get(id) || [];
     list.push(row);
     available.set(id, list);
+  }
+
+  // Retire shadow rows first so the copies they account for cannot also be used
+  // to confirm a pending entry that was never actually placed.
+  let retired = 0;
+  for (const entry of placed) {
+    const copies = available.get(entry.trackId);
+    if (!copies?.length) continue;
+    copies.shift();
+    if (!copies.length) available.delete(entry.trackId);
+    if (retirePlacedAdd(entry.id)) retired += 1;
   }
 
   let confirmed = 0;
@@ -85,5 +98,5 @@ export async function runAddTrueUp({ getQueueList }) {
     );
   }
 
-  return { confirmed, waiting: candidates.length - confirmed };
+  return { confirmed, retired, waiting: candidates.length - confirmed };
 }

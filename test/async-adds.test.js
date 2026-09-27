@@ -43,6 +43,7 @@ const { runAddTrueUp } = await import("../src/add-trueup.js");
 const {
   clearPendingAdds,
   listPendingAdds,
+  listPlaceable,
 } = await import("../src/pending-adds.js");
 const {
   configureAddDrainer,
@@ -255,7 +256,10 @@ describe("write-behind guest adds", { concurrency: false }, () => {
 
     assert.equal(fake.tracks.length, 1);
     assert.equal(fake.tracks[0].uri, TRACK_A.uri);
-    assert.equal(listPendingAdds().length, 0, "entry retires once placed");
+    // Kept only so the row survives until Sonos shows it; the true-up deletes
+    // it once the song is actually visible in the queue.
+    assert.equal(listPendingAdds()[0].state, "placed");
+    assert.deepEqual(listPlaceable(), [], "never placed a second time");
   });
 
   test("adds are placed in the order guests tapped", async () => {
@@ -297,7 +301,7 @@ describe("write-behind guest adds", { concurrency: false }, () => {
     const result = await runAddTrueUp({ getQueueList: () => fake.getQueueList() });
 
     assert.equal(result.confirmed, 1);
-    assert.equal(listPendingAdds().length, 0);
+    assert.equal(listPendingAdds()[0].state, "placed", "kept only to draw the row");
     assert.equal(await drainOnce(), "idle");
     assert.equal(fake.tracks.length, 1, "exactly one copy");
   });
@@ -346,7 +350,7 @@ describe("write-behind guest adds", { concurrency: false }, () => {
   test("a placed song that later disappears is not resurrected", async () => {
     await add(TRACK_A);
     await drainOnce();
-    assert.equal(listPendingAdds().length, 0);
+    assert.equal(listPendingAdds()[0].state, "placed");
 
     // Trimmed after playing.
     fake.tracks.length = 0;
@@ -373,7 +377,13 @@ describe("write-behind guest adds", { concurrency: false }, () => {
 
     assert.equal(result.confirmed, 1);
     assert.equal(result.waiting, 1);
-    assert.equal(listPendingAdds()[0].requestedByUser, "Maria");
+    // The confirmed entry is kept as a placed shadow row until Sonos shows it,
+    // so check states rather than who is left in the store.
+    const states = Object.fromEntries(
+      listPendingAdds().map((e) => [e.requestedByUser, e.state])
+    );
+    assert.equal(states.Dave, "placed", "the one queued copy is his");
+    assert.equal(states.Maria, "pending", "still waiting for a copy of her own");
   });
 
   test("a hopeless add is surfaced to the guest and can be retried", async () => {

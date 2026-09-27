@@ -91,14 +91,43 @@ test("releasing a claim puts the entry back in line", () => {
   assert.equal(store.listPlaceable().length, 1);
 });
 
-test("confirming placement retires the entry so it cannot be resurrected", () => {
+test("a placed entry is kept for display but can never be placed again", () => {
   const entry = store.addPending(sample());
 
   const placed = store.markPlaced(entry.id);
 
+  // Kept, because deleting it here makes the song vanish off every phone until
+  // Sonos gets round to showing the row.
   assert.equal(placed.state, "placed");
-  assert.equal(store.listPendingAdds().length, 0);
+  assert.equal(store.getPendingAdd(entry.id).state, "placed");
+
+  // ...but nothing can turn it back into work.
+  assert.deepEqual(store.listPlaceable(), []);
+  assert.equal(store.claimPending(entry.id), null);
+  assert.equal(store.retryPendingAdd(entry.id).ok, false);
+  assert.deepEqual(store.pendingAsQueueRows(), [], "consumes no fairness quota");
+});
+
+test("a placed entry is retired once Sonos confirms the song", () => {
+  const entry = store.addPending(sample());
+  store.markPlaced(entry.id);
+
+  assert.ok(store.retirePlacedAdd(entry.id));
   assert.equal(store.getPendingAdd(entry.id), null);
+  // Only placed entries: a waiting add must not be silently dropped.
+  const waiting = store.addPending(sample());
+  assert.equal(store.retirePlacedAdd(waiting.id), null);
+  assert.equal(store.getPendingAdd(waiting.id).state, "pending");
+});
+
+test("a placed entry the speaker never confirms is not drawn forever", async () => {
+  const entry = store.addPending(sample());
+  store.markPlaced(entry.id);
+
+  assert.equal(store.expirePlacedAdds(60_000), 0, "still inside the window");
+  await new Promise((r) => setTimeout(r, 5)); // let placedAt fall behind the cutoff
+  assert.equal(store.expirePlacedAdds(-1), 1);
+  assert.equal(store.listPendingAdds().length, 0);
 });
 
 test("a placing claim does not survive a restart", async () => {
@@ -331,6 +360,28 @@ test("a song being placed is not shown twice once it reaches Sonos", async () =>
     // Still worth showing while the speaker has not taken it yet.
     assert.equal(view.pendingViewRows([]).length, 1);
     assert.equal(view.pendingViewRows([{ uri: "spotify:track:other" }]).length, 1);
+  } finally {
+    process.env.PARTYQUEUE_ASYNC_ADDS = "0";
+    shared.clearPendingAdds();
+  }
+});
+
+test("a placed song keeps its row until Sonos actually shows it", async () => {
+  const { shared, view } = await sharedStoreAndView();
+  const entry = shared.addPending(sample());
+  shared.markPlaced(entry.id);
+  const trackId = shared.listPendingAdds()[0].trackId;
+
+  process.env.PARTYQUEUE_ASYNC_ADDS = "1";
+  try {
+    // Sonos has not surfaced the row yet. Dropping ours here is what made the
+    // song blink out of the list and invited the guest to add it again.
+    const [row] = view.pendingViewRows([]);
+    assert.equal(row.pending, true, "still reads as landing, so it cannot be reordered");
+    assert.equal(row.failed, false);
+
+    // The moment the real row shows up, ours gets out of the way.
+    assert.deepEqual(view.pendingViewRows([{ uri: sample().uri, id: trackId }]), []);
   } finally {
     process.env.PARTYQUEUE_ASYNC_ADDS = "0";
     shared.clearPendingAdds();
