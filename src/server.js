@@ -56,6 +56,8 @@ import {
   initQueueMaintenance,
   stopQueueMaintenance,
 } from "./queue-maintenance.js";
+import { initAddDrainer, stopAddDrainer } from "./add-drainer.js";
+import { asyncAddsEnabled } from "./async-adds.js";
 import { flushHistoryPersist } from "./play-history.js";
 import { flushLyricsPersist } from "./lyrics.js";
 import { flushReactionsPersist } from "./reactions.js";
@@ -605,6 +607,10 @@ function runListenStartup({ seed = true, warm = true } = {}) {
     startPoolRewarmLoop();
     initAutoFill();
     initQueueMaintenance();
+    if (asyncAddsEnabled()) {
+      initAddDrainer();
+      console.log("[queue] write-behind guest adds enabled");
+    }
   }
 }
 
@@ -689,6 +695,7 @@ export async function shutdownServer({
   const pendingShutdown = [
     stopAutoFillMonitor(),
     stopQueueMaintenance(),
+    stopAddDrainer(),
     nowPlayingMonitor.stop(),
     queueMonitor.stop(),
     partySettingsMonitor.stop(),

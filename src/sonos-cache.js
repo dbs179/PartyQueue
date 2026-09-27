@@ -16,6 +16,9 @@ export const GROUPS_TTL_MS = 10_000;
 
 export function makeCachedReader(fn, ttlMs) {
   let cache = { at: 0, value: null };
+  // Survives bust(): the last thing Sonos actually told us, kept so readers can
+  // degrade to stale data instead of to an error. See peek().
+  let lastGood = { at: 0, value: null };
   let inFlight = null;
   let generation = 0;
   const read = async () => {
@@ -26,6 +29,7 @@ export function makeCachedReader(fn, ttlMs) {
       try {
         const value = await fn();
         noteSonosReadSuccess();
+        lastGood = { at: Date.now(), value };
         // A mutation may have invalidated snapshots while this request was in
         // flight. Return its result to the original caller, but never let that
         // stale result repopulate the shared cache.
@@ -53,11 +57,22 @@ export function makeCachedReader(fn, ttlMs) {
     // request. The original caller may still finish, guarded by generation.
     inFlight = null;
   };
+  // Non-blocking look at the last value we got, however old. Callers that must
+  // stay responsive when Sonos is unreachable (guest adds, the queue display)
+  // use this instead of awaiting a read that may never return. `fresh` tells
+  // them whether it is still inside the normal TTL.
+  read.peek = () => {
+    if (!lastGood.value) return null;
+    const ageMs = Date.now() - lastGood.at;
+    const fresh = !!cache.value && Date.now() - cache.at < ttlMs;
+    return { value: lastGood.value, at: lastGood.at, ageMs, fresh };
+  };
   // Plant a value the next poll can return immediately (DJ announce after Play)
   // so a 10s+ SOAP that started on the previous song cannot keep winning.
   read.seed = (value) => {
     generation += 1;
     cache = { at: Date.now(), value };
+    lastGood = { at: Date.now(), value };
     inFlight = null;
   };
   return read;

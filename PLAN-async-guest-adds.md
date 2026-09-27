@@ -1,6 +1,8 @@
 # Plan: decouple guest adds from Sonos
 
-Status: **draft for review** — no code written yet.
+Status: **Phase 2 built, behind `PARTYQUEUE_ASYNC_ADDS=1`, not yet deployed.**
+Phases 0 and 1 were skipped — Phase 2 supersedes both. See §9 for what shipped
+and where it diverged from this plan.
 Written after the 2026-09-26 party incident. Full incident report lives in
 `C:\APPS\PartyQueue-backups\docker-logs-incident-20260927-102621\INCIDENT.md`.
 
@@ -329,7 +331,7 @@ best-effort (see §4).
 | 1 | Drop `queuePosition` from the ack response entirely | Toast becomes `Added "X" to the queue` | **Decided** — see below |
 | 2 | `promoted` ("Moved up") computed against the cached snapshot, so it can be wrong | Button may say "Added" when it technically promoted a filler row | **Decided** — accept best-effort |
 | 3 | A song can be acknowledged and then **fail** to place | Row stays in the queue in a "couldn't add" state with a retry | **Decided** — see §5 |
-| 4 | Fairness counts pending entries, so quota is consumed at ack, not at placement | Quota is refunded when an entry is marked `failed` | **Decided** — see §5 |
+| 4 | Fairness counts pending entries, so the upcoming cap is consumed at ack | Freed automatically when an entry is marked `failed`; rolling quota is never consumed until placement | **Resolved** — see §9 |
 | 5 | Closing-time ritual (`src/routes/queue.js:252`) currently fires synchronously on the End-of-Night song | Switches off Never-Ending and flips Party's Over | Suggest keeping this one path sync |
 
 ### Decision on #1 — drop the position from the toast
@@ -488,7 +490,74 @@ var, not a redeploy.
 
 ---
 
-## 9. What this does not fix
+## 9. What actually shipped (2026-09-27)
+
+Fallback point before any of this: branch `backup/main-12.1.1-pre-phase2`, tag
+`v12.1.1-pre-phase2`, commit `32465eb`, plus source and data zips in
+`C:\APPS\PartyQueue-backups\`.
+
+| File | Role |
+|---|---|
+| `src/pending-adds.js` | The outbox. Durable, bounded, `data/pending-adds.json` |
+| `src/add-drainer.js` | Self-scheduling placement loop, nudged on each add |
+| `src/add-trueup.js` | Reconciliation pass; the duplicate suppressor |
+| `src/queue-view.js` | Merged queue payload + last-known-good fallback |
+| `src/async-adds.js` | The feature flag |
+
+Changed: `src/routes/queue.js` (async ack path, retry/dismiss endpoints, merged
+list), `src/queue-maintenance.js` (hosts the true-up), `src/sonos-cache.js`
+(`peek()`), `src/server.js` (wiring), `public/js/queue-ui.js` and
+`public/styles.css` (pending/failed rows).
+
+Tests: `test/pending-adds.test.js`, `test/async-adds.test.js`,
+`test/queue-outbox-ui.test.js`. Full suite 1316 passing.
+
+### Where it diverged from the plan
+
+- **Confirmation is deletion, not a `placed` state.** Retiring an entry removes
+  it from the store, so resurrection is structurally impossible rather than a
+  rule we have to keep remembering. Persisted states are only `pending` and
+  `failed`.
+- **`placing` is in-memory, not persisted.** A crash mid-placement reverts the
+  entry to pending on boot, and the true-up suppresses the duplicate. This is
+  strictly safer than persisting a claim that might never be released.
+- **`partyGeneration` became a staleness window.** Entries older than six hours
+  are dropped on load, which handles the morning-restart case without inventing
+  a new party identity. In-party cancellation still uses the existing
+  `queueWorkGeneration()`.
+- **The true-up does its own queue read** rather than sharing trim's, because
+  `trimPlayedTracks()` does not return the list. It only reads when something is
+  actually waiting, so a healthy party adds no extra Sonos traffic.
+- **Phase 1 was skipped.** `awaitInsert` is simply `false` on the async path,
+  which made open question 2 moot; the synchronous path is untouched and still
+  the default.
+- **The toast needed no client change at all**, exactly as predicted in §4.
+
+### Still open
+
+- Run a party with the flag on before flipping the default.
+- `POST /api/queue/set-request` is still fully synchronous.
+- `POST /api/queue/set-request` is still fully synchronous.
+
+### Correction to §4, change 4
+
+The plan assumed fairness quota is consumed at acknowledgement and therefore
+needs an explicit refund on failure. Reading the shipped code, that is only half
+right, and the half that matters needs no refund:
+
+- **Upcoming cap** counts pending entries, so it *is* consumed at ack — but
+  `markFailed()` moves the entry out of `pendingAsQueueRows()`, which frees the
+  slot automatically.
+- **Rolling window** is driven by `request-log.js`, and `recordRequest()` is
+  called by the drainer on successful placement, never at ack. A song that never
+  places never consumes rolling quota in the first place.
+
+So there is nothing to refund, and no refund code was written. Worth
+re-checking against a live fairness config before the next party.
+
+---
+
+## 10. What this does not fix
 
 Worth stating plainly: **none of this fixes Sonos.** If Office drops off the
 network again, songs will still be slow to *land* — they just will not block the

@@ -110,6 +110,18 @@ import {
   isPartyOver,
   PARTY_OVER_MESSAGE,
 } from "../party-rituals.js";
+import { asyncAddsEnabled } from "../async-adds.js";
+import {
+  addPending,
+  findPendingForGuest,
+  listPendingAdds,
+  pendingAsQueueRows,
+  removePendingAdd,
+  retryPendingAdd,
+} from "../pending-adds.js";
+import { nudgeAddDrainer } from "../add-drainer.js";
+import { readQueueForDisplay } from "../queue-view.js";
+import { withTimeout } from "../with-timeout.js";
 import { requireHostControls } from "../http/host-controls.js";
 import { nudgeNowPlayingStream } from "../now-playing-http.js";
 import { nudgePartySettingsStream } from "../party-settings-http.js";
@@ -141,6 +153,120 @@ export function registerQueueRoutes(app, ctx) {
     ...(ctx.sonos || {}),
   };
 
+  const queueRowsOf = (snapshot) =>
+    Array.isArray(snapshot) ? snapshot : snapshot?.tracks || [];
+
+  function respondFairnessDenied(res, denied) {
+    if (denied.retryAfterSec) {
+      res.set("Retry-After", String(denied.retryAfterSec));
+    }
+    return res.status(denied.status || 429).json({
+      error: denied.error,
+      code: denied.code,
+      totalRequestedUpcoming: denied.totalRequestedUpcoming,
+      upcomingThreshold: denied.upcomingThreshold,
+      upcomingCount: denied.upcomingCount,
+      upcomingCap: denied.upcomingCap,
+      rollingCount: denied.rollingCount,
+      rollingMax: denied.rollingMax,
+      retryAt: denied.retryAt,
+    });
+  }
+
+  // A cold cache still has to answer the phone quickly, so the fallback live
+  // read is bounded. Nothing here may inherit the 30s Sonos write lane.
+  const FAIRNESS_READ_BUDGET_MS = 1200;
+
+  /**
+   * What fairness should count as "already coming up" without blocking on
+   * Sonos: the last queue snapshot the cached reader holds, plus our own
+   * unconfirmed adds. Quota is therefore consumed at acknowledgement, which is
+   * why a permanently failed placement refunds it.
+   */
+  async function fairnessQueueRows() {
+    const peeked =
+      typeof sonos.getQueueList?.peek === "function"
+        ? sonos.getQueueList.peek()
+        : null;
+    if (peeked?.value) return queueRowsOf(peeked.value);
+    try {
+      return queueRowsOf(
+        await withTimeout(
+          sonos.getQueueList(),
+          FAIRNESS_READ_BUDGET_MS,
+          "Queue read timed out."
+        )
+      );
+    } catch {
+      // No snapshot and Sonos is not answering. Counting pending entries alone
+      // still stops one guest flooding the queue during the outage.
+      return [];
+    }
+  }
+
+  /**
+   * Write-behind add: durable first, acknowledged second, placed later by
+   * add-drainer.js. Deliberately returns no queue position — working that out
+   * needs a live Sonos read, and guests read their position off the party
+   * display and their own queue view instead.
+   */
+  async function acknowledgeAsyncAdd(req, res, params) {
+    const { uri, name, artist, force, user, badge, alias, note } = params;
+    const trackId = spotifyTrackId(uri);
+
+    const outcome = await withRequestFairnessLock(async () => {
+      // Repeat taps must be idempotent against the outbox as well as the Sonos
+      // queue: the first tap may not have been placed yet.
+      if (trackId && findPendingForGuest(user, trackId)) {
+        return { alreadyRequested: true };
+      }
+      const fairness = getRequestFairnessSettings();
+      if (fairness.requestFairnessEnabled) {
+        const decision = evaluateRequestFairness({
+          settings: fairness,
+          user,
+          queue: [...(await fairnessQueueRows()), ...pendingAsQueueRows()],
+          events: getRequests(),
+          target: { uri, name, artist },
+          force,
+          hostAuthenticated: isValidHostToken(extractHostToken(req)),
+          fairnessResetAt: getFairnessResetAt(),
+        });
+        if (!decision.allowed) return { decision };
+        if (decision.alreadyRequested) return { alreadyRequested: true };
+      }
+      return {
+        entry: addPending({
+          uri,
+          name,
+          artist,
+          requestedBy: badge,
+          requestedByUser: user,
+          alias,
+          dedication: note,
+          force,
+          preemptGeneration: params.preemptGeneration,
+        }),
+      };
+    });
+
+    if (outcome.decision) return respondFairnessDenied(res, outcome.decision);
+    if (outcome.alreadyRequested) {
+      return res.json({ ok: true, alreadyRequested: true, requestCreated: false });
+    }
+
+    nudgeAddDrainer();
+    return res.json({
+      ok: true,
+      pending: true,
+      pendingId: outcome.entry.id,
+      requestCreated: true,
+      closingTime: false,
+      closingTimeAt: 0,
+      partyRecap: null,
+    });
+  }
+
   app.post("/api/queue", queueBurstLimit, queueSustainedLimit, asyncHandler(async (req, res) => {
     const preemptGeneration = queueWorkGeneration();
     const { uri, name, artist, force, requestedBy, requestedByUser, dedication } =
@@ -162,6 +288,25 @@ export function registerQueueRoutes(app, ctx) {
       return res.status(400).json({ error: "Enter your name before adding a song." });
     }
     const note = sanitizeDedication(dedication);
+
+    // Write-behind path: record the add, answer the phone, and let
+    // add-drainer.js do the slow speaker work. The End-of-Night song keeps the
+    // synchronous path — it switches off Never-Ending, flips Party's Over and
+    // clears upcoming filler, and that ordering is worth making the host wait.
+    if (asyncAddsEnabled() && !isEndOfNightTrack({ uri, name, artist })) {
+      return await acknowledgeAsyncAdd(req, res, {
+        uri,
+        name,
+        artist,
+        force: !!force,
+        user,
+        badge,
+        alias,
+        note,
+        preemptGeneration,
+      });
+    }
+
     try {
       const outcome = await withRequestFairnessLock(async () => {
         const fairness = getRequestFairnessSettings();
@@ -219,21 +364,7 @@ export function registerQueueRoutes(app, ctx) {
       });
 
       if (outcome.decision) {
-        const denied = outcome.decision;
-        if (denied.retryAfterSec) {
-          res.set("Retry-After", String(denied.retryAfterSec));
-        }
-        return res.status(denied.status || 429).json({
-          error: denied.error,
-          code: denied.code,
-          totalRequestedUpcoming: denied.totalRequestedUpcoming,
-          upcomingThreshold: denied.upcomingThreshold,
-          upcomingCount: denied.upcomingCount,
-          upcomingCap: denied.upcomingCap,
-          rollingCount: denied.rollingCount,
-          rollingMax: denied.rollingMax,
-          retryAt: denied.retryAt,
-        });
+        return respondFairnessDenied(res, outcome.decision);
       }
 
       const result = outcome.result;
@@ -1014,11 +1145,40 @@ export function registerQueueRoutes(app, ctx) {
   app.get("/api/queue/list", asyncHandler(async (_req, res) => {
     try {
       res.setHeader("Cache-Control", "no-store");
-      res.json({ tracks: await sonos.getQueueList() });
+      res.json(await readQueueForDisplay(sonos.getQueueList));
     } catch (err) {
       res.status(502).json({ error: err.message });
     }
   }));
+
+  // Retry an add the drainer gave up on. Safe to call repeatedly: placement
+  // still goes through the drainer, and the true-up checks the live queue
+  // first, so a retry cannot queue the song twice.
+  app.post("/api/queue/pending/:id/retry", queueBurstLimit, (req, res) => {
+    const { requestedBy, requestedByUser } = req.body ?? {};
+    const { user } = resolveGuestIdentity({ requestedBy, requestedByUser });
+    if (!user) {
+      return res.status(400).json({ error: "Enter your name first." });
+    }
+    const result = retryPendingAdd(req.params.id, { user });
+    if (!result.ok) return res.status(409).json({ error: result.error });
+    nudgeAddDrainer();
+    res.json({ ok: true, pendingId: result.entry.id });
+  });
+
+  // Dismiss a failed row the guest no longer wants to see.
+  app.delete("/api/queue/pending/:id", queueBurstLimit, (req, res) => {
+    const { requestedBy, requestedByUser } = req.body ?? {};
+    const { user } = resolveGuestIdentity({ requestedBy, requestedByUser });
+    const entry = listPendingAdds().find((e) => e.id === req.params.id);
+    if (!entry) return res.status(404).json({ error: "Nothing to dismiss." });
+    const owner = entry.requestedByUser || entry.requestedBy;
+    if (user && owner && String(owner).toLowerCase() !== String(user).toLowerCase()) {
+      return res.status(403).json({ error: "That isn't your request." });
+    }
+    removePendingAdd(req.params.id);
+    res.json({ ok: true });
+  });
 
   // Guest quota snapshot for the search-bar remaining line. Open on the LAN
   // like POST /api/queue — keyed by User name, not a secret.

@@ -2877,6 +2877,53 @@ body:has(#view-settings-user-edit:not([hidden])) > .container {
   background: linear-gradient(135deg, #6a8f3a, #4a6b28);
 }
 
+/* Outbox rows: accepted by PartyQueue, not yet confirmed by the speaker. */
+.queue-status-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  white-space: nowrap;
+  color: #fff;
+}
+
+.queue-status-badge.is-pending {
+  background: linear-gradient(135deg, #b4762a, #8a5a1f);
+}
+
+.queue-status-badge.is-failed {
+  background: linear-gradient(135deg, #b4453a, #8a2f27);
+}
+
+/* Dimmed until the speaker confirms, so the row reads as "not there yet"
+   without disappearing on the guest who just added it. */
+.track.is-pending {
+  opacity: 0.72;
+}
+
+.track.is-failed .title {
+  text-decoration: line-through;
+  text-decoration-color: rgba(180, 69, 58, 0.7);
+}
+
+.party-display-queue-status {
+  font-size: 0.78em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.party-display-queue-status.is-pending {
+  color: #e0a458;
+}
+
+.party-display-queue-status.is-failed {
+  color: #e07a6e;
+}
+
 /* Memory list: skipped while playing. */
 .memory-skipped-badge {
   display: inline-block;

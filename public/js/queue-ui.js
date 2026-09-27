@@ -92,6 +92,9 @@ export function queueTrackSig(track, { showQueueGenre = false } = {}) {
     track.title || "",
     track.artist || "",
     track.djVoice ? 1 : 0,
+    // Outbox state: a row repaints when an add lands or gives up.
+    track.pending ? 1 : 0,
+    track.failed ? 1 : 0,
     showQueueGenre ? 1 : 0,
     track.fromPlaylist ? 1 : 0,
     track.genreLane || "",
@@ -182,11 +185,36 @@ export function queuePlaylistBadgeHtml(track, { showQueueGenre = false } = {}) {
 }
 
 /**
+ * Rows that PartyQueue has accepted but Sonos has not confirmed yet, and rows
+ * we gave up on. Guests need to see both: "queued" with nothing in the list
+ * looks exactly like the app losing the song.
+ *
+ * @param {object} track
+ */
+export function queueStatusBadgeHtml(track) {
+  if (track?.failed) {
+    const reason = track.failedReason
+      ? `Couldn\u2019t add this song: ${track.failedReason}`
+      : "Couldn\u2019t add this song to the speaker.";
+    return `<span class="queue-status-badge is-failed" title="${escapeHtml(reason)}">\u26A0\uFE0F Couldn\u2019t add</span>`;
+  }
+  if (track?.pending) {
+    return `<span class="queue-status-badge is-pending" title="Waiting for the speaker to take this song">\u23F3 Adding\u2026</span>`;
+  }
+  return "";
+}
+
+/** True when this row is in the outbox rather than the Sonos queue. */
+export function isOutboxRow(track) {
+  return !!(track?.pending || track?.failed);
+}
+
+/**
  * @param {object} track
  * @param {{ showQueueGenre?: boolean, eraLabel?: string }} [opts]
  */
 export function queueBadgeHtml(track, opts = {}) {
-  return `${queueOriginBadgeHtml(track, opts)}${queueGenreBadgeHtml(track, opts)}${queuePlaylistBadgeHtml(track, opts)}`;
+  return `${queueStatusBadgeHtml(track)}${queueOriginBadgeHtml(track, opts)}${queueGenreBadgeHtml(track, opts)}${queuePlaylistBadgeHtml(track, opts)}`;
 }
 
 /**
@@ -294,7 +322,8 @@ export function createQueueUi(els, deps) {
     if (editMode && SortableCtor && queueList?.children.length) {
       sortable = SortableCtor.create(queueList, {
         animation: 150,
-        filter: ".track-delete",
+        // Outbox rows aren't in the Sonos queue, so they can't be reordered.
+        filter: ".track-delete, .is-pending, .is-failed",
         preventOnFilter: false,
         delay: 200,
         delayOnTouchOnly: true,
@@ -352,21 +381,65 @@ export function createQueueUi(els, deps) {
     }
   }
 
+  async function retryQueueItem(li) {
+    const pendingId = li.dataset.pendingId;
+    if (!pendingId) return;
+    const btn = li.querySelector(".track-retry");
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Retrying\u2026";
+    }
+    try {
+      const res = await hostFetch(`/api/queue/pending/${pendingId}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestedByUser: getGuestUser() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not retry the song.");
+      showToast("Trying again\u2026");
+    } catch (err) {
+      showToast(err.message, true);
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Retry";
+      }
+    } finally {
+      void loadQueue(true);
+    }
+  }
+
   function queueRowSig(track) {
     const owns = guestOwnsQueueTrack(track, getGuestUser()) ? "1" : "0";
     return `${queueTrackSig(track, badgeOpts(track))}|${owns}`;
   }
 
   function fillQueueRow(li, track, index) {
-    li.className = "track track-noart" + (editMode ? " editing" : "");
+    const outbox = isOutboxRow(track);
+    li.className =
+      "track track-noart" +
+      (editMode ? " editing" : "") +
+      (track.pending ? " is-pending" : "") +
+      (track.failed ? " is-failed" : "");
     li.dataset.uri = track.uri || "";
     li.dataset.position = String(track.position || index + 1);
     li.dataset.sig = queueRowSig(track);
-    const del = editMode
-      ? `<button class="track-delete" type="button" aria-label="Remove from queue" title="Remove from queue">&times;</button>`
-      : "";
+    if (track.pendingId) li.dataset.pendingId = track.pendingId;
+    else delete li.dataset.pendingId;
+    // Outbox rows have no Sonos position, so remove/reorder would be aimed at
+    // whatever song happens to sit at that index.
+    li.draggable = !outbox && editMode;
+    const del =
+      editMode && !outbox
+        ? `<button class="track-delete" type="button" aria-label="Remove from queue" title="Remove from queue">&times;</button>`
+        : "";
+    const retry =
+      track.failed && guestOwnsQueueTrack(track, getGuestUser())
+        ? `<button class="track-retry subpage-head-link" type="button" title="Try adding this song again">Retry</button>`
+        : "";
     const canDedicate =
       !editMode &&
+      !outbox &&
       onDedicate &&
       track.searched &&
       !track.djVoice &&
@@ -385,10 +458,17 @@ export function createQueueUi(els, deps) {
         <div class="artist">${escapeHtml(track.artist)}</div>
         ${badge ? `<div class="queue-tag">${badge}</div>` : ""}
       </div>
+      ${retry}
       ${dedicate}
       ${del}
     `;
-    if (editMode) {
+    if (retry) {
+      li.querySelector(".track-retry")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        void retryQueueItem(li);
+      });
+    }
+    if (editMode && !outbox) {
       li.querySelector(".track-delete").addEventListener("click", () =>
         removeQueueItem(li)
       );
@@ -487,6 +567,15 @@ export function createQueueUi(els, deps) {
     artist.className = "party-display-queue-artist";
     artist.textContent = track.artist || "";
     meta.append(title, artist);
+
+    if (isOutboxRow(track)) {
+      const status = document.createElement("span");
+      status.className = track.failed
+        ? "party-display-queue-status is-failed"
+        : "party-display-queue-status is-pending";
+      status.textContent = track.failed ? "Couldn\u2019t add" : "Adding\u2026";
+      meta.appendChild(status);
+    }
 
     if (!track.djVoice) {
       const originText = displayOriginLabel(track, eraMood);
