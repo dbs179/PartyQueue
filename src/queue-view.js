@@ -19,6 +19,7 @@
 
 import { listPendingAdds } from "./pending-adds.js";
 import { asyncAddsEnabled } from "./async-adds.js";
+import { spotifyTrackId } from "./sampler.js";
 
 export function queueRowsOf(snapshot) {
   if (Array.isArray(snapshot)) return snapshot;
@@ -38,10 +39,23 @@ export const GUEST_FAILURE_REASON =
  * Returns nothing when write-behind adds are off, so the flag is a real kill
  * switch: rolling back must not leave a stale store file painting songs that
  * nothing is going to place.
+ *
+ * `snapshotRows` closes the handover gap. AddURIToQueue succeeding and
+ * markPlaced() retiring the entry are not the same instant - on the first song
+ * of the night the drainer holds idle for the DJ shout in between - so for a
+ * second or so the song is in the Sonos queue AND still in the outbox, and the
+ * guest sees it twice. Only entries actually mid-placement are suppressed, so
+ * an add that is merely waiting its turn still shows up.
  */
-export function pendingViewRows() {
+export function pendingViewRows(snapshotRows = []) {
   if (!asyncAddsEnabled()) return [];
-  return listPendingAdds().map((entry) => ({
+  const live = new Set();
+  for (const row of snapshotRows) {
+    const id = row?.id || spotifyTrackId(row?.uri);
+    if (id) live.add(id);
+  }
+  const landed = (entry) => entry.placing && entry.trackId && live.has(entry.trackId);
+  return listPendingAdds().filter((entry) => !landed(entry)).map((entry) => ({
     uri: entry.uri,
     id: entry.trackId,
     title: entry.name,
@@ -62,7 +76,8 @@ export function pendingViewRows() {
  * @param {{ stale?: boolean, staleAt?: number }} [meta]
  */
 export function buildQueuePayload(snapshot, meta = {}) {
-  const tracks = [...queueRowsOf(snapshot), ...pendingViewRows()];
+  const rows = queueRowsOf(snapshot);
+  const tracks = [...rows, ...pendingViewRows(rows)];
   const payload = { tracks };
   if (meta.stale) {
     payload.stale = true;

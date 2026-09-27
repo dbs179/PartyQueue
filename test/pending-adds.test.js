@@ -313,6 +313,48 @@ test("the feature flag is a real kill switch for the queue view", async () => {
   }
 });
 
+test("a song being placed is not shown twice once it reaches Sonos", async () => {
+  const { shared, view } = await sharedStoreAndView();
+  const entry = shared.addPending(sample());
+  // claimPending is what the drainer holds while AddURIToQueue is in flight.
+  shared.claimPending(entry.id);
+  const liveRow = { uri: sample().uri, id: shared.listPendingAdds()[0].trackId };
+
+  process.env.PARTYQUEUE_ASYNC_ADDS = "1";
+  try {
+    assert.deepEqual(
+      view.buildQueuePayload([liveRow]).tracks,
+      [liveRow],
+      "the Sonos row alone - the outbox copy would read as a duplicate"
+    );
+
+    // Still worth showing while the speaker has not taken it yet.
+    assert.equal(view.pendingViewRows([]).length, 1);
+    assert.equal(view.pendingViewRows([{ uri: "spotify:track:other" }]).length, 1);
+  } finally {
+    process.env.PARTYQUEUE_ASYNC_ADDS = "0";
+    shared.clearPendingAdds();
+  }
+});
+
+test("an add still waiting its turn is shown even if that song is queued", async () => {
+  const { shared, view } = await sharedStoreAndView();
+  // No claim: nobody is placing this one, so a copy already in the queue is
+  // somebody else's add and must not hide this guest's request.
+  shared.addPending(sample());
+  const liveRow = { uri: sample().uri, id: shared.listPendingAdds()[0].trackId };
+
+  process.env.PARTYQUEUE_ASYNC_ADDS = "1";
+  try {
+    const rows = view.pendingViewRows([liveRow]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].pending, true);
+  } finally {
+    process.env.PARTYQUEUE_ASYNC_ADDS = "0";
+    shared.clearPendingAdds();
+  }
+});
+
 test("failed rows reach the view with their reason", async () => {
   const { shared, view } = await sharedStoreAndView();
   const entry = shared.addPending(sample());
