@@ -105,7 +105,21 @@ test("a placed entry is kept for display but can never be placed again", () => {
   assert.deepEqual(store.listPlaceable(), []);
   assert.equal(store.claimPending(entry.id), null);
   assert.equal(store.retryPendingAdd(entry.id).ok, false);
-  assert.deepEqual(store.pendingAsQueueRows(), [], "consumes no fairness quota");
+});
+
+test("a song handed to the speaker is charged once, never twice or not at all", () => {
+  const entry = store.addPending(sample());
+  store.markPlaced(entry.id);
+
+  // Sonos has not surfaced the row yet, so our copy is the only thing stopping
+  // the guest slipping an extra song past their cap during the handover.
+  assert.equal(store.pendingAsQueueRows([]).length, 1);
+
+  // Once the row really is there, counting both would block them a song early.
+  assert.deepEqual(
+    store.pendingAsQueueRows([{ id: entry.trackId, uri: entry.uri }]),
+    []
+  );
 });
 
 test("a placed entry is retired once Sonos confirms the song", () => {
@@ -196,6 +210,18 @@ test("pending entries read as searched queue rows for fairness", () => {
   assert.equal(row.requestedByUser, "Dave");
   assert.equal(row.uri, "spotify:track:abc123");
   assert.equal(row.pending, true);
+});
+
+test("attempt bookkeeping is coalesced but not lost on shutdown", () => {
+  const entry = store.addPending(sample());
+  const onDisk = () => JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
+  assert.equal(onDisk().length, 1, "the add itself is written through");
+
+  store.claimPending(entry.id);
+  assert.equal(onDisk()[0].attempts, 0, "the attempt counter can wait");
+
+  store.flushPendingAdds();
+  assert.equal(onDisk()[0].attempts, 1, "but it still survives a shutdown");
 });
 
 test("a failed entry stays visible and stops being placeable", () => {

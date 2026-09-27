@@ -112,12 +112,42 @@ function load() {
   placing.clear();
 }
 
+// Retry bookkeeping - the attempt counter and the last error - changes several
+// times per song and none of it is worth a blocking write. Losing a second of
+// it to a crash costs one redundant placement attempt, which the true-up
+// already makes safe; the entries themselves are written through.
+const BOOKKEEPING_DEBOUNCE_MS = 1000;
+let bookkeepingTimer = null;
+
+function cancelBookkeepingWrite() {
+  if (!bookkeepingTimer) return;
+  clearTimeout(bookkeepingTimer);
+  bookkeepingTimer = null;
+}
+
+/** Write through. Anything that changes which songs exist uses this. */
 function persist() {
+  cancelBookkeepingWrite();
   try {
     writeFileAtomic(STORE_FILE, JSON.stringify(entries ?? []));
   } catch (err) {
     console.error("[pending-adds] save failed:", err.message);
   }
+}
+
+/** Coalesce attempt bookkeeping - see BOOKKEEPING_DEBOUNCE_MS. */
+function persistSoon() {
+  if (bookkeepingTimer) return;
+  bookkeepingTimer = setTimeout(() => {
+    bookkeepingTimer = null;
+    persist();
+  }, BOOKKEEPING_DEBOUNCE_MS);
+  bookkeepingTimer.unref?.();
+}
+
+/** Flush a debounced bookkeeping write. Called on shutdown. */
+export function flushPendingAdds() {
+  if (bookkeepingTimer) persist();
 }
 
 /** Public shape handed to routes and the drainer (never the live object). */
@@ -214,14 +244,31 @@ export function findPendingForGuest(user, trackId) {
 }
 
 /**
- * Pending entries as queue-shaped rows so evaluateRequestFairness() can count
+ * Outbox entries as queue-shaped rows so evaluateRequestFairness() can count
  * them without a live Sonos read. Quota is consumed at acknowledgement, which
- * is why markFailed() refunds it.
+ * is why markFailed() refunds it - a failed entry is not counted here.
+ *
+ * `liveRows` is the queue these are counted alongside, and it has to be passed
+ * for the same reason pendingViewRows() needs it. A song we have handed to the
+ * speaker must keep counting until the Sonos row appears, or for those few
+ * seconds it is counted nowhere and a guest can slip one past their cap; but
+ * once the row IS visible, counting our copy too would charge them twice and
+ * block them a song early. Only one of the pair is ever live.
  */
-export function pendingAsQueueRows() {
+export function pendingAsQueueRows(liveRows = []) {
   load();
+  const live = new Set();
+  for (const row of liveRows) {
+    const id = row?.id || spotifyTrackId(row?.uri);
+    if (id) live.add(id);
+  }
+  const counts = (e) => {
+    if (e.state === "failed") return false;
+    const handedOver = placing.has(e.id) || e.state === "placed";
+    return !(handedOver && e.trackId && live.has(e.trackId));
+  };
   return entries
-    .filter((e) => e.state === "pending")
+    .filter(counts)
     .map((e) => ({
       uri: e.uri,
       id: e.trackId,
@@ -255,7 +302,7 @@ export function claimPending(id) {
   placing.add(entry.id);
   entry.attempts += 1;
   entry.updatedAt = nowMs();
-  persist();
+  persistSoon();
   return snapshot(entry);
 }
 
@@ -343,7 +390,7 @@ export function recordAttemptError(id, error) {
   if (!entry) return null;
   entry.lastError = cleanText(error) || "Sonos did not respond.";
   entry.updatedAt = nowMs();
-  persist();
+  persistSoon();
   return snapshot(entry);
 }
 
@@ -398,6 +445,8 @@ export function expireFailedAdds(maxAgeMs) {
 
 /** Drop in-memory state so tests can start from the file again. */
 export function resetPendingAddsCache() {
+  // Before entries goes null, or a queued write would land as an empty store.
+  cancelBookkeepingWrite();
   entries = null;
   placing.clear();
 }

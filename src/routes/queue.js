@@ -220,10 +220,13 @@ export function registerQueueRoutes(app, ctx) {
       }
       const fairness = getRequestFairnessSettings();
       if (fairness.requestFairnessEnabled) {
+        // The outbox rows are deduped against this exact list, so the two must
+        // come from one read - see pendingAsQueueRows().
+        const liveRows = await fairnessQueueRows();
         const decision = evaluateRequestFairness({
           settings: fairness,
           user,
-          queue: [...(await fairnessQueueRows()), ...pendingAsQueueRows()],
+          queue: [...liveRows, ...pendingAsQueueRows(liveRows)],
           events: getRequests(),
           target: { uri, name, artist },
           force,

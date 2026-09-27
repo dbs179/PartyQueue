@@ -63,6 +63,7 @@ import { flushLyricsPersist } from "./lyrics.js";
 import { flushReactionsPersist } from "./reactions.js";
 import { flushOriginPersist } from "./queue-origin.js";
 import { flushRequestsPersist } from "./request-log.js";
+import { flushPendingAdds } from "./pending-adds.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -476,6 +477,7 @@ function flushShutdownStores() {
     ["reactions", flushReactionsPersist],
     ["queue-origin", flushOriginPersist],
     ["requests", flushRequestsPersist],
+    ["pending-adds", flushPendingAdds],
   ]) {
     try {
       flush();
