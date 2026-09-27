@@ -304,37 +304,7 @@ export function retryPendingAdd(id, { user = null } = {}) {
   return { ok: true, entry: snapshot(entry) };
 }
 
-/** Drop an entry outright (guest dismissed it, or it was superseded). */
-export function removePendingAdd(id) {
-  load();
-  placing.delete(id);
-  const at = entries.findIndex((e) => e.id === id);
-  if (at === -1) return false;
-  entries.splice(at, 1);
-  persist();
-  return true;
-}
-
-/**
- * Cancel work that predates a Clear Queue / Party's Over. Mirrors the existing
- * queue-preempt generation so pending adds can't repopulate a cleared queue.
- */
-export function cancelPendingBefore(generation) {
-  load();
-  const gen = Number(generation) || 0;
-  const before = entries.length;
-  const survivors = entries.filter((e) => e.preemptGeneration >= gen);
-  const removed = before - survivors.length;
-  if (!removed) return 0;
-  for (const e of entries) {
-    if (e.preemptGeneration < gen) placing.delete(e.id);
-  }
-  entries = survivors;
-  persist();
-  return removed;
-}
-
-/** Clear everything (Party's Over, host reset, tests). */
+/** Clear everything. Called when the host empties the queue, and by tests. */
 export function clearPendingAdds() {
   load();
   const removed = entries.length;

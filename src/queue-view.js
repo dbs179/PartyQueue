@@ -25,6 +25,13 @@ export function queueRowsOf(snapshot) {
   return snapshot?.tracks || [];
 }
 
+// Sonos failures carry SOAP URLs and speaker IPs ("request to
+// http://10.10.20.196:1400/MediaRenderer/... failed"). That belongs in the
+// server log, not on a guest's phone, and it tells them nothing useful anyway.
+// The real error stays on the entry as lastError.
+export const GUEST_FAILURE_REASON =
+  "The speaker didn\u2019t take this song. Tap Retry to try again.";
+
 /**
  * Pending and failed outbox entries as queue rows the UI can render.
  *
@@ -45,7 +52,7 @@ export function pendingViewRows() {
     dedication: entry.dedication,
     pending: entry.state === "pending",
     failed: entry.state === "failed",
-    failedReason: entry.state === "failed" ? entry.lastError : null,
+    failedReason: entry.state === "failed" ? GUEST_FAILURE_REASON : null,
     pendingId: entry.id,
   }));
 }

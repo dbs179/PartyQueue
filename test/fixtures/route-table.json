@@ -4,7 +4,6 @@
   "DELETE /api/dj-voice/next-set :: requireHost > <anonymous>",
   "DELETE /api/guests/:name :: requireHostStrict > <anonymous>",
   "DELETE /api/guests/:name/notes/:index :: requireHostStrict > <anonymous>",
-  "DELETE /api/queue/pending/:id :: queueBurstLimit > <anonymous>",
   "DELETE /api/settings/pin :: <anonymous>",
   "GET /,/index.html :: sendBrandedIndex",
   "GET /api/albumart :: <anonymous>",

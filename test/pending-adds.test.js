@@ -225,17 +225,14 @@ test("recording an attempt error leaves the entry retryable", () => {
   assert.equal(store.listPlaceable().length, 1, "claim released for another pass");
 });
 
-test("Clear Queue cancels adds that predate it", () => {
-  store.addPending(sample({ uri: "spotify:track:old", preemptGeneration: 1 }));
-  store.addPending(sample({ uri: "spotify:track:new", preemptGeneration: 2 }));
+test("clearing drops every waiting add so none repopulate the queue", () => {
+  store.addPending(sample({ uri: "spotify:track:one" }));
+  store.addPending(sample({ uri: "spotify:track:two" }));
 
-  const removed = store.cancelPendingBefore(2);
+  const removed = store.clearPendingAdds();
 
-  assert.equal(removed, 1);
-  assert.deepEqual(
-    store.listPendingAdds().map((e) => e.uri),
-    ["spotify:track:new"]
-  );
+  assert.equal(removed, 2);
+  assert.deepEqual(store.listPendingAdds(), []);
 });
 
 test("failed rows age out but pending rows never do", () => {
@@ -326,8 +323,12 @@ test("failed rows reach the view with their reason", async () => {
     const [row] = view.pendingViewRows();
     assert.equal(row.failed, true);
     assert.equal(row.pending, false);
-    assert.equal(row.failedReason, "Sonos timeout");
     assert.equal(row.pendingId, entry.id);
+    // The raw Sonos error carries speaker IPs and SOAP URLs, so guests get a
+    // fixed message and the detail stays on the entry for the log.
+    assert.equal(row.failedReason, view.GUEST_FAILURE_REASON);
+    assert.doesNotMatch(row.failedReason, /Sonos timeout/);
+    assert.equal(shared.listPendingAdds()[0].lastError, "Sonos timeout");
   } finally {
     process.env.PARTYQUEUE_ASYNC_ADDS = "0";
     shared.clearPendingAdds();

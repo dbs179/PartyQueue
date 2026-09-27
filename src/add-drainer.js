@@ -20,7 +20,7 @@ import {
   ensureShoutLeadBuffer,
   getQueueList,
 } from "./sonos.js";
-import { queueWorkGeneration, queueWorkWasPreempted } from "./queue-preempt.js";
+import { queueWorkWasPreempted } from "./queue-preempt.js";
 import {
   shouldShoutOnSearch,
   announceRequestShout,
@@ -30,7 +30,6 @@ import {
 import { recordRequest } from "./request-log.js";
 import { ensureGuestProfile } from "./guest-profiles.js";
 import {
-  cancelPendingBefore,
   claimPending,
   listPlaceable,
   markPlaced,
@@ -263,13 +262,10 @@ async function placeEntry(entry) {
  * @returns {Promise<"idle"|"placed"|"failed"|"retry">}
  */
 export async function drainOnce({ now = Date.now() } = {}) {
-  // Clear Queue / Party's Over after a guest tapped Add: those songs must not
-  // repopulate a queue the host just emptied.
-  const cancelled = cancelPendingBefore(queueWorkGeneration());
-  if (cancelled) {
-    console.log(`[add-drainer] dropped ${cancelled} add(s) cancelled by the host`);
-  }
-
+  // Emptying the queue is the only thing that discards pending adds, and it is
+  // handled at that choke point (clearQueueWithoutAutoRefill). Do NOT infer it
+  // from the preempt generation: the End-of-Night ritual bumps that too, and it
+  // clears filler precisely so real guest requests play out the night.
   const due = dueEntries(now);
   if (!due.length) return "idle";
 

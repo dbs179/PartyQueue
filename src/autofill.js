@@ -30,6 +30,7 @@ import {
   clearPendingAnnounce,
 } from "./dj-voice.js";
 import { clearRefillAnnounceGuard } from "./refill-announce-guard.js";
+import { clearPendingAdds } from "./pending-adds.js";
 import { cancelActiveDjVolumeHandoff } from "./dj-volume-handoff.js";
 import {
   preemptQueueWork,
@@ -427,6 +428,14 @@ export async function clearQueueWithoutAutoRefill(options = {}) {
   // Immediate cancel token so announce pad inserts / Random can abort before
   // this function even acquires the Sonos write lock.
   preemptQueueWork();
+  // Guest adds that have not reached the speaker yet must not repopulate the
+  // queue the host just emptied. This is the ONLY place pending adds are
+  // discarded — last call bumps the preempt generation too, but it deliberately
+  // keeps real requests, so cancellation cannot be inferred from that.
+  const dropped = clearPendingAdds();
+  if (dropped) {
+    console.log(`[queue] Clear Queue dropped ${dropped} add(s) not yet placed`);
+  }
   queueClearPauseCount += 1;
   clearTimer();
   try {

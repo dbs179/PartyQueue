@@ -6,6 +6,7 @@ import {
   getQueueList,
   onSonosSnapshotsInvalidated,
 } from "./sonos.js";
+import { readQueueForDisplay } from "./queue-view.js";
 
 /**
  * Compact fingerprint of queue rows that matter to the UI (order, identity,
@@ -47,12 +48,18 @@ function trackSignature(track) {
 
 export function queueSignature(snapshot = null) {
   const tracks = Array.isArray(snapshot?.tracks) ? snapshot.tracks : [];
-  if (!tracks.length) return "0";
-  return `${tracks.length}\x1e${tracks.map(trackSignature).join("\x1e")}`;
+  // Losing (or regaining) the live Sonos read is a visible state change even
+  // when the rows are identical, so it has to move the signature.
+  const stale = snapshot?.stale ? "s" : "f";
+  if (!tracks.length) return `0\x1e${stale}`;
+  return `${tracks.length}\x1e${stale}\x1e${tracks.map(trackSignature).join("\x1e")}`;
 }
 
+// Must build the same payload as GET /api/queue/list. The stream is what
+// actually repaints the UI, so if it omitted pending rows a guest's song would
+// appear on a REST poll and vanish on the next push.
 export async function readQueuePayload() {
-  return { tracks: await getQueueList() };
+  return readQueueForDisplay(getQueueList);
 }
 
 const queueStreamClients = new Map();

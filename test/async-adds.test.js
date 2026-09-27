@@ -302,6 +302,34 @@ describe("write-behind guest adds", { concurrency: false }, () => {
     assert.equal(fake.tracks.length, 1, "exactly one copy");
   });
 
+  test("last call does not discard songs guests already asked for", async () => {
+    const { preemptQueueWork } = await import("../src/queue-preempt.js");
+    fake.addBehaviour = "hang";
+    await add(TRACK_A, "Dave");
+    fake.addBehaviour = null;
+
+    // The End-of-Night ritual bumps the preempt generation and clears filler
+    // precisely so real requests play out the night. Cancellation must not be
+    // inferred from that bump.
+    preemptQueueWork();
+
+    assert.equal(await drainOnce(), "placed");
+    assert.equal(fake.tracks.length, 1);
+  });
+
+  test("emptying the queue drops adds that never reached the speaker", async () => {
+    const { clearPendingAdds } = await import("../src/pending-adds.js");
+    fake.addBehaviour = "hang";
+    await add(TRACK_A, "Dave");
+    assert.equal(listPendingAdds().length, 1);
+
+    // What clearQueueWithoutAutoRefill() calls at the real choke point.
+    clearPendingAdds();
+
+    assert.equal(await drainOnce(), "idle");
+    assert.equal(fake.tracks.length, 0);
+  });
+
   test("the true-up never removes anything from Sonos", async () => {
     await add(TRACK_A);
     await drainOnce();
@@ -405,7 +433,44 @@ describe("write-behind guest adds", { concurrency: false }, () => {
 
     const row = body.tracks.find((t) => t.uri === TRACK_A.uri);
     assert.equal(row.failed, true);
-    assert.match(row.failedReason, /Sonos timeout/);
+    assert.match(row.failedReason, /Retry/);
+    // Speaker IPs and SOAP URLs stay in the server log.
+    assert.doesNotMatch(row.failedReason, /http|1400|Sonos timeout/);
+  });
+
+  test("the live stream shows the same rows as the REST list", async () => {
+    fake.addBehaviour = "hang";
+    await add(TRACK_A, "Dave");
+
+    const { readQueuePayload } = await import("../src/queue-http.js");
+    const { getQueueList } = await import("../src/sonos.js");
+    // The stream reads the real cached reader, so plant a snapshot rather than
+    // standing up a speaker.
+    getQueueList.seed([{ uri: TRACK_C.uri, title: TRACK_C.name }]);
+
+    const rest = await (await fetch(`${baseUrl}/api/queue/list`)).json();
+    const streamed = await readQueuePayload();
+
+    // The stream is what repaints the UI; if it omitted the pending row the
+    // song would appear on a poll and vanish on the next push.
+    assert.equal(rest.tracks.some((t) => t.pending), true);
+    assert.equal(streamed.tracks.some((t) => t.pending), true);
+    assert.equal(
+      streamed.tracks.filter((t) => t.pending).length,
+      rest.tracks.filter((t) => t.pending).length
+    );
+  });
+
+  test("the stream signature moves when the queue goes stale", async () => {
+    const { queueSignature } = await import("../src/queue-http.js");
+    const tracks = [{ uri: TRACK_A.uri, title: TRACK_A.name }];
+
+    // Losing the live read is a visible change even when the rows match, so it
+    // has to push an update rather than being swallowed as "no change".
+    assert.notEqual(
+      queueSignature({ tracks }),
+      queueSignature({ tracks, stale: true })
+    );
   });
 
   test("pending adds count against the fairness cap", async () => {

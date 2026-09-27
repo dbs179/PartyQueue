@@ -114,9 +114,7 @@ import { asyncAddsEnabled } from "../async-adds.js";
 import {
   addPending,
   findPendingForGuest,
-  listPendingAdds,
   pendingAsQueueRows,
-  removePendingAdd,
   retryPendingAdd,
 } from "../pending-adds.js";
 import { nudgeAddDrainer } from "../add-drainer.js";
@@ -1166,19 +1164,6 @@ export function registerQueueRoutes(app, ctx) {
     res.json({ ok: true, pendingId: result.entry.id });
   });
 
-  // Dismiss a failed row the guest no longer wants to see.
-  app.delete("/api/queue/pending/:id", queueBurstLimit, (req, res) => {
-    const { requestedBy, requestedByUser } = req.body ?? {};
-    const { user } = resolveGuestIdentity({ requestedBy, requestedByUser });
-    const entry = listPendingAdds().find((e) => e.id === req.params.id);
-    if (!entry) return res.status(404).json({ error: "Nothing to dismiss." });
-    const owner = entry.requestedByUser || entry.requestedBy;
-    if (user && owner && String(owner).toLowerCase() !== String(user).toLowerCase()) {
-      return res.status(403).json({ error: "That isn't your request." });
-    }
-    removePendingAdd(req.params.id);
-    res.json({ ok: true });
-  });
 
   // Guest quota snapshot for the search-bar remaining line. Open on the LAN
   // like POST /api/queue — keyed by User name, not a secret.
