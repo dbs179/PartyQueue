@@ -100,6 +100,7 @@ export {
   volumeDown,
   getCachedGroupVolume,
   resolveVolumeForDisplay,
+  volumeGetPayload,
 } from "./sonos-volume.js";
 
 export {

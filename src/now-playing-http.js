@@ -292,12 +292,30 @@ function broadcastNowPlayingStatus(health) {
   }
 }
 
+const nowPlayingSnapshotListeners = new Set();
+
+/** Listen without becoming an SSE subscriber (does not keep the NP poll alive). */
+export function onNowPlayingSnapshot(listener) {
+  if (typeof listener !== "function") return () => {};
+  nowPlayingSnapshotListeners.add(listener);
+  return () => nowPlayingSnapshotListeners.delete(listener);
+}
+
 export const nowPlayingMonitor = createNowPlayingMonitor({
   readSnapshot: readNowPlayingMonitorPayload,
   intervalMs: 1500,
   errorIntervalMs: 3000,
   failureThreshold: 2,
   onStatusChange: broadcastNowPlayingStatus,
+  onSnapshot(snapshot) {
+    for (const listener of nowPlayingSnapshotListeners) {
+      try {
+        listener(snapshot);
+      } catch (err) {
+        console.warn("[now-playing] snapshot listener failed:", err.message);
+      }
+    }
+  },
   logger: createLogger("now-playing-stream"),
 });
 

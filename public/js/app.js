@@ -3096,6 +3096,7 @@ function renderPartyDisplayNowPlaying(np, hasTrack) {
     displayState.classList.toggle("updating", stateUpdating);
   }
   reactionsUi.setDisplayHidden(!!np.djVoice || !!np.updating);
+  syncVolumeWatchToNowPlaying(np);
   if (displayOriginPill) {
     // Same "how it got here" tag as the Up Next rows; DJ clips aren't songs.
     const hide = !!np.djVoice || stateUpdating;
@@ -3472,9 +3473,9 @@ async function pollNpVolume() {
     const res = await fetch("/api/volume");
     if (!res.ok) return;
     const data = await res.json();
-    if (data?.ok && data.volume != null) {
-      noteDisplayedVolume(data.volume, !!data.ramping);
-    }
+    if (!data?.ok) return;
+    // volume: null leaves the label blank until a real change.
+    noteDisplayedVolume(data.volume, !!data.ramping);
   } catch {
     /* keep the last painted value */
   } finally {
@@ -3484,24 +3485,24 @@ async function pollNpVolume() {
 
 function scheduleNpVolumeWatch() {
   if (volumeWatchTimer) clearTimeout(volumeWatchTimer);
+  volumeWatchTimer = null;
+  const wait = volumePollMs(volumeWatchRamping);
+  if (!wait) return;
   volumeWatchTimer = setTimeout(() => {
     void pollNpVolume().finally(() => scheduleNpVolumeWatch());
-  }, volumePollMs(volumeWatchRamping));
+  }, wait);
 }
 
 function startNpVolumeWatch() {
   void pollNpVolume().finally(() => scheduleNpVolumeWatch());
 }
 
-desktopVolumeMq?.addEventListener?.("change", (event) => {
-  if (event.matches) startNpVolumeWatch();
-});
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && desktopVolumeMq?.matches) {
-    void pollNpVolume();
-  }
-});
-if (!desktopVolumeMq || desktopVolumeMq.matches) startNpVolumeWatch();
+let volumeWatchSawDj = false;
+function syncVolumeWatchToNowPlaying(np) {
+  const dj = !!np?.djVoice;
+  if (dj && !volumeWatchSawDj) startNpVolumeWatch();
+  volumeWatchSawDj = dj;
+}
 
 volDownBtn.addEventListener("click", () => {
   postControl(volDownBtn, "/api/volume/down", (d) => {

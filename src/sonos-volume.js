@@ -23,10 +23,27 @@ export function setPlayerVolumeTimeoutForTests(ms) {
   if (ms != null) playerVolumeTimeoutMs = Number(ms);
 }
 export { setSkipUnreachableMsForTests };
+let volumeIo = {};
+
+/** Inject fakes for tests. Call with {} to restore the real speaker layer. */
+export function configureVolumeIo(next = {}) {
+  volumeIo = next || {};
+}
+
+async function groupMembers() {
+  if (typeof volumeIo.resolveMembers === "function") {
+    return volumeIo.resolveMembers();
+  }
+  const m = await (volumeIo.getManager || getManager)();
+  const { members } = await (volumeIo.resolveGroup || resolveGroup)(m);
+  return members;
+}
+
 export function resetVolumeReachabilityForTests() {
   playerVolumeTimeoutMs = PLAYER_VOLUME_TIMEOUT_MS;
   resetSpeakerReachabilityForTests();
   cachedGroupVolume = null;
+  volumeIo = {};
 }
 
 /** Last commanded/read group volume (0–100), or null. */
@@ -70,6 +87,22 @@ export function resolveVolumeForDisplay({ handoff = null, cached = null } = {}) 
     };
   }
   return null;
+}
+
+/**
+ * GET /api/volume. Memory only — a wide screen must not trigger GetVolume
+ * just to keep a label fresh. Unknown until the first real change.
+ */
+export function volumeGetPayload(handoff = null) {
+  const fromMemory = resolveVolumeForDisplay({
+    handoff,
+    cached: cachedGroupVolume,
+  });
+  if (fromMemory?.ramping) return { ok: true, ...fromMemory };
+  if (fromMemory?.volume != null) {
+    return { ok: true, volume: fromMemory.volume, ramping: false };
+  }
+  return { ok: true, volume: null, ramping: false };
 }
 
 export function assertManualVolumeAvailable() {
@@ -180,21 +213,24 @@ export async function lockGroupVolume(members, target) {
 }
 
 async function adjustGroupVolume(delta) {
-  const m = await getManager();
-  const { members } = await resolveGroup(m);
+  const members = await groupMembers();
   const active = volumeTargets(members);
   if (!active.length) {
     throw new Error("No reachable Sonos players for group volume.");
   }
 
-  // Read every reachable player's CURRENT volume live, then sync the whole
-  // group to the LOUDEST one before applying the step.
-  const reads = await Promise.all(active.map((device) => readPlayerVolumeSafe(device)));
-  const ok = reads.filter((r) => r.ok);
-  if (!ok.length) {
-    throw new Error("Could not read volume from any Sonos player.");
+  let reference = cachedGroupVolume;
+  if (reference == null) {
+    // First change after startup: learn the loudest live level once.
+    const reads = await Promise.all(
+      active.map((device) => readPlayerVolumeSafe(device))
+    );
+    const ok = reads.filter((r) => r.ok);
+    if (!ok.length) {
+      throw new Error("Could not read volume from any Sonos player.");
+    }
+    reference = Math.max(...ok.map((r) => r.volume));
   }
-  const reference = Math.max(...ok.map((r) => r.volume));
   const target = Math.max(0, Math.min(100, reference + delta));
 
   const locked = await lockGroupVolume(members, target);
@@ -219,8 +255,7 @@ export async function volumeDown(step = VOLUME_STEP) {
 // Absolute group volume helpers (0–100) for DJ Voice boost/restore.
 // Reads stay unlocked so DJ watch / UI polls don't serialize behind queue writes.
 export async function getGroupVolume() {
-  const m = await getManager();
-  const { members } = await resolveGroup(m);
+  const members = await groupMembers();
   const active = volumeTargets(members);
   if (!active.length) {
     throw new Error("No reachable Sonos players for group volume.");

@@ -9,6 +9,9 @@ import {
   resolveVolumeForDisplay,
   noteGroupVolume,
   getCachedGroupVolume,
+  configureVolumeIo,
+  volumeUp,
+  volumeGetPayload,
 } from "../src/sonos-volume.js";
 
 afterEach(() => {
@@ -137,4 +140,63 @@ test("resolveVolumeForDisplay prefers the DJ ramp commanded level", () => {
 test("noteGroupVolume caches a 0–100 reading", () => {
   noteGroupVolume(32.4);
   assert.equal(getCachedGroupVolume(), 32);
+});
+
+test("volumeUp with a remembered level does not read first", async () => {
+  noteGroupVolume(15);
+  const kitchen = fakePlayer("10.10.20.190", { volume: 99 });
+  configureVolumeIo({
+    resolveMembers: async () => [kitchen],
+  });
+
+  const result = await volumeUp(1);
+
+  assert.equal(result.volume, 16);
+  assert.equal(kitchen.volume, 16);
+  assert.equal(getCachedGroupVolume(), 16);
+});
+
+test("volumeUp with no memory reads once and steps from the loudest", async () => {
+  const kitchen = fakePlayer("10.10.20.190", { volume: 10 });
+  const patio = fakePlayer("10.10.20.191", { volume: 14 });
+  configureVolumeIo({
+    resolveMembers: async () => [kitchen, patio],
+  });
+
+  const result = await volumeUp(1);
+
+  assert.equal(result.volume, 15);
+  assert.equal(kitchen.volume, 15);
+  assert.equal(patio.volume, 15);
+  assert.equal(getCachedGroupVolume(), 15);
+  assert.equal(kitchen.reads >= 1, true);
+});
+
+test("GET /api/volume with memory does not need Sonos", () => {
+  noteGroupVolume(18);
+  assert.deepEqual(volumeGetPayload(), {
+    ok: true,
+    volume: 18,
+    ramping: false,
+  });
+});
+
+test("GET /api/volume with no memory returns null", () => {
+  assert.deepEqual(volumeGetPayload(), {
+    ok: true,
+    volume: null,
+    ramping: false,
+  });
+});
+
+test("GET /api/volume during a DJ ramp returns the commanded level", () => {
+  noteGroupVolume(12);
+  assert.deepEqual(
+    volumeGetPayload({
+      phase: "ramping-up",
+      volumeLocked: true,
+      currentVolume: 27,
+    }),
+    { ok: true, volume: 27, ramping: true, phase: "ramping-up" }
+  );
 });

@@ -38,9 +38,9 @@ export function formatVolumeHeaderText(volume) {
   return `Volume: ${Math.max(0, Math.min(100, n))}`;
 }
 
-/** Fast while the DJ is ramping; slower for a live group read. */
+/** Fast while the DJ is ramping. Idle screens do not poll. */
 export function volumePollMs(ramping) {
-  return ramping ? 250 : 2500;
+  return ramping ? 250 : 0;
 }
 
 /**

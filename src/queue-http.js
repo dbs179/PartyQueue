@@ -1,7 +1,7 @@
 import { createLogger } from "./logger.js";
 import { admitSseClient } from "./http/sse-limits.js";
 import { createSnapshotMonitor } from "./now-playing-stream.js";
-import { nowPlayingMonitor } from "./now-playing-http.js";
+import { onNowPlayingSnapshot } from "./now-playing-http.js";
 import {
   getQueueList,
   onSonosSnapshotsInvalidated,
@@ -77,27 +77,43 @@ function broadcastQueueStatus(health) {
   }
 }
 
-function queuePollIntervalMs() {
-  const np = nowPlayingMonitor.latest;
-  if (!np) return 3000;
-  const playing =
-    np.isPlaying === true ||
-    np.state === "PLAYING" ||
-    np.state === "TRANSITIONING";
-  return playing ? 3000 : 15_000;
+/** Backstop only. Mutations and track changes are what actually refresh. */
+export const QUEUE_SAFETY_INTERVAL_MS = 60_000;
+
+export function queueTrackChangeKey(np) {
+  if (!np) return "";
+  const uri = String(np.uri || "");
+  if (!uri) return "";
+  return `${uri}\x1f${np.queueTrack ?? ""}`;
+}
+
+export function createQueueTrackChangeWatcher(nudge) {
+  let lastKey = "";
+  return function onNowPlaying(np) {
+    const key = queueTrackChangeKey(np);
+    if (!key || key === lastKey) return false;
+    lastKey = key;
+    nudge?.();
+    return true;
+  };
 }
 
 export const queueMonitor = createSnapshotMonitor({
   monitorName: "queue",
   readSnapshot: readQueuePayload,
   signatureFor: queueSignature,
-  intervalMs: 3000,
+  intervalMs: QUEUE_SAFETY_INTERVAL_MS,
   errorIntervalMs: 5000,
-  intervalFor: queuePollIntervalMs,
+  intervalFor: () => QUEUE_SAFETY_INTERVAL_MS,
   failureThreshold: 2,
   onStatusChange: broadcastQueueStatus,
   logger: createLogger("queue-stream"),
 });
+
+const noteNowPlayingForQueue = createQueueTrackChangeWatcher(() => {
+  queueMonitor.nudge();
+});
+const unsubscribeNowPlayingTrack = onNowPlayingSnapshot(noteNowPlayingForQueue);
 
 /** Re-read after Sonos Browse catches up (Clear → Random from Node-RED / HA). */
 export const QUEUE_MUTATION_FOLLOWUP_MS = [400, 1600];
@@ -150,6 +166,7 @@ function removeQueueStreamClient(res) {
 
 export function closeQueueStreams() {
   unsubscribeSonosStreamNudge();
+  unsubscribeNowPlayingTrack();
   clearQueueFollowupNudges();
   for (const res of [...queueStreamClients.keys()]) {
     removeQueueStreamClient(res);

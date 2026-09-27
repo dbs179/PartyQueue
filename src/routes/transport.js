@@ -23,9 +23,7 @@ import {
   toggleShuffle,
   volumeDown,
   volumeUp,
-  getGroupVolume,
-  getCachedGroupVolume,
-  resolveVolumeForDisplay,
+  volumeGetPayload,
   invalidateSonosSnapshots,
 } from "../sonos.js";
 import { setSonosPlayerType } from "../settings.js";
@@ -199,29 +197,11 @@ export function registerTransportRoutes(app, ctx) {
     }
   }));
 
-  // Read current target-group volume (max across members). During a DJ ramp,
-  // return the commanded level from the handoff so the PC header can tick
-  // without extra Sonos SOAP on the transport lane.
+  // Memory only. A wide screen used to trigger GetVolume on every member
+  // just to keep a label fresh. The first up/down after startup learns the
+  // level; until then the header stays blank.
   app.get("/api/volume", asyncHandler(async (_req, res) => {
-    const fromMemory = resolveVolumeForDisplay({
-      handoff: getDjVolumeHandoffState(),
-      cached: getCachedGroupVolume(),
-    });
-    if (fromMemory?.ramping) {
-      res.json({ ok: true, ...fromMemory });
-      return;
-    }
-    try {
-      const volume = await getGroupVolume();
-      res.json({ ok: true, volume, ramping: false });
-    } catch (err) {
-      if (fromMemory?.volume != null) {
-        res.json({ ok: true, ...fromMemory });
-        return;
-      }
-      console.error("[volume]", err.message);
-      res.status(502).json({ error: err.message || "Could not read volume." });
-    }
+    res.json(volumeGetPayload(getDjVolumeHandoffState()));
   }));
 
   app.post("/api/group-all", destructiveLimit, requireHostControls, blockVolumeDuringDj, asyncHandler(async (_req, res) => {

@@ -147,6 +147,8 @@ export function createSnapshotMonitor({
   maxSilenceMs = 0,
   forcePublishFor = null,
   onStatusChange = null,
+  /** Called on every publish, including position-only refreshes of `latest`. */
+  onSnapshot = null,
   logger = console,
 } = {}) {
   if (typeof readSnapshot !== "function") {
@@ -220,6 +222,15 @@ export function createSnapshotMonitor({
     }
   }
 
+  function emitSnapshot(snapshot) {
+    if (typeof onSnapshot !== "function") return;
+    try {
+      onSnapshot(snapshot);
+    } catch (err) {
+      logger.warn?.(`[${monitorName}-stream] snapshot listener failed:`, err.message);
+    }
+  }
+
   function publish(snapshot, { force = false } = {}) {
     const signature = signatureFor(snapshot);
     const sentAt = now();
@@ -259,6 +270,7 @@ export function createSnapshotMonitor({
       // Position-only reads do not fan out to every connected browser, but keep
       // the retained snapshot fresh so a reconnect gets an accurate clock.
       latest = decorate(streamSequence);
+      emitSnapshot(latest);
       return false;
     }
     latestSignature = signature;
@@ -267,6 +279,7 @@ export function createSnapshotMonitor({
     for (const listener of [...subscribers]) {
       notify(listener, latest);
     }
+    emitSnapshot(latest);
     return true;
   }
 

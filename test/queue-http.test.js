@@ -3,9 +3,13 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import {
   broadcastQueueMutation,
+  createQueueTrackChangeWatcher,
+  QUEUE_MUTATION_FOLLOWUP_MS,
+  QUEUE_SAFETY_INTERVAL_MS,
   queueSignature,
   registerQueueStreamRoutes,
 } from "../src/queue-http.js";
+import { createSnapshotMonitor } from "../src/now-playing-stream.js";
 
 class FakeResponse extends EventEmitter {
   constructor() {
@@ -166,5 +170,116 @@ test("queue mutation pings every open SSE client so HA Random refreshes idle tab
   assert.match(added, /event: queue-changed/);
   assert.match(added, /data: \{/);
   req.emit("close");
+});
+
+function fakeClockMonitor(readSnapshot) {
+  const now = { t: 0 };
+  const timers = [];
+  const monitor = createSnapshotMonitor({
+    monitorName: "queue-test",
+    readSnapshot,
+    signatureFor: queueSignature,
+    intervalMs: QUEUE_SAFETY_INTERVAL_MS,
+    intervalFor: () => QUEUE_SAFETY_INTERVAL_MS,
+    now: () => now.t,
+    setTimer: (fn, ms) => {
+      const timer = { fn, at: now.t + Math.max(0, Number(ms) || 0) };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimer: (timer) => {
+      const at = timers.indexOf(timer);
+      if (at !== -1) timers.splice(at, 1);
+    },
+    logger: { warn() {} },
+  });
+  async function flush(to) {
+    now.t = to;
+    const due = timers.filter((t) => t.at <= now.t).sort((a, b) => a.at - b.at);
+    for (const timer of due) {
+      const at = timers.indexOf(timer);
+      if (at !== -1) timers.splice(at, 1);
+      timer.fn();
+    }
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+  }
+  return { monitor, now, timers, flush };
+}
+
+test("a stable track does not re-read the queue across former 3-second ticks", async () => {
+  let reads = 0;
+  const { monitor, flush } = fakeClockMonitor(async () => {
+    reads += 1;
+    return { tracks: [{ uri: "spotify:track:1" }] };
+  });
+  monitor.subscribe(() => {});
+  await flush(0);
+  assert.equal(reads, 1, "first subscriber reads once");
+
+  await flush(3_000);
+  await flush(6_000);
+  await flush(9_000);
+  assert.equal(reads, 1, "the 3-second clock is gone");
+  await monitor.stop();
+});
+
+test("broadcastQueueMutation causes a queue read", async () => {
+  let reads = 0;
+  const { monitor, flush } = fakeClockMonitor(async () => {
+    reads += 1;
+    return { tracks: [] };
+  });
+  monitor.subscribe(() => {});
+  await flush(0);
+  assert.equal(reads, 1);
+  monitor.nudge();
+  await flush(0);
+  assert.equal(reads, 2);
+  await monitor.stop();
+});
+
+test("a new now-playing URI nudges; the same URI and index do not", () => {
+  let nudges = 0;
+  const watch = createQueueTrackChangeWatcher(() => {
+    nudges += 1;
+  });
+  assert.equal(watch({ uri: "spotify:track:a", queueTrack: 1 }), true);
+  assert.equal(nudges, 1);
+  assert.equal(watch({ uri: "spotify:track:a", queueTrack: 1 }), false);
+  assert.equal(watch({ uri: "spotify:track:a", queueTrack: 1, title: "x" }), false);
+  assert.equal(nudges, 1);
+  assert.equal(watch({ uri: "spotify:track:b", queueTrack: 1 }), true);
+  assert.equal(watch({ uri: "spotify:track:b", queueTrack: 2 }), true);
+  assert.equal(nudges, 3);
+});
+
+test("mutation follow-ups are still 400ms and 1600ms", () => {
+  assert.deepEqual(QUEUE_MUTATION_FOLLOWUP_MS, [400, 1600]);
+});
+
+test("with zero subscribers the safety timer does not read", async () => {
+  let reads = 0;
+  const { monitor, flush } = fakeClockMonitor(async () => {
+    reads += 1;
+    return { tracks: [] };
+  });
+  await flush(QUEUE_SAFETY_INTERVAL_MS);
+  assert.equal(reads, 0);
+  await monitor.stop();
+});
+
+test("with a subscriber the safety read happens at 60 seconds", async () => {
+  let reads = 0;
+  const { monitor, flush } = fakeClockMonitor(async () => {
+    reads += 1;
+    return { tracks: [] };
+  });
+  monitor.subscribe(() => {});
+  await flush(0);
+  assert.equal(reads, 1);
+  await flush(QUEUE_SAFETY_INTERVAL_MS);
+  assert.equal(reads, 2);
+  await monitor.stop();
 });
 
