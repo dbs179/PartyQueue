@@ -19,10 +19,14 @@ export function normalizeGroupsPayload(data) {
   const speakers = data?.speakers?.length
     ? data.speakers
     : speakersFromGroups(groups);
+  const marked = groups.find((g) => g.isTarget);
+  // Prefer the name the host actually chose. Only fall through to the first
+  // group when the payload is an older shape with no target at all — the
+  // picker has always opened that way on a fresh install.
   const targetLabel =
     data?.targetLabel ||
-    groups.find((g) => g.isTarget)?.label ||
-    groups[0]?.label ||
+    marked?.label ||
+    (data?.targetVisible === false ? null : groups[0]?.label) ||
     null;
   return { groups, speakers, targetLabel };
 }

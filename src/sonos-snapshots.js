@@ -24,6 +24,7 @@ import {
   visibleUpcomingQueueItems,
   upcomingGenreHintFromQueueItems,
   shouldHideGhostNowPlaying,
+  resolveTargetGroup,
 } from "./sonos-queue-policy.js";
 import { spotifyTrackId } from "./sampler.js";
 import { buildAlbumArtProxyUrl } from "./album-art.js";
@@ -561,8 +562,10 @@ async function listGroupsRaw() {
   // When nothing is explicitly targeted yet, mark the default (first group).
   if (!targetRoom && out.length) out[0].isTarget = true;
 
-  const target =
-    out.find((g) => g.isTarget) || (out.length ? out[0] : null);
+  const { group: target, visible: targetVisible } = resolveTargetGroup(
+    out,
+    targetRoom
+  );
   const targetMembers = new Set(
     (target?.members || []).map((n) => String(n).toLowerCase())
   );
@@ -581,8 +584,11 @@ async function listGroupsRaw() {
   }).sort((a, b) => a.name.localeCompare(b.name));
 
   return {
+    // Name the room the host actually chose even when this read cannot see it,
+    // so the picker never presents some other group as the target.
     targetRoom: target?.coordinator || targetRoom || null,
-    targetLabel: target?.label || null,
+    targetLabel: target?.label || targetRoom || null,
+    targetVisible,
     groups: out,
     speakers,
     playerTypes,

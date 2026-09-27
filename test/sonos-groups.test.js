@@ -40,6 +40,18 @@ test("normalizeGroupsPayload derives speakers and target label", () => {
   assert.ok(out.speakers.some((s) => s.name === "Den" && s.inTargetGroup));
 });
 
+test("normalizeGroupsPayload keeps the stored room when no group is marked", () => {
+  const out = normalizeGroupsPayload({
+    groups: [
+      { label: "Kitchen", isTarget: false, coordinator: "Kitchen", members: ["Kitchen"] },
+    ],
+    targetLabel: "Office",
+    targetVisible: false,
+  });
+  assert.equal(out.targetLabel, "Office");
+  assert.equal(out.groups.every((g) => !g.isTarget), true);
+});
+
 test("ungroupAllToastMessage pluralizes", () => {
   assert.equal(ungroupAllToastMessage(0), "All speakers were already alone");
   assert.equal(ungroupAllToastMessage(1), "Ungrouped 1 speaker");

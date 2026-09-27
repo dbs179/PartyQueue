@@ -3,6 +3,7 @@ import {
   setDjVolumeHandoffActive,
   setDjVolumeHandoffArmed,
 } from "./dj-volume-handoff-state.js";
+import { handoffWatchSleepMs } from "./dj-volume-handoff.js";
 
 // Volume control for a single-row baked announce.
 //
@@ -244,6 +245,7 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
     }
   };
   rememberBaseline(musicVolume);
+  let consecutiveReadFailures = 0;
   try {
     while (now() - started < maxMs) {
       if (generation !== announceVolumeGeneration) {
@@ -256,9 +258,24 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
       let durationSec;
       try {
         ({ uri, positionSec, queueTrack, durationSec } = (await io.read()) ?? {});
+        consecutiveReadFailures = 0;
       } catch (err) {
-        logger.warn?.(`[dj-volume] transport read failed: ${err?.message || err}`);
-        await io.sleep(pollMs);
+        consecutiveReadFailures += 1;
+        // Office dropped ~8% of these ticks all soak long. Sleeping the active
+        // 150ms poll here used to hammer the speaker harder on failure than on
+        // success. Back off from the wait interval instead, and stop reprinting
+        // every timeout — the first of a streak and each 8th after that is enough.
+        if (consecutiveReadFailures === 1 || consecutiveReadFailures % 8 === 0) {
+          logger.warn?.(
+            `[dj-volume] transport read failed (${consecutiveReadFailures} in a row): ${err?.message || err}`
+          );
+        }
+        await io.sleep(
+          handoffWatchSleepMs(
+            consecutiveReadFailures,
+            sawClip ? pollMs : waitMs
+          )
+        );
         continue;
       }
       if (matches(uri)) {

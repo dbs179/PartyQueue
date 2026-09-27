@@ -439,6 +439,41 @@ test("a newer announce supersedes the previous volume session without restoring"
   );
 });
 
+test("a struggling speaker is not polled faster while the clip is still waiting", async () => {
+  const sleeps = [];
+  let reads = 0;
+  let t = 0;
+  const io = {
+    now: () => {
+      t += 80;
+      return t;
+    },
+    read: async () => {
+      reads += 1;
+      throw new Error("Sonos transport tick timed out");
+    },
+    setVolume: async () => {},
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      t += ms;
+    },
+  };
+  const result = await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+    graceMs: 50,
+    waitMs: 1000,
+    pollMs: 150,
+    maxMs: 8_000,
+  });
+
+  assert.equal(result.reason, "timeout");
+  assert.ok(sleeps[0] >= 1000, `first backoff should use waitMs, got ${sleeps[0]}`);
+  assert.ok(
+    sleeps[1] > sleeps[0],
+    `consecutive failures should back off (${sleeps[0]} then ${sleeps[1]})`
+  );
+  assert.ok(reads < 12, `must not hammer the speaker, got ${reads} reads`);
+});
+
 test("transport ticks expose TrackDuration so restore can use the real clip length", async () => {
   const fs = await import("node:fs");
   const path = await import("node:path");

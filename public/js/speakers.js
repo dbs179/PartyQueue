@@ -14,7 +14,9 @@
  */
 export function speakersFromGroups(groups) {
   const list = Array.isArray(groups) ? groups : [];
-  const target = list.find((g) => g.isTarget) || list[0] || null;
+  // Do not invent a target when none is marked. A missing room is a failed
+  // topology read, not "please pretend the first group is selected".
+  const target = list.find((g) => g.isTarget) || null;
   const targetMembers = new Set(
     (target?.members || []).map((n) => String(n).toLowerCase())
   );

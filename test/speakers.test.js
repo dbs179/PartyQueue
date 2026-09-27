@@ -39,13 +39,13 @@ test("speakersFromGroups flattens members and flags the target group", () => {
   );
 });
 
-test("speakersFromGroups falls back to the first group when none is target", () => {
+test("speakersFromGroups does not invent a target when none is marked", () => {
   const speakers = speakersFromGroups([
     { coordinator: "A", members: ["A", "B"] },
     { coordinator: "C", members: ["C"] },
   ]);
-  assert.equal(speakers.find((s) => s.name === "A").inTargetGroup, true);
-  assert.equal(speakers.find((s) => s.name === "C").inTargetGroup, false);
+  assert.equal(speakers.every((s) => !s.inTargetGroup), true);
+  assert.equal(speakers.every((s) => !s.isTargetCoordinator), true);
 });
 
 test("speakersFromGroups handles empty input", () => {

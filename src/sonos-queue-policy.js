@@ -28,6 +28,34 @@ export function pickGroupByTarget(groups, targetRoom) {
   );
 }
 
+/**
+ * Pure: which group the /api/groups payload should present as the target.
+ *
+ * Three cases, and the third is the one that used to lie:
+ *
+ *   - nothing chosen yet: default to the first group, the way the picker has
+ *     always opened on a fresh install;
+ *   - the chosen room is in this topology: that group, resolved to its
+ *     coordinator, because selecting a member targets its group;
+ *   - the chosen room is NOT in this topology: no group at all.
+ *
+ * That last case is a room we cannot see right now, not a room the host
+ * changed. It happens when a topology read fails over to another speaker
+ * mid-degradation. Falling through to the first group there reported a room
+ * nobody selected: the picker highlighted the wrong group while playback still
+ * went to the stored target, which reads exactly like the select being ignored.
+ *
+ * @param {Array<{ isTarget?: boolean, coordinator?: string, label?: string }>} groups
+ * @param {string|null|undefined} targetRoom the stored setting
+ */
+export function resolveTargetGroup(groups, targetRoom) {
+  const list = Array.isArray(groups) ? groups : [];
+  const matched = list.find((g) => g.isTarget) || null;
+  if (matched) return { group: matched, visible: true };
+  if (!targetRoom) return { group: list[0] || null, visible: !!list.length };
+  return { group: null, visible: false };
+}
+
 // Pure: given the current 1-based track pointer, the range of already-played
 // tracks to remove (everything before the current song). Returns null when
 // nothing precedes the current track. Exported for unit testing.
