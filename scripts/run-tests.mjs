@@ -29,11 +29,11 @@ const result = spawnSync(
     stdio: "inherit",
     // Keep local .env PUBLIC_BASE_URL from forcing Origin-required CSRF in
     // HTTP contract tests (browsers/smoke send Origin; bare fetch helpers don't).
-    // PARTYQUEUE_ASYNC_ADDS is cleared for the same reason: the synchronous add
-    // contract is what most queue tests assert, and a flag left set in the
-    // shell or .env would fail them for reasons that look nothing like the
-    // cause. The write-behind suite sets it for itself.
-    env: { ...process.env, PUBLIC_BASE_URL: "", PARTYQUEUE_ASYNC_ADDS: "" },
+    // PARTYQUEUE_ASYNC_ADDS is pinned off for the same reason: the synchronous
+    // add contract is still what most queue tests assert, and since 14.0.0 the
+    // flag defaults ON, so leaving it unset would fail those tests for reasons
+    // that look nothing like the cause. The write-behind suite sets it itself.
+    env: { ...process.env, PUBLIC_BASE_URL: "", PARTYQUEUE_ASYNC_ADDS: "0" },
   }
 );
 process.exit(result.status ?? 1);

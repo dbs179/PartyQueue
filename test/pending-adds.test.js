@@ -276,13 +276,30 @@ async function sharedStoreAndView() {
   return { shared, view };
 }
 
+test("write-behind adds are on unless explicitly switched off", async () => {
+  const { asyncAddsEnabled } = await import("../src/async-adds.js");
+  const previous = process.env.PARTYQUEUE_ASYNC_ADDS;
+  try {
+    // 14.0.0 flipped the default. Only an explicit "0" goes back to the
+    // synchronous path, so an unset or empty variable must not disable it.
+    delete process.env.PARTYQUEUE_ASYNC_ADDS;
+    assert.equal(asyncAddsEnabled(), true);
+    process.env.PARTYQUEUE_ASYNC_ADDS = "1";
+    assert.equal(asyncAddsEnabled(), true);
+    process.env.PARTYQUEUE_ASYNC_ADDS = "0";
+    assert.equal(asyncAddsEnabled(), false);
+  } finally {
+    process.env.PARTYQUEUE_ASYNC_ADDS = previous ?? "0";
+  }
+});
+
 test("the feature flag is a real kill switch for the queue view", async () => {
   const { shared, view } = await sharedStoreAndView();
   shared.addPending(sample());
 
   // Flag off: rolling back must not leave a stale store painting songs that
   // nothing is going to place.
-  delete process.env.PARTYQUEUE_ASYNC_ADDS;
+  process.env.PARTYQUEUE_ASYNC_ADDS = "0";
   assert.deepEqual(view.pendingViewRows(), []);
   assert.deepEqual(view.buildQueuePayload([{ uri: "spotify:track:live" }]).tracks, [
     { uri: "spotify:track:live" },
@@ -295,7 +312,7 @@ test("the feature flag is a real kill switch for the queue view", async () => {
     assert.equal(rows[0].pending, true);
     assert.equal(rows[0].title, "Nine Ball");
   } finally {
-    delete process.env.PARTYQUEUE_ASYNC_ADDS;
+    process.env.PARTYQUEUE_ASYNC_ADDS = "0";
   }
 });
 
@@ -312,7 +329,7 @@ test("failed rows reach the view with their reason", async () => {
     assert.equal(row.failedReason, "Sonos timeout");
     assert.equal(row.pendingId, entry.id);
   } finally {
-    delete process.env.PARTYQUEUE_ASYNC_ADDS;
+    process.env.PARTYQUEUE_ASYNC_ADDS = "0";
     shared.clearPendingAdds();
   }
 });

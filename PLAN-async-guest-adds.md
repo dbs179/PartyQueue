@@ -1,6 +1,7 @@
 # Plan: decouple guest adds from Sonos
 
-Status: **Phase 2 built, behind `PARTYQUEUE_ASYNC_ADDS=1`, not yet deployed.**
+Status: **Shipped in 14.0.0, on by default.** `PARTYQUEUE_ASYNC_ADDS=0` forces
+the old synchronous path back without a redeploy.
 Phases 0 and 1 were skipped — Phase 2 supersedes both. See §9 for what shipped
 and where it diverged from this plan.
 Written after the 2026-09-26 party incident. Full incident report lives in
@@ -456,9 +457,13 @@ New coverage needed:
 
 Phase 1 ships on its own and is safe to deploy before the next party.
 
-Phase 2 goes behind `PARTYQUEUE_ASYNC_ADDS=1`, defaulting **off**. Run a party
-with it on, watch the drainer logs, then flip the default. Rollback is an env
-var, not a redeploy.
+Phase 2 shipped in 14.0.0 defaulting **on**. Rollback is `PARTYQUEUE_ASYNC_ADDS=0`
+in the Unraid `.env` plus a container restart — no rebuild, no redeploy.
+
+Watch for in the first party: `[add-drainer] placed ...` lines (normal),
+`[add-drainer] attempt N ... failed` (speaker struggling, still recovering),
+`[true-up] confirmed ...` (an add landed but the call timed out — the duplicate
+was suppressed), and `[add-drainer] giving up ...` (a guest saw "Couldn't add").
 
 ---
 
