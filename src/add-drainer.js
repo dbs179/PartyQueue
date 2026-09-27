@@ -14,12 +14,7 @@
 // queue and retires the entry before this loop gets another go at it. That is
 // what keeps "at least once" from turning into "twice".
 
-import {
-  addTrackToQueue,
-  play,
-  ensureShoutLeadBuffer,
-  getQueueList,
-} from "./sonos.js";
+import { addTrackToQueue, play } from "./sonos.js";
 import { queueWorkWasPreempted } from "./queue-preempt.js";
 import {
   shouldShoutOnSearch,
@@ -54,6 +49,8 @@ const MAX_ATTEMPTS = 5;
 let timer = null;
 let stopping = false;
 let activeTick = null;
+/** A nudge that arrived while a tick was already running. See nudgeAddDrainer. */
+let wakePending = false;
 
 // Speaker/DJ seam: production uses the real modules, tests inject fakes.
 let overrides = {};
@@ -62,8 +59,6 @@ function deps() {
   return {
     addTrackToQueue,
     play,
-    getQueueList,
-    ensureShoutLeadBuffer,
     recordRequest,
     ensureGuestProfile,
     shouldShoutOnSearch,
@@ -300,6 +295,10 @@ export async function drainOnce({ now = Date.now() } = {}) {
 }
 
 async function tick() {
+  // Cleared before the store is read, so an add that lands any time after this
+  // point is treated as unseen by this pass even if it actually made the read.
+  // Worst case is one wasted pass that finds nothing.
+  wakePending = false;
   let delay = IDLE_MS;
   try {
     const outcome = await drainOnce();
@@ -309,24 +308,33 @@ async function tick() {
     console.error("[add-drainer] tick failed:", err.message);
     delay = IDLE_MS;
   }
-  schedule(delay);
+  schedule(wakePending ? 0 : delay);
 }
 
 /** Wake the loop now - called when a guest add lands in the outbox. */
 export function nudgeAddDrainer() {
-  if (stopping || activeTick) return;
+  if (stopping) return;
+  if (activeTick) {
+    // The running tick may already have read the store, so dropping this wake
+    // leaves the song sitting there until the 15s safety poll. Remember it and
+    // let the tick reschedule itself immediately instead.
+    wakePending = true;
+    return;
+  }
   schedule(0);
 }
 
 /** Start the drain loop. Safe to call once at startup. */
 export function initAddDrainer() {
   stopping = false;
+  wakePending = false;
   schedule(START_DELAY_MS);
 }
 
 /** Stop the self-scheduling loop during process shutdown. */
 export function stopAddDrainer() {
   stopping = true;
+  wakePending = false;
   clearTimer();
   return activeTick ?? Promise.resolve();
 }

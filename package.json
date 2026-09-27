@@ -21,6 +21,7 @@
     "smoke:room": "node --env-file-if-exists=.env scripts/smoke-office-setup.mjs",
     "smoke:transport": "node --env-file-if-exists=.env scripts/smoke-transport-probe.mjs",
     "smoke:async-add": "node --env-file-if-exists=.env scripts/smoke-async-add.mjs",
+    "soak:party": "node --env-file-if-exists=.env scripts/soak-party.mjs",
     "sim:party": "node scripts/sim-busy-party.mjs",
     "package:share": "powershell -ExecutionPolicy Bypass -File scripts/package-share.ps1"
   },

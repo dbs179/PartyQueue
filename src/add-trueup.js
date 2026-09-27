@@ -12,7 +12,7 @@
 // entry that is missing from the queue is not evidence of failure - songs leave
 // the queue constantly once they have played (queue-maintenance trims them, the
 // host skips, Clear Queue wipes them). Only entries we never confirmed are
-// eligible, and confirmation deletes them from the outbox for good.
+// eligible, and confirmation puts them permanently beyond the drainer's reach.
 
 import { spotifyTrackId } from "./sampler.js";
 import {
@@ -43,13 +43,20 @@ export async function runAddTrueUp({ getQueueList }) {
   // Placed entries are the shadow rows covering the gap between handing a song
   // to Sonos and Sonos showing it. Seeing the row is what retires them.
   const placed = live.filter((e) => e.state === "placed");
-  if (!candidates.length && !placed.length) return { confirmed: 0, waiting: 0 };
+  if (!candidates.length && !placed.length) {
+    return { confirmed: 0, retired: 0, waiting: 0 };
+  }
 
   // The DJ machinery inserts and removes announce pads as it works, so the
   // queue is a moving target mid-handoff. Nothing here would corrupt it, but a
   // read taken now is worth little - wait for the next pass.
   if (isDjVolumeHandoffActive() || isDjVolumeHandoffArmed()) {
-    return { confirmed: 0, waiting: candidates.length, skipped: "dj-announce-armed" };
+    return {
+      confirmed: 0,
+      retired: 0,
+      waiting: candidates.length,
+      skipped: "dj-announce-armed",
+    };
   }
 
   const rows = queueRows(await getQueueList());
@@ -67,13 +74,19 @@ export async function runAddTrueUp({ getQueueList }) {
 
   // Retire shadow rows first so the copies they account for cannot also be used
   // to confirm a pending entry that was never actually placed.
+  //
+  // Both loops resolve the store BEFORE spending the copy. The queue read above
+  // is awaited, so the outbox can move underneath us - Clear Queue is the
+  // obvious one - and an entry that is already gone must leave its copy for the
+  // next candidate rather than swallowing it on the way out.
   let retired = 0;
   for (const entry of placed) {
     const copies = available.get(entry.trackId);
     if (!copies?.length) continue;
+    if (!retirePlacedAdd(entry.id)) continue;
     copies.shift();
     if (!copies.length) available.delete(entry.trackId);
-    if (retirePlacedAdd(entry.id)) retired += 1;
+    retired += 1;
   }
 
   let confirmed = 0;
@@ -88,10 +101,10 @@ export async function runAddTrueUp({ getQueueList }) {
       sameUser(row?.requestedByUser || row?.requestedBy, entry.requestedByUser)
     );
     if (at === -1) at = 0;
+
+    if (!markPlaced(entry.id)) continue;
     copies.splice(at, 1);
     if (!copies.length) available.delete(entry.trackId);
-
-    markPlaced(entry.id);
     confirmed += 1;
     console.log(
       `[true-up] confirmed "${entry.name}" for ${entry.requestedByUser} was already queued`

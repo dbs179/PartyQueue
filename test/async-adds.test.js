@@ -158,7 +158,6 @@ describe("write-behind guest adds", { concurrency: false }, () => {
     configureAddDrainer({
       addTrackToQueue: (...args) => fake.addTrackToQueue(...args),
       play: () => fake.play(),
-      getQueueList: () => fake.getQueueList(),
       recordRequest: () => {},
       ensureGuestProfile: () => false,
       shouldShoutOnSearch: () => false,
@@ -304,6 +303,27 @@ describe("write-behind guest adds", { concurrency: false }, () => {
     assert.equal(listPendingAdds()[0].state, "placed", "kept only to draw the row");
     assert.equal(await drainOnce(), "idle");
     assert.equal(fake.tracks.length, 1, "exactly one copy");
+  });
+
+  test("emptying the queue mid-read is not counted as a confirmation", async () => {
+    const { clearPendingAdds } = await import("../src/pending-adds.js");
+    fake.addBehaviour = "landed-then-timeout";
+    await add(TRACK_A, "Dave");
+    assert.equal(await drainOnce(), "retry");
+    fake.addBehaviour = null;
+
+    // The queue read is awaited, so the host can empty the outbox between it
+    // and the rows coming back. Nothing is left to confirm at that point.
+    const result = await runAddTrueUp({
+      getQueueList: async () => {
+        const rows = await fake.getQueueList();
+        clearPendingAdds();
+        return rows;
+      },
+    });
+
+    assert.equal(result.confirmed, 0);
+    assert.equal(listPendingAdds().length, 0);
   });
 
   test("last call does not discard songs guests already asked for", async () => {

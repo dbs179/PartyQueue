@@ -16,14 +16,14 @@
 // A store that tried to mirror the queue would fight its own trim loop and
 // resurrect songs the party already heard.
 //
-// Confirmation is therefore a DELETE: once an entry is placed it leaves the
-// store for good, which makes resurrection structurally impossible rather than
-// something we have to remember to guard against.
+// Confirmation is therefore one-way: a placed entry can never become placeable
+// again. It is kept only long enough to stay on screen while Sonos catches up
+// (see markPlaced), and the true-up drops it the moment the real row appears.
 //
-// Persisted states are only "pending" and "failed". "placing" is deliberately
-// in-memory: if the process dies mid-placement the entry reverts to pending on
-// boot, and the true-up in queue-maintenance.js suppresses the duplicate by
-// checking the live queue before re-placing.
+// Persisted states are "pending", "placed" and "failed". "placing" is
+// deliberately in-memory: if the process dies mid-placement the entry reverts
+// to pending on boot, and the true-up in queue-maintenance.js suppresses the
+// duplicate by checking the live queue before re-placing.
 //
 // Honors PARTYQUEUE_PENDING_ADDS_FILE to point the store elsewhere (tests).
 
@@ -130,6 +130,30 @@ function sameUser(a, b) {
   return String(a).toLowerCase() === String(b).toLowerCase();
 }
 
+// Cheapest rows to lose first. A "placed" entry is a shadow of a song already
+// sitting on the speaker, a "failed" one is a notice the guest has probably
+// read, and only a "pending" entry is a song nobody has heard yet.
+const EVICTION_ORDER = ["placed", "failed", "pending"];
+
+/**
+ * Make room for one new add. Evicting the oldest row outright could throw away
+ * a guest's waiting request while display-only leftovers survived it.
+ */
+function evictOne() {
+  for (const state of EVICTION_ORDER) {
+    // The drainer always takes the oldest pending entry, so without the placing
+    // check the likeliest row to be evicted is the one being placed right now.
+    const at = entries.findIndex(
+      (e) => e.state === state && !placing.has(e.id)
+    );
+    if (at !== -1) {
+      entries.splice(at, 1);
+      return;
+    }
+  }
+  entries.shift();
+}
+
 /**
  * Record a guest add. Durable before we acknowledge, so a crash between the
  * ack and placement still plays the song.
@@ -148,8 +172,7 @@ export function addPending(input) {
   const entry = normalizeEntry({ ...input, state: "pending", createdAt: ts, updatedAt: ts });
   if (!entry) throw new Error("Missing track uri.");
   entries.push(entry);
-  // Oldest-first eviction; a pending entry this old is never going to place.
-  while (entries.length > MAX) entries.shift();
+  while (entries.length > MAX) evictOne();
   persist();
   return snapshot(entry);
 }

@@ -289,6 +289,35 @@ test("the store stays bounded under a wedged speaker", () => {
   assert.equal(rows[rows.length - 1].uri, "spotify:track:t319");
 });
 
+test("making room drops a shadow row before a guest's waiting song", () => {
+  const waiting = store.addPending(sample({ uri: "spotify:track:waiting" }));
+  const shadow = store.addPending(sample({ uri: "spotify:track:shadow" }));
+  store.markPlaced(shadow.id);
+  for (let i = 0; i < 298; i++) {
+    store.addPending(sample({ uri: `spotify:track:t${i}` }));
+  }
+
+  store.addPending(sample({ uri: "spotify:track:newest" }));
+
+  const ids = store.listPendingAdds().map((e) => e.id);
+  assert.equal(ids.length, 300);
+  assert.ok(ids.includes(waiting.id), "nobody's request is thrown away first");
+  assert.ok(!ids.includes(shadow.id), "the song already on the speaker went");
+});
+
+test("making room never drops the song being placed right now", () => {
+  const first = store.addPending(sample({ uri: "spotify:track:first" }));
+  // The drainer always claims the oldest, which is also the eviction target.
+  store.claimPending(first.id);
+  for (let i = 0; i < 300; i++) {
+    store.addPending(sample({ uri: `spotify:track:t${i}` }));
+  }
+
+  const ids = store.listPendingAdds().map((e) => e.id);
+  assert.equal(ids.length, 300);
+  assert.ok(ids.includes(first.id), "still in the store while it is in flight");
+});
+
 /**
  * queue-view imports pending-adds directly, so both must come from the same
  * module instance — the cache-busted `store` used elsewhere in this file is a
