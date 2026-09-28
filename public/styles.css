@@ -2470,6 +2470,10 @@ body:has(#view-settings-user-edit:not([hidden])) > .container {
   margin: 0 0 8px;
 }
 
+.sonos-speaker-health {
+  white-space: pre-line;
+}
+
 .booth-field-note {
   margin: 0 0 8px;
 }

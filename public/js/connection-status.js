@@ -1,6 +1,7 @@
 /** Settings connection status pills + credential field painters. */
 
 import { formatDuration, formatTimeAgo } from "./format.js";
+import { formatSpeakerHealthList } from "../../src/sonos-speaker-health.js";
 
 const STATUS_CLASSES = [
   "status-connected",
@@ -180,11 +181,12 @@ export function applyHaStatus(els, data) {
  *   roomInput?: HTMLInputElement|null,
  *   saveBtn?: HTMLButtonElement|null,
  *   clearBtn?: HTMLButtonElement|null,
+ *   healthEl?: HTMLElement|null,
  * }} els
- * @param {{ hostSet?: boolean, host?: string, room?: string }} data
+ * @param {{ hostSet?: boolean, host?: string, room?: string, speakers?: object[] }} data
  */
 export function applySonosConnStatus(els, data) {
-  const { statusEl, hostInput, roomInput, saveBtn, clearBtn } = els || {};
+  const { statusEl, hostInput, roomInput, saveBtn, clearBtn, healthEl } = els || {};
   if (!statusEl) return;
 
   if (data.hostSet) {
@@ -201,6 +203,9 @@ export function applySonosConnStatus(els, data) {
   }
   if (saveBtn) saveBtn.disabled = false;
   if (clearBtn) clearBtn.disabled = false;
+  if (healthEl && Array.isArray(data.speakers)) {
+    healthEl.textContent = formatSpeakerHealthList(data.speakers);
+  }
 }
 
 /**

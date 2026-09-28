@@ -28,7 +28,11 @@ import {
 } from "./party-settings-http.js";
 import { setSonosDemandChecker } from "./sonos-manager-health.js";
 import { noteFailure } from "./failure-log.js";
-import { closeSonosManager } from "./sonos-core.js";
+import {
+  closeSonosManager,
+  startManagedSonosSpeakerHealthMonitor,
+  stopManagedSonosSpeakerHealthMonitor,
+} from "./sonos-core.js";
 import { registerApiRoutes } from "./routes/index.js";
 import {
   getBrandingSettings,
@@ -612,6 +616,7 @@ function runListenStartup({ seed = true, warm = true } = {}) {
     startPoolRewarmLoop();
     initAutoFill();
     initQueueMaintenance();
+    startManagedSonosSpeakerHealthMonitor();
     if (asyncAddsEnabled()) {
       initAddDrainer();
       console.log("[queue] write-behind guest adds enabled");
@@ -694,6 +699,7 @@ export async function shutdownServer({
   forceExit.unref?.();
 
   stopGenreWarm();
+  stopManagedSonosSpeakerHealthMonitor();
   closeNowPlayingStreams();
   closeQueueStreams();
   closePartySettingsStreams();

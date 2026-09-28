@@ -1,3 +1,8 @@
+import {
+  noteSpeakerHealthFailure,
+  noteSpeakerHealthSuccess,
+} from "./sonos-speaker-health.js";
+
 // Classify Sonos SOAP / TCP failures that mean a player is gone or wedged, and
 // remember which speakers to leave alone for a while.
 //
@@ -59,6 +64,9 @@ export function markPlayerUnreachable(device, now = Date.now()) {
 export function markPlayerReachable(device) {
   const key = playerKey(device);
   if (key) unreachableUntil.delete(key);
+  // A successful Sonos call is also a health signal. This does not change the
+  // skip map beyond the delete above.
+  noteSpeakerHealthSuccess(device);
 }
 
 /**
@@ -70,6 +78,7 @@ export function markPlayerReachable(device) {
 export function noteSpeakerFailure(device, err, now = Date.now()) {
   if (!isSonosUnreachableError(err)) return false;
   markPlayerUnreachable(device, now);
+  noteSpeakerHealthFailure(device, err, { now });
   return true;
 }
 

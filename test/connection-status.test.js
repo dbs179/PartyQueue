@@ -145,6 +145,44 @@ test("applySonosConnStatus distinguishes pinned vs discovery", () => {
   assert.ok(els.statusEl.classList.contains("status-limited"));
 });
 
+test("applySonosConnStatus paints speaker health and leaves it when speakers are omitted", () => {
+  const els = {
+    statusEl: makeEl(),
+    healthEl: makeEl(),
+  };
+  applySonosConnStatus(els, {
+    hostSet: true,
+    host: "10.10.20.50",
+    room: "Living Room",
+    speakers: [
+      {
+        name: "Office",
+        state: "UNRESPONSIVE",
+        consecutiveFailures: 3,
+        lastFailureReason: "timeout",
+        lastSuccessAt: Date.parse("2026-09-28T00:43:00Z"),
+      },
+      {
+        name: "Living Room",
+        state: "HEALTHY",
+        consecutiveFailures: 0,
+        lastSuccessAt: Date.parse("2026-09-28T00:44:00Z"),
+      },
+    ],
+  });
+  assert.match(els.healthEl.textContent, /Office — UNRESPONSIVE/);
+  assert.match(els.healthEl.textContent, /3 consecutive timeouts/);
+  assert.match(els.healthEl.textContent, /Last response:/);
+  const living = els.healthEl.textContent
+    .split("\n\n")
+    .find((block) => block.startsWith("Living Room"));
+  assert.equal(living, "Living Room — HEALTHY");
+
+  const painted = els.healthEl.textContent;
+  applySonosConnStatus(els, { hostSet: false, host: "", room: "" });
+  assert.equal(els.healthEl.textContent, painted);
+});
+
 test("applySpotifyAccountStatus covers linked / limited / unlinked", () => {
   const els = { statusEl: makeEl(), cacheWarmed: makeEl() };
   const now = Date.parse("2026-08-08T12:00:00Z");

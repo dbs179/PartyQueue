@@ -44,6 +44,7 @@ import {
  *     statusEl?: HTMLElement|null,
  *     hostInput?: HTMLInputElement|null,
  *     roomInput?: HTMLInputElement|null,
+ *     healthEl?: HTMLElement|null,
  *     saveBtn?: HTMLElement|null,
  *     testBtn?: HTMLElement|null,
  *     clearBtn?: HTMLElement|null,
@@ -104,6 +105,7 @@ export function createConnectionsUi(els, deps) {
     statusEl: sonos.statusEl,
     hostInput: sonos.hostInput,
     roomInput: sonos.roomInput,
+    healthEl: sonos.healthEl,
     saveBtn: sonos.saveBtn,
     clearBtn: sonos.clearBtn,
   };

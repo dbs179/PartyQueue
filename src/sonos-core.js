@@ -10,8 +10,15 @@ import { getSonosTargetRoom } from "./settings.js";
 import { getSonosHost } from "./sonos-config.js";
 import {
   isPlayerSkipped,
+  isSonosUnreachableError,
   markPlayerReachable,
 } from "./sonos-reachability.js";
+import {
+  noteSpeakerHealthFailure,
+  SPEAKER_HEALTH_PROBE_TIMEOUT_MS,
+  startSonosSpeakerHealthMonitor,
+  stopSonosSpeakerHealthMonitor,
+} from "./sonos-speaker-health.js";
 import { envTimeoutMs, withTimeout } from "./with-timeout.js";
 
 // PartyQueue reads topology with its own GetZoneGroupState polls and never
@@ -140,6 +147,43 @@ export function resolveRegion() {
 /** True when a household manager is already connected (no discovery). */
 export function hasReadySonosManager() {
   return !!manager;
+}
+
+/**
+ * Speakers the manager already knows. Never starts discovery — an empty list
+ * means we have not connected yet.
+ */
+export function listManagedSonosDevices() {
+  if (!manager) return [];
+  try {
+    // SonosManager.Devices throws while the device list is still empty.
+    const devices = manager.Devices;
+    return Array.isArray(devices) ? devices : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Read-only GetTransportInfo, at most once a minute, and only for speakers
+ * ordinary traffic has not already measured. Does not mark the skip map.
+ * @returns {boolean} true when this call armed the timer
+ */
+export function startManagedSonosSpeakerHealthMonitor() {
+  return startSonosSpeakerHealthMonitor({
+    listDevices: listManagedSonosDevices,
+    isCommunicationFailure: isSonosUnreachableError,
+    readDevice: (device) =>
+      withTimeout(
+        device.AVTransportService.GetTransportInfo(),
+        SPEAKER_HEALTH_PROBE_TIMEOUT_MS,
+        "Sonos health probe timed out"
+      ),
+  });
+}
+
+export function stopManagedSonosSpeakerHealthMonitor() {
+  stopSonosSpeakerHealthMonitor();
 }
 
 export async function getManager() {
@@ -288,6 +332,8 @@ async function getZoneGroupStateFromHousehold(m, probePrefs = {}) {
       lastErr = err;
       // A topology probe timeout is not "this speaker is dead." Marking Office
       // unreachable here banned SetVolume for 60s and the DJ never ducked.
+      // Record the miss for diagnostics only — do not touch the skip map.
+      if (isSonosUnreachableError(err)) noteSpeakerHealthFailure(device, err);
       const next = toTry[i + 1];
       if (next) {
         const from = device.Name || device.Host || `device[${i}]`;

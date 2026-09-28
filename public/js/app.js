@@ -1378,6 +1378,7 @@ function ensureConnections() {
       statusEl: document.getElementById("sonos-conn-status"),
       hostInput: document.getElementById("set-sonos-host"),
       roomInput: document.getElementById("set-sonos-room"),
+      healthEl: document.getElementById("sonos-speaker-health"),
       saveBtn: document.getElementById("sonos-conn-save"),
       testBtn: document.getElementById("sonos-conn-test"),
       clearBtn: document.getElementById("sonos-conn-clear"),

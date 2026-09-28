@@ -30,6 +30,7 @@ import {
 } from "../home-assistant.js";
 import { setSonosTargetRoom } from "../settings.js";
 import { resetSonosManager } from "../sonos.js";
+import { listSpeakerHealth } from "../sonos-speaker-health.js";
 
 /** @param {import('express').Express} app */
 export function registerConnectionRoutes(app) {
@@ -74,7 +75,7 @@ export function registerConnectionRoutes(app) {
   // Sonos speaker IP + room (Settings → Connections). Helps when SSDP discovery
   // fails across VLANs/VPNs. Saves to data/sonos.json + .env.
   app.get("/api/sonos/connection", requireHost, (_req, res) => {
-    res.json(getSonosConnectionStatus());
+    res.json({ ...getSonosConnectionStatus(), speakers: listSpeakerHealth() });
   });
 
   app.post("/api/sonos/connection", requireHostStrict, (req, res) => {

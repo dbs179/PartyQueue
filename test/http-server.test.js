@@ -96,12 +96,51 @@ describe("HTTP server harness", { concurrency: false }, () => {
     assert.equal(typeof body.diagnostics.spotify.configured, "boolean");
     assert.equal(typeof body.diagnostics.spotify.userConnected, "boolean");
     assert.equal(typeof body.diagnostics.sonos.status, "string");
+    assert.ok(Array.isArray(body.diagnostics.sonos.speakers));
     assert.ok(
       body.diagnostics.queue.upcoming === null ||
         typeof body.diagnostics.queue.upcoming === "number"
     );
     assert.ok(Array.isArray(body.diagnostics.recentFailures));
     assert.equal(JSON.stringify(body.diagnostics).includes("refresh_token"), false);
+  });
+
+  test("GET /api/ready reports per-speaker Sonos health", async () => {
+    const health = await import("../src/sonos-speaker-health.js");
+    health.resetSpeakerHealthForTests();
+    const timeout = Object.assign(new Error("request timed out"), {
+      code: "ETIMEDOUT",
+    });
+    const office = { Name: "Office", Host: "10.10.20.50", Uuid: "RINCON_OFFICE" };
+    const living = {
+      Name: "Living Room",
+      Host: "10.10.20.51",
+      Uuid: "RINCON_LIVING",
+    };
+    health.noteSpeakerHealthSuccess(living, { now: 1_700_000_000_000 });
+    health.noteSpeakerHealthFailure(office, timeout, { now: 1_700_000_001_000 });
+    health.noteSpeakerHealthFailure(office, timeout, { now: 1_700_000_002_000 });
+    health.noteSpeakerHealthFailure(office, timeout, { now: 1_700_000_003_000 });
+    try {
+      const res = await fetch(`${baseUrl}/api/ready`);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      const speakers = body.diagnostics.sonos.speakers;
+      const byName = Object.fromEntries(speakers.map((row) => [row.name, row]));
+      assert.equal(byName.Office.state, "UNRESPONSIVE");
+      assert.equal(byName.Office.consecutiveFailures, 3);
+      assert.equal(byName.Office.lastFailureReason, "timeout");
+      assert.equal(byName.Office.host, "10.10.20.50");
+      assert.equal(byName.Office.lastFailureAt, 1_700_000_003_000);
+      assert.equal(byName["Living Room"].state, "HEALTHY");
+      assert.equal(byName["Living Room"].consecutiveFailures, 0);
+      assert.equal(byName["Living Room"].lastSuccessAt, 1_700_000_000_000);
+      const wire = JSON.stringify(body);
+      assert.equal(wire.includes("refresh_token"), false);
+      assert.equal(wire.includes("client_secret"), false);
+    } finally {
+      health.resetSpeakerHealthForTests();
+    }
   });
 
   test("cross-origin POSTs are blocked by the CSRF guard", async () => {

@@ -4,6 +4,11 @@
 
 import { recentFailures, lastSuccessFor } from "./failure-log.js";
 import { getSonosManagerHealth } from "./sonos-manager-health.js";
+import { listManagedSonosDevices } from "./sonos-core.js";
+import {
+  listSpeakerHealth,
+  observeKnownSpeakers,
+} from "./sonos-speaker-health.js";
 import { getNowPlaying, getQueueList } from "./sonos-snapshots.js";
 import { getSonosTargetRoom } from "./settings.js";
 import {
@@ -22,6 +27,16 @@ function peekValue(reader) {
   } catch {
     return null;
   }
+}
+
+/** Per-speaker responsiveness. Never starts discovery or a SOAP call. */
+function sonosSpeakerHealth() {
+  try {
+    observeKnownSpeakers(listManagedSonosDevices());
+  } catch {
+    /* diagnostics must still return */
+  }
+  return listSpeakerHealth();
 }
 
 /**
@@ -61,6 +76,7 @@ export function collectPartyDiagnostics() {
       lastSuccessAt: sonosHealth.lastSuccessAt || 0,
       unhealthySince: sonosHealth.unhealthySince || 0,
       lastResetAt: sonosHealth.lastResetAt || 0,
+      speakers: sonosSpeakerHealth(),
     },
     queue: {
       upcoming: tracks ? tracks.length : null,

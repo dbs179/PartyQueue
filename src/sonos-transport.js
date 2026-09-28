@@ -17,6 +17,8 @@ import {
 import { assertManualVolumeAvailable } from "./sonos-volume.js";
 import { spotifyTrackId } from "./sampler.js";
 import { withTimeout } from "./with-timeout.js";
+import { isSonosUnreachableError } from "./sonos-reachability.js";
+import { noteSpeakerHealthFailure } from "./sonos-speaker-health.js";
 import { recordSkip } from "./play-history.js";
 import { originOf, moodOf, clearConsumedDedication } from "./queue-origin.js";
 import { memoryRequesterIdentityOf } from "./memory-requester.js";
@@ -87,25 +89,40 @@ export async function ensureOrderedPlayModeOn(coordinator) {
 export async function getAnnouncePlaybackContext() {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
-  const [transport, pos, media, queue] = await withTimeout(
-    Promise.all([
-      coordinator.AVTransportService.GetTransportInfo().catch(() => ({
-        CurrentTransportState: "",
-      })),
-      coordinator.AVTransportService.GetPositionInfo().catch(() => ({
-        Track: 0,
-        RelTime: "",
-        TrackDuration: "",
-        TrackURI: "",
-      })),
-      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
-        CurrentURI: "",
-      })),
-      coordinator.GetQueue().catch(() => ({ Result: [], TotalMatches: 0 })),
-    ]),
-    QUEUE_SOAP_TIMEOUT_MS,
-    "Sonos announce context timed out"
-  );
+  const started = Date.now();
+  let transport;
+  let pos;
+  let media;
+  let queue;
+  try {
+    [transport, pos, media, queue] = await withTimeout(
+      Promise.all([
+        coordinator.AVTransportService.GetTransportInfo().catch(() => ({
+          CurrentTransportState: "",
+        })),
+        coordinator.AVTransportService.GetPositionInfo().catch(() => ({
+          Track: 0,
+          RelTime: "",
+          TrackDuration: "",
+          TrackURI: "",
+        })),
+        coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
+          CurrentURI: "",
+        })),
+        coordinator.GetQueue().catch(() => ({ Result: [], TotalMatches: 0 })),
+      ]),
+      QUEUE_SOAP_TIMEOUT_MS,
+      "Sonos announce context timed out"
+    );
+  } catch (err) {
+    // Inner calls swallow their own faults, so a resolved read is not proof
+    // the speaker answered. Only the outer timeout is a health signal, and
+    // only when it looks like a communication failure.
+    if (isSonosUnreachableError(err)) {
+      noteSpeakerHealthFailure(coordinator, err, { latencyMs: Date.now() - started });
+    }
+    throw err;
+  }
   const items = Array.isArray(queue.Result) ? queue.Result : [];
   const track = Number(pos.Track) || 0;
   const playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");

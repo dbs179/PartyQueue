@@ -60,9 +60,14 @@ import {
 } from "./sonos-manager-health.js";
 import {
   isPlayerSkipped,
+  isSonosUnreachableError,
   markPlayerReachable,
   noteSpeakerFailure,
 } from "./sonos-reachability.js";
+import {
+  noteSpeakerHealthFailure,
+  noteSpeakerHealthSuccess,
+} from "./sonos-speaker-health.js";
 import { envTimeoutMs, withTimeout } from "./with-timeout.js";
 
 const NOW_PLAYING_SOAP_TIMEOUT_MS = envTimeoutMs(
@@ -78,6 +83,22 @@ const TRANSPORT_TICK_TIMEOUT_MS = envTimeoutMs(
   "PARTYQUEUE_TRANSPORT_TICK_TIMEOUT_MS",
   2_000
 );
+
+/**
+ * Attribute one coordinator SOAP round-trip to that speaker. Logical Sonos
+ * faults (the box answered) are ignored. Does not touch the unreachable skip.
+ */
+function noteCoordinatorCommunication(coordinator, startedAt, err) {
+  if (!coordinator) return;
+  const latencyMs = Date.now() - startedAt;
+  if (!err) {
+    noteSpeakerHealthSuccess(coordinator, { latencyMs });
+    return;
+  }
+  if (isSonosUnreachableError(err)) {
+    noteSpeakerHealthFailure(coordinator, err, { latencyMs });
+  }
+}
 
 /** After Play starts a baked announce, serve this instead of a stale song SOAP. */
 let announceNowPlayingHold = null;
@@ -698,23 +719,35 @@ async function readSonosNowPlayingSnapshot() {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
 
-  const [pos, transport, groupMute, settings, media] = await withTimeout(
-    Promise.all([
-      coordinator.AVTransportService.GetPositionInfo(),
-      coordinator.AVTransportService.GetTransportInfo(),
-      coordinator.GroupRenderingControlService.GetGroupMute({ InstanceID: 0 }).catch(
-        () => ({ CurrentMute: false })
-      ),
-      coordinator.AVTransportService.GetTransportSettings({ InstanceID: 0 }).catch(
-        () => ({ PlayMode: "NORMAL" })
-      ),
-      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(
-        () => ({ CurrentURI: "" })
-      ),
-    ]),
-    NOW_PLAYING_SOAP_TIMEOUT_MS,
-    "Sonos now-playing timed out"
-  );
+  const soapStarted = Date.now();
+  let pos;
+  let transport;
+  let groupMute;
+  let settings;
+  let media;
+  try {
+    [pos, transport, groupMute, settings, media] = await withTimeout(
+      Promise.all([
+        coordinator.AVTransportService.GetPositionInfo(),
+        coordinator.AVTransportService.GetTransportInfo(),
+        coordinator.GroupRenderingControlService.GetGroupMute({ InstanceID: 0 }).catch(
+          () => ({ CurrentMute: false })
+        ),
+        coordinator.AVTransportService.GetTransportSettings({ InstanceID: 0 }).catch(
+          () => ({ PlayMode: "NORMAL" })
+        ),
+        coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(
+          () => ({ CurrentURI: "" })
+        ),
+      ]),
+      NOW_PLAYING_SOAP_TIMEOUT_MS,
+      "Sonos now-playing timed out"
+    );
+  } catch (err) {
+    noteCoordinatorCommunication(coordinator, soapStarted, err);
+    throw err;
+  }
+  noteCoordinatorCommunication(coordinator, soapStarted, null);
   // Shared snapshots can be reused for up to a few seconds. Clients use this
   // observation time to advance RelTime by the snapshot's age.
   const positionObservedAt = Date.now();
@@ -976,17 +1009,27 @@ async function getQueueListRaw() {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
 
-  const [queue, pos, media] = await withTimeout(
-    Promise.all([
-      coordinator.GetQueue(),
-      coordinator.AVTransportService.GetPositionInfo().catch(() => ({ Track: 0 })),
-      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
-        CurrentURI: "",
-      })),
-    ]),
-    QUEUE_SOAP_TIMEOUT_MS,
-    "Sonos queue read timed out"
-  );
+  const soapStarted = Date.now();
+  let queue;
+  let pos;
+  let media;
+  try {
+    [queue, pos, media] = await withTimeout(
+      Promise.all([
+        coordinator.GetQueue(),
+        coordinator.AVTransportService.GetPositionInfo().catch(() => ({ Track: 0 })),
+        coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
+          CurrentURI: "",
+        })),
+      ]),
+      QUEUE_SOAP_TIMEOUT_MS,
+      "Sonos queue read timed out"
+    );
+  } catch (err) {
+    noteCoordinatorCommunication(coordinator, soapStarted, err);
+    throw err;
+  }
+  noteCoordinatorCommunication(coordinator, soapStarted, null);
 
   const items = Array.isArray(queue.Result) ? queue.Result : [];
 
@@ -1092,18 +1135,29 @@ async function getQueueStatusRaw() {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
 
-  const [transport, pos, media, queue] = await withTimeout(
-    Promise.all([
-      coordinator.AVTransportService.GetTransportInfo(),
-      coordinator.AVTransportService.GetPositionInfo().catch(() => ({ Track: 0 })),
-      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
-        CurrentURI: "",
-      })),
-      coordinator.GetQueue(),
-    ]),
-    QUEUE_SOAP_TIMEOUT_MS,
-    "Sonos queue status timed out"
-  );
+  const soapStarted = Date.now();
+  let transport;
+  let pos;
+  let media;
+  let queue;
+  try {
+    [transport, pos, media, queue] = await withTimeout(
+      Promise.all([
+        coordinator.AVTransportService.GetTransportInfo(),
+        coordinator.AVTransportService.GetPositionInfo().catch(() => ({ Track: 0 })),
+        coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
+          CurrentURI: "",
+        })),
+        coordinator.GetQueue(),
+      ]),
+      QUEUE_SOAP_TIMEOUT_MS,
+      "Sonos queue status timed out"
+    );
+  } catch (err) {
+    noteCoordinatorCommunication(coordinator, soapStarted, err);
+    throw err;
+  }
+  noteCoordinatorCommunication(coordinator, soapStarted, null);
 
   const items = Array.isArray(queue.Result) ? queue.Result : [];
   const total = Number(queue.TotalMatches) || items.length;
@@ -1155,9 +1209,11 @@ export async function getNowPlayingFresh() {
  * poll rate.
  */
 export async function getTransportTick() {
+  const started = Date.now();
+  let coordinator = null;
   try {
     const m = await getManager();
-    const coordinator = await resolveCoordinator(m);
+    coordinator = await resolveCoordinator(m);
     const [pos, transport] = await withTimeout(
       Promise.all([
         coordinator.AVTransportService.GetPositionInfo(),
@@ -1166,6 +1222,7 @@ export async function getTransportTick() {
       TRANSPORT_TICK_TIMEOUT_MS,
       "Sonos transport tick timed out"
     );
+    noteCoordinatorCommunication(coordinator, started, null);
     noteSonosReadSuccess();
     return {
       uri: pos.TrackURI ?? null,
@@ -1175,6 +1232,7 @@ export async function getTransportTick() {
       queueTrack: Number(pos.Track) || 0,
     };
   } catch (err) {
+    noteCoordinatorCommunication(coordinator, started, err);
     noteSonosReadFailure();
     throw err;
   }
