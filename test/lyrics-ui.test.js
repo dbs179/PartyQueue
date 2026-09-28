@@ -5,12 +5,73 @@ import {
   DISPLAY_LYRIC_WINDOW,
   KARAOKE_LYRIC_WINDOW,
   activeSyncedLineIndex,
+  lyricsClockShouldRun,
+  stepPlaybackClock,
   createLyricsUi,
   displayLyricWindowSlots,
   karaokeLyricWindowSlots,
   formatDjAnnounceScript,
   lyricsMissMessage,
 } from "../public/js/lyrics-ui.js";
+
+test("optimistic skip holds the lyric clock until Sonos confirms", () => {
+  const optimistic = {
+    optimistic: true,
+    isPlaying: true,
+    queueTrack: 4,
+    uri: "spotify:track:next",
+    positionSec: 0,
+    positionAgeSec: 0,
+  };
+  assert.equal(lyricsClockShouldRun(optimistic), false);
+  const seeded = stepPlaybackClock(
+    {
+      key: "3|spotify:track:now|",
+      positionBase: 40,
+      positionAt: 1000,
+      playing: true,
+    },
+    optimistic,
+    1000,
+    0
+  );
+  assert.equal(seeded.playing, false);
+  assert.equal(seeded.positionBase, 0);
+  const held = stepPlaybackClock(seeded, optimistic, 3000, 0);
+  assert.equal(held.positionBase, 0);
+  assert.equal(held.playing, false);
+  const started = stepPlaybackClock(
+    held,
+    {
+      isPlaying: true,
+      queueTrack: 4,
+      uri: "spotify:track:next",
+      positionSec: 0.2,
+      positionAgeSec: 0,
+    },
+    3200,
+    0.2
+  );
+  assert.equal(started.playing, true);
+  assert.equal(started.positionBase, 0.2);
+});
+
+test("a stale poll does not rewind lyrics that are already ahead", () => {
+  const np = {
+    isPlaying: true,
+    queueTrack: 2,
+    uri: "spotify:track:song",
+  };
+  const state = {
+    key: "2|spotify:track:song|",
+    positionBase: 10,
+    positionAt: 1000,
+    playing: true,
+  };
+  const next = stepPlaybackClock(state, np, 4000, 10);
+  assert.equal(next.positionBase, 10);
+  assert.equal(next.positionAt, 1000);
+});
 
 function makeLyricsEl() {
   let html = "";

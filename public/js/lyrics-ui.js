@@ -51,6 +51,62 @@ export function karaokeLyricWindowSlots(activeIdx) {
  * @param {number} posSec
  * @param {number} [leadSec]
  */
+/** Lyric clock follows audio. An optimistic Skip is not audio yet. */
+export function lyricsClockShouldRun(np) {
+  return !!(np && np.isPlaying && !np.djVoice && !np.optimistic);
+}
+
+/**
+ * One playback-clock step. A Skip paints the next song before Sonos agrees.
+ * That paint must not start the clock: a head start would stick for the whole
+ * song, because a later poll that is behind the local estimate is ignored.
+ *
+ * @param {{ key?: string, positionBase?: number, positionAt?: number, playing?: boolean }} state
+ * @param {object|null|undefined} np
+ * @param {number} now
+ * @param {number|null} serverPos
+ */
+export function stepPlaybackClock(state, np, now, serverPos) {
+  const key = playbackIdentity(np);
+  const previousKey = state?.key || "";
+  const force = key !== previousKey;
+  const playing = lyricsClockShouldRun(np);
+  const hasServer = serverPos != null && Number.isFinite(serverPos);
+  const positionAt = Number(state?.positionAt) || 0;
+  const positionBase = Number(state?.positionBase) || 0;
+  const wasPlaying = !!state?.playing;
+
+  if (force || !positionAt) {
+    return {
+      key,
+      positionBase: hasServer ? serverPos : 0,
+      positionAt: now,
+      playing,
+    };
+  }
+
+  let estimated = positionBase;
+  if (wasPlaying && positionAt) estimated += (now - positionAt) / 1000;
+
+  if (!hasServer) {
+    if (wasPlaying !== playing && !playing) {
+      return { key, positionBase: estimated, positionAt: now, playing };
+    }
+    return { key, positionBase, positionAt, playing };
+  }
+
+  const drift = Math.abs(serverPos - estimated);
+  const playChanged = playing !== wasPlaying;
+  const staleReplay = playing && !playChanged && serverPos + 0.75 < estimated;
+  if (playChanged || !playing) {
+    return { key, positionBase: serverPos, positionAt: now, playing };
+  }
+  if (!staleReplay && drift > 1.5) {
+    return { key, positionBase: serverPos, positionAt: now, playing };
+  }
+  return { key, positionBase, positionAt, playing };
+}
+
 export function activeSyncedLineIndex(lines, posSec, leadSec = LYRICS_LEAD_SEC) {
   let idx = -1;
   if (!Array.isArray(lines)) return idx;
@@ -451,44 +507,21 @@ export function createLyricsUi(els, deps) {
   }
 
   function applyPlaybackClock(np) {
-    const key = lyricsTrackKey(np);
-    const force = key !== progressClockKey;
-    progressClockKey = key;
-
-    const clockNow = playbackClockNow();
-    const playing = !!(np && np.isPlaying && !np.djVoice);
-    const serverPos = serverPlaybackPosition(np);
-    const hasServer = serverPos != null;
-
-    if (force || !positionAt) {
-      positionBase = hasServer ? serverPos : 0;
-      positionAt = clockNow;
-      isPlayingOverlay = playing;
-      return;
-    }
-
-    const estimated = estimatedPositionSec();
-
-    if (!hasServer) {
-      if (playing !== isPlayingOverlay && !playing) {
-        positionBase = estimated;
-        positionAt = clockNow;
-      }
-      isPlayingOverlay = playing;
-      return;
-    }
-
-    const drift = Math.abs(serverPos - estimated);
-    const playChanged = playing !== isPlayingOverlay;
-    const staleReplay = playing && !playChanged && serverPos + 0.75 < estimated;
-    if (playChanged || !playing) {
-      positionBase = hasServer ? serverPos : estimated;
-      positionAt = clockNow;
-    } else if (!staleReplay && drift > 1.5) {
-      positionBase = serverPos;
-      positionAt = clockNow;
-    }
-    isPlayingOverlay = playing;
+    const next = stepPlaybackClock(
+      {
+        key: progressClockKey,
+        positionBase,
+        positionAt,
+        playing: isPlayingOverlay,
+      },
+      np,
+      playbackClockNow(),
+      serverPlaybackPosition(np)
+    );
+    progressClockKey = next.key;
+    positionBase = next.positionBase;
+    positionAt = next.positionAt;
+    isPlayingOverlay = next.playing;
   }
 
   function freezePlayhead() {
