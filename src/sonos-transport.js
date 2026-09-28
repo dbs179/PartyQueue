@@ -7,6 +7,7 @@ import {
 } from "./sonos-core.js";
 import {
   announceHoldIsLive,
+  getQueueList,
   invalidateSonosSnapshots,
   parseSonosTime,
   clearLastHeardIf,
@@ -32,6 +33,8 @@ import {
   decideSkipAnnounceAction,
   findNextMusicTrackNumber,
   formatSonosRelTime,
+  queueItemsFromUpcoming,
+  snapshotMatchesPlayhead,
 } from "./skip-announce-policy.js";
 import { isDjVolumeHandoffArmed } from "./dj-volume-handoff-state.js";
 
@@ -308,12 +311,11 @@ async function nextUnlocked(opts = {}) {
   let currentIsAnnouncePad = false;
 
   try {
-    const [pos, media, queue] = await Promise.all([
+    const [pos, media] = await Promise.all([
       coordinator.AVTransportService.GetPositionInfo(),
       coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(
         () => ({ CurrentURI: "" })
       ),
-      coordinator.GetQueue().catch(() => ({ Result: [] })),
     ]);
     const meta = typeof pos.TrackMetaData === "object" ? pos.TrackMetaData : null;
     const uri = pos.TrackURI ?? null;
@@ -328,22 +330,31 @@ async function nextUnlocked(opts = {}) {
     }
     currentIsAnnouncePad = isAnnounceQueuePad(uri, title);
 
-    queueItems = Array.isArray(queue.Result) ? queue.Result : [];
     track = Number(pos.Track) || 0;
     playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");
-    const nextItem =
-      playingFromQueue && track >= 1 && track < queueItems.length
-        ? queueItems[track]
-        : null;
+    const peeked = getQueueList.peek?.();
+    const aligned =
+      peeked?.fresh &&
+      snapshotMatchesPlayhead(peeked.value, track, playingFromQueue);
+    const upcoming = aligned ? peeked.value : null;
+    const nextRow = upcoming?.[0] || null;
     decision = decideSkipAnnounceAction({
       currentUri: uri,
       currentTitle: title,
-      nextUri: nextItem?.TrackUri ?? nextItem?.uri ?? "",
-      nextTitle: nextItem?.Title ?? nextItem?.title ?? "",
+      nextUri: nextRow?.uri ?? "",
+      nextTitle: nextRow?.title ?? "",
       durationSec: parseSonosTime(pos.TrackDuration),
       positionSec: parseSonosTime(pos.RelTime),
       volumeLocked: isDjVolumeHandoffActive(),
     });
+    // A normal skip is one Next(). Browse the queue only when the decision
+    // has to jump a DJ pad, and prefer the snapshot we already have.
+    if (decision.action === "jumpAnnounce" && upcoming) {
+      queueItems = queueItemsFromUpcoming(upcoming);
+    } else if (decision.action !== "normalNext") {
+      const queue = await coordinator.GetQueue().catch(() => ({ Result: [] }));
+      queueItems = Array.isArray(queue.Result) ? queue.Result : [];
+    }
   } catch (err) {
     console.error("[next] announce context failed:", err.message);
     decision = { action: "normalNext" };

@@ -76,6 +76,8 @@ import { ensureGuestProfile } from "../guest-profiles.js";
 import {
   recordRequest,
   recordSetRequest,
+  recordSetTracks,
+  forgetSetRequest,
   getRequests,
   setRequestDedication,
 } from "../request-log.js";
@@ -633,35 +635,28 @@ export function registerQueueRoutes(app, ctx) {
           });
         }
 
-        // Re-check + enqueue + ledger under one short lock (no double-spend).
-        const outcome = await withRequestFairnessLock(async () => {
+        // Quota only. The five Sonos writes happen after this lock so a Set
+        // Request cannot stall every other guest's outbox acknowledgement.
+        const aliasOnly = alias && alias !== user ? alias : null;
+        const reservedAt = Date.now();
+        const gate = await withRequestFairnessLock(async () => {
           const decision = evaluateSetRequestFairness(fairnessArgs());
           if (!decision.allowed) return { decision };
-
-          const added = await sonos.addSetRequestToQueue(top, {
-            requestedBy: badge,
-            requestedByUser: user,
-          });
-
-          if (added.requestCreated !== false) {
-            recordSetRequest({
+          recordSetRequest(
+            {
               artistId: id,
               artist: artistName,
               requestedBy: user,
-              alias: alias && alias !== user ? alias : null,
-              tracks: (added.tracks || []).map((t) => ({
-                id: t.id,
-                name: t.name,
-                artist: t.artist,
-              })),
-            });
-          }
-
-          return { result: added, artistName };
+              alias: aliasOnly,
+              tracks: [],
+            },
+            reservedAt
+          );
+          return { reserved: true };
         });
 
-        if (outcome.decision) {
-          const denied = outcome.decision;
+        if (gate.decision) {
+          const denied = gate.decision;
           if (denied.retryAfterSec) {
             res.set("Retry-After", String(denied.retryAfterSec));
           }
@@ -675,7 +670,34 @@ export function registerQueueRoutes(app, ctx) {
           });
         }
 
-        const result = outcome.result;
+        let result;
+        try {
+          result = await sonos.addSetRequestToQueue(top, {
+            requestedBy: badge,
+            requestedByUser: user,
+          });
+        } catch (err) {
+          forgetSetRequest({ artistId: id, requestedBy: user, ts: reservedAt });
+          throw err;
+        }
+
+        if (result.requestCreated !== false) {
+          recordSetTracks(
+            {
+              artist: artistName,
+              requestedBy: user,
+              alias: aliasOnly,
+              tracks: (result.tracks || []).map((t) => ({
+                id: t.id,
+                name: t.name,
+                artist: t.artist,
+              })),
+            },
+            reservedAt
+          );
+        } else {
+          forgetSetRequest({ artistId: id, requestedBy: user, ts: reservedAt });
+        }
         try {
           if (ensureGuestProfile(user)) {
             console.log(`[queue/set-request] new guest profile: ${user}`);
@@ -702,46 +724,49 @@ export function registerQueueRoutes(app, ctx) {
           // Set Request must never stop a song mid-play.
           const startPlayback = !!result.deferredStart && !result.alreadyPlaying;
           if (Number.isFinite(pos) && pos >= 1) {
-            try {
-              const shoutPos = pos;
-              const voice = await announceRequestShout({
-                name: first.name || "Set Request",
-                artist: artistName,
-                requestedBy: user,
-                uri: first.uri,
-                trackId: first.id,
-                kind: "setRequest",
-                trackCount: Array.isArray(result.tracks)
-                  ? result.tracks.length
-                  : 0,
-                queuePosition: shoutPos,
-                startPlayback,
-                preemptGeneration,
-              });
-              if (
-                startPlayback &&
-                !voice?.ok &&
-                !voice?.skipped &&
-                !queueWorkWasPreempted(preemptGeneration)
-              ) {
-                await sonos.play();
-              }
-            } catch (err) {
-              console.error("[queue/set-request] shout:", err.message);
-              if (
-                startPlayback &&
-                !queueWorkWasPreempted(preemptGeneration)
-              ) {
-                try {
-                  await sonos.play();
-                } catch (playErr) {
-                  console.error(
-                    "[queue/set-request] shout fallback play:",
-                    playErr.message
+            // The phone is already answered below. A slow script must not
+            // hold this response, or the guest who asked for the set.
+            const voice = announceRequestShout({
+              name: first.name || "Set Request",
+              artist: artistName,
+              requestedBy: user,
+              uri: first.uri,
+              trackId: first.id,
+              kind: "setRequest",
+              trackCount: Array.isArray(result.tracks)
+                ? result.tracks.length
+                : 0,
+              queuePosition: pos,
+              startPlayback,
+              preemptGeneration,
+            });
+            void voice
+              .then((spoken) => {
+                if (
+                  startPlayback &&
+                  !spoken?.ok &&
+                  !spoken?.skipped &&
+                  !queueWorkWasPreempted(preemptGeneration)
+                ) {
+                  return sonos.play();
+                }
+                return null;
+              })
+              .catch((err) => {
+                console.error("[queue/set-request] shout:", err.message);
+                if (
+                  startPlayback &&
+                  !queueWorkWasPreempted(preemptGeneration)
+                ) {
+                  return sonos.play().catch((playErr) =>
+                    console.error(
+                      "[queue/set-request] shout fallback play:",
+                      playErr.message
+                    )
                   );
                 }
-              }
-            }
+                return null;
+              });
           } else {
             releaseReservedFirstShout(user);
           }

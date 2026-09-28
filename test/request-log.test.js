@@ -263,6 +263,33 @@ test("latestRequesterOf uses setTrack rows and ignores setRequest ledger ids", (
   assert.equal(reqlog.latestRequesterOf("set:art1"), null);
 });
 
+test("forgetSetRequest drops a failed reservation and keeps other rows", () => {
+  reqlog.recordSetRequest(
+    {
+      artistId: "art1",
+      artist: "Zach Bryan",
+      requestedBy: "Dave",
+      tracks: [{ id: "nine", name: "Nine Ball", artist: "Zach Bryan" }],
+    },
+    1000
+  );
+  reqlog.recordRequest(
+    { id: "other", name: "Stay", artist: "X", requestedBy: "Dave" },
+    1000
+  );
+  assert.equal(
+    reqlog.forgetSetRequest({ artistId: "art1", requestedBy: "Dave", ts: 1000 }),
+    true
+  );
+  const left = reqlog.getRequests();
+  assert.equal(left.length, 1);
+  assert.equal(left[0].id, "other");
+  assert.equal(
+    reqlog.forgetSetRequest({ artistId: "art1", requestedBy: "Dave", ts: 1000 }),
+    false
+  );
+});
+
 test("setRequestDedication updates the newest matching request", () => {
   reqlog.recordRequest({ id: "x", name: "A", artist: "Y", requestedBy: "Pat" }, 10);
   assert.equal(reqlog.setRequestDedication("x", "Jess"), true);

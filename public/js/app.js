@@ -2821,7 +2821,9 @@ refreshBoothTvFullyUrl();
 const EMPTY_MESSAGE =
   "Nothing is playing, add some music to the queue to start the party";
 const CONNECTING_MESSAGE = "Connecting\u2026";
-let npIsPlaying = false;
+  let npIsPlaying = false;
+  /** Hold Play/Pause paint until Sonos agrees, so a stale poll cannot flip it back. */
+  let playbackIntent = null;
 // First paint placeholders so the main view isn't blank while SSE/poll catch up.
 if (npEmpty && npCard) {
   npCard.classList.add("is-empty");
@@ -3282,7 +3284,17 @@ function renderNowPlaying(transport) {
   lyricsUi.applyPlaybackClock(np);
   lyricsUi.updateTrackProgress();
   // Transport owns play/pause affordances so Skip optimism cannot hide Pause.
-  npIsPlaying = !!(transport && transport.queuePlaying);
+  // A tap paints immediately; keep that until this snapshot matches it.
+  if (playbackIntent && Date.now() >= playbackIntent.until) playbackIntent = null;
+  if (
+    playbackIntent &&
+    !!(transport && transport.queuePlaying) === playbackIntent.playing
+  ) {
+    playbackIntent = null;
+  }
+  const intentPlaying = playbackIntent ? playbackIntent.playing : null;
+  npIsPlaying =
+    intentPlaying != null ? intentPlaying : !!(transport && transport.queuePlaying);
   npToggle.textContent = npIsPlaying ? "\u23F8\uFE0F" : "\u25B6\uFE0F";
   const muted = !!(transport && transport.muted);
   muteBtn.textContent = muted ? "\u{1F507}" : "\u{1F508}";
@@ -3312,7 +3324,10 @@ function renderNowPlaying(transport) {
   if (npPills) npPills.hidden = !hasTrack;
   npState.hidden = !hasTrack;
   if (hasTrack) {
-    const transportPlaying = !!(transport?.isPlaying ?? np.isPlaying);
+    const transportPlaying =
+      intentPlaying != null
+        ? intentPlaying
+        : !!(transport?.isPlaying ?? np.isPlaying);
     npState.textContent = stateUpdating
       ? "Updating"
       : transportPlaying
@@ -3369,6 +3384,7 @@ function renderNowPlaying(transport) {
     if (lyricsUi.isOpen()) lyricsUi.close();
   }
 
+  if (intentPlaying != null && np) np.isPlaying = intentPlaying;
   renderPartyDisplayNowPlaying(np, hasTrack);
   lyricsUi.sync(np);
   partyDisplayIdle.syncPlayback({
@@ -3445,13 +3461,14 @@ liveStreams.bindResume({
   onSleep: () => syncDisplayStatsPolling(false),
 });
 
-async function postControl(btn, endpoint, onOk) {
+async function postControl(btn, endpoint, onOk, onFail) {
   btn.disabled = true;
   try {
     const res = await hostFetch(endpoint, { method: "POST" });
     const data = await res.json();
     if (res.status === 423) {
       showToast(data.error || "DJ volume handoff in progress.");
+      if (onFail) onFail();
       return;
     }
     if (!res.ok) throw new Error(data.error || "Action failed.");
@@ -3459,13 +3476,29 @@ async function postControl(btn, endpoint, onOk) {
     refreshSonos();
   } catch (err) {
     showToast(err.message, true);
+    if (onFail) onFail();
   } finally {
     btn.disabled = false;
   }
 }
 
 npToggle.addEventListener("click", () => {
-  postControl(npToggle, npIsPlaying ? "/api/pause" : "/api/play");
+  const wasPlaying = npIsPlaying;
+  playbackIntent = { playing: !wasPlaying, until: Date.now() + 4000 };
+  if (lastTransportNp) renderNowPlaying(lastTransportNp);
+  else {
+    npIsPlaying = !wasPlaying;
+    npToggle.textContent = npIsPlaying ? "\u23F8\uFE0F" : "\u25B6\uFE0F";
+  }
+  postControl(
+    npToggle,
+    wasPlaying ? "/api/pause" : "/api/play",
+    null,
+    () => {
+      playbackIntent = null;
+      if (lastTransportNp) renderNowPlaying(lastTransportNp);
+    }
+  );
 });
 
 shuffleBtn.addEventListener("click", () => {

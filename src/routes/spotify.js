@@ -12,6 +12,7 @@ import {
   searchCatalog,
   rewarmCaches,
   spotifyCooldownMs,
+  spotifyUnavailableMs,
   getPoolWarmedAt,
 } from "../spotify.js";
 import { getContentSettings } from "../settings.js";
@@ -23,17 +24,28 @@ import { warmGenresFromPool } from "../genres.js";
  */
 export function registerSpotifyRoutes(app, ctx) {
   const { searchLimit } = ctx;
+  /** @type {Map<string, AbortController>} */
+  const searchInFlight = new Map();
+
   app.get("/api/search", searchLimit, asyncHandler(async (req, res) => {
     const query = req.query.q;
-    if (!query || !String(query).trim()) {
+    const q = String(query || "").trim();
+    // One character is not a search. It used to fan out a Spotify call per letter.
+    if (q.length < 2) {
       return res.json({ tracks: [], artists: [] });
     }
+    const ip = req.ip || req.socket?.remoteAddress || "unknown";
+    const previous = searchInFlight.get(ip);
+    if (previous) previous.abort();
+    const ac = new AbortController();
+    searchInFlight.set(ip, ac);
     try {
-      const q = String(query);
       const { tracks: trackHits, artists: artistHits } = await searchCatalog(q, {
         trackLimit: 20,
         artistLimit: 5,
+        signal: ac.signal,
       });
+      if (searchInFlight.get(ip) !== ac) return res.status(204).end();
       let tracks = trackHits;
       // Hide explicit results when the host's content filter is on.
       if (getContentSettings().filterExplicit) {
@@ -49,8 +61,27 @@ export function registerSpotifyRoutes(app, ctx) {
       });
       res.json({ tracks, artists });
     } catch (err) {
+      if (err?.code === "SEARCH_SUPERSEDED" || searchInFlight.get(ip) !== ac) {
+        return res.status(204).end();
+      }
+      const wait = spotifyUnavailableMs();
       console.error("[search]", err.message);
-      res.status(502).json({ error: "Spotify search failed. Check your credentials." });
+      if (wait > 0) {
+        const retrySec = Math.max(1, Math.ceil(wait / 1000));
+        res.set("Retry-After", String(retrySec));
+        return res.status(429).json({
+          error: `Search is taking a break — try again in ${retrySec}s.`,
+          retryMs: wait,
+        });
+      }
+      if (err.status === 401 || err.status === 403) {
+        return res
+          .status(502)
+          .json({ error: "Spotify search failed. Check your credentials." });
+      }
+      res.status(502).json({ error: "Spotify search failed. Try again in a moment." });
+    } finally {
+      if (searchInFlight.get(ip) === ac) searchInFlight.delete(ip);
     }
   }));
 

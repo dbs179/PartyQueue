@@ -99,6 +99,30 @@ describe("Spotify searchCatalog", () => {
     assert.equal(artists[0].id, "art1");
   });
 
+  it("a superseded search does not trip the Spotify outage backoff", async () => {
+    const ac = new AbortController();
+    globalThis.fetch = async (url, opts = {}) => {
+      const u = String(url);
+      if (u.includes("accounts.spotify.com/api/token")) {
+        return jsonRes({
+          access_token: "tok",
+          token_type: "Bearer",
+          expires_in: 3600,
+        });
+      }
+      ac.abort();
+      if (opts.signal?.aborted) {
+        throw new DOMException("The operation was aborted", "AbortError");
+      }
+      throw new Error(`expected abort for ${u}`);
+    };
+    await assert.rejects(
+      () => spotify.searchCatalog("brand-new-query", { signal: ac.signal }),
+      (err) => err?.code === "SEARCH_SUPERSEDED"
+    );
+    assert.equal(spotify.spotifyUnavailableMs(), 0);
+  });
+
   it("serves a repeat query from cache without another Spotify search", async () => {
     await spotify.searchCatalog("neon");
     const again = await spotify.searchCatalog("neon");

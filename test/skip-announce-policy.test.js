@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   decideSkipAnnounceAction,
   findNextMusicTrackNumber,
+  queueItemsFromUpcoming,
+  snapshotMatchesPlayhead,
   findUpcomingAnnounceHandoffPlan,
   formatSonosRelTime,
   locateAnnounceBlockByClipUrl,
@@ -17,6 +19,21 @@ const BAKED =
   "http://partyqueue/media/tts/dj-announce-0123456789abcdef.mp3";
 const MUSIC = "x-sonos-http:track%3aid%3aspotify%3atrack%3anext";
 const SONG = "x-sonos-http:track%3aid%3aspotify%3atrack%3acurrent";
+
+test("snapshotMatchesPlayhead when the first upcoming row is the next track", () => {
+  assert.equal(snapshotMatchesPlayhead([{ position: 4 }], 3, true), true);
+  assert.equal(snapshotMatchesPlayhead([{ position: 5 }], 3, true), false);
+  assert.equal(snapshotMatchesPlayhead([{ position: 4 }], 3, false), false);
+  assert.equal(snapshotMatchesPlayhead([], 3, true), false);
+});
+
+test("queueItemsFromUpcoming can find music after a DJ pad", () => {
+  const items = queueItemsFromUpcoming([
+    { position: 4, uri: TTS, title: "DJ" },
+    { position: 5, uri: MUSIC, title: "Next" },
+  ]);
+  assert.equal(findNextMusicTrackNumber(items, 3), 5);
+});
 
 test("formatSonosRelTime pads minutes and seconds", () => {
   assert.equal(formatSonosRelTime(0), "0:00:00");

@@ -173,6 +173,15 @@ export function recordSetRequest(
     },
     when
   );
+  recordSetTracks({ artist, requestedBy, alias, tracks }, when);
+}
+
+/** Per-track audit rows for a Set Request. Does not consume set fairness. */
+export function recordSetTracks(
+  { artist, requestedBy, alias, tracks = [] } = {},
+  ts = Date.now()
+) {
+  const when = Number(ts) || Date.now();
   for (const t of Array.isArray(tracks) ? tracks : []) {
     const trackId = typeof t?.id === "string" ? t.id : "";
     if (!trackId) continue;
@@ -188,6 +197,31 @@ export function recordSetRequest(
       when
     );
   }
+}
+
+/**
+ * Drop a Set Request ledger row when the enqueue did not land.
+ * Matches the reservation timestamp so a later, successful set is left alone.
+ */
+export function forgetSetRequest({ artistId, requestedBy, ts } = {}) {
+  const id = `set:${String(artistId || "").trim()}`;
+  const by = sanitizeDisplayName(requestedBy);
+  const when = Number(ts);
+  if (!id || id === "set:" || !Number.isFinite(when)) return false;
+  const list = load();
+  const next = list.filter((row) => {
+    if (Number(row?.ts) !== when) return true;
+    if (row.kind === "setRequest" && row.id === id && row.requestedBy === by) {
+      return false;
+    }
+    if (row.kind === "setTrack" && row.requestedBy === by) return false;
+    return true;
+  });
+  if (next.length === list.length) return false;
+  cache = next;
+  persist();
+  invalidatePartyStatsCache();
+  return true;
 }
 
 /** Attach / update dedication on the newest matching request for this track. */

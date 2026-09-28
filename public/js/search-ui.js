@@ -25,6 +25,14 @@ import {
   watchVisualViewport,
 } from "./visual-viewport-box.js";
 
+/** Wait longer than a typical phone key gap so one word is one search. */
+export const SEARCH_DEBOUNCE_MS = 500;
+export const MIN_SEARCH_CHARS = 2;
+
+export function searchQueryIsReady(q) {
+  return String(q || "").trim().length >= MIN_SEARCH_CHARS;
+}
+
 function isAbortError(err) {
   return (
     err?.name === "AbortError" ||
@@ -98,6 +106,8 @@ export function createSearchUi(els, deps) {
   let debounceTimer = null;
   let currentQuery = "";
   let searchAbort = null;
+  let searchPausedUntil = 0;
+  let searchPauseMessage = "";
   let searchHistoryPushed = false;
   let presence = {
     queuedIds: new Set(),
@@ -198,8 +208,24 @@ export function createSearchUi(els, deps) {
     if (statusEl) statusEl.textContent = "";
   }
 
+  function searchIsPaused() {
+    return Date.now() < searchPausedUntil;
+  }
+
+  function noteSearchPause(message, retryMs) {
+    const wait = Math.max(1000, Number(retryMs) || 10_000);
+    searchPausedUntil = Date.now() + wait;
+    searchPauseMessage =
+      message || "Search is taking a break — try again in a moment.";
+    if (statusEl) statusEl.textContent = searchPauseMessage;
+  }
+
   async function runSearch(q) {
     currentQuery = q;
+    if (searchIsPaused()) {
+      if (statusEl) statusEl.textContent = searchPauseMessage;
+      return;
+    }
     searchAbort?.abort();
     const ac = new AbortController();
     searchAbort = ac;
@@ -209,8 +235,15 @@ export function createSearchUi(els, deps) {
       const res = await fetchFn(`/api/search?q=${encodeURIComponent(q)}`, {
         signal: ac.signal,
       });
-      const data = await res.json();
       if (q !== currentQuery) return;
+      if (res.status === 204) return;
+      const data = await res.json().catch(() => ({}));
+      if (q !== currentQuery) return;
+
+      if (res.status === 429) {
+        noteSearchPause(data.error, data.retryMs);
+        return;
+      }
 
       if (!res.ok) {
         if (resultsEl) {
@@ -546,11 +579,28 @@ export function createSearchUi(els, deps) {
     if (q) ensureSearchHistory();
     if (searchClear) searchClear.hidden = searchInput.value.length === 0;
     clearTimeout(debounceTimer);
-    if (!q) {
-      clearSearchPanel();
+    if (!searchQueryIsReady(q)) {
+      if (!q) clearSearchPanel();
+      else {
+        searchAbort?.abort();
+        searchAbort = null;
+        currentQuery = "";
+        if (!searchIsPaused()) {
+          if (resultsEl) {
+            resultsEl.innerHTML = "";
+            resultsEl.style.removeProperty("--results-max");
+            resultsEl.removeAttribute("aria-busy");
+          }
+          if (statusEl) statusEl.textContent = "";
+        }
+      }
       return;
     }
-    debounceTimer = setTimeout(() => runSearch(q), 300);
+    if (searchIsPaused()) {
+      if (statusEl) statusEl.textContent = searchPauseMessage;
+      return;
+    }
+    debounceTimer = setTimeout(() => runSearch(q), SEARCH_DEBOUNCE_MS);
   });
 
   searchClear?.addEventListener("click", () => {

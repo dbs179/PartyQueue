@@ -69,6 +69,14 @@ export function spotifyCooldownMs() {
 const NETWORK_FAIL_BACKOFF_MS = 10_000;
 let networkFailedUntil = 0;
 
+/** How long search should stay quiet: 429 cooldown or a network outage. */
+export function spotifyUnavailableMs() {
+  return Math.max(
+    spotifyCooldownMs(),
+    Math.max(0, networkFailedUntil - Date.now())
+  );
+}
+
 /** Test helper: clear outage/rate-limit gates and token single-flight. */
 export function resetSpotifyNetworkStateForTests() {
   networkFailedUntil = 0;
@@ -115,6 +123,13 @@ async function spotifyNetworkFetch(url, opts = {}) {
     networkFailedUntil = 0;
     return res;
   } catch (err) {
+    // A newer search aborted this one. That is not an outage, and it must
+    // not pause Random, tokens, or the next query.
+    if (signal?.aborted && !deadline.aborted) {
+      const superseded = new Error("Spotify request superseded");
+      superseded.code = "SEARCH_SUPERSEDED";
+      throw superseded;
+    }
     networkFailedUntil = Date.now() + NETWORK_FAIL_BACKOFF_MS;
     if (isAbortOrTimeout(err)) {
       throw new Error(
@@ -775,7 +790,7 @@ function trackSearchKey(market, limit, query) {
   return `${market}|${limit}|${query.trim().toLowerCase()}`;
 }
 
-export async function searchTracks(query, limit = 20) {
+export async function searchTracks(query, limit = 20, { signal } = {}) {
   if (!query || !query.trim()) return [];
 
   const market = getSpotifyAppCredentials().market;
@@ -795,6 +810,7 @@ export async function searchTracks(query, limit = 20) {
 
   const res = await spotifyApiFetch(`${SEARCH_URL}?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
+    signal,
   });
 
   if (!res.ok) {
@@ -813,7 +829,7 @@ const ARTIST_SEARCH_CACHE_TTL_MS = 60_000;
 const ARTIST_SEARCH_CACHE_MAX = 100;
 const artistSearchCache = new Map(); // key -> { at, artists }
 
-export async function searchArtists(query, limit = 10) {
+export async function searchArtists(query, limit = 10, { signal } = {}) {
   if (!query || !query.trim()) return [];
 
   const market = getSpotifyAppCredentials().market;
@@ -832,6 +848,7 @@ export async function searchArtists(query, limit = 10) {
   });
   const res = await spotifyApiFetch(`${SEARCH_URL}?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
+    signal,
   });
   if (!res.ok) {
     throw spotifyHttpError("artist search", res.status);
@@ -843,7 +860,10 @@ export async function searchArtists(query, limit = 10) {
 }
 
 /** One Spotify search for guest typeahead (tracks + artists). */
-export async function searchCatalog(query, { trackLimit = 20, artistLimit = 5 } = {}) {
+export async function searchCatalog(
+  query,
+  { trackLimit = 20, artistLimit = 5, signal } = {}
+) {
   if (!query || !query.trim()) return { tracks: [], artists: [] };
 
   const market = getSpotifyAppCredentials().market;
@@ -861,14 +881,15 @@ export async function searchCatalog(query, { trackLimit = 20, artistLimit = 5 } 
   if (trackHit && !artistHit) {
     let artists = [];
     try {
-      artists = await searchArtists(q, aLimit);
-    } catch {
+      artists = await searchArtists(q, aLimit, { signal });
+    } catch (err) {
+      if (err?.code === "SEARCH_SUPERSEDED") throw err;
       artists = [];
     }
     return { tracks: trackHit.tracks, artists };
   }
   if (!trackHit && artistHit) {
-    const tracks = await searchTracks(q, tLimit);
+    const tracks = await searchTracks(q, tLimit, { signal });
     return { tracks, artists: artistHit.artists };
   }
 
@@ -881,6 +902,7 @@ export async function searchCatalog(query, { trackLimit = 20, artistLimit = 5 } 
   });
   const res = await spotifyApiFetch(`${SEARCH_URL}?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
+    signal,
   });
   if (!res.ok) {
     throw spotifyHttpError("search", res.status);

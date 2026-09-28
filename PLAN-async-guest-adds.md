@@ -534,15 +534,16 @@ Tests: `test/pending-adds.test.js`, `test/async-adds.test.js`,
   `trimPlayedTracks()` does not return the list. It only reads when something is
   actually waiting, so a healthy party adds no extra Sonos traffic.
 - **Phase 1 was skipped.** `awaitInsert` is simply `false` on the async path,
-  which made open question 2 moot; the synchronous path is untouched and still
-  the default.
+  which made open question 2 moot. The synchronous path is untouched and runs
+  only when `PARTYQUEUE_ASYNC_ADDS=0`. The async path is the default as of
+  14.0.0.
 - **The toast needed no client change at all**, exactly as predicted in §4.
 
 ### Still open
 
-- Run a party with the flag on before flipping the default.
-- `POST /api/queue/set-request` is still fully synchronous.
-- `POST /api/queue/set-request` is still fully synchronous.
+- `POST /api/queue/set-request` still waits on the five Sonos writes before
+  that phone is answered. It no longer holds the fairness lock while it does
+  that, so other guests' Adds return from the outbox. The shout is not awaited.
 
 ### Correction to §4, change 4
 

@@ -78,6 +78,32 @@ export function formatSonosRelTime(totalSec) {
 }
 
 /**
+ * The queue snapshot is upcoming rows with absolute 1-based positions.
+ * It matches the live playhead when the first row is the next track.
+ */
+export function snapshotMatchesPlayhead(rows, liveTrack, playingFromQueue) {
+  if (!playingFromQueue || !(Number(liveTrack) >= 1)) return false;
+  if (!Array.isArray(rows) || rows.length === 0) return false;
+  return Number(rows[0]?.position) === Number(liveTrack) + 1;
+}
+
+/** Sparse Sonos-shaped items so findNextMusicTrackNumber can use a snapshot. */
+export function queueItemsFromUpcoming(rows) {
+  const items = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const idx = Number(row?.position) - 1;
+    if (!Number.isFinite(idx) || idx < 0) continue;
+    items[idx] = {
+      TrackUri: row.uri ?? null,
+      uri: row.uri ?? null,
+      Title: row.title ?? "",
+      title: row.title ?? "",
+    };
+  }
+  return items;
+}
+
+/**
  * 1-based queue track number of the next non-announce music item after the
  * current track. Returns null when none remain.
  * @param {Array<{ TrackUri?: string, uri?: string, Title?: string, title?: string }>} items

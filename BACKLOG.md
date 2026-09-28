@@ -2,6 +2,36 @@
 
 Ideas parked for later — not scheduled work unless pulled into a release.
 
+The 28 Sep 2026 application review is folded in below. Party-night bugs from that review shipped in 14.1.0 and 14.1.1. A later pass stopped a Set Request from holding the fairness lock across its Sonos writes, quieted guest search, and stopped a normal Skip from browsing the queue. The three plan files that still said “not started” (`PLAN-queue-on-change.md`, `PLAN-topology-hold.md`, `PLAN-shared-volume.md`) described work that shipped in 14.0.5–14.0.7; those files were removed. `PLAN-async-guest-adds.md` stays as the record of the 14.0.0 outbox.
+
+## Left as-is (28 Sep 2026)
+
+Recorded so the next pass does not treat these as bugs. The party stays open unless we decide otherwise.
+
+- **Skip, volume, and Clear stay open after a PIN is set**  
+  `requireHostControls` (`src/http/host-controls.js`) does nothing unless Host-only controls is on (`hostControlsOnly` in `src/settings.js`, default off). A phone on guest Wi-Fi can skip, pause, change volume, clear the queue, Random-fill, and regroup speakers. Soft rate limits only slow that down.
+
+  **If we change it:** turn Host-only controls on for a real party. Leave search and Add open. Rate-limit group select the same way as skip.
+
+- **Settings, including the guest Wi-Fi password, are readable until a PIN exists**  
+  `requireHost` (`src/host-auth.js`) calls through when no PIN is configured, so `GET /api/settings` includes `guestWifiPassword`. Spotify login and banner uploads use the same gate. Credential writes already use `requireHostStrict` and the bootstrap code. The gap is first boot, and any night the PIN file is missing.
+
+  **If we change it:** omit the Wi-Fi password from the settings payload, or require a host session to read it.
+
+## Accept or limit
+
+- **Vibe, Mix, and Never-Ending have no PIN and no rate limit**  
+  `POST /api/party`, `POST /api/autofill`, and `POST /api/selection` are open so the Vibe page works for everyone. A guest can turn off Never-Ending, rewrite the Mix, or flip Kids lock as fast as they can tap. CSRF Origin is checked only when `PUBLIC_BASE_URL` is set.
+
+  **Keep them open** if that is the party. Otherwise add the same soft rate limit used for search, and confirm `PUBLIC_BASE_URL` is set in the container env.
+
+## When you next touch it
+
+- **Split DJ voice, and thin the client shell, only while those files are already open**  
+  `src/dj-voice.js` (~4,400 lines) still mixes copy, TTS, bake, and playback. `public/js/app.js` is still the lifecycle for views, volume, stats, and groups. `src/settings.js` (~1,800 lines) mixes disk format with product policy. Sonos was already split into a barrel plus focused modules, which is why later playback work could land without a rewrite.
+
+  Split `dj-voice.js` the way `sonos.js` was split: copy, TTS I/O, and playback orchestration. Keep `app.js` as imports and route wiring. Leave settings persistence in one module and move policy getters out as you touch them.
+
 ## Playback / Sonos
 
 - **Arc TV input blocks auto-start after Clear / Random**  
