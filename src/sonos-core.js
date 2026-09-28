@@ -434,6 +434,15 @@ export function isNotCoordinatorError(err) {
   return /\b800\b/.test(err?.message ?? "");
 }
 
+/**
+ * Queue writes should retry once on either failure: 800 means this speaker
+ * is no longer the coordinator, and 701/711 means the group moved under a
+ * Play, Seek, or AddURI that was already in flight.
+ */
+export function isQueueWriteRefusal(err) {
+  return isNotCoordinatorError(err) || isTransportRefusalError(err);
+}
+
 /** Play/Seek refusals when the coordinator changed under us (701/711). */
 export function isTransportRefusalError(err) {
   const msg = String(err?.message ?? err ?? "");

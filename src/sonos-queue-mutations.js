@@ -4,7 +4,9 @@ import {
   getManager,
   resolveCoordinator,
   resolveRegion,
-  isNotCoordinatorError,
+  getZoneGroups,
+  clearZoneCache,
+  isQueueWriteRefusal,
 } from "./sonos-core.js";
 import { invalidateSonosSnapshots } from "./sonos-snapshots.js";
 import {
@@ -15,6 +17,7 @@ import {
   announcePadsToSupersede,
   announcePadsForClipUrl,
   songMatchKey,
+  formatZoneTopology,
   isAnnounceQueuePad,
   isTransportPlaying,
   isHomeTheaterStream,
@@ -650,6 +653,24 @@ export function httpAudioMeta(url) {
   return { trackUri: url, metadata: "" };
 }
 
+/**
+ * A 701/711 or 800 during a queue write means the coordinator moved. Drop the
+ * zone cache, log the groups we see now, and retry the write once.
+ */
+async function refreshCoordinatorAfterRefusal(m, label, err) {
+  clearZoneCache();
+  let topology = "unread";
+  try {
+    topology = formatZoneTopology(await getZoneGroups(m, { fresh: true }));
+  } catch (readErr) {
+    topology = `unread (${readErr?.message || readErr})`;
+  }
+  console.warn(
+    `[queue] ${label} refused (${err?.message || err}); topology: ${topology}; retrying once`
+  );
+  return resolveCoordinator(m, { fresh: true });
+}
+
 export async function enqueueMeta(m, meta, position = 0) {
   const enqueue = (coordinator) =>
     coordinator.AVTransportService.AddURIToQueue({
@@ -664,8 +685,8 @@ export async function enqueueMeta(m, meta, position = 0) {
   try {
     await enqueue(coordinator);
   } catch (err) {
-    if (!isNotCoordinatorError(err)) throw err;
-    coordinator = await resolveCoordinator(m, { fresh: true });
+    if (!isQueueWriteRefusal(err)) throw err;
+    coordinator = await refreshCoordinatorAfterRefusal(m, "enqueue", err);
     await enqueue(coordinator);
   }
   return coordinator;
@@ -1649,8 +1670,9 @@ async function clearQueueUnlocked() {
       alreadyEmpty = true;
     } else {
       // Stale topology: re-resolve against the live coordinator and retry once.
-      if (!isNotCoordinatorError(err)) throw err;
-      coordinator = await resolveCoordinator(m, { fresh: true });
+      // 800 is "not the coordinator"; 701/711 is the same regroup, mid-write.
+      if (!isQueueWriteRefusal(err)) throw err;
+      coordinator = await refreshCoordinatorAfterRefusal(m, "clear", err);
       await stop(coordinator);
       try {
         await removeAll(coordinator);

@@ -52,6 +52,13 @@ test("clearQueueUnlocked cancels DJ volume handoff before wiping the queue", () 
   assert.match(fn[0], /cancelActiveDjVolumeHandoff\("queue cleared"\)/);
 });
 
+test("queue writes retry 701/711 once and log the new topology", () => {
+  assert.match(clearSrc, /function refreshCoordinatorAfterRefusal/);
+  assert.match(clearSrc, /isQueueWriteRefusal\(err\)/);
+  assert.match(clearSrc, /clearZoneCache\(\)/);
+  assert.match(clearSrc, /topology:/);
+});
+
 test("Play, Pause, Next, and Previous retry once on 701/711", () => {
   assert.match(src, /retryOnTransportRefusal\("play"/);
   assert.match(src, /retryOnTransportRefusal\("pause"/);

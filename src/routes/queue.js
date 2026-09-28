@@ -114,9 +114,11 @@ import { asyncAddsEnabled } from "../async-adds.js";
 import {
   addPending,
   findPendingForGuest,
+  getPendingAdd,
   pendingAsQueueRows,
   retryPendingAdd,
   setPendingDedication,
+  whenPendingAddsDurable,
 } from "../pending-adds.js";
 import { nudgeAddDrainer } from "../add-drainer.js";
 import { broadcastQueueMutation } from "../queue-http.js";
@@ -252,6 +254,8 @@ export function registerQueueRoutes(app, ctx) {
         }),
       };
     });
+
+    if (outcome.entry) await whenPendingAddsDurable();
 
     if (outcome.decision) return respondFairnessDenied(res, outcome.decision);
     if (outcome.alreadyRequested) {
@@ -786,6 +790,7 @@ export function registerQueueRoutes(app, ctx) {
     const pendingUpdated = setPendingDedication(id, dedication, {
       user: identity.user,
     });
+    if (pendingUpdated) await whenPendingAddsDurable();
     const updated = setDedication(id, dedication, {
       requestedBy: identity.badge,
       requestedByUser: identity.user,
@@ -1169,22 +1174,67 @@ export function registerQueueRoutes(app, ctx) {
   // Retry an add the drainer gave up on. Safe to call repeatedly: placement
   // still goes through the drainer, and the true-up checks the live queue
   // first, so a retry cannot queue the song twice.
-  app.post("/api/queue/pending/:id/retry", queueBurstLimit, (req, res) => {
+  app.post("/api/queue/pending/:id/retry", queueBurstLimit, asyncHandler(async (req, res) => {
     const { requestedBy, requestedByUser } = req.body ?? {};
     const { user } = resolveGuestIdentity({ requestedBy, requestedByUser });
     if (!user) {
       return res.status(400).json({ error: "Enter your name first." });
     }
-    const result = retryPendingAdd(req.params.id, { user });
-    if (!result.ok) return res.status(409).json({ error: result.error });
+    const existing = getPendingAdd(req.params.id);
+    if (!existing) {
+      return res.status(409).json({ error: "That request is no longer waiting." });
+    }
+    const owner = existing.requestedByUser || existing.requestedBy;
+    if (owner && owner.toLowerCase() !== user.toLowerCase()) {
+      return res.status(409).json({
+        error: "Only the person who asked for this song can retry it.",
+      });
+    }
+
+    const outcome = await withRequestFairnessLock(async () => {
+      const fairness = getRequestFairnessSettings();
+      if (fairness.requestFairnessEnabled && asyncAddsEnabled()) {
+        const liveRows = await fairnessQueueRows();
+        const decision = evaluateRequestFairness({
+          settings: fairness,
+          user,
+          queue: [...liveRows, ...pendingAsQueueRows(liveRows)],
+          events: getRequests(),
+          target: {
+            uri: existing.uri,
+            name: existing.name,
+            artist: existing.artist,
+          },
+          force: !!existing.force,
+          hostAuthenticated: isValidHostToken(extractHostToken(req)),
+          fairnessResetAt: getFairnessResetAt(),
+        });
+        if (!decision.allowed) return { decision };
+        // The recording is already a guest request. Putting the failed row
+        // back in line would queue it a second time.
+        if (decision.alreadyRequested) return { alreadyRequested: true };
+      }
+      return retryPendingAdd(req.params.id, { user });
+    });
+
+    if (outcome.decision) return respondFairnessDenied(res, outcome.decision);
+    if (outcome.alreadyRequested) {
+      return res.json({
+        ok: true,
+        alreadyRequested: true,
+        pendingId: existing.id,
+      });
+    }
+    if (!outcome.ok) return res.status(409).json({ error: outcome.error });
+    await whenPendingAddsDurable();
     nudgeAddDrainer();
     try {
       broadcastQueueMutation();
     } catch (err) {
       console.error("[queue] retry notify failed:", err.message);
     }
-    res.json({ ok: true, pendingId: result.entry.id });
-  });
+    res.json({ ok: true, pendingId: outcome.entry.id });
+  }));
 
 
   // Guest quota snapshot for the search-bar remaining line. Open on the LAN
@@ -1201,12 +1251,12 @@ export function registerQueueRoutes(app, ctx) {
     const setSettings = getSetRequestFairnessSettings();
     let queue = [];
     if (songSettings.requestFairnessEnabled) {
-      try {
-        const snapshot = await sonos.getQueueList();
-        queue = Array.isArray(snapshot) ? snapshot : snapshot?.tracks || [];
-      } catch {
-        queue = [];
-      }
+      // Same rows the add ack counts, including songs accepted but not yet
+      // on the speaker. A live-only read shows a free slot the next Add rejects.
+      const liveRows = await fairnessQueueRows();
+      queue = asyncAddsEnabled()
+        ? [...liveRows, ...pendingAsQueueRows(liveRows)]
+        : liveRows;
     }
     res.setHeader("Cache-Control", "no-store");
     res.json(

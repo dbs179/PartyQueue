@@ -37,6 +37,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  store?.resetPendingAddsCache?.();
   try {
     fs.unlinkSync(TMP_FILE);
   } catch {
@@ -47,6 +48,7 @@ afterEach(() => {
 
 test("an add is durable before it is acknowledged", async () => {
   store.addPending(sample());
+  await store.whenPendingAddsDurable();
 
   // A crash right here must not lose the song: re-read from disk only.
   const reloaded = await freshImport();
@@ -139,13 +141,20 @@ test("a placed entry the speaker never confirms is not drawn forever", async () 
   store.markPlaced(entry.id);
 
   assert.equal(store.expirePlacedAdds(60_000), 0, "still inside the window");
-  await new Promise((r) => setTimeout(r, 5)); // let placedAt fall behind the cutoff
-  assert.equal(store.expirePlacedAdds(-1), 1);
+  await store.whenPendingAddsDurable();
+  const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
+  raw.find((row) => row.id === entry.id).placedAt = Date.now() - 60_000;
+  fs.writeFileSync(TMP_FILE, JSON.stringify(raw), "utf8");
+  store.resetPendingAddsCache();
+
+  assert.equal(store.expirePlacedAdds(1000), 1);
   assert.equal(store.listPendingAdds().length, 0);
+  await store.whenPendingAddsDurable();
 });
 
 test("a placing claim does not survive a restart", async () => {
   const entry = store.addPending(sample());
+  await store.whenPendingAddsDurable();
   store.claimNextPending();
 
   const reloaded = await freshImport();
@@ -212,8 +221,9 @@ test("pending entries read as searched queue rows for fairness", () => {
   assert.equal(row.pending, true);
 });
 
-test("attempt bookkeeping is coalesced but not lost on shutdown", () => {
+test("attempt bookkeeping is coalesced but not lost on shutdown", async () => {
   const entry = store.addPending(sample());
+  await store.whenPendingAddsDurable();
   const onDisk = () => JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
   assert.equal(onDisk().length, 1, "the add itself is written through");
 
@@ -290,18 +300,26 @@ test("clearing drops every waiting add so none repopulate the queue", () => {
   assert.deepEqual(store.listPendingAdds(), []);
 });
 
-test("failed rows age out but pending rows never do", () => {
+test("failed rows age out but pending rows never do", async () => {
   const keep = store.addPending(sample({ uri: "spotify:track:keep" }));
   const drop = store.addPending(sample({ uri: "spotify:track:drop" }));
   store.markFailed(drop.id, "nope");
+  await store.whenPendingAddsDurable();
+  // Backdate on disk. A same-millisecond expire used to pass on Windows, where
+  // the sync write crossed the clock, and fail on Ubuntu CI, where it did not.
+  const raw = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
+  raw.find((row) => row.id === drop.id).failedAt = Date.now() - 60_000;
+  fs.writeFileSync(TMP_FILE, JSON.stringify(raw), "utf8");
+  store.resetPendingAddsCache();
 
-  const removed = store.expireFailedAdds(-1);
+  const removed = store.expireFailedAdds(1000);
 
   assert.equal(removed, 1);
   assert.deepEqual(
     store.listPendingAdds().map((e) => e.id),
     [keep.id]
   );
+  await store.whenPendingAddsDurable();
 });
 
 test("the store stays bounded under a wedged speaker", () => {
@@ -354,6 +372,7 @@ async function sharedStoreAndView() {
   const view = await import("../src/queue-view.js");
   shared.resetPendingAddsCache();
   shared.clearPendingAdds();
+  await shared.whenPendingAddsDurable();
   return { shared, view };
 }
 
@@ -418,6 +437,7 @@ test("a song being placed is not shown twice once it reaches Sonos", async () =>
   } finally {
     process.env.PARTYQUEUE_ASYNC_ADDS = "0";
     shared.clearPendingAdds();
+    await shared.whenPendingAddsDurable();
   }
 });
 
@@ -440,6 +460,7 @@ test("a placed song keeps its row until Sonos actually shows it", async () => {
   } finally {
     process.env.PARTYQUEUE_ASYNC_ADDS = "0";
     shared.clearPendingAdds();
+    await shared.whenPendingAddsDurable();
   }
 });
 
@@ -458,6 +479,7 @@ test("an add still waiting its turn is shown even if that song is queued", async
   } finally {
     process.env.PARTYQUEUE_ASYNC_ADDS = "0";
     shared.clearPendingAdds();
+    await shared.whenPendingAddsDurable();
   }
 });
 
@@ -480,6 +502,30 @@ test("failed rows reach the view with their reason", async () => {
   } finally {
     process.env.PARTYQUEUE_ASYNC_ADDS = "0";
     shared.clearPendingAdds();
+    await shared.whenPendingAddsDurable();
+  }
+});
+
+test("a burst of adds shares one write of the outbox", async () => {
+  const original = fs.writeFileSync;
+  let writes = 0;
+  fs.writeFileSync = (...args) => {
+    writes += 1;
+    return original.apply(fs, args);
+  };
+  try {
+    store.addPending(sample({ uri: "spotify:track:one", name: "One" }));
+    store.addPending(sample({ uri: "spotify:track:two", name: "Two" }));
+    assert.equal(writes, 0, "neither add blocks on its own write");
+    await store.whenPendingAddsDurable();
+    const rows = JSON.parse(fs.readFileSync(TMP_FILE, "utf8"));
+    assert.equal(writes, 1);
+    assert.deepEqual(
+      rows.map((row) => row.name),
+      ["One", "Two"]
+    );
+  } finally {
+    fs.writeFileSync = original;
   }
 });
 

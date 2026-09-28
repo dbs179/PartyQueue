@@ -19,9 +19,11 @@ Ideas parked for later — not scheduled work unless pulled into a release.
 
   Suspect the same Home Assistant Node-RED grouping flow as the Arc item above. The failure mode is generic: we resolve a coordinator, enqueue to it, and by the time `Play` is sent that device is no longer the coordinator, so Sonos refuses the transition. Because nothing ever started, no DJ shout was generated either — announces silently do not happen.
 
+  **Done**
+  1. Play, Skip, and queue writes (`enqueue`, Clear) invalidate the zone cache and retry once on `701`/`711` (queue writes also still retry `800`).
+  2. The queue-write retry logs the group topology next to the refusal.
+
   **Later**
-  1. On `701`/`711`, invalidate the zone cache, re-resolve the coordinator, and retry once before surfacing an error.
-  2. Log the group topology alongside the failure so this is diagnosable from logs instead of a live probe.
   3. Consider whether guest-visible state should say "speakers regrouped" rather than failing quietly.
   4. Worth checking against the 2026-09-11 party logs — this may be a second, independent cause of missed announces alongside the stale queue indices fixed in 11.2.4.
 

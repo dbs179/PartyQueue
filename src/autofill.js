@@ -30,7 +30,7 @@ import {
   clearPendingAnnounce,
 } from "./dj-voice.js";
 import { clearRefillAnnounceGuard } from "./refill-announce-guard.js";
-import { clearPendingAdds } from "./pending-adds.js";
+import { clearPendingAdds, whenPendingAddsDurable } from "./pending-adds.js";
 import { cancelActiveDjVolumeHandoff } from "./dj-volume-handoff.js";
 import {
   preemptQueueWork,
@@ -433,6 +433,7 @@ export async function clearQueueWithoutAutoRefill(options = {}) {
   // discarded — last call bumps the preempt generation too, but it deliberately
   // keeps real requests, so cancellation cannot be inferred from that.
   const dropped = clearPendingAdds();
+  await whenPendingAddsDurable();
   if (dropped) {
     console.log(`[queue] Clear Queue dropped ${dropped} add(s) not yet placed`);
   }

@@ -4,6 +4,7 @@ import {
   clearZoneCache,
   deviceDriftInfoForTests,
   getZoneGroups,
+  isQueueWriteRefusal,
   isTransportRefusalError,
   orderTopologyProbeDevices,
   resetDeviceDriftForTests,
@@ -22,6 +23,19 @@ afterEach(() => {
   resetSpeakerReachabilityForTests();
   resetDeviceDriftForTests();
   clearZoneCache();
+});
+
+test("isQueueWriteRefusal retries coordinator moves and transport refusals", () => {
+  assert.equal(isQueueWriteRefusal(new Error("UPnP Error 800")), true);
+  assert.equal(
+    isQueueWriteRefusal(new Error("UPnP Error 701 Transition not available")),
+    true
+  );
+  assert.equal(
+    isQueueWriteRefusal(new Error("UPnP Error 711: Illegal seek target")),
+    true
+  );
+  assert.equal(isQueueWriteRefusal(new Error("Sonos timeout")), false);
 });
 
 test("isTransportRefusalError matches Sonos 701 and 711", () => {

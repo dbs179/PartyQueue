@@ -17,6 +17,21 @@ import { isBakedAnnounceUri } from "./dj-announce-bake.js";
 
 // Pure: pick the zone group that matches a target room name (coordinator or any
 // member, case-insensitive). Returns null when no match; callers fall back.
+/** One line for logs when a queue write is refused mid-regroup. */
+export function formatZoneTopology(groups) {
+  if (!Array.isArray(groups) || !groups.length) return "(no groups)";
+  return groups
+    .map((group) => {
+      const coordinator = group?.coordinator?.name || "unknown";
+      const names = Array.isArray(group?.members)
+        ? group.members.map((member) => member?.name).filter(Boolean)
+        : [];
+      const others = names.filter((name) => name !== coordinator);
+      return others.length ? `${coordinator} + ${others.join(", ")}` : coordinator;
+    })
+    .join(" | ");
+}
+
 export function pickGroupByTarget(groups, targetRoom) {
   if (!groups?.length) return null;
   if (!targetRoom) return groups[0];

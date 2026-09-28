@@ -33,6 +33,7 @@ import {
   markFailed,
   recordAttemptError,
   releasePlacing,
+  whenPendingAddsDurable,
 } from "./pending-adds.js";
 
 const START_DELAY_MS = 5_000; // let the speaker layer settle after boot
@@ -276,6 +277,7 @@ export async function drainOnce({ now = Date.now() } = {}) {
   try {
     await placeEntry(entry);
     markPlaced(entry.id);
+    await whenPendingAddsDurable();
     console.log(
       `[add-drainer] placed "${entry.name}" for ${entry.requestedByUser}` +
         (entry.attempts > 1 ? ` (attempt ${entry.attempts})` : "")
@@ -285,6 +287,7 @@ export async function drainOnce({ now = Date.now() } = {}) {
     const message = err?.message || "Could not add to the Sonos queue.";
     if (entry.attempts >= MAX_ATTEMPTS) {
       markFailed(entry.id, message);
+      await whenPendingAddsDurable();
       // The row's title did not change. Phones only learn it failed if we push.
       try {
         broadcastQueueMutation();

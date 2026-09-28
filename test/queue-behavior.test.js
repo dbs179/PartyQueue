@@ -18,6 +18,7 @@ import {
   shouldHideGhostNowPlaying,
   randomDjAnnouncePlan,
   songMatchKey,
+  formatZoneTopology,
 } from "../src/sonos.js";
 import {
   isDjVolumeHandoffArmed,
@@ -222,6 +223,19 @@ test("autoStartDecision still leaves radio and line-in alone", () => {
   assert.equal(
     autoStartDecision("PLAYING", { currentUri: "x-rincon-queue:RINCON_1#0" }),
     "skip"
+  );
+});
+
+test("formatZoneTopology names the coordinator and the rooms grouped with it", () => {
+  assert.equal(formatZoneTopology([]), "(no groups)");
+  assert.equal(
+    formatZoneTopology([
+      {
+        coordinator: { name: "Living Room" },
+        members: [{ name: "Living Room" }, { name: "Kitchen" }, { name: "Office" }],
+      },
+    ]),
+    "Living Room + Kitchen, Office"
   );
 });
 

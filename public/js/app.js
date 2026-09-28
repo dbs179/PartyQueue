@@ -1,5 +1,4 @@
 import { isModalOpen } from "./modal.js";
-import { createGuestHubUi } from "./guest-hub-ui.js";
 import {
   mediaIdentity,
   playbackIdentity,
@@ -16,10 +15,8 @@ import { createGuestNameUi } from "./guest-name-ui.js";
 import { createGuestFairnessUi } from "./guest-fairness-ui.js";
 import { createDebounced } from "./debounce.js";
 import { createSameArtistCountdownUi } from "./same-artist-countdown-ui.js";
-import { loadMemory as loadMemoryUi } from "./memory-ui.js";
 import { createPartyRecapUi } from "./party-recap.js";
 import { createSonosGroups } from "./sonos-groups.js";
-import { createConnectionsUi } from "./connections-ui.js";
 import {
   createBrandingUi,
   persistBrandingCache,
@@ -54,16 +51,6 @@ import {
   suggestionsEmptyMessage,
   suggestionRowHtml,
 } from "./suggestions.js";
-import {
-  paintStatsReactionList,
-  statRows,
-  statsSummaryCardsHtml,
-  paintDisplayTonightStats,
-  dedicationsHtml,
-  karaokeRowsHtml,
-  statsEmptyMessage,
-} from "./stats-ui.js";
-import { createDjBoothUi } from "./dj-booth-ui.js";
 import {
   isSettingsArea,
   isMusicMixArea,
@@ -531,12 +518,22 @@ const displayPartyOverPill = document.getElementById("display-party-over");
 let requestsPaused = false;
 let partyOver = false;
 let hostControlsOnly = false;
-// DJ booth UI bound after branding (selectDjIcon) is created
+// DJ booth, connections, and the guest-notes hub load on the first host
+// screen. Guest phones keep those modules off the initial download.
 let updateDjHubSummaries = () => {};
 let setActiveDjIconName = () => {};
 let applyDjFromSettings = () => {};
 let loadDjEffectivePrompt = async () => {};
-let getEndOfNightName = () => "Last call";
+let endOfNightName = "Closing Time";
+function getEndOfNightName() {
+  return endOfNightName;
+}
+let loadGuests = () => {};
+let loadSpotifyAppStatus = async () => {};
+let loadLastfmStatus = async () => {};
+let loadHaStatus = async () => {};
+let loadSonosConnStatus = async () => {};
+let loadSpotifyStatus = async () => {};
 const djIconUploadBtn = document.getElementById("dj-icon-upload-btn");
 const djIconFileInput = document.getElementById("dj-icon-file");
 const djIconGallery = document.getElementById("dj-icon-gallery");
@@ -674,7 +671,11 @@ const {
   }
 );
 
-const djBooth = createDjBoothUi(
+let djBoothPromise = null;
+function ensureDjBooth() {
+  if (!djBoothPromise) {
+    djBoothPromise = import("./dj-booth-ui.js").then(({ createDjBoothUi }) => {
+      const djBooth = createDjBoothUi(
   {
     djVoiceToggle: document.getElementById("dj-voice-toggle"),
     djNameInput: document.getElementById("set-dj-name"),
@@ -752,11 +753,14 @@ const djBooth = createDjBoothUi(
     loadDjIcons,
   }
 );
-updateDjHubSummaries = djBooth.updateDjHubSummaries;
-setActiveDjIconName = djBooth.setActiveDjIconName;
-applyDjFromSettings = djBooth.applyFromSettings;
-loadDjEffectivePrompt = djBooth.loadDjEffectivePrompt;
-getEndOfNightName = djBooth.getEndOfNightName;
+      updateDjHubSummaries = djBooth.updateDjHubSummaries;
+      setActiveDjIconName = djBooth.setActiveDjIconName;
+      applyDjFromSettings = djBooth.applyFromSettings;
+      loadDjEffectivePrompt = djBooth.loadDjEffectivePrompt;
+    });
+  }
+  return djBoothPromise;
+}
 
 function fillSettings(s) {
   if (s.songMemory != null) songMemoryInput.value = s.songMemory;
@@ -961,6 +965,13 @@ function fillSettings(s) {
   }
   if (s.heroBanner !== undefined) applyHero(s.heroBanner);
   if (s.heroBannerMobile !== undefined) applyHeroMobile(s.heroBannerMobile);
+  if (
+    s.endOfNightTrackUri !== undefined ||
+    s.endOfNightTrackName !== undefined ||
+    s.endOfNightTrackArtist !== undefined
+  ) {
+    endOfNightName = s.endOfNightTrackName || "Closing Time";
+  }
   applyBranding(s.eventName, s.subtitle);
   if (s.defaults) settingsDefaults = s.defaults;
 }
@@ -1295,38 +1306,45 @@ function setPartyOverUi(on) {
 }
 
 // ---- Users hub (DJ Booth → shout-out notes / birthdays) ----
-const { loadGuests } = createGuestHubUi(
-  {
-    hubGrid: document.getElementById("guest-hub-grid"),
-    listEl: document.getElementById("guest-list"),
-    nameInput: document.getElementById("guest-name-input"),
-    notesInput: document.getElementById("guest-notes-input"),
-    saveBtn: document.getElementById("guest-save"),
-    bdayMonth: document.getElementById("guest-bday-month"),
-    bdayDay: document.getElementById("guest-bday-day"),
-    bdayRole: document.getElementById("guest-bday-role"),
-    bdaySaveBtn: document.getElementById("guest-bday-save"),
-    bdayForgetBtn: document.getElementById("guest-bday-forget"),
-    removeBtn: document.getElementById("guest-remove"),
-    renameBtn: document.getElementById("guest-rename"),
-    editTitle: document.getElementById("settings-user-edit-title"),
-  },
-  {
-    hostFetch,
-    showToast,
-    confirmModal,
-    navigate,
+let guestHubPromise = null;
+function ensureGuestHub() {
+  if (!guestHubPromise) {
+    guestHubPromise = import("./guest-hub-ui.js").then(({ createGuestHubUi }) => {
+      const hub = createGuestHubUi(
+        {
+          hubGrid: document.getElementById("guest-hub-grid"),
+          listEl: document.getElementById("guest-list"),
+          nameInput: document.getElementById("guest-name-input"),
+          notesInput: document.getElementById("guest-notes-input"),
+          saveBtn: document.getElementById("guest-save"),
+          bdayMonth: document.getElementById("guest-bday-month"),
+          bdayDay: document.getElementById("guest-bday-day"),
+          bdayRole: document.getElementById("guest-bday-role"),
+          bdaySaveBtn: document.getElementById("guest-bday-save"),
+          bdayForgetBtn: document.getElementById("guest-bday-forget"),
+          removeBtn: document.getElementById("guest-remove"),
+          renameBtn: document.getElementById("guest-rename"),
+          editTitle: document.getElementById("settings-user-edit-title"),
+        },
+        {
+          hostFetch,
+          showToast,
+          confirmModal,
+          navigate,
+        }
+      );
+      loadGuests = hub.loadGuests;
+    });
   }
-);
+  return guestHubPromise;
+}
 
 // ---- Connections (Spotify app / Last.fm / HA / Sonos HTTP / account) ----
-const {
-  loadSpotifyAppStatus,
-  loadLastfmStatus,
-  loadHaStatus,
-  loadSonosConnStatus,
-  loadSpotifyStatus,
-} = createConnectionsUi(
+let connectionsPromise = null;
+function ensureConnections() {
+  if (!connectionsPromise) {
+    connectionsPromise = import("./connections-ui.js").then(({ createConnectionsUi }) => {
+      const ui = createConnectionsUi(
   {
     spotifyApp: {
       statusEl: document.getElementById("spotify-app-status"),
@@ -1370,11 +1388,32 @@ const {
     },
   },
   {
-    hostFetch,
-    showToast,
-    loadGenres,
+        hostFetch,
+        showToast,
+        loadGenres,
+      }
+    );
+      loadSpotifyAppStatus = ui.loadSpotifyAppStatus;
+      loadLastfmStatus = ui.loadLastfmStatus;
+      loadHaStatus = ui.loadHaStatus;
+      loadSonosConnStatus = ui.loadSonosConnStatus;
+      loadSpotifyStatus = ui.loadSpotifyStatus;
+    });
   }
-);
+  return connectionsPromise;
+}
+
+let hostChromePromise = null;
+function ensureHostChrome() {
+  if (!hostChromePromise) {
+    hostChromePromise = Promise.all([
+      ensureDjBooth(),
+      ensureGuestHub(),
+      ensureConnections(),
+    ]);
+  }
+  return hostChromePromise;
+}
 
 settingsResetBtn?.addEventListener("click", () => {
   // Leave Vibe / DJ persona / branding alone; each has its own control
@@ -1585,6 +1624,7 @@ const memoryEls = {
 };
 
 async function loadMemory() {
+  const { loadMemory: loadMemoryUi } = await import("./memory-ui.js");
   return loadMemoryUi(memoryEls, { hostFetch });
 }
 
@@ -1737,7 +1777,21 @@ const statsWinBtns = document.querySelectorAll("#stats-box .stats-win-btn");
 let statsData = null;
 let statsWindow = "allTime";
 
-function renderStats() {
+let statsModulePromise = null;
+function loadStatsModule() {
+  if (!statsModulePromise) statsModulePromise = import("./stats-ui.js");
+  return statsModulePromise;
+}
+
+async function renderStats() {
+  const {
+    paintStatsReactionList,
+    statRows,
+    statsSummaryCardsHtml,
+    dedicationsHtml,
+    karaokeRowsHtml,
+    statsEmptyMessage,
+  } = await loadStatsModule();
   if (!statsData) return;
   const s = statsData[statsWindow] || {
     total: 0,
@@ -1840,11 +1894,12 @@ function syncDisplayStatsPolling(on) {
 
 async function loadStats() {
   statsEmpty.hidden = true;
+  const { paintDisplayTonightStats } = await loadStatsModule();
   try {
     const res = await fetch("/api/stats");
     if (!res.ok) throw new Error("Could not load stats.");
     statsData = await res.json();
-    renderStats();
+    await renderStats();
     paintDisplayTonightStats(
       {
         tonightGrid: document.getElementById("display-stats-grid"),
@@ -1871,7 +1926,7 @@ statsWinBtns.forEach((btn) => {
   btn.addEventListener("click", () => {
     statsWindow = btn.dataset.window;
     statsWinBtns.forEach((b) => b.classList.toggle("active", b === btn));
-    renderStats();
+    void renderStats();
   });
 });
 
@@ -2215,22 +2270,27 @@ function showView(name) {
   // Main search-bar fairness is view-local; refresh when Back lands here so
   // Booth toggles show without a hard reload.
   if (target === "main" && previousView !== "main") refreshGuestFairness();
-  if (!hostLocked) {
-    if (target === "booth") {
-      updateBoothHubSummaries();
-      refreshBoothTvFullyUrl();
-      if (!joinUrlCache) void loadJoinCode();
-    }
-    if (target === "settings-dj") updateDjHubSummaries();
-    if (target === "settings-dj-advanced") void loadDjEffectivePrompt();
-    // Booth holds most host toggles; hydrate them the same way Settings does
-    // (eager boot loadSettings often 401s before PIN unlock).
-    if (target === "booth" || isSettingsArea(target)) revealSettings();
-    if (target === "memory") loadMemory();
-    if (target === "suggestions") loadSuggestions();
-    // A long-lived tab can outlive the server's host session (restart or
-    // expiry). Confirm it in the background and re-lock if it's gone.
-    if (isHostArea(target)) void verifyHostSessionStillValid();
+  if (!hostLocked && isHostArea(target)) {
+    // Booth, DJ, connections, and the notes hub stay out of the guest download
+    // until a host screen actually opens.
+    void ensureHostChrome().then(() => {
+      if (currentView !== target) return;
+      if (target === "booth") {
+        updateBoothHubSummaries();
+        refreshBoothTvFullyUrl();
+        if (!joinUrlCache) void loadJoinCode();
+      }
+      if (target === "settings-dj") updateDjHubSummaries();
+      if (target === "settings-dj-advanced") void loadDjEffectivePrompt();
+      // Booth holds most host toggles; hydrate them the same way Settings does
+      // (eager boot loadSettings often 401s before PIN unlock).
+      if (target === "booth" || isSettingsArea(target)) revealSettings();
+      if (target === "memory") loadMemory();
+      if (target === "suggestions") loadSuggestions();
+      // A long-lived tab can outlive the server's host session (restart or
+      // expiry). Confirm it in the background and re-lock if it's gone.
+      void verifyHostSessionStillValid();
+    });
   }
   if (target === "sonos") loadGroups(true);
   if (isMusicMixArea(target)) {

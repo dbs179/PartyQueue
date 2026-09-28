@@ -19,7 +19,12 @@ import {
   isDjVolumeHandoffArmed,
   isDjVolumeHandoffActive,
 } from "./dj-volume-handoff-state.js";
-import { listPendingAdds, markPlaced, retirePlacedAdd } from "./pending-adds.js";
+import {
+  listPendingAdds,
+  markPlaced,
+  retirePlacedAdd,
+  whenPendingAddsDurable,
+} from "./pending-adds.js";
 
 function sameUser(a, b) {
   if (!a || !b) return false;
@@ -113,5 +118,6 @@ export async function runAddTrueUp({ getQueueList }) {
     );
   }
 
+  if (retired || confirmed) await whenPendingAddsDurable();
   return { confirmed, retired, waiting: candidates.length - confirmed };
 }

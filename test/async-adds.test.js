@@ -477,6 +477,63 @@ describe("write-behind guest adds", { concurrency: false }, () => {
     assert.equal(fake.tracks.length, 1);
   });
 
+  test("retry is refused once the guest is already at the cap", async () => {
+    setRequestFairnessSettings({
+      requestFairnessEnabled: true,
+      requestFairnessUpcomingThreshold: 1,
+      requestFairnessUpcomingCap: 1,
+      requestFairnessHostBypass: true,
+    });
+    try {
+      fake.addBehaviour = "throw";
+      const failed = await add(TRACK_A, "Dave");
+      await exhaustAttempts();
+
+      // The failed song no longer counts. A later song can take the only slot.
+      fake.addBehaviour = "hang";
+      fake.tracks.push({
+        uri: TRACK_C.uri,
+        id: TRACK_C.uri.split(":").pop(),
+        title: TRACK_C.name,
+        searched: true,
+        requestedByUser: "Maria",
+      });
+      const held = await add(TRACK_B, "Dave");
+      assert.equal(held.body.pending, true);
+
+      const retry = await postJson(`/api/queue/pending/${failed.body.pendingId}/retry`, {
+        requestedBy: "Dave",
+        requestedByUser: "Dave",
+      });
+      assert.equal(retry.status, 409);
+      assert.equal((await retry.json()).code, "upcoming_cap");
+
+      const { createHostSession } = await import("../src/host-auth.js");
+      const token = createHostSession();
+      const hostRetry = await fetch(
+        `${baseUrl}/api/queue/pending/${failed.body.pendingId}/retry`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-partyqueue-host": token,
+          },
+          body: JSON.stringify({
+            requestedBy: "Dave",
+            requestedByUser: "Dave",
+          }),
+        }
+      );
+      assert.equal(hostRetry.status, 200);
+      assert.equal((await hostRetry.json()).ok, true);
+    } finally {
+      setRequestFairnessSettings({
+        requestFairnessEnabled: false,
+        requestFairnessHostBypass: false,
+      });
+    }
+  });
+
   test("only the requester can retry their song", async () => {
     fake.addBehaviour = "throw";
     const { body } = await add(TRACK_A, "Dave");
@@ -571,6 +628,14 @@ describe("write-behind guest adds", { concurrency: false }, () => {
 
       const first = await add(TRACK_A, "Dave");
       assert.equal(first.body.pending, true);
+
+      // The remaining-slots line has to see the outbox, or it still offers a
+      // free slot that the next Add then rejects.
+      const status = await (
+        await fetch(`${baseUrl}/api/fairness?user=Dave`)
+      ).json();
+      assert.equal(status.song.upcomingRemaining, 0);
+      assert.equal(status.song.canRequest, false);
 
       // Dave's second add must be refused even though the first one has not
       // reached the speaker yet - quota is consumed at acknowledgement.

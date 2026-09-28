@@ -23,6 +23,7 @@ export {
   clipUrlMatchesQueueUri,
   findUpcomingTrackPositionInItems,
   songMatchKey,
+  formatZoneTopology,
   interleave,
   findCompanionDjTtsUri,
   isDjVoiceUri,

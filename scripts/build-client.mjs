@@ -1,7 +1,7 @@
 /**
- * Bundle the PartyQueue browser entry (main.js → app.js + helpers) into one
- * ESM file under public/js/dist/. Same UI behavior; smaller deploy surface and
- * a place to land future app.js splits.
+ * Bundle the PartyQueue browser entry into public/js/dist/.
+ * Guest code stays in main.js. Booth, DJ, connections, and stats load as
+ * separate chunks the first time those screens open.
  *
  *   node scripts/build-client.mjs           # one-shot
  *   node scripts/build-client.mjs --watch   # rebuild on public/js changes
@@ -27,21 +27,43 @@ const minify = watch
 const buildOptions = {
   entryPoints: [entry],
   bundle: true,
+  splitting: true,
   format: "esm",
   platform: "browser",
   target: ["es2020"],
-  outfile,
+  outdir,
+  entryNames: "[name]",
+  chunkNames: "chunk-[hash]",
   minify,
   sourcemap: true,
   logLevel: "info",
 };
 
 function logBundle() {
-  const { size } = fs.statSync(outfile);
+  const files = fs
+    .readdirSync(outdir)
+    .filter((name) => name.endsWith(".js"));
+  const lines = files.map((name) => {
+    const { size } = fs.statSync(path.join(outdir, name));
+    return `${name} (${(size / 1024).toFixed(1)} KB)`;
+  });
   console.log(
-    `[build:client] wrote ${path.relative(root, outfile)} (${(size / 1024).toFixed(1)} KB)` +
+    `[build:client] wrote ${lines.join(", ")}` +
       (minify ? ", minified" : ", watch")
   );
+  const main = fs.readFileSync(outfile, "utf8");
+  if (main.includes("dj-stat-banner")) {
+    throw new Error(
+      "[build:client] guest bundle still contains the DJ booth UI"
+    );
+  }
+  const booth = files
+    .filter((name) => name.startsWith("chunk-"))
+    .map((name) => fs.readFileSync(path.join(outdir, name), "utf8"))
+    .some((source) => source.includes("dj-stat-banner"));
+  if (!booth) {
+    throw new Error("[build:client] DJ booth UI was not split into a chunk");
+  }
 }
 
 if (watch) {

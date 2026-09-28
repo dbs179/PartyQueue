@@ -113,11 +113,20 @@ function load() {
 }
 
 // Retry bookkeeping - the attempt counter and the last error - changes several
-// times per song and none of it is worth a blocking write. Losing a second of
-// it to a crash costs one redundant placement attempt, which the true-up
-// already makes safe; the entries themselves are written through.
+// times per song and none of it is worth its own write. Losing a second of it
+// to a crash costs one redundant placement attempt, which the true-up already
+// makes safe.
+//
+// Song-list changes share one write of this file. A burst of adds updates
+// memory immediately and waits on the same snapshot, so the event loop takes
+// one sync write instead of one per tap. The HTTP ack awaits
+// whenPendingAddsDurable() and does not answer until that snapshot is on disk.
 const BOOKKEEPING_DEBOUNCE_MS = 1000;
 let bookkeepingTimer = null;
+let writeTimer = null;
+let writeNeeded = false;
+let resolveDurable = null;
+let durablePromise = Promise.resolve();
 
 function cancelBookkeepingWrite() {
   if (!bookkeepingTimer) return;
@@ -125,29 +134,80 @@ function cancelBookkeepingWrite() {
   bookkeepingTimer = null;
 }
 
-/** Write through. Anything that changes which songs exist uses this. */
-function persist() {
-  cancelBookkeepingWrite();
+function cancelQueuedWrite() {
+  if (!writeTimer) return;
+  clearImmediate(writeTimer);
+  writeTimer = null;
+}
+
+function writeSnapshot() {
+  if (entries == null) return;
+  writeFileAtomic(STORE_FILE, JSON.stringify(entries));
+}
+
+function finishDurableWrite() {
+  const resolve = resolveDurable;
+  resolveDurable = null;
+  writeTimer = null;
+  const needed = writeNeeded;
+  writeNeeded = false;
   try {
-    writeFileAtomic(STORE_FILE, JSON.stringify(entries ?? []));
+    if (needed) writeSnapshot();
   } catch (err) {
     console.error("[pending-adds] save failed:", err.message);
   }
+  resolve?.();
+}
+
+/**
+ * Queue one write of the latest entries. Further calls before it runs join
+ * the same snapshot. Resolves even when the write fails: the song is already
+ * in memory, and a disk error must not hang the ack.
+ */
+function armDurableWrite() {
+  writeNeeded = true;
+  if (writeTimer) return durablePromise;
+  durablePromise = new Promise((resolve) => {
+    resolveDurable = resolve;
+  });
+  writeTimer = setImmediate(finishDurableWrite);
+  return durablePromise;
+}
+
+/** Wait until the newest queued snapshot has been written. Already settled if nothing is queued. */
+export function whenPendingAddsDurable() {
+  return durablePromise;
+}
+
+/** Song-list changes. Durable before the HTTP ack, which awaits whenPendingAddsDurable(). */
+function persist() {
+  cancelBookkeepingWrite();
+  armDurableWrite();
 }
 
 /** Coalesce attempt bookkeeping - see BOOKKEEPING_DEBOUNCE_MS. */
 function persistSoon() {
-  if (bookkeepingTimer) return;
+  // A song-list write is already queued and reads entries when it runs, so
+  // this attempt counter rides along instead of starting its own write.
+  if (bookkeepingTimer || writeTimer) return;
   bookkeepingTimer = setTimeout(() => {
     bookkeepingTimer = null;
-    persist();
+    armDurableWrite();
   }, BOOKKEEPING_DEBOUNCE_MS);
   bookkeepingTimer.unref?.();
 }
 
-/** Flush a debounced bookkeeping write. Called on shutdown. */
+/**
+ * Flush a queued song-list or bookkeeping write. Called on shutdown, so it
+ * writes now instead of waiting for the timer.
+ */
 export function flushPendingAdds() {
-  if (bookkeepingTimer) persist();
+  const bookkeeping = !!bookkeepingTimer;
+  cancelBookkeepingWrite();
+  if (!bookkeeping && !writeNeeded) return;
+  writeNeeded = true;
+  cancelQueuedWrite();
+  finishDurableWrite();
 }
 
 /** Public shape handed to routes and the drainer (never the live object). */
@@ -476,6 +536,12 @@ export function expireFailedAdds(maxAgeMs) {
 export function resetPendingAddsCache() {
   // Before entries goes null, or a queued write would land as an empty store.
   cancelBookkeepingWrite();
+  writeNeeded = false;
+  cancelQueuedWrite();
+  const resolve = resolveDurable;
+  resolveDurable = null;
+  durablePromise = Promise.resolve();
   entries = null;
   placing.clear();
+  resolve?.();
 }
