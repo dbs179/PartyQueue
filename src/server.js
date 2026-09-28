@@ -27,6 +27,7 @@ import {
   registerPartySettingsRoutes,
 } from "./party-settings-http.js";
 import { setSonosDemandChecker } from "./sonos-manager-health.js";
+import { noteFailure } from "./failure-log.js";
 import { closeSonosManager } from "./sonos-core.js";
 import { registerApiRoutes } from "./routes/index.js";
 import {
@@ -517,9 +518,11 @@ function registerSignalHandlers() {
   // the process on Node 20+. Log it loudly instead. Uncaught synchronous
   // exceptions still crash (state may be corrupt; Docker restarts us).
   process.on("unhandledRejection", (reason) => {
+    const err = reason instanceof Error ? reason : new Error(String(reason));
+    noteFailure("app", err.message || "unhandled promise rejection");
     log.error("unhandled promise rejection", {
       event: "unhandled-rejection",
-      err: reason instanceof Error ? reason : new Error(String(reason)),
+      err,
     });
   });
 }

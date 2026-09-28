@@ -1,3 +1,5 @@
+import { noteFailure } from "./failure-log.js";
+
 // Single global gate for Sonos manager rediscovery.
 //
 // Goal: if Sonos has been unreachable for a long stretch WHILE clients are
@@ -57,7 +59,10 @@ export function noteSonosReadFailure() {
   }
 
   const t = nowFn();
-  if (!unhealthySince) unhealthySince = t;
+  if (!unhealthySince) {
+    unhealthySince = t;
+    noteFailure("sonos", "read failed while guests are connected");
+  }
   const offlineForMs = t - unhealthySince;
 
   if (offlineForMs < SONOS_OFFLINE_BEFORE_RESET_MS) {

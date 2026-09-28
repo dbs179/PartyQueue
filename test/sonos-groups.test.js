@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   normalizeGroupsPayload,
+  groupAllToastMessage,
   ungroupAllToastMessage,
   sonosIconImgHtml,
   isGroupTileSelectClick,
@@ -50,6 +51,21 @@ test("normalizeGroupsPayload keeps the stored room when no group is marked", () 
   });
   assert.equal(out.targetLabel, "Office");
   assert.equal(out.groups.every((g) => !g.isTarget), true);
+});
+
+test("groupAllToastMessage warns when volume lock fails and keeps the success copy otherwise", () => {
+  assert.deepEqual(groupAllToastMessage({ players: 7, volume: 15, locked: true }), {
+    message: "Grouped 7 speakers · Volume 15",
+    warning: false,
+  });
+  assert.deepEqual(groupAllToastMessage({ players: 7, volume: 15, locked: false }), {
+    message: "Speakers grouped, but volume could not be synchronized.",
+    warning: true,
+  });
+  assert.equal(
+    groupAllToastMessage({ players: 3, volume: 15 }).warning,
+    false
+  );
 });
 
 test("ungroupAllToastMessage pluralizes", () => {

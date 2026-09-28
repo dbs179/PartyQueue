@@ -10,11 +10,13 @@ import {
   getQueueList,
   invalidateSonosSnapshots,
   parseSonosTime,
+  QUEUE_SOAP_TIMEOUT_MS,
   clearLastHeardIf,
   shouldPreserveAnnounceHoldOnPlay,
 } from "./sonos-snapshots.js";
 import { assertManualVolumeAvailable } from "./sonos-volume.js";
 import { spotifyTrackId } from "./sampler.js";
+import { withTimeout } from "./with-timeout.js";
 import { recordSkip } from "./play-history.js";
 import { originOf, moodOf, clearConsumedDedication } from "./queue-origin.js";
 import { memoryRequesterIdentityOf } from "./memory-requester.js";
@@ -85,21 +87,25 @@ export async function ensureOrderedPlayModeOn(coordinator) {
 export async function getAnnouncePlaybackContext() {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
-  const [transport, pos, media, queue] = await Promise.all([
-    coordinator.AVTransportService.GetTransportInfo().catch(() => ({
-      CurrentTransportState: "",
-    })),
-    coordinator.AVTransportService.GetPositionInfo().catch(() => ({
-      Track: 0,
-      RelTime: "",
-      TrackDuration: "",
-      TrackURI: "",
-    })),
-    coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
-      CurrentURI: "",
-    })),
-    coordinator.GetQueue().catch(() => ({ Result: [], TotalMatches: 0 })),
-  ]);
+  const [transport, pos, media, queue] = await withTimeout(
+    Promise.all([
+      coordinator.AVTransportService.GetTransportInfo().catch(() => ({
+        CurrentTransportState: "",
+      })),
+      coordinator.AVTransportService.GetPositionInfo().catch(() => ({
+        Track: 0,
+        RelTime: "",
+        TrackDuration: "",
+        TrackURI: "",
+      })),
+      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
+        CurrentURI: "",
+      })),
+      coordinator.GetQueue().catch(() => ({ Result: [], TotalMatches: 0 })),
+    ]),
+    QUEUE_SOAP_TIMEOUT_MS,
+    "Sonos announce context timed out"
+  );
   const items = Array.isArray(queue.Result) ? queue.Result : [];
   const track = Number(pos.Track) || 0;
   const playingFromQueue = /^x-rincon-queue:/.test(media.CurrentURI || "");

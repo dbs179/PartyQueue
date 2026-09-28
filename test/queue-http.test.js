@@ -7,6 +7,7 @@ import {
   QUEUE_MUTATION_FOLLOWUP_MS,
   QUEUE_SAFETY_INTERVAL_MS,
   queueSignature,
+  queueStreamClientCount,
   registerQueueStreamRoutes,
 } from "../src/queue-http.js";
 import { createSnapshotMonitor } from "../src/now-playing-stream.js";
@@ -151,6 +152,47 @@ test("queue SSE route sends retained data and releases demand on close", () => {
 
   req.emit("close");
   assert.equal(subscribers, 0);
+});
+
+test("a destroyed SSE socket frees its per-IP slot before the next phone connects", () => {
+  let route = null;
+  const monitor = {
+    health: { status: "connected" },
+    subscribe() {
+      return () => {};
+    },
+  };
+  const app = {
+    get(_path, handler) {
+      route = handler;
+    },
+  };
+  registerQueueStreamRoutes(app, { monitor });
+
+  const ip = "203.0.113.44";
+  const before = queueStreamClientCount();
+  const opened = [];
+  for (let i = 0; i < 8; i++) {
+    const req = new EventEmitter();
+    req.ip = ip;
+    const res = new FakeResponse();
+    route(req, res);
+    assert.equal(res.statusCode, 200);
+    opened.push({ req, res });
+  }
+  assert.equal(queueStreamClientCount(), before + 8);
+
+  for (const { res } of opened) res.destroyed = true;
+
+  const req = new EventEmitter();
+  req.ip = ip;
+  const res = new FakeResponse();
+  route(req, res);
+  assert.equal(res.statusCode, 200, "dead sockets must not hold the cap");
+  assert.equal(queueStreamClientCount(), before + 1);
+
+  req.emit("close");
+  assert.equal(queueStreamClientCount(), before);
 });
 
 test("queue mutation pings every open SSE client so HA Random refreshes idle tabs", () => {

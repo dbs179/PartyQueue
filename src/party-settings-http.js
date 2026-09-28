@@ -3,7 +3,7 @@
 // mutate instead of riding every 1.5s track poll.
 
 import { createLogger } from "./logger.js";
-import { admitSseClient } from "./http/sse-limits.js";
+import { admitSseClient, pruneDeadSseClients } from "./http/sse-limits.js";
 import { createSnapshotMonitor } from "./now-playing-stream.js";
 import {
   getAutoFillState,
@@ -193,6 +193,10 @@ export const partySettingsMonitor = createSnapshotMonitor({
   logger: createLogger("party-stream"),
 });
 
+export function partyStreamClientCount() {
+  return partyStreamClients.size;
+}
+
 function removePartyStreamClient(res) {
   const client = partyStreamClients.get(res);
   if (!client) return;
@@ -244,6 +248,7 @@ export function registerPartySettingsRoutes(
   });
 
   app.get("/api/party/stream", (req, res) => {
+    pruneDeadSseClients(partyStreamClients, removePartyStreamClient);
     const ip = admitSseClient(partyStreamClients, req, res);
     if (ip == null) return;
     res.status(200);

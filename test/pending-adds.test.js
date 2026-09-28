@@ -209,6 +209,16 @@ test("finds this guest's live entry so repeat taps stay idempotent", () => {
   assert.equal(store.findPendingForGuest("Dave", "other"), null);
 });
 
+test("a placed shadow still blocks a repeat tap until it is retired", () => {
+  const entry = store.addPending(sample({ requestedByUser: "Dave" }));
+  store.markPlaced(entry.id);
+
+  assert.ok(store.findPendingForGuest("Dave", "abc123"));
+
+  store.markFailed(entry.id, "speaker rejected it");
+  assert.equal(store.findPendingForGuest("Dave", "abc123"), null);
+});
+
 test("pending entries read as searched queue rows for fairness", () => {
   store.addPending(sample({ requestedByUser: "Dave", requestedBy: "Big Dave" }));
 

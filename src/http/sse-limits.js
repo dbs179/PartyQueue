@@ -13,6 +13,18 @@ export const SSE_MAX_PER_IP = 8;
  * @param {import('express').Response} res
  * @returns {string|null} client IP when admitted, null when a 503 was sent
  */
+/**
+ * Drop sockets the browser already abandoned (sleep, Wi-Fi roam) so they do
+ * not keep a per-IP slot until the TCP close event finally arrives.
+ * @param {Map<object, { ip?: string }>} clients
+ * @param {(res: object) => void} remove
+ */
+export function pruneDeadSseClients(clients, remove) {
+  for (const res of [...clients.keys()]) {
+    if (res.writableEnded || res.destroyed) remove(res);
+  }
+}
+
 export function admitSseClient(clients, req, res) {
   const ip = req.ip || req.socket?.remoteAddress || "unknown";
   let mine = 0;

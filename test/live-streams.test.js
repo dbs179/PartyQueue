@@ -15,6 +15,7 @@ import {
   PARTY_FALLBACK_MS,
   QUEUE_STALE_MESSAGE,
   NOW_PLAYING_STALE_MESSAGE,
+  MUTATION_PULL_DEBOUNCE_MS,
   FOREGROUND_RESUME_DEBOUNCE_MS,
   FOCUS_RESUME_FRESH_MS,
   STALE_NOW_PLAYING_MS,
@@ -436,8 +437,61 @@ test("queue-changed pulls Up Next even while the queue SSE is connected", async 
   await new Promise((r) => setTimeout(r, 10));
   paints.length = 0;
   sourceApi.fire("queue-changed", { at: 1 });
-  await new Promise((r) => setTimeout(r, 10));
+  await new Promise((r) => setTimeout(r, MUTATION_PULL_DEBOUNCE_MS + 40));
   assert.deepEqual(paints, [["From HA"]]);
+  live.closeQueueStream();
+});
+
+test("a burst of queue-changed events pulls Up Next once", async () => {
+  let queueListFetches = 0;
+  /** @type {null | { fire: (name: string, data?: object) => void }} */
+  let sourceApi = null;
+  const live = createLiveStreams(
+    {},
+    {
+      fetch: async (url) => {
+        if (String(url).startsWith("/api/queue/list")) queueListFetches += 1;
+        return {
+          ok: true,
+          async json() {
+            return { tracks: [] };
+          },
+        };
+      },
+      EventSource: class {
+        constructor() {
+          const listeners = new Map();
+          sourceApi = {
+            fire(name, data) {
+              listeners.get(name)?.({ data: JSON.stringify(data || {}) });
+            },
+          };
+          queueMicrotask(() => this.onopen?.());
+          this.addEventListener = (name, fn) => listeners.set(name, fn);
+          this.close = () => {};
+        }
+      },
+      getVisibilityState: () => "visible",
+      getCurrentView: () => "main",
+      renderNowPlaying: () => {},
+      applyQueueTracks: () => {},
+      applyPartySettings: () => {},
+      freezePlayhead: () => {},
+      isQueueEditMode: () => false,
+      setPendingStreamTracks: () => {},
+      clearPendingStreamTracks: () => {},
+      loadGroups: () => {},
+    }
+  );
+
+  live.openQueueStream();
+  await new Promise((r) => setTimeout(r, 20));
+  const afterOpen = queueListFetches;
+  sourceApi.fire("queue-changed", { at: 1 });
+  sourceApi.fire("queue-changed", { at: 2 });
+  sourceApi.fire("queue-changed", { at: 3 });
+  await new Promise((r) => setTimeout(r, MUTATION_PULL_DEBOUNCE_MS + 40));
+  assert.equal(queueListFetches - afterOpen, 1);
   live.closeQueueStream();
 });
 
@@ -539,7 +593,7 @@ test("nowplaying-changed pulls Now Playing even while SSE is connected", async (
   await new Promise((r) => setTimeout(r, 10));
   paints.length = 0;
   sourceApi.fire("nowplaying-changed", { at: 1 });
-  await new Promise((r) => setTimeout(r, 10));
+  await new Promise((r) => setTimeout(r, MUTATION_PULL_DEBOUNCE_MS + 40));
   assert.deepEqual(paints, ["HA Random"]);
   live.closeNowPlayingStream();
 });

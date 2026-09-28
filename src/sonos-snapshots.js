@@ -69,6 +69,11 @@ const NOW_PLAYING_SOAP_TIMEOUT_MS = envTimeoutMs(
   "PARTYQUEUE_NOW_PLAYING_TIMEOUT_MS",
   3_500
 );
+/** Browse/GetQueue budget. A hung queue read must not freeze Up Next all night. */
+export const QUEUE_SOAP_TIMEOUT_MS = envTimeoutMs(
+  "PARTYQUEUE_QUEUE_SOAP_TIMEOUT_MS",
+  5_000
+);
 const TRANSPORT_TICK_TIMEOUT_MS = envTimeoutMs(
   "PARTYQUEUE_TRANSPORT_TICK_TIMEOUT_MS",
   2_000
@@ -732,7 +737,11 @@ async function readSonosNowPlayingSnapshot() {
   let upcomingForGenre = null;
   if (silenceBridge && playingFromQueue) {
     try {
-      const queue = await coordinator.GetQueue();
+      const queue = await withTimeout(
+        coordinator.GetQueue(),
+        NOW_PLAYING_SOAP_TIMEOUT_MS,
+        "Sonos queue read timed out"
+      );
       const items = Array.isArray(queue.Result) ? queue.Result : [];
       const trackNum = Number(pos.Track) || 0;
       companionUri = findCompanionDjTtsUri(items, trackNum - 1);
@@ -967,13 +976,17 @@ async function getQueueListRaw() {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
 
-  const [queue, pos, media] = await Promise.all([
-    coordinator.GetQueue(),
-    coordinator.AVTransportService.GetPositionInfo().catch(() => ({ Track: 0 })),
-    coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
-      CurrentURI: "",
-    })),
-  ]);
+  const [queue, pos, media] = await withTimeout(
+    Promise.all([
+      coordinator.GetQueue(),
+      coordinator.AVTransportService.GetPositionInfo().catch(() => ({ Track: 0 })),
+      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
+        CurrentURI: "",
+      })),
+    ]),
+    QUEUE_SOAP_TIMEOUT_MS,
+    "Sonos queue read timed out"
+  );
 
   const items = Array.isArray(queue.Result) ? queue.Result : [];
 
@@ -1079,14 +1092,18 @@ async function getQueueStatusRaw() {
   const m = await getManager();
   const coordinator = await resolveCoordinator(m);
 
-  const [transport, pos, media, queue] = await Promise.all([
-    coordinator.AVTransportService.GetTransportInfo(),
-    coordinator.AVTransportService.GetPositionInfo().catch(() => ({ Track: 0 })),
-    coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
-      CurrentURI: "",
-    })),
-    coordinator.GetQueue(),
-  ]);
+  const [transport, pos, media, queue] = await withTimeout(
+    Promise.all([
+      coordinator.AVTransportService.GetTransportInfo(),
+      coordinator.AVTransportService.GetPositionInfo().catch(() => ({ Track: 0 })),
+      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(() => ({
+        CurrentURI: "",
+      })),
+      coordinator.GetQueue(),
+    ]),
+    QUEUE_SOAP_TIMEOUT_MS,
+    "Sonos queue status timed out"
+  );
 
   const items = Array.isArray(queue.Result) ? queue.Result : [];
   const total = Number(queue.TotalMatches) || items.length;

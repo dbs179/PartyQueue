@@ -319,6 +319,10 @@ export function setPendingDedication(trackId, dedication, { user = null } = {}) 
 /**
  * This guest's live entry for a track, used to make repeat taps idempotent the
  * same way an upcoming Sonos row does.
+ *
+ * "placed" counts too. That row is the shadow we keep on screen until Sonos
+ * Browse catches up; treating it as gone is what made a phone retry add the
+ * song a second time. "failed" does not count — Retry has to be able to run.
  */
 export function findPendingForGuest(user, trackId) {
   load();
@@ -326,7 +330,7 @@ export function findPendingForGuest(user, trackId) {
   const entry = entries.find(
     (e) =>
       e.trackId === trackId &&
-      e.state === "pending" &&
+      (e.state === "pending" || e.state === "placed") &&
       sameUser(e.requestedByUser || e.requestedBy, user)
   );
   return entry ? snapshot(entry) : null;

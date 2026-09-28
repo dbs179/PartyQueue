@@ -34,6 +34,24 @@ export function normalizeGroupsPayload(data) {
 /**
  * @param {number|null|undefined} ungrouped
  */
+/**
+ * Group All toast. Grouping is kept even when the follow-up volume lock fails.
+ * @param {{ players?: number, volume?: number, locked?: boolean }} [data]
+ * @returns {{ message: string, warning: boolean }}
+ */
+export function groupAllToastMessage(data = {}) {
+  if (data.locked === false) {
+    return {
+      message: "Speakers grouped, but volume could not be synchronized.",
+      warning: true,
+    };
+  }
+  return {
+    message: `Grouped ${data.players} speakers · Volume ${data.volume}`,
+    warning: false,
+  };
+}
+
 export function ungroupAllToastMessage(ungrouped) {
   const n = Number(ungrouped) || 0;
   return n

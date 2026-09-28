@@ -1,5 +1,5 @@
 import { createLogger } from "./logger.js";
-import { admitSseClient } from "./http/sse-limits.js";
+import { admitSseClient, pruneDeadSseClients } from "./http/sse-limits.js";
 import { createNowPlayingMonitor } from "./now-playing-stream.js";
 import { dominantBucket, getGenreFlowState } from "./genre-flow.js";
 import { bucketsForArtistSync, GENRE_BUCKETS } from "./genres.js";
@@ -428,6 +428,10 @@ export function nowPlayingDiagnostics() {
   };
 }
 
+export function nowPlayingStreamClientCount() {
+  return nowPlayingStreamClients.size;
+}
+
 function removeNowPlayingStreamClient(res) {
   const client = nowPlayingStreamClients.get(res);
   if (!client) return;
@@ -469,6 +473,7 @@ export function registerNowPlayingRoutes(app) {
   });
 
   app.get("/api/nowplaying/stream", (req, res) => {
+    pruneDeadSseClients(nowPlayingStreamClients, removeNowPlayingStreamClient);
     const ip = admitSseClient(nowPlayingStreamClients, req, res);
     if (ip == null) return;
     res.status(200);

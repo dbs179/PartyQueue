@@ -14,6 +14,7 @@ import { writeFileAtomic } from "./atomic-write.js";
 import { getSpotifyAppCredentials } from "./spotify-app.js";
 import { spotifyTrackId } from "./sampler.js";
 import { envTimeoutMs } from "./with-timeout.js";
+import { noteFailure, noteSuccess } from "./failure-log.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -131,6 +132,10 @@ async function spotifyNetworkFetch(url, opts = {}) {
       throw superseded;
     }
     networkFailedUntil = Date.now() + NETWORK_FAIL_BACKOFF_MS;
+    noteFailure(
+      "spotify",
+      isAbortOrTimeout(err) ? "request timed out" : "network error"
+    );
     if (isAbortOrTimeout(err)) {
       throw new Error(
         `Spotify request timed out after ${Math.ceil(timeoutMs / 1000)}s`
@@ -155,10 +160,15 @@ async function spotifyApiFetch(url, opts) {
     const backoff = Number.isFinite(ra) && ra > 0 ? ra * 1000 : 30_000;
     rateLimitedUntil = Date.now() + backoff;
     persistDiskCache(); // survive restarts so we don't poke Spotify mid-timeout
+    noteFailure(
+      "spotify",
+      `HTTP 429; backing off ${Math.ceil(backoff / 1000)}s`
+    );
     throw new Error(
       `Spotify rate limited (429); backing off ${Math.ceil(backoff / 1000)}s`
     );
   }
+  if (res.ok) noteSuccess("spotify");
   return res;
 }
 

@@ -1,5 +1,5 @@
 import { createLogger } from "./logger.js";
-import { admitSseClient } from "./http/sse-limits.js";
+import { admitSseClient, pruneDeadSseClients } from "./http/sse-limits.js";
 import { createSnapshotMonitor } from "./now-playing-stream.js";
 import { onNowPlayingSnapshot } from "./now-playing-http.js";
 import {
@@ -161,6 +161,10 @@ const unsubscribeSonosStreamNudge = onSonosSnapshotsInvalidated(() => {
   broadcastQueueMutation();
 });
 
+export function queueStreamClientCount() {
+  return queueStreamClients.size;
+}
+
 function removeQueueStreamClient(res) {
   const client = queueStreamClients.get(res);
   if (!client) return;
@@ -185,6 +189,7 @@ export function closeQueueStreams() {
 
 export function registerQueueStreamRoutes(app, { monitor = queueMonitor } = {}) {
   app.get("/api/queue/stream", (req, res) => {
+    pruneDeadSseClients(queueStreamClients, removeQueueStreamClient);
     const ip = admitSseClient(queueStreamClients, req, res);
     if (ip == null) return;
     res.status(200);

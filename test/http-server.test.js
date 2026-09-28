@@ -87,6 +87,21 @@ describe("HTTP server harness", { concurrency: false }, () => {
       )
     );
     assert.equal(typeof body.checks.nowPlaying, "object");
+    assert.equal(typeof body.diagnostics.uptimeSec, "number");
+    assert.equal(typeof body.diagnostics.memoryMb.rss, "number");
+    assert.equal(typeof body.diagnostics.memoryMb.heapUsed, "number");
+    assert.equal(typeof body.diagnostics.sse.nowPlaying, "number");
+    assert.equal(typeof body.diagnostics.sse.queue, "number");
+    assert.equal(typeof body.diagnostics.sse.party, "number");
+    assert.equal(typeof body.diagnostics.spotify.configured, "boolean");
+    assert.equal(typeof body.diagnostics.spotify.userConnected, "boolean");
+    assert.equal(typeof body.diagnostics.sonos.status, "string");
+    assert.ok(
+      body.diagnostics.queue.upcoming === null ||
+        typeof body.diagnostics.queue.upcoming === "number"
+    );
+    assert.ok(Array.isArray(body.diagnostics.recentFailures));
+    assert.equal(JSON.stringify(body.diagnostics).includes("refresh_token"), false);
   });
 
   test("cross-origin POSTs are blocked by the CSRF guard", async () => {

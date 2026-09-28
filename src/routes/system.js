@@ -16,6 +16,7 @@ import {
   nowPlayingDiagnostics,
   nowPlayingMonitor,
 } from "../now-playing-http.js";
+import { collectPartyDiagnostics } from "../party-diagnostics.js";
 
 /** @param {import('express').Express} app @param {import('./api.js').ApiCtx} ctx */
 export function registerSystemRoutes(app, ctx) {
@@ -46,6 +47,13 @@ export function registerSystemRoutes(app, ctx) {
       sonosHostConfigured: !!String(getSonosHost() || "").trim(),
     });
     payload.checks.nowPlaying = nowPlayingDiagnostics();
+    try {
+      payload.diagnostics = collectPartyDiagnostics();
+    } catch (err) {
+      payload.diagnostics = {
+        error: err?.message || "diagnostics unavailable",
+      };
+    }
     if (!payload.ready) return res.status(503).json(payload);
     res.json(payload);
   });

@@ -23,6 +23,12 @@ export const STALE_LIVE_MS = 45000;
 export const STALE_LIVE_CHECK_MS = 5000;
 /** NP monitor clock-syncs every 10s; silence past this means the NP socket is dead. */
 export const STALE_NOW_PLAYING_MS = 15000;
+/**
+ * Coalesce queue-changed / nowplaying-changed into one HTTP pull per phone.
+ * The server already pushes the snapshot over SSE; this pull only covers a
+ * write whose Browse result is still catching up (Home Assistant / Node-RED).
+ */
+export const MUTATION_PULL_DEBOUNCE_MS = 400;
 
 export function nowPlayingStreamIsStale(
   lastNpEventAt,
@@ -209,6 +215,8 @@ export function createLiveStreams(els, deps) {
   let queueStreamCursor = createStreamCursor();
   let queueStreamVersion = 0;
   let queueHttpRequest = 0;
+  let queueMutationPullTimer = null;
+  let nowPlayingMutationPullTimer = null;
 
   let partySource = null;
   let partyStreamConnected = false;
@@ -498,7 +506,7 @@ export function createLiveStreams(els, deps) {
     source.addEventListener("nowplaying-changed", () => {
       if (nowPlayingSource !== source) return;
       noteNowPlayingStreamEvent();
-      void loadNowPlaying(true);
+      scheduleNowPlayingMutationPull();
     });
     source.onmessage = (event) => {
       if (nowPlayingSource !== source) return;
@@ -516,8 +524,21 @@ export function createLiveStreams(els, deps) {
     };
   }
 
+  function scheduleNowPlayingMutationPull() {
+    if (nowPlayingMutationPullTimer) clearTimeout(nowPlayingMutationPullTimer);
+    nowPlayingMutationPullTimer = setTimeout(() => {
+      nowPlayingMutationPullTimer = null;
+      if (!nowPlayingSource) return;
+      void loadNowPlaying(true);
+    }, MUTATION_PULL_DEBOUNCE_MS);
+  }
+
   function closeNowPlayingStream() {
     nowPlayingStreamConnected = false;
+    if (nowPlayingMutationPullTimer) {
+      clearTimeout(nowPlayingMutationPullTimer);
+      nowPlayingMutationPullTimer = null;
+    }
     stopNowPlayingFallback();
     if (nowPlayingSource) {
       nowPlayingSource.close();
@@ -635,7 +656,7 @@ export function createLiveStreams(els, deps) {
     source.addEventListener("queue-changed", () => {
       if (queueSource !== source) return;
       noteLiveEvent();
-      void loadQueue(true);
+      scheduleQueueMutationPull();
     });
     source.onmessage = (event) => {
       if (queueSource !== source) return;
@@ -653,8 +674,21 @@ export function createLiveStreams(els, deps) {
     };
   }
 
+  function scheduleQueueMutationPull() {
+    if (queueMutationPullTimer) clearTimeout(queueMutationPullTimer);
+    queueMutationPullTimer = setTimeout(() => {
+      queueMutationPullTimer = null;
+      if (!queueSource) return;
+      void loadQueue(true);
+    }, MUTATION_PULL_DEBOUNCE_MS);
+  }
+
   function closeQueueStream() {
     queueStreamConnected = false;
+    if (queueMutationPullTimer) {
+      clearTimeout(queueMutationPullTimer);
+      queueMutationPullTimer = null;
+    }
     stopQueueFallback();
     if (queueSource) {
       queueSource.close();

@@ -16,7 +16,7 @@ import { createGuestFairnessUi } from "./guest-fairness-ui.js";
 import { createDebounced } from "./debounce.js";
 import { createSameArtistCountdownUi } from "./same-artist-countdown-ui.js";
 import { createPartyRecapUi } from "./party-recap.js";
-import { createSonosGroups } from "./sonos-groups.js";
+import { createSonosGroups, groupAllToastMessage } from "./sonos-groups.js";
 import {
   createBrandingUi,
   persistBrandingCache,
@@ -3628,8 +3628,9 @@ volUp10Btn.addEventListener("click", () => {
 groupAllBtn.addEventListener("click", () => {
   postControl(groupAllBtn, "/api/group-all", (d) => {
     reloadGroupsAfterTopology();
-    if (d.volume != null) noteDisplayedVolume(d.volume, false);
-    showToast(`Grouped ${d.players} speakers · Volume ${d.volume}`);
+    const toast = groupAllToastMessage(d);
+    if (!toast.warning && d.volume != null) noteDisplayedVolume(d.volume, false);
+    showToast(toast.message, toast.warning);
   });
 });
 

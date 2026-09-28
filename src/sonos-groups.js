@@ -1,4 +1,4 @@
-import { withSonosWriteLock } from "./sonos-lock.js";
+import { withSonosTransportLane, withSonosWriteLock } from "./sonos-lock.js";
 import {
   getManager,
   resolveCoordinator,
@@ -109,11 +109,22 @@ export async function selectGroup(room) {
 // playing keeps playing; every other room joins that group.
 const GROUP_ALL_VOLUME = 15;
 
-export async function groupAll(...args) {
-  return withSonosWriteLock(() => {
-    assertManualVolumeAvailable();
-    return groupAllUnlocked(...args);
-  });
+export async function groupAll() {
+  // Fail before taking the queue lock if a DJ ramp owns the volume knob.
+  assertManualVolumeAvailable();
+  const joined = await withSonosWriteLock(() => groupAllUnlocked());
+  // Volume uses the transport lane, and only after joins release the write
+  // lock. Holding both at once can deadlock a DJ ramp that needs the queue.
+  let locked = false;
+  try {
+    locked = await withSonosTransportLane(() =>
+      lockGroupVolume(joined.volumeMembers, GROUP_ALL_VOLUME)
+    );
+  } catch (err) {
+    console.error(`[group-all] volume lock failed: ${err.message}`);
+  }
+  invalidateSonosSnapshots();
+  return { players: joined.players, volume: GROUP_ALL_VOLUME, locked };
 }
 
 async function groupAllUnlocked() {
@@ -156,9 +167,7 @@ async function groupAllUnlocked() {
       `[group-all] party group lookup after join failed: ${err.message}`
     );
   }
-  const locked = await lockGroupVolume(volumeMembers, GROUP_ALL_VOLUME);
-  invalidateSonosSnapshots();
-  return { players: m.Devices.length, volume: GROUP_ALL_VOLUME, locked };
+  return { players: m.Devices.length, volumeMembers };
 }
 
 function findDeviceByName(m, room) {
@@ -168,7 +177,13 @@ function findDeviceByName(m, room) {
 }
 
 // Join one speaker to the currently targeted group's coordinator.
+// Serialized with guest adds: a JoinGroup that lands mid-insert moves the
+// coordinator out from under AddURIToQueue.
 export async function joinSpeakerToTarget(room) {
+  return withSonosWriteLock(() => joinSpeakerToTargetUnlocked(room));
+}
+
+async function joinSpeakerToTargetUnlocked(room) {
   const name = String(room || "").trim();
   if (!name) throw new Error("Missing room name.");
 
@@ -184,7 +199,17 @@ export async function joinSpeakerToTarget(room) {
     return { room: device.Name, coordinator: anchor.Name, alreadyInGroup: true };
   }
 
-  await device.JoinGroup(anchor.Name);
+  try {
+    await withTimeout(
+      device.JoinGroup(anchor.Name),
+      JOIN_TIMEOUT_MS,
+      `Sonos join timed out after ${Math.ceil(JOIN_TIMEOUT_MS / 1000)}s`
+    );
+    markPlayerReachable(device);
+  } catch (err) {
+    noteSpeakerFailure(device, err);
+    throw err;
+  }
   await sleep(SETTLE_MS);
   clearZoneCache();
   invalidateSonosSnapshots();
@@ -193,6 +218,10 @@ export async function joinSpeakerToTarget(room) {
 
 // Leave the current group (become a standalone coordinator).
 export async function leaveSpeakerGroup(room) {
+  return withSonosWriteLock(() => leaveSpeakerGroupUnlocked(room));
+}
+
+async function leaveSpeakerGroupUnlocked(room) {
   const name = String(room || "").trim();
   if (!name) throw new Error("Missing room name.");
 
@@ -232,6 +261,10 @@ export async function leaveSpeakerGroup(room) {
 
 // Split every multi-room group so each speaker stands alone.
 export async function ungroupAll() {
+  return withSonosWriteLock(() => ungroupAllUnlocked());
+}
+
+async function ungroupAllUnlocked() {
   const m = await getManager();
   let changed = 0;
   const wasPlaying = await captureTargetWasPlaying();
