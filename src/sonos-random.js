@@ -1178,8 +1178,17 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
   if (added > 0 && !wasPreempted()) {
     if (mergedOpts.deferAutoStart) {
       try {
-        const transport = await coordinator.AVTransportService.GetTransportInfo();
-        if (autoStartDecision(transport.CurrentTransportState) === "start") {
+        const [transport, media] = await Promise.all([
+          coordinator.AVTransportService.GetTransportInfo(),
+          coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(
+            () => ({ CurrentURI: "" })
+          ),
+        ]);
+        if (
+          autoStartDecision(transport.CurrentTransportState, {
+            currentUri: media?.CurrentURI || "",
+          }) === "start"
+        ) {
           deferredStart = true;
           await holdIdleForDeferredShout(coordinator);
         }

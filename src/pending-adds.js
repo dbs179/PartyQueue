@@ -228,6 +228,35 @@ export function getPendingAdd(id) {
 }
 
 /**
+ * Store a dedication on this guest's outbox row.
+ *
+ * The add toast offers Dedicate before Sonos has the song, and the origin
+ * store is only written at placement. Without this, that tap is rejected.
+ * Placement reads the row again, so the note still reaches the DJ.
+ *
+ * @returns {object|null} the updated entry, or null when this guest has no
+ *   pending or placed row for the track
+ */
+export function setPendingDedication(trackId, dedication, { user = null } = {}) {
+  load();
+  if (!trackId || !user) return null;
+  let entry = null;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const candidate = entries[i];
+    if (candidate.trackId !== trackId) continue;
+    if (candidate.state !== "pending" && candidate.state !== "placed") continue;
+    if (!sameUser(candidate.requestedByUser || candidate.requestedBy, user)) continue;
+    entry = candidate;
+    break;
+  }
+  if (!entry) return null;
+  entry.dedication = sanitizeDedication(dedication);
+  entry.updatedAt = nowMs();
+  persist();
+  return snapshot(entry);
+}
+
+/**
  * This guest's live entry for a track, used to make repeat taps idempotent the
  * same way an upcoming Sonos row does.
  */

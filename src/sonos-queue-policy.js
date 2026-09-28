@@ -170,14 +170,29 @@ export function orderedPlayMode(mode) {
   }
 }
 
+/** Arc / Beam HDMI or SPDIF. Reports PLAYING while the TV is the source. */
+export function isHomeTheaterStream(uri) {
+  return /^x-sonos-htastream:/i.test(String(uri || "").trim());
+}
+
 // Pure: decide whether adding a song should kick off playback.
 //   "skip"  -> leave playback alone: the queue is already playing, a real
 //              external source (radio/SiriusXM/line-in) is playing and we won't
 //              hijack it, or the host deliberately paused.
-//   "start" -> the system is idle/stopped, so resume the queue in order.
+//   "start" -> the system is idle/stopped, or the Arc is on TV audio, so resume
+//              the queue in order. TV audio is not a chosen stream.
 // Exported for unit testing.
-export function autoStartDecision(state) {
+export function autoStartDecision(state, opts = {}) {
+  const currentUri = typeof opts === "string" ? opts : opts?.currentUri;
   const s = String(state || "").toUpperCase();
+  // PLAYING here is the TV input, not the party. A paused TV stays paused:
+  // that matches a deliberate pause and we do not resume over it.
+  if (
+    isHomeTheaterStream(currentUri) &&
+    (s === "PLAYING" || s === "TRANSITIONING")
+  ) {
+    return "start";
+  }
   if (s === "PLAYING") return "skip";
   if (s === "PAUSED_PLAYBACK" || s === "PAUSED") return "skip";
   if (s === "TRANSITIONING") return "skip";
@@ -220,9 +235,12 @@ export function shouldHideGhostNowPlaying({
 export function shoutPlaybackHoldDecision({
   queueWasEmpty = false,
   transportState = "",
+  currentUri = "",
   djShoutReady = false,
 } = {}) {
-  if (isTransportPlaying(transportState)) {
+  // TV audio looks like PLAYING. Hold for the DJ the same way we would if the
+  // room were stopped. Radio and line-in still count as already playing.
+  if (isTransportPlaying(transportState) && !isHomeTheaterStream(currentUri)) {
     return { holdIdle: false, startPlayback: false, alreadyPlaying: true };
   }
   if (queueWasEmpty && djShoutReady) {

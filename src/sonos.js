@@ -8,6 +8,7 @@ export {
   trimPlayedDecision,
   TRIM_PLAYED_MAX_PER_TICK,
   autoStartDecision,
+  isHomeTheaterStream,
   isTransportPlaying,
   shoutPlaybackHoldDecision,
   isShufflePlayMode,

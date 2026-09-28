@@ -24,8 +24,10 @@ import {
 } from "./dj-shout.js";
 import { recordRequest } from "./request-log.js";
 import { ensureGuestProfile } from "./guest-profiles.js";
+import { broadcastQueueMutation } from "./queue-http.js";
 import {
   claimPending,
+  getPendingAdd,
   listPlaceable,
   markPlaced,
   markFailed,
@@ -190,6 +192,10 @@ async function runRequestShout(entry, result, d) {
  */
 async function placeEntry(entry) {
   const d = deps();
+  // Dedicate can land after the ack and before this attempt. The claimed
+  // snapshot would still say "no note", so read the outbox again here.
+  const fresh = getPendingAdd(entry.id) || entry;
+  const dedication = fresh.dedication;
 
   const added = await d.addTrackToQueue(entry.uri, {
     name: entry.name,
@@ -197,7 +203,7 @@ async function placeEntry(entry) {
     force: entry.force,
     requestedBy: entry.requestedBy,
     requestedByUser: entry.requestedByUser,
-    dedication: entry.dedication,
+    dedication,
   });
 
   // Only a newly-added or promoted slot consumes Party Stats, matching the
@@ -211,7 +217,7 @@ async function placeEntry(entry) {
         requestedBy: entry.requestedByUser,
         alias:
           entry.alias && entry.alias !== entry.requestedByUser ? entry.alias : null,
-        dedication: entry.dedication,
+        dedication,
       });
     } catch (err) {
       console.error("[add-drainer] record request:", err.message);
@@ -233,7 +239,7 @@ async function placeEntry(entry) {
       requestedBy: entry.requestedByUser,
     })
   ) {
-    await runRequestShout(entry, added, d);
+    await runRequestShout({ ...entry, dedication }, added, d);
   } else if (
     added.requestCreated !== false &&
     added.deferredStart &&
@@ -279,6 +285,12 @@ export async function drainOnce({ now = Date.now() } = {}) {
     const message = err?.message || "Could not add to the Sonos queue.";
     if (entry.attempts >= MAX_ATTEMPTS) {
       markFailed(entry.id, message);
+      // The row's title did not change. Phones only learn it failed if we push.
+      try {
+        broadcastQueueMutation();
+      } catch (notifyErr) {
+        console.error("[add-drainer] queue notify failed:", notifyErr.message);
+      }
       console.error(
         `[add-drainer] giving up on "${entry.name}" after ${entry.attempts} attempts: ${message}`
       );

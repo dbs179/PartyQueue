@@ -202,6 +202,50 @@ test("autoStartDecision is case-insensitive", () => {
   assert.equal(autoStartDecision("stopped"), "start");
 });
 
+test("autoStartDecision starts when the Arc is on TV audio", () => {
+  const tv = "x-sonos-htastream:RINCON_000:spdif";
+  assert.equal(autoStartDecision("PLAYING", { currentUri: tv }), "start");
+  assert.equal(autoStartDecision("TRANSITIONING", { currentUri: tv }), "start");
+  // A paused TV stays paused, same as a deliberate pause of the queue.
+  assert.equal(autoStartDecision("PAUSED_PLAYBACK", { currentUri: tv }), "skip");
+});
+
+test("autoStartDecision still leaves radio and line-in alone", () => {
+  assert.equal(
+    autoStartDecision("PLAYING", { currentUri: "x-sonosapi-stream:sirius" }),
+    "skip"
+  );
+  assert.equal(
+    autoStartDecision("PLAYING", { currentUri: "x-rincon-stream:linein" }),
+    "skip"
+  );
+  assert.equal(
+    autoStartDecision("PLAYING", { currentUri: "x-rincon-queue:RINCON_1#0" }),
+    "skip"
+  );
+});
+
+test("shoutPlaybackHoldDecision treats TV audio as idle", () => {
+  assert.deepEqual(
+    shoutPlaybackHoldDecision({
+      queueWasEmpty: true,
+      transportState: "PLAYING",
+      currentUri: "x-sonos-htastream:RINCON_000:spdif",
+      djShoutReady: true,
+    }),
+    { holdIdle: true, startPlayback: true, alreadyPlaying: false }
+  );
+  assert.deepEqual(
+    shoutPlaybackHoldDecision({
+      queueWasEmpty: true,
+      transportState: "PLAYING",
+      currentUri: "x-sonosapi-stream:sirius",
+      djShoutReady: true,
+    }),
+    { holdIdle: false, startPlayback: false, alreadyPlaying: true }
+  );
+});
+
 // shouldClearQueueForRandomDj: Random+DJ may only wipe an empty queue.
 
 test("shouldClearQueueForRandomDj clears only when the queue is empty", () => {

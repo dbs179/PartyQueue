@@ -116,8 +116,10 @@ import {
   findPendingForGuest,
   pendingAsQueueRows,
   retryPendingAdd,
+  setPendingDedication,
 } from "../pending-adds.js";
 import { nudgeAddDrainer } from "../add-drainer.js";
+import { broadcastQueueMutation } from "../queue-http.js";
 import { readQueueForDisplay } from "../queue-view.js";
 import { withTimeout } from "../with-timeout.js";
 import { requireHostControls } from "../http/host-controls.js";
@@ -257,6 +259,12 @@ export function registerQueueRoutes(app, ctx) {
     }
 
     nudgeAddDrainer();
+    // Other phones and the TV do not poll. Tell them the song is waiting.
+    try {
+      broadcastQueueMutation();
+    } catch (err) {
+      console.error("[queue] pending notify failed:", err.message);
+    }
     return res.json({
       ok: true,
       pending: true,
@@ -774,19 +782,25 @@ export function registerQueueRoutes(app, ctx) {
     if (!identity.user) {
       return res.status(400).json({ error: "Your name is required to dedicate." });
     }
+    // The toast offers Dedicate the moment the outbox acks, before origin exists.
+    const pendingUpdated = setPendingDedication(id, dedication, {
+      user: identity.user,
+    });
     const updated = setDedication(id, dedication, {
       requestedBy: identity.badge,
       requestedByUser: identity.user,
     });
-    if (!updated.ok) {
+    if (!updated.ok && !pendingUpdated) {
       return res.status(400).json({ error: updated.error });
     }
 
-    const forWho = updated.dedication;
+    const forWho = updated.ok ? updated.dedication : pendingUpdated.dedication;
     // Keep the request-log wall in sync with toast Dedicate.
     setRequestDedication(id, forWho);
 
-    if (forWho && isDjVoiceReady() && name) {
+    // A note saved before placement rides the drainer's shout. Refreshing now
+    // would announce against filler that has not been promoted yet.
+    if (updated.ok && forWho && isDjVoiceReady() && name) {
       const by = identity.user || requestedByUserOf(id) || requestedByOf(id);
       try {
         const { findUpcomingTrackPosition } = await import("../sonos.js");
@@ -1164,6 +1178,11 @@ export function registerQueueRoutes(app, ctx) {
     const result = retryPendingAdd(req.params.id, { user });
     if (!result.ok) return res.status(409).json({ error: result.error });
     nudgeAddDrainer();
+    try {
+      broadcastQueueMutation();
+    } catch (err) {
+      console.error("[queue] retry notify failed:", err.message);
+    }
     res.json({ ok: true, pendingId: result.entry.id });
   });
 

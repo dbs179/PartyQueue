@@ -78,7 +78,7 @@ function createFakeSonos() {
     async getQueueList() {
       return tracks.map((t, i) => ({ ...t, position: i + 1 }));
     },
-    async addTrackToQueue(uri, { name, artist, requestedBy, requestedByUser } = {}) {
+    async addTrackToQueue(uri, { name, artist, requestedBy, requestedByUser, dedication } = {}) {
       const behaviour = this.addBehaviour;
       if (behaviour === "hang") {
         await new Promise(() => {});
@@ -103,6 +103,7 @@ function createFakeSonos() {
         searched: true,
         requestedBy,
         requestedByUser,
+        dedication,
       });
       if (behaviour === "landed-then-timeout") {
         // The exact party-night failure: the speaker took the track, then the
@@ -378,6 +379,54 @@ describe("write-behind guest adds", { concurrency: false }, () => {
     await drainOnce();
 
     assert.equal(fake.tracks.length, 0, "the party already heard it");
+  });
+
+  test("true-up does not confirm a request against Random filler", async () => {
+    await add(TRACK_A, "Dave");
+    fake.tracks.push({
+      uri: TRACK_A.uri,
+      id: TRACK_A.uri.split(":").pop(),
+      title: TRACK_A.name,
+      artist: TRACK_A.artist,
+      searched: false,
+      origin: "filler",
+    });
+
+    const result = await runAddTrueUp({ getQueueList: () => fake.getQueueList() });
+
+    assert.equal(result.confirmed, 0);
+    assert.equal(result.waiting, 1);
+    assert.equal(listPendingAdds()[0].state, "pending");
+    assert.equal(fake.tracks.length, 1, "filler copy stays; the drainer promotes it");
+  });
+
+  test("dedicate before placement is kept and sent to the speaker", async () => {
+    fake.addBehaviour = "hang";
+    await add(TRACK_A, "Dave");
+
+    const saved = await postJson("/api/queue/dedication", {
+      uri: TRACK_A.uri,
+      name: TRACK_A.name,
+      artist: TRACK_A.artist,
+      dedication: "for the crew",
+      requestedBy: "Dave",
+      requestedByUser: "Dave",
+    });
+    assert.equal(saved.status, 200);
+    assert.equal((await saved.json()).dedication, "for the crew");
+    assert.equal(listPendingAdds()[0].dedication, "for the crew");
+
+    const stranger = await postJson("/api/queue/dedication", {
+      uri: TRACK_A.uri,
+      dedication: "not yours",
+      requestedBy: "Maria",
+      requestedByUser: "Maria",
+    });
+    assert.equal(stranger.status, 400);
+
+    fake.addBehaviour = null;
+    assert.equal(await drainOnce(), "placed");
+    assert.equal(fake.tracks[0].dedication, "for the crew");
   });
 
   test("one queue row cannot confirm two different guests' adds", async () => {

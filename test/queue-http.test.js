@@ -101,6 +101,13 @@ test("queue signature ignores object key order but sees badge and edit fields", 
     queueSignature({ tracks: [a] }),
     queueSignature({ tracks: [{ ...a, origin: "filler" }] })
   );
+  const pending = { ...a, pending: true, failed: false, pendingId: "p1" };
+  const failed = { ...a, pending: false, failed: true, pendingId: "p1" };
+  assert.notEqual(
+    queueSignature({ tracks: [pending] }),
+    queueSignature({ tracks: [failed] }),
+    "a failed add must republish even when the song itself did not change"
+  );
 });
 
 test("queue SSE route sends retained data and releases demand on close", () => {

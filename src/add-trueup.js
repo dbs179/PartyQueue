@@ -94,13 +94,15 @@ export async function runAddTrueUp({ getQueueList }) {
     const copies = available.get(entry.trackId);
     if (!copies?.length) continue;
 
-    // Prefer a copy attributed to this guest; fall back to any copy of the
-    // track. The looser match is deliberate: if the song is in the queue the
-    // guest gets what they asked for, and queueing it twice would not be.
-    let at = copies.findIndex((row) =>
+    // Only a copy already attributed to this guest. A Random / Never-Ending
+    // filler row shares the track id and has no requester; confirming it would
+    // skip promotion and leave the song buried, unbadged, and unshouted. The
+    // drainer still promotes that filler. An ambiguous timeout that already
+    // stamped this guest on the row still confirms, so it is not queued twice.
+    const at = copies.findIndex((row) =>
       sameUser(row?.requestedByUser || row?.requestedBy, entry.requestedByUser)
     );
-    if (at === -1) at = 0;
+    if (at === -1) continue;
 
     if (!markPlaced(entry.id)) continue;
     copies.splice(at, 1);

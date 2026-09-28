@@ -17,6 +17,7 @@ import {
   songMatchKey,
   isAnnounceQueuePad,
   isTransportPlaying,
+  isHomeTheaterStream,
   shoutPlaybackHoldDecision,
   findUpcomingTrackPositionInItems,
 } from "./sonos-queue-policy.js";
@@ -69,6 +70,7 @@ export async function readLiveQueueForInsert(coordinator, { attempts = 2 } = {})
         items: Array.isArray(queue.Result) ? queue.Result : [],
         updateId: Number(queue.UpdateID) || 0,
         currentTrack: Number(pos.Track) || 0,
+        currentUri: media.CurrentURI || "",
         playingFromQueue: /^x-rincon-queue:/.test(media.CurrentURI || ""),
         transportState: transport?.CurrentTransportState || "",
       };
@@ -189,7 +191,16 @@ async function trimPlayedTracksUnlocked() {
 export async function autoStartIfIdle(coordinator) {
   try {
     const transport = await coordinator.AVTransportService.GetTransportInfo();
-    if (autoStartDecision(transport.CurrentTransportState) !== "start") return false;
+    const media = await coordinator.AVTransportService.GetMediaInfo({
+      InstanceID: 0,
+    }).catch(() => ({ CurrentURI: "" }));
+    if (
+      autoStartDecision(transport.CurrentTransportState, {
+        currentUri: media?.CurrentURI || "",
+      }) !== "start"
+    ) {
+      return false;
+    }
     await coordinator.SwitchToQueue();
     await coordinator.Play();
     return true;
@@ -210,20 +221,30 @@ export async function holdIdleForDeferredShout(coordinator) {
       () => null
     );
     const state = transport?.CurrentTransportState || "";
-    if (isTransportPlaying(state)) {
-      console.log("[queue] skip idle hold — music is already playing");
-      return false;
-    }
     const media = await coordinator.AVTransportService.GetMediaInfo({
       InstanceID: 0,
     }).catch(() => null);
-    const onQueue = /^x-rincon-queue:/.test(media?.CurrentURI || "");
+    const currentUri = media?.CurrentURI || "";
+    const homeTheater = isHomeTheaterStream(currentUri);
+    // TV audio reports PLAYING. That is not the party — leave it so the DJ
+    // can lead. Radio, line-in, and a real queue stay untouched.
+    if (isTransportPlaying(state) && !homeTheater) {
+      console.log("[queue] skip idle hold — music is already playing");
+      return false;
+    }
+    const onQueue = /^x-rincon-queue:/.test(currentUri);
     if (!onQueue) await coordinator.SwitchToQueue();
-    // Recheck after SwitchToQueue — never Pause a song that started playing.
+    // Recheck after SwitchToQueue — never Pause a song that was already
+    // playing from somewhere other than the TV. Leaving HDMI is the exception:
+    // the queue may already look PLAYING, and that is the tease we want to hold.
     const again = await coordinator.AVTransportService.GetTransportInfo().catch(
       () => null
     );
-    if (isTransportPlaying(again?.CurrentTransportState)) {
+    const againMedia = await coordinator.AVTransportService.GetMediaInfo({
+      InstanceID: 0,
+    }).catch(() => null);
+    const stillTv = isHomeTheaterStream(againMedia?.CurrentURI || "");
+    if (isTransportPlaying(again?.CurrentTransportState) && !homeTheater && !stillTv) {
       console.log("[queue] skip idle hold — music started during switch");
       return false;
     }
@@ -332,6 +353,7 @@ async function addSetRequestToQueueUnlocked(
   const currentTrack = live.currentTrack;
   const playingFromQueue = live.playingFromQueue;
   const transportState = live.transportState;
+  const currentUri = live.currentUri;
 
   const start = playingFromQueue && currentTrack >= 1 ? currentTrack : 0;
   const upcomingIds = new Set();
@@ -401,6 +423,7 @@ async function addSetRequestToQueueUnlocked(
   const hold = shoutPlaybackHoldDecision({
     queueWasEmpty,
     transportState,
+    currentUri,
     djShoutReady: !!dj.djVoiceEnabled && !!dj.djShoutEnabled,
   });
   let started = false;
@@ -462,6 +485,7 @@ async function addTrackToQueueUnlocked(
   const currentTrack = live.currentTrack;
   const playingFromQueue = live.playingFromQueue;
   const transportState = live.transportState;
+  const currentUri = live.currentUri;
 
   const insertPos = findInsertPosition(items, {
     currentTrack,
@@ -559,6 +583,7 @@ async function addTrackToQueueUnlocked(
   const hold = shoutPlaybackHoldDecision({
     queueWasEmpty,
     transportState,
+    currentUri,
     djShoutReady: !!dj.djVoiceEnabled && !!dj.djShoutEnabled,
   });
 
@@ -1634,6 +1659,19 @@ async function clearQueueUnlocked() {
         alreadyEmpty = true;
       }
     }
+  }
+
+  // Clear stops the transport but leaves an Arc on HDMI/SPDIF. Grouped rooms
+  // keep playing TV audio until the coordinator is back on its queue.
+  try {
+    const media = await coordinator.AVTransportService.GetMediaInfo({
+      InstanceID: 0,
+    });
+    if (isHomeTheaterStream(media?.CurrentURI || "")) {
+      await coordinator.SwitchToQueue();
+    }
+  } catch (err) {
+    console.warn("[queue] leave TV input after clear failed:", err.message);
   }
 
   invalidateSonosSnapshots({ seedIdle: true });

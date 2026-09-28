@@ -37,6 +37,11 @@ function trackSignature(track) {
     track.requestedBy ?? "",
     track.requestedByUser ?? "",
     track.dedication ?? "",
+    // Outbox flags. A failed add keeps the same title and requester, so without
+    // these the stream treats "Adding…" and "Retry" as the same snapshot.
+    track.pending ? 1 : 0,
+    track.failed ? 1 : 0,
+    track.pendingId ?? "",
     track.djVoice ? 1 : 0,
     track.fromPlaylist ? 1 : 0,
     track.genreLane ?? "",
