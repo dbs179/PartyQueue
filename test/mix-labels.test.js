@@ -43,7 +43,7 @@ test("formatVolumeHeaderText and paintVolumeLabel", () => {
   assert.equal(formatVolumeHeaderText(null), "");
   assert.equal(formatVolumeHeaderText(undefined), "");
   assert.equal(volumePollMs(true), 250);
-  assert.equal(volumePollMs(false), 0);
+  assert.equal(volumePollMs(false), 2500);
   const el = { textContent: "", hidden: true };
   paintVolumeLabel(el, 32);
   assert.equal(el.textContent, "Volume: 32");

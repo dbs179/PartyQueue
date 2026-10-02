@@ -12,10 +12,14 @@ import {
   configureVolumeIo,
   volumeUp,
   volumeGetPayload,
+  seedGroupVolumeForDisplay,
+  setVolumeSeedRetryForTests,
 } from "../src/sonos-volume.js";
+import { setDjVolumeHandoffArmed } from "../src/dj-volume-handoff-state.js";
 
 afterEach(() => {
   resetVolumeReachabilityForTests();
+  setDjVolumeHandoffArmed(false);
 });
 
 function fakePlayer(host, { volume = 10, hangMs = 0, fail = false } = {}) {
@@ -187,6 +191,60 @@ test("GET /api/volume with no memory returns null", () => {
     volume: null,
     ramping: false,
   });
+});
+
+test("a fresh server seeds the header once and then never reads again", async () => {
+  const kitchen = fakePlayer("10.10.20.10", { volume: 15 });
+  const office = fakePlayer("10.10.20.11", { volume: 15 });
+  configureVolumeIo({ resolveMembers: async () => [kitchen, office] });
+
+  // Every open screen asking at once shares the single seed read.
+  const seeded = await Promise.all([
+    seedGroupVolumeForDisplay(),
+    seedGroupVolumeForDisplay(),
+    seedGroupVolumeForDisplay(),
+  ]);
+
+  assert.deepEqual(seeded, [15, 15, 15]);
+  assert.equal(office.reads, 1);
+  assert.deepEqual(volumeGetPayload(), { ok: true, volume: 15, ramping: false });
+
+  // A night of polling from every screen must never touch Sonos again.
+  for (let i = 0; i < 50; i += 1) await seedGroupVolumeForDisplay();
+  assert.equal(kitchen.reads, 1, "the Office speaker must not be polled on a clock");
+  assert.equal(office.reads, 1);
+});
+
+test("a level PartyQueue already set needs no seed read at all", async () => {
+  const office = fakePlayer("10.10.20.11", { volume: 15 });
+  configureVolumeIo({ resolveMembers: async () => [office] });
+  noteGroupVolume(22);
+
+  assert.equal(await seedGroupVolumeForDisplay(), 22);
+  assert.equal(office.reads, 0);
+});
+
+test("an armed announce keeps the seed off the speakers", async () => {
+  const office = fakePlayer("10.10.20.11", { volume: 15 });
+  configureVolumeIo({ resolveMembers: async () => [office] });
+  setDjVolumeHandoffArmed(true);
+
+  assert.equal(await seedGroupVolumeForDisplay(), null);
+  assert.equal(office.reads, 0, "a mid-shout sample would cache the boost");
+
+  setDjVolumeHandoffArmed(false);
+  assert.equal(await seedGroupVolumeForDisplay(), 15);
+});
+
+test("a room that is off at startup is not re-read on every poll", async () => {
+  setVolumeSeedRetryForTests(60_000);
+  const office = fakePlayer("10.10.20.11", { fail: true });
+  configureVolumeIo({ resolveMembers: async () => [office] });
+
+  assert.equal(await seedGroupVolumeForDisplay(), null);
+  for (let i = 0; i < 20; i += 1) await seedGroupVolumeForDisplay();
+  assert.equal(office.reads, 1);
+  assert.deepEqual(volumeGetPayload(), { ok: true, volume: null, ramping: false });
 });
 
 test("GET /api/volume during a DJ ramp returns the commanded level", () => {

@@ -42,10 +42,11 @@ export function formatVolumeHeaderText(volume) {
  * Fast while a DJ ramp is on screen, or while the announce clip itself is.
  * The first /api/volume sample can land before the announce target is
  * published; staying on 250ms through the clip catches that publish.
- * Idle screens do not poll.
+ * Idle screens keep a slow poll so the header shows the room's level without
+ * waiting for the first volume press. The server throttles the speaker read.
  */
 export function volumePollMs(ramping, announceOnScreen = false) {
-  return ramping || announceOnScreen ? 250 : 0;
+  return ramping || announceOnScreen ? 250 : 2500;
 }
 
 /**

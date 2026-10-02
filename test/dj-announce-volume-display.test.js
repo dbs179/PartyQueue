@@ -196,7 +196,7 @@ test("manual volume outside a handoff still steps from the cached level", async 
 });
 
 test("the volume watch stays fast for the whole announce clip", () => {
-  assert.equal(volumePollMs(false), 0);
+  assert.equal(volumePollMs(false), 2500);
   assert.equal(volumePollMs(true), 250);
   assert.equal(volumePollMs(false, true), 250);
 });

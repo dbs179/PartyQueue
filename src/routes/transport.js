@@ -20,6 +20,7 @@ import {
   pause,
   play,
   previous,
+  seedGroupVolumeForDisplay,
   toggleMute,
   toggleShuffle,
   volumeDown,
@@ -197,10 +198,12 @@ export function registerTransportRoutes(app, ctx) {
     }
   }));
 
-  // Memory only. A wide screen used to trigger GetVolume on every member
-  // just to keep a label fresh. The first up/down after startup learns the
-  // level; until then the header stays blank.
+  // Memory only. A wide screen must not trigger GetVolume on every member just
+  // to keep a label fresh, so the level comes from what PartyQueue last set.
+  // A just-started server has nothing to serve yet, so the first ask seeds the
+  // cache with one read instead of leaving the header blank until an up/down.
   app.get("/api/volume", asyncHandler(async (_req, res) => {
+    await seedGroupVolumeForDisplay();
     res.json(announceVolumePayload(getDjVolumeHandoffState()));
   }));
 

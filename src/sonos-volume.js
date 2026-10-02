@@ -1,7 +1,10 @@
 import { withSonosTransportLane } from "./sonos-lock.js";
 import { getManager, resolveGroup } from "./sonos-core.js";
 import { invalidateSonosSnapshots } from "./sonos-snapshots.js";
-import { isDjVolumeHandoffActive } from "./dj-volume-handoff-state.js";
+import {
+  isDjVolumeHandoffActive,
+  isDjVolumeHandoffArmed,
+} from "./dj-volume-handoff-state.js";
 import { envTimeoutMs, withTimeout } from "./with-timeout.js";
 import {
   liveMembers,
@@ -43,11 +46,31 @@ export function resetVolumeReachabilityForTests() {
   playerVolumeTimeoutMs = PLAYER_VOLUME_TIMEOUT_MS;
   resetSpeakerReachabilityForTests();
   cachedGroupVolume = null;
+  seedRetryMs = VOLUME_SEED_RETRY_MS;
+  seedNextAttemptAt = 0;
+  seedRead = null;
   volumeIo = {};
 }
 
 /** Last commanded/read group volume (0–100), or null. */
 let cachedGroupVolume = null;
+
+/**
+ * A seed attempt that found no answer waits this long before trying again, so
+ * a room that is off at startup cannot be re-read on every screen's poll.
+ */
+const VOLUME_SEED_RETRY_MS = envTimeoutMs(
+  "PARTYQUEUE_VOLUME_SEED_RETRY_MS",
+  60_000
+);
+
+let seedRetryMs = VOLUME_SEED_RETRY_MS;
+let seedNextAttemptAt = 0;
+let seedRead = null;
+
+export function setVolumeSeedRetryForTests(ms) {
+  if (ms != null) seedRetryMs = Number(ms);
+}
 
 export function noteGroupVolume(level) {
   const n = Math.round(Number(level));
@@ -57,6 +80,30 @@ export function noteGroupVolume(level) {
 
 export function getCachedGroupVolume() {
   return cachedGroupVolume;
+}
+
+/**
+ * Learn the room's level ONCE, so a server that has just started can paint the
+ * header before the first volume press. Every later change comes through
+ * PartyQueue and lands in `cachedGroupVolume`, so this never reads on a clock
+ * — a known level short-circuits immediately and concurrent screens share the
+ * single in-flight read. An announce publishes its own commanded levels, so
+ * skip it while one is armed: a sample taken mid-shout would cache the boost
+ * as the room's level.
+ */
+export async function seedGroupVolumeForDisplay() {
+  if (cachedGroupVolume != null) return cachedGroupVolume;
+  if (isDjVolumeHandoffActive() || isDjVolumeHandoffArmed()) return null;
+  if (Date.now() < seedNextAttemptAt) return null;
+  if (!seedRead) {
+    seedRead = getGroupVolume()
+      .catch(() => null)
+      .finally(() => {
+        seedNextAttemptAt = Date.now() + seedRetryMs;
+        seedRead = null;
+      });
+  }
+  return seedRead;
 }
 
 /**
@@ -90,8 +137,8 @@ export function resolveVolumeForDisplay({ handoff = null, cached = null } = {}) 
 }
 
 /**
- * GET /api/volume. Memory only — a wide screen must not trigger GetVolume
- * just to keep a label fresh. Unknown until the first real change.
+ * GET /api/volume. Memory only — the level is whatever PartyQueue last set or
+ * seeded, never a fresh Sonos read.
  */
 export function volumeGetPayload(handoff = null) {
   const fromMemory = resolveVolumeForDisplay({

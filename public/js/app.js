@@ -3567,9 +3567,10 @@ async function pollNpVolume() {
     const res = await fetch("/api/volume");
     if (!res.ok) return;
     const data = await res.json();
-    if (!data?.ok) return;
-    // volume: null leaves the label blank until a real change.
-    noteDisplayedVolume(data.volume, !!data.ramping);
+    // A sample with no level yet must not blank a label we already painted.
+    if (data?.ok && data.volume != null) {
+      noteDisplayedVolume(data.volume, !!data.ramping);
+    }
   } catch {
     /* keep the last painted value */
   } finally {
@@ -3598,6 +3599,16 @@ function syncVolumeWatchToNowPlaying(np) {
   volumeWatchSawDj = dj;
   if (starting) startNpVolumeWatch();
 }
+
+desktopVolumeMq?.addEventListener?.("change", (event) => {
+  if (event.matches) startNpVolumeWatch();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && desktopVolumeMq?.matches) {
+    void pollNpVolume();
+  }
+});
+if (!desktopVolumeMq || desktopVolumeMq.matches) startNpVolumeWatch();
 
 volDownBtn.addEventListener("click", () => {
   postControl(volDownBtn, "/api/volume/down", (d) => {
