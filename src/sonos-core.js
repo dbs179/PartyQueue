@@ -4,8 +4,9 @@ import {
   noteSonosReadSuccess,
   noteSonosReadFailure,
   clearSonosUnhealthy,
+  getSonosManagerHealth,
 } from "./sonos-manager-health.js";
-import { pickGroupByTarget } from "./sonos-queue-policy.js";
+import { formatZoneTopology, pickGroupByTarget } from "./sonos-queue-policy.js";
 import { getSonosTargetRoom } from "./settings.js";
 import { getSonosHost } from "./sonos-config.js";
 import {
@@ -41,6 +42,17 @@ const ZONE_DEVICE_TIMEOUT_MS = envTimeoutMs(
   4_000
 );
 const ZONE_DEVICE_FAILOVER_LIMIT = 3;
+/**
+ * Safety-net re-read of household groups. Event-driven refreshes (group
+ * edits, 701/711/800) stay primary. This is intentionally infrequent.
+ */
+export const SONOS_TOPOLOGY_REFRESH_MS = 5 * 60_000;
+/**
+ * Skip the safety-net read when ordinary Sonos traffic (now playing, queue,
+ * transport) succeeded this recently. The per-speaker health probe is not
+ * this clock.
+ */
+export const SONOS_TOPOLOGY_REFRESH_IDLE_MS = 60_000;
 
 /**
  * Household topology XML is the same on every speaker. Probe the configured
@@ -232,7 +244,18 @@ export async function getManager() {
 }
 
 let zoneCache = { at: 0, groups: null };
+/**
+ * The one topology SOAP chain on the wire, if any.
+ * @type {null | {
+ *   promise: Promise<unknown>,
+ *   startedGeneration: number,
+ *   ok: boolean,
+ *   completedGeneration: number,
+ *   error: unknown,
+ * }}
+ */
 let zoneInFlight = null;
+/** Bumped by clearZoneCache(). A read may fill the cache only for the generation it started in. */
 let zoneGeneration = 0;
 
 /** Cool-off between device-list rebuilds triggered by topology drift. */
@@ -347,29 +370,32 @@ async function getZoneGroupStateFromHousehold(m, probePrefs = {}) {
   throw lastErr || new Error("Sonos topology query failed.");
 }
 
-export async function getZoneGroups(
-  m,
-  { fresh = false, preferHost, preferRoom } = {}
-) {
-  // Hold the last good map until clearZoneCache(). Now-playing used to expire
-  // this every 2s and ask a speaker again; the house only changes when we
-  // group, ungroup, or retarget — and those paths already drop the cache.
-  if (!fresh && zoneCache.groups) {
-    return zoneCache.groups;
-  }
-  // Collapse concurrent topology reads (many phones + DJ watch + autofill).
-  // Do not join an in-flight read when the caller asked for fresh — join/leave
-  // may have just cleared the cache, and a pre-mutation request must not win.
-  if (zoneInFlight && !fresh) return zoneInFlight;
-  const readGeneration = zoneGeneration;
-  const request = (async () => {
+/**
+ * Start the single household topology read. The flight is published before
+ * the SOAP call can yield, so a second caller cannot start another chain.
+ * @param {object} m
+ * @param {{ preferHost?: string, preferRoom?: string, quietFailure?: boolean, onKeptCache?: ((err: unknown) => void) | null }} opts
+ * @param {number} startedGeneration
+ */
+function startTopologyRead(m, opts, startedGeneration) {
+  const flight = {
+    startedGeneration,
+    ok: false,
+    completedGeneration: startedGeneration,
+    error: null,
+    promise: /** @type {Promise<unknown>} */ (Promise.resolve()),
+  };
+  zoneInFlight = flight;
+  flight.promise = (async () => {
     try {
       const groups = await getZoneGroupStateFromHousehold(m, {
-        preferHost,
-        preferRoom,
+        preferHost: opts.preferHost,
+        preferRoom: opts.preferRoom,
       });
+      flight.completedGeneration = zoneGeneration;
+      flight.ok = true;
       // clearZoneCache() bumps generation; never let a superseded read refill.
-      if (readGeneration === zoneGeneration) {
+      if (startedGeneration === zoneGeneration) {
         zoneCache = { at: Date.now(), groups };
       }
       // Safe to drop the manager here: this read's caller keeps using the
@@ -377,21 +403,112 @@ export async function getZoneGroups(
       noteTopologyDeviceDrift(m, groups);
       return groups;
     } catch (err) {
+      flight.ok = false;
+      flight.error = err;
+      flight.completedGeneration = zoneGeneration;
       // A failed refresh is not "we have no house." Keep the last map so
       // now-playing does not walk the failover list on a timer.
       if (zoneCache.groups) {
-        console.warn(
-          `[sonos] topology refresh failed (${err?.message || err}); keeping last group map`
-        );
+        if (typeof opts.onKeptCache === "function") opts.onKeptCache(err);
+        if (!opts.quietFailure) {
+          console.warn(
+            `[sonos] topology refresh failed (${err?.message || err}); keeping last group map`
+          );
+        }
         return zoneCache.groups;
       }
       throw err;
     } finally {
-      if (zoneInFlight === request) zoneInFlight = null;
+      if (zoneInFlight === flight) zoneInFlight = null;
     }
   })();
-  zoneInFlight = request;
-  return request;
+  return flight;
+}
+
+/**
+ * @param {{ promise: Promise<unknown> }} flight
+ */
+async function settleTopologyFlight(flight) {
+  try {
+    return { groups: await flight.promise, error: null };
+  } catch (error) {
+    return { groups: undefined, error };
+  }
+}
+
+/**
+ * A finished read is usable when it started in the generation the caller
+ * needs and nothing invalidated the cache before it completed.
+ * @param {{ ok: boolean, startedGeneration: number, completedGeneration: number }} flight
+ * @param {number} requiredGeneration
+ */
+function topologyFlightUsable(flight, requiredGeneration) {
+  return (
+    flight.ok &&
+    flight.completedGeneration === flight.startedGeneration &&
+    flight.startedGeneration >= requiredGeneration
+  );
+}
+
+/**
+ * @param {object} m
+ * @param {{ fresh?: boolean, preferHost?: string, preferRoom?: string, quietFailure?: boolean, onKeptCache?: ((err: unknown) => void) | null }} opts
+ * @param {boolean} followedUp true after this caller already took its one post-stale read
+ */
+async function acquireTopology(m, opts, followedUp) {
+  const required = zoneGeneration;
+  let flight = zoneInFlight;
+  let startedHere = false;
+
+  // The active chain started before this caller was invalidated. Let it
+  // finish, then share exactly one newer read. Do not open a second chain.
+  if (flight && flight.startedGeneration < required) {
+    await settleTopologyFlight(flight);
+    if (followedUp) {
+      if (zoneCache.groups) return zoneCache.groups;
+      if (flight.error) throw flight.error;
+      throw new Error("Sonos topology query failed.");
+    }
+    return acquireTopology(m, opts, true);
+  }
+
+  if (!flight) {
+    flight = startTopologyRead(m, opts, zoneGeneration);
+    startedHere = true;
+  }
+
+  const settled = await settleTopologyFlight(flight);
+  if (topologyFlightUsable(flight, required)) return settled.groups;
+
+  // The caller that opened this chain does not retry itself. A fresh waiter,
+  // or anyone who still needs a post-invalidation map, gets one follow-up.
+  const needsFollowUp = !!opts.fresh || flight.startedGeneration < required;
+  if (startedHere || followedUp || !needsFollowUp) {
+    if (settled.error && !zoneCache.groups) throw settled.error;
+    return settled.groups;
+  }
+  return acquireTopology(m, opts, true);
+}
+
+export async function getZoneGroups(
+  m,
+  {
+    fresh = false,
+    preferHost,
+    preferRoom,
+    quietFailure = false,
+    onKeptCache = null,
+  } = {}
+) {
+  // Hold the last good map until clearZoneCache() or a successful fresh read.
+  // Now-playing must not poll topology. External regroups are caught by the
+  // infrequent safety-net refresh, not by expiring this cache on a timer.
+  if (!fresh && zoneCache.groups) return zoneCache.groups;
+  return acquireTopology(
+    m,
+    { fresh, preferHost, preferRoom, quietFailure, onKeptCache },
+    false
+  );
 }
 
 // Map a topology member (uuid/host) back to a managed SonosDevice instance.
@@ -503,9 +620,9 @@ export function isTransportRefusalError(err) {
 export function clearZoneCache() {
   zoneGeneration += 1;
   zoneCache = { at: 0, groups: null };
-  // Drop coalescing so the next reader starts a post-mutation SOAP query
-  // instead of awaiting a topology snapshot taken before join/leave/ungroup.
-  zoneInFlight = null;
+  // Keep zoneInFlight. The SOAP call is still on the wire; forgetting it
+  // here is what used to let a second GetZoneGroupState start. The generation
+  // bump is what stops this read from refilling the cache.
 }
 
 /** Test helper — zone cache bookkeeping after clearZoneCache. */
@@ -525,4 +642,182 @@ export function setZoneCacheAgeForTests(ageMs) {
     ...zoneCache,
     at: Date.now() - Math.max(0, Number(ageMs) || 0),
   };
+}
+
+/** @type {ReturnType<typeof setInterval> | null} */
+let topologyTimer = null;
+/** @type {object | null} */
+let topologyRefreshManager = null;
+/** @type {(id: unknown) => void} */
+let clearTopologyTimer = clearInterval;
+/** Epoch ms. 0 until a periodic cycle actually starts a read. */
+let lastTopologyRefreshAttempt = 0;
+/** Epoch ms. 0 until a periodic read successfully commits the cache. */
+let lastSuccessfulTopologyRefresh = 0;
+let topologyFailureStreak = false;
+let topologyFailureMessage = "";
+/** @type {(line: string) => void} */
+let logTopologyInfo = (line) => console.info(line);
+/** @type {(line: string) => void} */
+let logTopologyWarn = (line) => console.warn(line);
+
+/**
+ * Order-independent identity. Member order and object identity are not a
+ * regroup. Coordinator, membership, and which groups exist are.
+ * @param {unknown} groups
+ */
+function topologyFingerprint(groups) {
+  if (!Array.isArray(groups)) return "";
+  const idOf = (member) => String(member?.uuid || member?.host || member?.name || "");
+  return groups
+    .map((group) => {
+      const members = Array.isArray(group?.members)
+        ? group.members.map(idOf).filter(Boolean).sort()
+        : [];
+      return `${idOf(group?.coordinator)}[${members.join(",")}]`;
+    })
+    .sort()
+    .join("|");
+}
+
+/**
+ * Ordinary party traffic, not the health probe. lastSuccessAt is stamped by
+ * now-playing, queue, and transport reads.
+ * @param {number} [now]
+ */
+export function sonosTopologyRefreshWouldSkip(now = Date.now()) {
+  const last = getSonosManagerHealth().lastSuccessAt || 0;
+  if (!last) return false;
+  return now - last < SONOS_TOPOLOGY_REFRESH_IDLE_MS;
+}
+
+function notePeriodicTopologyFailure(err) {
+  const message = String(err?.message || err || "topology refresh failed");
+  if (topologyFailureStreak && message === topologyFailureMessage) return;
+  topologyFailureStreak = true;
+  topologyFailureMessage = message;
+  const kept = zoneCache.groups ? "; keeping last group map" : "";
+  logTopologyWarn(`[sonos] topology refresh failed (${message})${kept}`);
+}
+
+/**
+ * One safety-net re-read. Shares zoneInFlight with every other topology read:
+ * if one is already running, this cycle skips and does not queue.
+ * Does not discover, regroup, or clear a good cache.
+ * @param {{ manager?: object, now?: number }} [opts]
+ */
+export async function refreshCachedZoneTopology(opts = {}) {
+  if (zoneInFlight) return { skipped: "overlap" };
+  const m = opts.manager || manager;
+  if (!m) return { skipped: "not-ready" };
+  const now = opts.now || Date.now();
+  if (sonosTopologyRefreshWouldSkip(now)) return { skipped: "recent-activity" };
+  // zoneInFlight is set synchronously inside getZoneGroups, before this
+  // function awaits, so a second cycle cannot start a stacked read.
+  lastTopologyRefreshAttempt = now;
+  const beforeGroups = zoneCache.groups;
+  const beforeFp = topologyFingerprint(beforeGroups);
+  const genBefore = zoneGeneration;
+  let keptErr = null;
+  try {
+    await getZoneGroups(m, {
+      fresh: true,
+      quietFailure: true,
+      onKeptCache(err) {
+        keptErr = err;
+      },
+    });
+  } catch (err) {
+    notePeriodicTopologyFailure(err);
+    return { ok: false, preserved: !!zoneCache.groups, changed: false };
+  }
+  if (keptErr) {
+    notePeriodicTopologyFailure(keptErr);
+    return { ok: false, preserved: true, changed: false };
+  }
+  if (zoneGeneration !== genBefore) {
+    return { ok: true, superseded: true, changed: false };
+  }
+  lastSuccessfulTopologyRefresh = zoneCache.at || now;
+  topologyFailureStreak = false;
+  topologyFailureMessage = "";
+  const changed = !!beforeGroups && beforeFp !== topologyFingerprint(zoneCache.groups);
+  if (changed) {
+    logTopologyInfo(
+      `[sonos] topology changed: ${formatZoneTopology(beforeGroups)} -> ${formatZoneTopology(zoneCache.groups)}`
+    );
+  }
+  return { ok: true, changed, preserved: false };
+}
+
+/**
+ * Arm the safety-net timer. A second call does not add another timer.
+ * Ticks do nothing until a Sonos manager already exists, and they do not
+ * start discovery. The first read waits one full interval.
+ * @param {{
+ *   setInterval?: typeof setInterval,
+ *   clearInterval?: typeof clearInterval,
+ *   intervalMs?: number,
+ *   manager?: object,
+ *   now?: () => number,
+ * }} [deps]
+ * @returns {boolean} true when this call armed the timer
+ */
+export function startPeriodicZoneTopologyRefresh(deps = {}) {
+  if (topologyTimer) return false;
+  clearTopologyTimer = deps.clearInterval || clearInterval;
+  topologyRefreshManager = deps.manager || null;
+  const setInt = deps.setInterval || setInterval;
+  const ms = deps.intervalMs || SONOS_TOPOLOGY_REFRESH_MS;
+  topologyTimer = setInt(() => {
+    if (zoneInFlight) return;
+    const tickOpts = {};
+    if (topologyRefreshManager) tickOpts.manager = topologyRefreshManager;
+    if (typeof deps.now === "function") tickOpts.now = deps.now();
+    void refreshCachedZoneTopology(tickOpts).catch(() => {
+      /* a refresh must not take the process down */
+    });
+  }, ms);
+  topologyTimer.unref?.();
+  return true;
+}
+
+export function stopPeriodicZoneTopologyRefresh() {
+  if (topologyTimer) {
+    try {
+      clearTopologyTimer(topologyTimer);
+    } catch {
+      /* a test double is not a real timer */
+    }
+  }
+  topologyTimer = null;
+  topologyRefreshManager = null;
+  clearTopologyTimer = clearInterval;
+}
+
+export function zoneTopologyRefreshInfo() {
+  return {
+    lastTopologyRefreshAttempt,
+    lastSuccessfulTopologyRefresh,
+    armed: !!topologyTimer,
+    inFlight: !!zoneInFlight,
+  };
+}
+
+/**
+ * @param {{ info?: (line: string) => void, warn?: (line: string) => void }} [fns]
+ */
+export function setZoneTopologyLoggerForTests(fns = {}) {
+  logTopologyInfo = typeof fns.info === "function" ? fns.info : (line) => console.info(line);
+  logTopologyWarn = typeof fns.warn === "function" ? fns.warn : (line) => console.warn(line);
+}
+
+export function resetZoneTopologyRefreshForTests() {
+  stopPeriodicZoneTopologyRefresh();
+  lastTopologyRefreshAttempt = 0;
+  lastSuccessfulTopologyRefresh = 0;
+  topologyFailureStreak = false;
+  topologyFailureMessage = "";
+  logTopologyInfo = (line) => console.info(line);
+  logTopologyWarn = (line) => console.warn(line);
 }

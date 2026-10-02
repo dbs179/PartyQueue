@@ -96,6 +96,8 @@ describe("HTTP server harness", { concurrency: false }, () => {
     assert.equal(typeof body.diagnostics.spotify.configured, "boolean");
     assert.equal(typeof body.diagnostics.spotify.userConnected, "boolean");
     assert.equal(typeof body.diagnostics.sonos.status, "string");
+    assert.equal(typeof body.diagnostics.sonos.lastTopologyRefreshAttempt, "number");
+    assert.equal(typeof body.diagnostics.sonos.lastSuccessfulTopologyRefresh, "number");
     assert.ok(Array.isArray(body.diagnostics.sonos.speakers));
     assert.ok(
       body.diagnostics.queue.upcoming === null ||

@@ -135,7 +135,7 @@ test("a failed refresh returns the previous groups", async () => {
   assert.equal(zoneCacheInfoForTests().hasCache, true);
 });
 
-test("clearZoneCache drops in-flight coalescing and bumps generation", async () => {
+test("clearZoneCache keeps the in-flight read and bumps generation", async () => {
   clearZoneCache();
   const before = zoneCacheInfoForTests().generation;
   const m = mockManager([[{ label: "stale" }], [{ label: "fresh" }]]);
@@ -143,7 +143,7 @@ test("clearZoneCache drops in-flight coalescing and bumps generation", async () 
   const pending = getZoneGroups(m);
   clearZoneCache();
   const afterClear = zoneCacheInfoForTests();
-  assert.equal(afterClear.hasInFlight, false);
+  assert.equal(afterClear.hasInFlight, true);
   assert.ok(afterClear.generation > before);
 
   const stale = await pending;

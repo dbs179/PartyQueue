@@ -31,7 +31,9 @@ import { noteFailure } from "./failure-log.js";
 import {
   closeSonosManager,
   startManagedSonosSpeakerHealthMonitor,
+  startPeriodicZoneTopologyRefresh,
   stopManagedSonosSpeakerHealthMonitor,
+  stopPeriodicZoneTopologyRefresh,
 } from "./sonos-core.js";
 import { registerApiRoutes } from "./routes/index.js";
 import {
@@ -617,6 +619,7 @@ function runListenStartup({ seed = true, warm = true } = {}) {
     initAutoFill();
     initQueueMaintenance();
     startManagedSonosSpeakerHealthMonitor();
+    startPeriodicZoneTopologyRefresh();
     if (asyncAddsEnabled()) {
       initAddDrainer();
       console.log("[queue] write-behind guest adds enabled");
@@ -700,6 +703,7 @@ export async function shutdownServer({
 
   stopGenreWarm();
   stopManagedSonosSpeakerHealthMonitor();
+  stopPeriodicZoneTopologyRefresh();
   closeNowPlayingStreams();
   closeQueueStreams();
   closePartySettingsStreams();

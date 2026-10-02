@@ -4,7 +4,7 @@
 
 import { recentFailures, lastSuccessFor } from "./failure-log.js";
 import { getSonosManagerHealth } from "./sonos-manager-health.js";
-import { listManagedSonosDevices } from "./sonos-core.js";
+import { listManagedSonosDevices, zoneTopologyRefreshInfo } from "./sonos-core.js";
 import {
   listSpeakerHealth,
   observeKnownSpeakers,
@@ -76,6 +76,9 @@ export function collectPartyDiagnostics() {
       lastSuccessAt: sonosHealth.lastSuccessAt || 0,
       unhealthySince: sonosHealth.unhealthySince || 0,
       lastResetAt: sonosHealth.lastResetAt || 0,
+      lastTopologyRefreshAttempt: zoneTopologyRefreshInfo().lastTopologyRefreshAttempt || 0,
+      lastSuccessfulTopologyRefresh:
+        zoneTopologyRefreshInfo().lastSuccessfulTopologyRefresh || 0,
       speakers: sonosSpeakerHealth(),
     },
     queue: {
