@@ -4,7 +4,7 @@ import {
   setDjVolumeHandoffArmed,
 } from "./dj-volume-handoff-state.js";
 import { handoffWatchSleepMs } from "./dj-volume-handoff.js";
-import { noteGroupVolume } from "./sonos-volume.js";
+import { noteGroupVolume, volumeGetPayload } from "./sonos-volume.js";
 import {
   flushSpeakerVolumeEpoch,
   publishSpeakerVolume,
@@ -24,6 +24,12 @@ let announceVolumeGeneration = 0;
 let lastMusicBaseline = null;
 /** Play/Skip just started the clip — poll at 150ms so the opening pad is seen. */
 let announcePlaybackImminent = false;
+/**
+ * Commanded level for the volume indicator. Updated when a target is
+ * published, not when a speaker answers. `epoch` keeps a finished announcement
+ * from clearing a newer one.
+ */
+let announceDisplay = null;
 
 export function markAnnouncePlaybackImminent() {
   announcePlaybackImminent = true;
@@ -58,7 +64,21 @@ export function resetAnnounceVolumeForTests() {
   announceVolumeGeneration = 0;
   lastMusicBaseline = null;
   announcePlaybackImminent = false;
+  announceDisplay = null;
   resetSpeakerVolumeForTests();
+}
+
+/** Handoff-shaped display state while this announcement owns the indicator. */
+export function getAnnounceVolumeDisplayState() {
+  return announceDisplay;
+}
+
+/**
+ * GET /api/volume. The baked announcement's commanded level wins over the
+ * idle multi-row handoff snapshot. No Sonos read.
+ */
+export function announceVolumePayload(fallbackHandoff = null) {
+  return volumeGetPayload(announceDisplay || fallbackHandoff);
 }
 
 /** Phases of a baked announce, by position within the clip. */
@@ -305,6 +325,15 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
     if (published === next) return;
     published = next;
     noteGroupVolume(next);
+    announceDisplay = {
+      epoch: generation,
+      phase:
+        musicVolume != null && next === musicVolume
+          ? "ramping-down"
+          : "ramping-up",
+      volumeLocked: true,
+      currentVolume: next,
+    };
     const appliedAt = clock();
     if (announceVolume != null && next === announceVolume) {
       if (!timeline.rampUpStartAt) timeline.rampUpStartAt = appliedAt;
@@ -462,6 +491,7 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
         `[dj-volume] could not finish speaker volume: ${err?.message || err}`
       );
     } finally {
+      if (announceDisplay?.epoch === generation) announceDisplay = null;
       if (owns()) {
         announceVolumeRunning = false;
         announcePlaybackImminent = false;

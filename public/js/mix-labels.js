@@ -38,9 +38,14 @@ export function formatVolumeHeaderText(volume) {
   return `Volume: ${Math.max(0, Math.min(100, n))}`;
 }
 
-/** Fast while the DJ is ramping. Idle screens do not poll. */
-export function volumePollMs(ramping) {
-  return ramping ? 250 : 0;
+/**
+ * Fast while a DJ ramp is on screen, or while the announce clip itself is.
+ * The first /api/volume sample can land before the announce target is
+ * published; staying on 250ms through the clip catches that publish.
+ * Idle screens do not poll.
+ */
+export function volumePollMs(ramping, announceOnScreen = false) {
+  return ramping || announceOnScreen ? 250 : 0;
 }
 
 /**

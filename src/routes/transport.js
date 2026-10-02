@@ -6,6 +6,7 @@
 import { asyncHandler } from "../http/async-handler.js";
 import { requireHostControls } from "../http/host-controls.js";
 import { isDjVolumeHandoffActive, getDjVolumeHandoffState } from "../dj-volume-handoff.js";
+import { announceVolumePayload } from "../dj-announce-volume.js";
 import { nudgeAutoFill } from "../autofill.js";
 import {
   groupAll,
@@ -23,7 +24,6 @@ import {
   toggleShuffle,
   volumeDown,
   volumeUp,
-  volumeGetPayload,
   invalidateSonosSnapshots,
 } from "../sonos.js";
 import { setSonosPlayerType } from "../settings.js";
@@ -201,7 +201,7 @@ export function registerTransportRoutes(app, ctx) {
   // just to keep a label fresh. The first up/down after startup learns the
   // level; until then the header stays blank.
   app.get("/api/volume", asyncHandler(async (_req, res) => {
-    res.json(volumeGetPayload(getDjVolumeHandoffState()));
+    res.json(announceVolumePayload(getDjVolumeHandoffState()));
   }));
 
   app.post("/api/group-all", destructiveLimit, requireHostControls, blockVolumeDuringDj, asyncHandler(async (_req, res) => {

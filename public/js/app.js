@@ -3580,7 +3580,7 @@ async function pollNpVolume() {
 function scheduleNpVolumeWatch() {
   if (volumeWatchTimer) clearTimeout(volumeWatchTimer);
   volumeWatchTimer = null;
-  const wait = volumePollMs(volumeWatchRamping);
+  const wait = volumePollMs(volumeWatchRamping, volumeWatchSawDj);
   if (!wait) return;
   volumeWatchTimer = setTimeout(() => {
     void pollNpVolume().finally(() => scheduleNpVolumeWatch());
@@ -3594,8 +3594,9 @@ function startNpVolumeWatch() {
 let volumeWatchSawDj = false;
 function syncVolumeWatchToNowPlaying(np) {
   const dj = !!np?.djVoice;
-  if (dj && !volumeWatchSawDj) startNpVolumeWatch();
+  const starting = dj && !volumeWatchSawDj;
   volumeWatchSawDj = dj;
+  if (starting) startNpVolumeWatch();
 }
 
 volDownBtn.addEventListener("click", () => {
