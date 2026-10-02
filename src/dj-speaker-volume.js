@@ -26,6 +26,13 @@ export const SPEAKER_VOLUME_CLEANUP_MS = 4_500;
 const lanes = new Map();
 
 /**
+ * Read-only record of a level's write outcome for one announcement epoch.
+ * Does not affect lane scheduling or retry.
+ * @type {Array<{ epoch: number, level: number, timedOut: boolean, timeoutAt: number|null, retryStartedAt: number|null, retryFinishedAt: number|null }>}
+ */
+const writeNotes = [];
+
+/**
  * @typedef {{
  *   key: string,
  *   speaker: object,
@@ -145,6 +152,29 @@ function writeResultLabel(err) {
   return "failure";
 }
 
+function noteSpeakerWrite(epoch, level, patch, { onlyIfTimedOut = false } = {}) {
+  const e = Number(epoch) || 0;
+  const lv = Number(level);
+  if (!e || !Number.isFinite(lv)) return;
+  let row = writeNotes.find((item) => item.epoch === e && item.level === lv);
+  if (!row) {
+    if (onlyIfTimedOut) return;
+    row = {
+      epoch: e,
+      level: lv,
+      timedOut: false,
+      timeoutAt: null,
+      retryStartedAt: null,
+      retryFinishedAt: null,
+    };
+    writeNotes.push(row);
+    if (writeNotes.length > 32) writeNotes.shift();
+  }
+  if (onlyIfTimedOut && !row.timedOut) return;
+  if (patch.retryFinishedAt != null && row.retryFinishedAt != null) return;
+  Object.assign(row, patch);
+}
+
 function kick(lane) {
   if (lane.inFlight || !needsSend(lane)) return;
   const level = lane.desired;
@@ -152,6 +182,7 @@ function kick(lane) {
   lane.inFlight = true;
   lane.inFlightLevel = level;
   lane.inFlightEpoch = epoch;
+  const startingFollowUp = lane.pendingFollowUp;
   if (lane.pendingFollowUp) {
     lane.pendingFollowUp = false;
     lane.followUpSpentFor = level;
@@ -159,6 +190,9 @@ function kick(lane) {
   if (lane.forceOnce) lane.forceOnce = false;
   lane.lastAttemptedLevel = level;
   const started = Date.now();
+  if (startingFollowUp) {
+    noteSpeakerWrite(epoch, level, { retryStartedAt: started });
+  }
   console.info(
     `[dj-volume] speaker-write speaker=${speakerLogName(lane)} epoch=${epoch} ` +
       `level=${level} start=${diagnosticIso(started)}`
@@ -185,6 +219,19 @@ function settle(lane, result) {
       `finish=${diagnosticIso(finished)} ` +
       `result=${result.ok ? "success" : writeResultLabel(result.err)}${replaced}`
   );
+  if (!result.ok && writeResultLabel(result.err) === "timeout") {
+    noteSpeakerWrite(result.epoch, result.level, {
+      timedOut: true,
+      timeoutAt: finished,
+    });
+  } else if (result.ok) {
+    noteSpeakerWrite(
+      result.epoch,
+      result.level,
+      { retryFinishedAt: finished },
+      { onlyIfTimedOut: true }
+    );
+  }
   const commFailure = !result.ok && isSonosUnreachableError(result.err);
   if (result.ok) {
     lane.lastResolvedLevel = result.level;
@@ -363,6 +410,33 @@ export function speakerVolumeLaneForTests(speaker) {
   return { ...lane };
 }
 
+/**
+ * Whether the music-level write for this epoch timed out, and when its retry
+ * finished. Reads the notes taken while settling; does not call Sonos.
+ * @param {number} epoch
+ * @param {number} level
+ */
+export function speakerVolumeLevelDiagnostic(epoch, level) {
+  const e = Number(epoch) || 0;
+  const lv = Number(level);
+  const row = writeNotes.find((item) => item.epoch === e && item.level === lv);
+  if (!row) {
+    return {
+      timedOut: false,
+      timeoutAt: null,
+      retryStartedAt: null,
+      retryFinishedAt: null,
+    };
+  }
+  return {
+    timedOut: !!row.timedOut,
+    timeoutAt: row.timeoutAt,
+    retryStartedAt: row.retryStartedAt,
+    retryFinishedAt: row.retryFinishedAt,
+  };
+}
+
 export function resetSpeakerVolumeForTests() {
   lanes.clear();
+  writeNotes.length = 0;
 }

@@ -7,6 +7,7 @@ import {
   lastAnnounceMusicBaseline,
   resetAnnounceVolumeForTests,
   resolveAnnounceClipDuration,
+  observePostDriverTransport,
   runAnnounceVolume,
   uriMatchesClip,
   ANNOUNCE_PHASE,
@@ -1341,4 +1342,279 @@ test("a resumed frozen playhead is labeled rebased", () => {
   );
   assert.equal(resumed.source, "rebased");
   assert.ok(Math.abs(resumed.positionSec - 8) < 0.05);
+});
+
+const WATCH_AT = Date.parse("2026-10-02T16:02:52.503Z");
+const SPOTIFY = "x-sonos-spotify:spotify%3atrack%3a1raAR3au3OUh2f2F00Plil";
+
+function clipSample(rel, state, dur = 22, track = 1) {
+  return {
+    uri: CLIP,
+    state,
+    positionSec: rel,
+    durationSec: dur,
+    queueTrack: track,
+  };
+}
+
+function postDriverHarness(samples, { maxMs = 1_500, pollMs = 500, stillCurrent } = {}) {
+  const lines = [];
+  const commands = [];
+  let clock = WATCH_AT;
+  let index = 0;
+  const transport = {
+    play: async () => commands.push("play"),
+    pause: async () => commands.push("pause"),
+    next: async () => commands.push("next"),
+    previous: async () => commands.push("previous"),
+    seek: async () => commands.push("seek"),
+    stop: async () => commands.push("stop"),
+    switchToQueue: async () => commands.push("switch"),
+  };
+  return {
+    lines,
+    commands,
+    transport,
+    reads: () => index,
+    run(extra = {}) {
+      return observePostDriverTransport({
+        clipUrl: CLIP,
+        epoch: 7,
+        driverReturnedAt: WATCH_AT,
+        musicLevel: 8,
+        maxMs,
+        pollMs,
+        now: () => clock,
+        sleep: async (ms) => {
+          clock += ms;
+        },
+        stillCurrent: stillCurrent || (() => true),
+        read: async () => samples[Math.min(index++, samples.length - 1)],
+        logger: { info: (line) => lines.push(String(line)) },
+        ...transport,
+        ...extra,
+      });
+    },
+  };
+}
+
+test("watcher keeps reading after the volume driver returns complete", async () => {
+  const volumes = [];
+  let i = 0;
+  const steps = [
+    clipSample(0, "PLAYING", 24),
+    clipSample(3, "PLAYING", 24),
+    clipSample(22, "PLAYING", 24),
+  ];
+  let t = 0;
+  const io = {
+    now: () => (t += 100),
+    read: async () => steps[Math.min(i, steps.length - 1)],
+    setVolume: async (v) => volumes.push(v),
+    sleep: async () => {
+      i += 1;
+    },
+  };
+  const result = await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+    graceMs: 20_000,
+    logger: { debug() {}, info() {}, warn() {}, error() {} },
+  });
+  assert.equal(result.reason, "complete");
+  assert.equal(typeof result.generation, "number");
+  assert.equal(volumes.at(-1), 8);
+  const lines = [];
+  let clock = WATCH_AT;
+  let reads = 0;
+  const watched = await observePostDriverTransport({
+    clipUrl: CLIP,
+    epoch: result.generation,
+    driverReturnedAt: WATCH_AT,
+    musicLevel: 8,
+    maxMs: 30_000,
+    pollMs: 500,
+    now: () => clock,
+    sleep: async (ms) => {
+      clock += ms;
+      if (reads >= 2) clock += 30_000;
+    },
+    stillCurrent: () => true,
+    read: async () => {
+      reads += 1;
+      return clipSample(21, "PLAYING", 24);
+    },
+    logger: { info: (line) => lines.push(String(line)) },
+  });
+  assert.ok(reads >= 2);
+  assert.equal(watched.reason, "timeout");
+  assert.match(lines.join("\n"), /post-driver sample/);
+  assert.match(lines.join("\n"), /firstState=PLAYING/);
+});
+
+test("same DJ URI staying PLAYING is logged and issues no command", async () => {
+  const harness = postDriverHarness([
+    clipSample(19, "PLAYING"),
+    clipSample(20, "PLAYING"),
+    clipSample(21, "PLAYING"),
+  ]);
+  const watched = await harness.run();
+  assert.equal(watched.reason, "timeout");
+  assert.ok(harness.lines.some((line) => /state=PLAYING/.test(line)));
+  assert.equal(
+    harness.lines.some((line) => line.includes("post-driver transition")),
+    false
+  );
+  assert.deepEqual(harness.commands, []);
+});
+
+test("PLAYING to STOPPED at the start of the same DJ URI is a distinct transition", async () => {
+  const harness = postDriverHarness(
+    [clipSample(19, "PLAYING"), clipSample(0, "STOPPED")],
+    { maxMs: 1_200 }
+  );
+  const watched = await harness.run();
+  assert.equal(watched.reason, "timeout");
+  const transition = harness.lines.find((line) =>
+    line.includes("post-driver transition")
+  );
+  assert.match(transition, /PLAYING -> STOPPED/);
+  assert.match(transition, /signature=stopped-at-start/);
+  assert.match(transition, /sameClip=1/);
+  assert.match(transition, /relReset=1/);
+  assert.deepEqual(harness.commands, []);
+});
+
+test("a URI change to Spotify is recorded and the watcher stops", async () => {
+  const harness = postDriverHarness(
+    [
+      clipSample(21, "PLAYING"),
+      {
+        uri: SPOTIFY,
+        state: "PLAYING",
+        positionSec: 1,
+        durationSec: 188,
+        queueTrack: 2,
+      },
+    ],
+    { maxMs: 30_000 }
+  );
+  const watched = await harness.run();
+  assert.equal(watched.reason, "uri-changed");
+  assert.equal(harness.reads(), 2);
+  const joined = harness.lines.join("\n");
+  assert.match(joined, /uriChanged=1/);
+  assert.match(joined, new RegExp(SPOTIFY.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(joined, /reason=uri-changed/);
+  assert.match(joined, /uriChangeAt=/);
+  assert.deepEqual(harness.commands, []);
+});
+
+test("the watcher stops at 30 seconds without recovery", async () => {
+  const harness = postDriverHarness(
+    [clipSample(19, "PLAYING")],
+    { maxMs: 30_000, pollMs: 10_000 }
+  );
+  const watched = await harness.run();
+  assert.equal(watched.reason, "timeout");
+  assert.equal(harness.reads(), 3);
+  assert.deepEqual(harness.commands, []);
+  assert.match(harness.lines.at(-1), /reason=timeout/);
+});
+
+test("a superseded announcement stops the old watcher", async () => {
+  let current = true;
+  const harness = postDriverHarness(
+    [clipSample(19, "PLAYING")],
+    {
+      maxMs: 30_000,
+      stillCurrent: () => current,
+    }
+  );
+  const watched = await harness.run({
+    read: async () => {
+      current = false;
+      return clipSample(19, "PLAYING");
+    },
+  });
+  assert.equal(watched.reason, "superseded");
+  assert.equal(
+    harness.lines.some((line) => line.includes("post-driver sample")),
+    false
+  );
+  assert.match(harness.lines.at(-1), /reason=superseded/);
+  assert.deepEqual(harness.commands, []);
+});
+
+test("post-driver diagnostics add no transport command", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const volumeSrc = fs.readFileSync(
+    path.join(here, "..", "src", "dj-announce-volume.js"),
+    "utf8"
+  );
+  const voiceSrc = fs.readFileSync(
+    path.join(here, "..", "src", "dj-voice.js"),
+    "utf8"
+  );
+  const start = volumeSrc.indexOf("export async function observePostDriverTransport");
+  const end = volumeSrc.indexOf("export function uriMatchesClip");
+  const watcher = volumeSrc.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  for (const word of [
+    ".Play",
+    ".Pause",
+    ".Next",
+    ".Previous",
+    ".Seek",
+    ".Stop",
+    "SwitchToQueue",
+    "play(",
+    "pause(",
+    "next(",
+    "seek(",
+  ]) {
+    assert.equal(watcher.includes(word), false, word);
+  }
+  assert.match(voiceSrc, /announce volume finished \(\$\{result\.reason\}\)/);
+  assert.match(voiceSrc, /if \(!result\?\.sawClip\) return/);
+  assert.match(voiceSrc, /observePostDriverTransport\(/);
+});
+
+test("the post-driver summary records the music-level timeout and its retry", async () => {
+  const { publishSpeakerVolume } = await import("../src/dj-speaker-volume.js");
+  const { resetSpeakerHealthForTests } = await import("../src/sonos-speaker-health.js");
+  const sent = [];
+  let calls = 0;
+  const office = {
+    Name: "Office",
+    Host: "10.10.20.77",
+    setVolume: async (level) => {
+      calls += 1;
+      sent.push(level);
+      if (calls === 1) throw new Error("Sonos volume write timed out");
+    },
+  };
+  try {
+    publishSpeakerVolume(office, 8, 9);
+    for (let n = 0; n < 8; n += 1) await Promise.resolve();
+    const harness = postDriverHarness([clipSample(19, "PLAYING")], {
+      maxMs: 30_000,
+    });
+    const watched = await harness.run({ epoch: 9, musicLevel: 8, maxMs: 0 });
+    assert.deepEqual(sent, [8, 8]);
+    assert.equal(watched.reason, "timeout");
+    assert.equal(watched.music.timedOut, true);
+    assert.equal(typeof watched.music.retryFinishedAt, "number");
+    const summary = harness.lines.at(-1);
+    assert.match(summary, /musicTimeout=1/);
+    assert.match(summary, /musicTimeoutAt=2026-/);
+    assert.match(summary, /musicRetryAt=2026-/);
+    assert.match(summary, /musicRetryFinish=2026-/);
+    assert.match(summary, /driverReturnedAt=2026-10-02T16:02:52.503Z/);
+    assert.deepEqual(harness.commands, []);
+    assert.equal(harness.reads(), 0);
+  } finally {
+    resetSpeakerHealthForTests();
+  }
 });

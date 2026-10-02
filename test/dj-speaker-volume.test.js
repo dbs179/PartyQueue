@@ -7,6 +7,7 @@ import {
   resetSpeakerVolumeForTests,
   speakerVolumeInFlightSnapshot,
   speakerVolumeLaneForTests,
+  speakerVolumeLevelDiagnostic,
 } from "../src/dj-speaker-volume.js";
 import {
   isPlayerSkipped,
@@ -326,4 +327,26 @@ test("an in-flight write logs the newer desired level that replaced it", async (
         line.includes("replaced=22")
     )
   );
+});
+
+test("music-level timeout notes do not add a second follow-up", async () => {
+  const sent = [];
+  let calls = 0;
+  const office = speaker("Office", "10.10.20.50", {
+    setVolume: async (level) => {
+      calls += 1;
+      sent.push(level);
+      if (calls === 1) throw new Error("Sonos volume write timed out");
+    },
+  });
+  publishSpeakerVolume(office, 8, 4);
+  await drain();
+  await drain();
+  assert.deepEqual(sent, [8, 8]);
+  const note = speakerVolumeLevelDiagnostic(4, 8);
+  assert.equal(note.timedOut, true);
+  assert.equal(typeof note.timeoutAt, "number");
+  assert.equal(typeof note.retryStartedAt, "number");
+  assert.equal(typeof note.retryFinishedAt, "number");
+  assert.ok(note.retryFinishedAt >= note.retryStartedAt);
 });

@@ -53,6 +53,7 @@ import {
 } from "./dj-announce-bake.js";
 import {
   inheritAnnounceMusicBaseline,
+  observePostDriverTransport,
   runAnnounceVolume,
   markAnnouncePlaybackImminent,
 } from "./dj-announce-volume.js";
@@ -3091,9 +3092,24 @@ async function beginAnnounceVolume({
       },
     }
   )
-    .then(({ reason }) =>
-      console.log(`[dj-volume] announce volume finished (${reason})`)
-    )
+    .then((result) => {
+      console.log(`[dj-volume] announce volume finished (${result.reason})`);
+      // The volume driver has stopped sampling. Keep reading transport only,
+      // so a stop on the same MP3 is visible before the track URI changes.
+      if (!result?.sawClip) return;
+      observePostDriverTransport({
+        clipUrl,
+        epoch: result.generation,
+        driverReturnedAt: Date.now(),
+        musicLevel: musicVolume,
+        read: io.read,
+        sleep: io.sleep,
+      }).catch((err) =>
+        console.error(
+          `[dj-volume] post-driver watch crashed: ${err?.message || err}`
+        )
+      );
+    })
     .catch((err) =>
       console.error(`[dj-volume] announce volume crashed: ${err?.message || err}`)
     );

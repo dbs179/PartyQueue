@@ -10,6 +10,7 @@ import {
   publishSpeakerVolume,
   resetSpeakerVolumeForTests,
   speakerVolumeInFlightSnapshot,
+  speakerVolumeLevelDiagnostic,
   SPEAKER_VOLUME_CLEANUP_MS,
 } from "./dj-speaker-volume.js";
 
@@ -578,7 +579,207 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
     }
     debug("[dj-volume] announce timeline", { reason, activeDurationSec, ...timeline });
   }
-  return { reason, sawClip, timeline };
+  return { reason, sawClip, generation, timeline };
+}
+
+/** Epoch of the announcement volume driver that most recently started. */
+export function currentAnnounceVolumeEpoch() {
+  return announceVolumeGeneration;
+}
+
+/** How long to keep reading transport after the volume driver returns. */
+export const POST_DRIVER_WATCH_MS = 30_000;
+/** Gap between read-only samples. The failure state persists, so this only bounds how soon the change is logged. */
+export const POST_DRIVER_POLL_MS = 500;
+const POST_DRIVER_REL_RESET_SEC = 2;
+
+function postDriverRelNearStart(rel) {
+  return Number.isFinite(rel) && rel <= 0.5;
+}
+
+/**
+ * Read transport after the baked-announcement volume driver has returned.
+ * Logs samples and the first state/URI/playhead change. Never sends a
+ * transport command.
+ *
+ * @param {{
+ *   clipUrl: string,
+ *   epoch: number,
+ *   driverReturnedAt?: number,
+ *   musicLevel?: number|null,
+ *   read: () => Promise<{ uri?: string, state?: string, positionSec?: number, durationSec?: number, queueTrack?: number }>,
+ *   sleep?: (ms: number) => Promise<void>,
+ *   now?: () => number,
+ *   stillCurrent?: () => boolean,
+ *   maxMs?: number,
+ *   pollMs?: number,
+ *   logger?: { info?: Function },
+ * }} opts
+ */
+export async function observePostDriverTransport({
+  clipUrl,
+  epoch,
+  driverReturnedAt = Date.now(),
+  musicLevel = null,
+  read,
+  sleep = (ms) =>
+    new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      if (typeof timer.unref === "function") timer.unref();
+    }),
+  now = Date.now,
+  stillCurrent = () => currentAnnounceVolumeEpoch() === epoch,
+  maxMs = POST_DRIVER_WATCH_MS,
+  pollMs = POST_DRIVER_POLL_MS,
+  logger = console,
+} = {}) {
+  const info = (...args) => logger.info?.(...args);
+  const started = now();
+  const deadline = started + Math.max(0, Number(maxMs) || 0);
+  let previous = null;
+  let first = null;
+  let uriChangeAt = null;
+  let stopReason = "timeout";
+
+  const emitSample = (sample) => {
+    info(
+      "[dj-volume] post-driver sample " +
+        `at=${diagnosticAt(sample.at)} ` +
+        `uri=${sample.uri} ` +
+        `state=${sample.state} ` +
+        `track=${sample.track || ""} ` +
+        `rel=${formatPlayheadSec(sample.rel)} ` +
+        `dur=${formatPlayheadSec(sample.dur)}`
+    );
+  };
+
+  const emitTransition = (sample, flags) => {
+    const from = previous?.state || "clip";
+    info(
+      "[dj-volume] post-driver transition " +
+        `${from} -> ${sample.state || "?"} ` +
+        `at=${diagnosticAt(sample.at)} ` +
+        `uri=${sample.uri} ` +
+        `track=${sample.track || ""} ` +
+        `rel=${formatPlayheadSec(sample.rel)} ` +
+        `dur=${formatPlayheadSec(sample.dur)} ` +
+        `sameClip=${flags.sameClip ? 1 : 0} ` +
+        `uriChanged=${flags.uriChanged ? 1 : 0} ` +
+        `trackChanged=${flags.trackChanged ? 1 : 0} ` +
+        `relReset=${flags.relReset ? 1 : 0}` +
+        (flags.stoppedAtStart ? " signature=stopped-at-start" : "")
+    );
+  };
+
+  while (now() < deadline) {
+    if (!stillCurrent()) {
+      stopReason = "superseded";
+      break;
+    }
+    let tick;
+    try {
+      tick = await read();
+    } catch {
+      const before = now();
+      await sleep(pollMs);
+      if (!stillCurrent()) {
+        stopReason = "superseded";
+        break;
+      }
+      if (now() <= before) break;
+      continue;
+    }
+    if (!stillCurrent()) {
+      stopReason = "superseded";
+      break;
+    }
+    const at = now();
+    const uri = String(tick?.uri || "");
+    const state = String(tick?.state || "");
+    const rel = Number(tick?.positionSec);
+    const dur = Number(tick?.durationSec);
+    const track = Number(tick?.queueTrack) || 0;
+    if (!uri && !state) {
+      const before = now();
+      await sleep(pollMs);
+      if (now() <= before) break;
+      continue;
+    }
+    const sample = { at, uri, state, rel, dur, track };
+    emitSample(sample);
+    if (!first) first = sample;
+    const sameClip = uriMatchesClip(uri, clipUrl);
+    const uriChanged = !!(
+      previous?.uri &&
+      uri &&
+      previous.uri !== uri &&
+      !uriMatchesClip(uri, previous.uri)
+    );
+    const stateChanged = !!(previous?.state && state && state !== previous.state);
+    const trackChanged = !!(previous?.track && track && track !== previous.track);
+    const relReset = !!(
+      sameClip &&
+      previous &&
+      Number.isFinite(previous.rel) &&
+      Number.isFinite(rel) &&
+      previous.rel - rel >= POST_DRIVER_REL_RESET_SEC
+    );
+    const stoppedAtStart =
+      sameClip && state === "STOPPED" && postDriverRelNearStart(rel);
+    const leftClip = !!(uri && !sameClip && (previous ? uriMatchesClip(previous.uri, clipUrl) : true));
+    if (
+      stateChanged ||
+      uriChanged ||
+      trackChanged ||
+      relReset ||
+      leftClip ||
+      (stoppedAtStart && previous?.state !== "STOPPED")
+    ) {
+      emitTransition(sample, {
+        sameClip,
+        uriChanged: uriChanged || leftClip,
+        trackChanged,
+        relReset,
+        stoppedAtStart,
+      });
+    }
+    if (leftClip) {
+      uriChangeAt = at;
+      stopReason = "uri-changed";
+      previous = sample;
+      break;
+    }
+    previous = sample;
+    if (now() >= deadline) {
+      stopReason = "timeout";
+      break;
+    }
+    const before = now();
+    await sleep(pollMs);
+    if (!stillCurrent()) {
+      stopReason = "superseded";
+      break;
+    }
+    if (now() <= before) break;
+  }
+
+  const music =
+    musicLevel == null ? null : speakerVolumeLevelDiagnostic(epoch, musicLevel);
+  info(
+    "[dj-volume] post-driver summary " +
+      `epoch=${epoch} ` +
+      `reason=${stopReason} ` +
+      `driverReturnedAt=${diagnosticAt(driverReturnedAt)} ` +
+      `firstState=${first?.state || ""} ` +
+      `firstAt=${diagnosticAt(first?.at)} ` +
+      `firstRel=${formatPlayheadSec(first?.rel)} ` +
+      `uriChangeAt=${diagnosticAt(uriChangeAt)} ` +
+      `musicTimeout=${music?.timedOut ? 1 : 0} ` +
+      `musicTimeoutAt=${diagnosticAt(music?.timeoutAt)} ` +
+      `musicRetryAt=${diagnosticAt(music?.retryStartedAt)} ` +
+      `musicRetryFinish=${diagnosticAt(music?.retryFinishedAt)}`
+  );
+  return { reason: stopReason, first, uriChangeAt, music };
 }
 
 /**
