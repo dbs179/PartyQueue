@@ -4,6 +4,15 @@ import {
   setDjVolumeHandoffArmed,
 } from "./dj-volume-handoff-state.js";
 import { handoffWatchSleepMs } from "./dj-volume-handoff.js";
+import { envTimeoutMs } from "./with-timeout.js";
+
+/**
+ * Same budget as a single SetVolume. A closing write that uses all of it is
+ * followed by one more music-level write inside this same call. The SOAP
+ * underneath a timeout is not cancelled, so the retry has to be the last command.
+ */
+const PLAYER_VOLUME_TIMEOUT_SEC =
+  envTimeoutMs("PARTYQUEUE_PLAYER_VOLUME_TIMEOUT_MS", 2_000) / 1000;
 
 // Volume control for a single-row baked announce.
 //
@@ -170,10 +179,10 @@ export const ANNOUNCE_RESTORE_MARGIN_SEC = 0.6;
 /** Don't aim more than this far ahead of the playhead to absorb one slow write. */
 export const ANNOUNCE_APPLY_LEAD_CAP_SEC = 1;
 /**
- * While Sonos reports PLAYING, trust wall-clock elapsed up to this far ahead of
- * a lagging RelTime. A stuck 0:00:00 used to keep the ramp in the opening pad
- * after the DJ was already talking. Capped so a frozen position cannot run the
- * whole shout on a timer.
+ * While Sonos reports PLAYING and the clip length is not known, trust
+ * wall-clock elapsed only this far ahead of RelTime. A known duration replaces
+ * this cap: the playhead may follow the wall clock up to that length, so a
+ * frozen 0:00:00 can still reach the closing silence. It never runs past it.
  */
 export const ANNOUNCE_PLAYHEAD_AHEAD_CAP_SEC = 2.5;
 
@@ -255,29 +264,68 @@ function transportHeld(state) {
   return value === "STOPPED" || value === "PAUSED_PLAYBACK" || value === "PAUSED";
 }
 
+function knownClipDuration(durationSec) {
+  const duration = Number(durationSec);
+  return Number.isFinite(duration) && duration > 0 ? duration : 0;
+}
+
+function boundPlayhead(position, reported, durationSec) {
+  const duration = knownClipDuration(durationSec);
+  const ahead = Math.max(0, Math.max(reported, position));
+  if (!duration) {
+    return Math.min(ahead, Math.max(0, reported) + ANNOUNCE_PLAYHEAD_AHEAD_CAP_SEC);
+  }
+  return Math.min(ahead, duration);
+}
+
 /**
- * Playhead used to choose a volume. PLAYING samples advance on the wall clock
- * when RelTime lags; anything else uses the reported position so a pause cannot
- * ramp the room and scripted tests stay on the positions they pass in.
+ * Playhead used to choose a volume.
+ *
+ * PLAYING with a known clip length follows wall-clock elapsed up to that
+ * length, even when RelTime stays at 0. Without a length, elapsed may lead
+ * RelTime by at most {@link ANNOUNCE_PLAYHEAD_AHEAD_CAP_SEC}.
+ *
+ * Leaving PLAYING freezes the estimate. Paused or stopped time is not added
+ * back in when playback resumes, and a stuck RelTime of 0 does not wipe the
+ * position already reached. A reported position ahead of that freeze is kept.
+ *
+ * @param {object} sample
+ * @param {number} nowMs
+ * @param {{ originAt?: number|null, playing?: boolean, positionSec?: number, frozenSec?: number|null }} [origin]
+ * @param {number} [durationSec] resolved announcement length; 0 when unknown
  */
-export function estimateAnnouncePlayhead(sample, nowMs, origin) {
+export function estimateAnnouncePlayhead(sample, nowMs, origin, durationSec = 0) {
   const reported = Math.max(0, Number(sample?.positionSec) || 0);
+  const duration = knownClipDuration(durationSec);
   if (sample?.state !== "PLAYING") {
-    return { positionSec: reported, originAt: origin?.originAt ?? null };
+    let frozen = reported;
+    if (origin?.playing === true && Number.isFinite(origin.positionSec)) {
+      frozen = Math.max(origin.positionSec, reported);
+    } else if (origin?.playing === false && origin.frozenSec != null) {
+      frozen = Math.max(origin.frozenSec, reported);
+    }
+    const positionSec = boundPlayhead(frozen, frozen, duration);
+    return { positionSec, originAt: null, playing: false, frozenSec: positionSec };
   }
   const at = Number.isFinite(Number(sample?.observedAt))
     ? Number(sample.observedAt)
     : nowMs;
-  let originAt = origin?.originAt;
-  if (originAt == null) originAt = at - reported * 1000;
-  else {
+  const resumed = origin?.playing === false;
+  let originAt = resumed ? null : origin?.originAt;
+  if (originAt == null) {
+    const start =
+      resumed && origin?.frozenSec != null
+        ? Math.max(origin.frozenSec, reported)
+        : reported;
+    originAt = at - start * 1000;
+  } else {
     const implied = at - reported * 1000;
     // RelTime jumped forward (seek, or it caught up). Rebase so we follow it.
     if (implied < originAt) originAt = implied;
   }
   const elapsed = Math.max(0, (at - originAt) / 1000);
-  const capped = Math.min(Math.max(reported, elapsed), reported + ANNOUNCE_PLAYHEAD_AHEAD_CAP_SEC);
-  return { positionSec: capped, originAt };
+  const positionSec = boundPlayhead(elapsed, reported, duration);
+  return { positionSec, originAt, playing: true, frozenSec: null };
 }
 
 /**
@@ -359,6 +407,9 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
   setDjVolumeHandoffArmed(true);
   const owns = () => generation === announceVolumeGeneration;
   let applyLeadSec = 0;
+  /** Uncapped duration of the last SetVolume. The 1s lead cap is only for aiming. */
+  let lastWriteSec = 0;
+  let musicRetryUsed = false;
   let playOrigin = { originAt: null };
   let lastPlayheadSec = 0;
   let activeDurationSec = Math.max(0, Number(announce.durationSec) || 0);
@@ -405,25 +456,24 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
   };
 
   const setVolume = async (volume, exact, samplePos, scheduled, force = false) => {
-    if (!owns()) return;
-    if (!force && volume === lastSet) return;
+    if (!owns()) return 0;
+    if (!force && volume === lastSet) return 0;
     const t0 = clock();
+    let failed = false;
     try {
       await io.setVolume(volume, exact);
     } catch (err) {
+      failed = true;
       logger.warn?.(`[dj-volume] setVolume ${volume} failed: ${err?.message || err}`);
-      const elapsedSec = Math.max(0, (clock() - t0) / 1000);
-      if (elapsedSec >= 0.02) {
-        applyLeadSec = Math.min(applyLeadCapSec, elapsedSec);
-      }
-      return;
     }
     const elapsedSec = Math.max(0, (clock() - t0) / 1000);
     if (elapsedSec >= 0.02) {
       applyLeadSec = Math.min(applyLeadCapSec, elapsedSec);
+      lastWriteSec = elapsedSec;
     }
+    if (failed) return elapsedSec;
     // The write already left. A newer shout owns whatever it sets next.
-    if (!owns()) return;
+    if (!owns()) return elapsedSec;
     lastSet = volume;
     const appliedAt = clock();
     if (scheduled) noteTimeline(scheduled, appliedAt);
@@ -441,6 +491,18 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
         );
       }
     }
+    return elapsedSec;
+  };
+  const retryMusicVolume = async () => {
+    if (musicRetryUsed || !owns() || musicVolume == null) return;
+    musicRetryUsed = true;
+    await setVolume(
+      clampVolume(musicVolume),
+      true,
+      null,
+      { phase: ANNOUNCE_PHASE.done, volume: clampVolume(musicVolume) },
+      true
+    );
   };
   const rememberBaseline = (level) => {
     if (generation === announceVolumeGeneration && level != null) {
@@ -485,13 +547,24 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
       if (matches(uri)) {
         // Play returned is not the first audio frame. A paused or stopped
         // row at 0:00 still has the clip URI; ramping then would finish
-        // before the opening silence exists.
-        if (transportHeld(sample.state) && reportedPos < 0.05) {
+        // before the opening silence exists. Once the clip has been playing,
+        // a pause must freeze the estimate instead of skipping it — skipping
+        // would keep the old PLAYING origin and count the pause on resume.
+        if (!sawClip && transportHeld(sample.state) && reportedPos < 0.05) {
           await io.sleep(pollMs);
           continue;
         }
-        const tracked = estimateAnnouncePlayhead(sample, clock(), playOrigin);
-        playOrigin = { originAt: tracked.originAt };
+        const clipDuration = resolveAnnounceClipDuration(
+          announce.durationSec,
+          durationSec
+        );
+        const tracked = estimateAnnouncePlayhead(
+          sample,
+          clock(),
+          playOrigin,
+          clipDuration
+        );
+        playOrigin = tracked;
         const positionSec = tracked.positionSec;
         lastPlayheadSec = positionSec;
         if (!sawClip) {
@@ -525,10 +598,6 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
           break;
         }
         rememberBaseline(musicVolume);
-        const clipDuration = resolveAnnounceClipDuration(
-          announce.durationSec,
-          durationSec
-        );
         activeDurationSec = clipDuration;
         if (timeline.playbackStartAt != null) {
           const restoreMs = Math.max(0, Number(announce.restoreSec) || 0) * 1000;
@@ -548,14 +617,39 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
           restoreMarginSec,
           applyLeadCapSec,
         });
+        // A write that takes longer than the clip has left cannot finish another
+        // fade step in time. Send the saved music level now and stop stepping.
+        const restoreSec = Math.max(0, Number(announce.restoreSec) || 0);
+        const remainingSec = clipDuration > 0 ? clipDuration - positionSec : Infinity;
+        const restoreStart = Math.max(0, clipDuration - restoreSec);
+        const musicLevel = musicVolume == null ? null : clampVolume(musicVolume);
+        const finishNow =
+          musicLevel != null &&
+          clipDuration > 0 &&
+          lastWriteSec > 0 &&
+          remainingSec < lastWriteSec &&
+          positionSec >= restoreStart &&
+          at.volume !== musicLevel;
+        const scheduled = finishNow
+          ? { phase: ANNOUNCE_PHASE.done, volume: musicLevel }
+          : at;
         // Read-back only at the two landings: announce level (speech) and
         // music level (restore done). Mid-ramp and mid-restore steps are
         // transient — the exact path's settle loop is what used to push the
         // closing ramp into the next song.
         const exact =
-          at.phase === ANNOUNCE_PHASE.hold || at.phase === ANNOUNCE_PHASE.done;
-        await setVolume(at.volume, exact, positionSec, at);
-        if (at.phase === ANNOUNCE_PHASE.done) break;
+          scheduled.phase === ANNOUNCE_PHASE.hold ||
+          scheduled.phase === ANNOUNCE_PHASE.done;
+        const elapsed = await setVolume(
+          scheduled.volume,
+          exact,
+          positionSec,
+          scheduled
+        );
+        if (scheduled.phase === ANNOUNCE_PHASE.done) {
+          if (elapsed >= PLAYER_VOLUME_TIMEOUT_SEC) await retryMusicVolume();
+          break;
+        }
       } else if (sawClip) {
         // Gone from the playhead after we had it: finished or skipped. Either
         // way the announce is over. This is the safety exit, not the clock
@@ -592,33 +686,37 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
     if (now() - started >= maxMs) reason = "timeout";
   } finally {
     const superseded = generation !== announceVolumeGeneration;
-    if (!superseded) {
-      announceVolumeRunning = false;
-      setDjVolumeHandoffActive(false);
-      if (sawClip) setDjVolumeHandoffArmed(false);
-    }
-    // A newer announce owns the room — restoring here would fight its ramp.
-    // One bounded write, and only if this generation still owns the room at
-    // the moment of the call. No timer is left behind.
-    if (!superseded && sawClip && musicVolume != null && owns()) {
-      try {
-        await setVolume(
-          clampVolume(musicVolume),
-          true,
-          null,
-          {
-            phase: ANNOUNCE_PHASE.done,
-            volume: clampVolume(musicVolume),
-          },
-          true
-        );
-      } catch (err) {
-        logger.error?.(
-          `[dj-volume] could not restore music volume: ${err?.message || err}`
-        );
+    // Flags stay up through this write. A newer shout that took the room
+    // during the write owns them; this generation must not clear those.
+    try {
+      if (!superseded && sawClip && musicVolume != null && owns() && !musicRetryUsed) {
+        try {
+          const elapsed = await setVolume(
+            clampVolume(musicVolume),
+            true,
+            null,
+            {
+              phase: ANNOUNCE_PHASE.done,
+              volume: clampVolume(musicVolume),
+            },
+            true
+          );
+          // One retry, still inside this call. Nothing is scheduled after it.
+          if (elapsed >= PLAYER_VOLUME_TIMEOUT_SEC) await retryMusicVolume();
+        } catch (err) {
+          logger.error?.(
+            `[dj-volume] could not restore music volume: ${err?.message || err}`
+          );
+        }
+      }
+    } finally {
+      if (generation === announceVolumeGeneration) {
+        announceVolumeRunning = false;
+        setDjVolumeHandoffActive(false);
+        if (sawClip) setDjVolumeHandoffArmed(false);
       }
     }
-    if (superseded) reason = "superseded";
+    if (generation !== announceVolumeGeneration) reason = "superseded";
     debug("[dj-volume] announce timeline", { reason, ...timeline });
   }
   return { reason, sawClip, timeline };

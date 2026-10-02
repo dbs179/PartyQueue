@@ -717,6 +717,178 @@ test("a stuck RelTime still reaches the announce level before speech", async () 
   assert.deepEqual(partial, []);
 });
 
+function stepPlayhead(state, at, origin, duration = 24) {
+  return estimateAnnouncePlayhead(
+    { positionSec: 0, state, observedAt: at, durationSec: duration },
+    at,
+    origin,
+    duration
+  );
+}
+
+test("a known duration lets a frozen RelTime cross the closing silence", () => {
+  let origin = { originAt: null };
+  origin = stepPlayhead("PLAYING", 0, origin);
+  origin = stepPlayhead("PLAYING", 3_000, origin);
+  assert.ok(origin.positionSec >= 3, `speech start, got ${origin.positionSec}`);
+  origin = stepPlayhead("PLAYING", 21_000, origin);
+  assert.ok(
+    Math.abs(origin.positionSec - 21) < 0.05,
+    `speech end, got ${origin.positionSec}`
+  );
+  const scheduled = scheduleAnnounceVolume({
+    ...shape,
+    positionSec: origin.positionSec,
+  });
+  assert.equal(scheduled.phase, ANNOUNCE_PHASE.restore);
+  origin = stepPlayhead("PLAYING", 23_400, origin);
+  assert.ok(origin.positionSec < 24, `music landing, got ${origin.positionSec}`);
+  assert.ok(origin.positionSec >= 23.4 - 0.05);
+  const landed = scheduleAnnounceVolume({
+    ...shape,
+    positionSec: origin.positionSec,
+  });
+  assert.equal(landed.volume, 8);
+  origin = stepPlayhead("PLAYING", 40_000, origin);
+  assert.equal(origin.positionSec, 24);
+});
+
+test("pause and stop freeze a synthetic playhead and resume does not catch up", () => {
+  let origin = stepPlayhead("PLAYING", 0, { originAt: null });
+  origin = stepPlayhead("PLAYING", 8_000, origin);
+  assert.ok(Math.abs(origin.positionSec - 8) < 0.05, `before pause ${origin.positionSec}`);
+
+  const paused = stepPlayhead("PAUSED_PLAYBACK", 9_000, origin);
+  assert.ok(Math.abs(paused.positionSec - 8) < 0.05, `paused ${paused.positionSec}`);
+  const pausedLater = stepPlayhead("PAUSED_PLAYBACK", 25_000, paused);
+  assert.equal(pausedLater.positionSec, paused.positionSec);
+  const scheduled = scheduleAnnounceVolume({
+    ...shape,
+    positionSec: pausedLater.positionSec,
+  });
+  assert.notEqual(scheduled.phase, ANNOUNCE_PHASE.restore);
+
+  const resumed = stepPlayhead("PLAYING", 30_000, pausedLater);
+  assert.ok(
+    Math.abs(resumed.positionSec - paused.positionSec) < 0.05,
+    `resume caught up to ${resumed.positionSec}`
+  );
+  const later = stepPlayhead("PLAYING", 31_000, resumed);
+  assert.ok(
+    Math.abs(later.positionSec - (paused.positionSec + 1)) < 0.05,
+    `after resume ${later.positionSec}`
+  );
+
+  const stopped = stepPlayhead("STOPPED", 50_000, later);
+  assert.equal(stopped.positionSec, later.positionSec);
+  const stillStopped = stepPlayhead("STOPPED", 60_000, stopped);
+  assert.equal(stillStopped.positionSec, later.positionSec);
+});
+
+test("an unknown duration keeps the 2.5s RelTime lead cap", () => {
+  const first = estimateAnnouncePlayhead(
+    { positionSec: 0, state: "PLAYING", observedAt: 0 },
+    0,
+    { originAt: null }
+  );
+  const later = estimateAnnouncePlayhead(
+    { positionSec: 0, state: "PLAYING", observedAt: 5_000 },
+    5_000,
+    first
+  );
+  assert.ok(later.positionSec <= 2.5, `uncapped playhead ${later.positionSec}`);
+  assert.ok(later.positionSec >= 2);
+});
+
+test("a frozen RelTime still restores during the closing silence", async () => {
+  let clock = 0;
+  let sawNext = false;
+  const events = [];
+  const NEXT = "x-sonos-spotify:spotify:track:next";
+  const io = {
+    mono: () => clock,
+    now: () => clock,
+    read: async () => {
+      if (clock >= 24_000) {
+        sawNext = true;
+        return {
+          uri: NEXT,
+          positionSec: 0,
+          state: "PLAYING",
+          observedAt: clock,
+        };
+      }
+      return {
+        uri: CLIP,
+        positionSec: 0,
+        durationSec: 24,
+        state: "PLAYING",
+        observedAt: clock,
+      };
+    },
+    setVolume: async (v) => {
+      events.push({ v, at: clock / 1000, next: sawNext });
+    },
+    sleep: async (ms) => {
+      clock += ms;
+    },
+  };
+  const result = await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+    pollMs: 150,
+    maxMs: 30_000,
+    logger: { debug() {}, warn() {}, error() {} },
+  });
+  assert.equal(result.reason, "complete");
+  const boosted = events.find((event) => event.v === 20);
+  assert.ok(boosted && boosted.at < 3, `announce level at ${boosted?.at}`);
+  const closing = events.find((event) => event.at >= 20 && event.v < 20 && event.v > 8);
+  assert.ok(closing, "closing ramp did not start");
+  assert.ok(
+    closing.at >= 21 && closing.at < 22.5,
+    `closing ramp started at ${closing.at}`
+  );
+  const restored = events.find((event) => event.v === 8 && event.at > 3);
+  assert.ok(restored && restored.at < 24, `music level at ${restored?.at}`);
+  assert.equal(restored.next, false);
+  assert.equal(sawNext, false);
+  assert.ok(events.every((event) => event.next === false));
+});
+
+test("pausing a frozen RelTime does not run the closing ramp or catch up", async () => {
+  let clock = 0;
+  let state = "PLAYING";
+  const events = [];
+  const io = {
+    mono: () => clock,
+    now: () => clock,
+    read: async () => ({
+      uri: CLIP,
+      positionSec: 0,
+      durationSec: 24,
+      state,
+      observedAt: clock,
+    }),
+    setVolume: async (v) => {
+      events.push({ v, at: clock / 1000 });
+    },
+    sleep: async (ms) => {
+      clock += ms;
+      if (clock >= 8_000 && clock < 30_000) state = "PAUSED_PLAYBACK";
+      else if (clock >= 30_000) state = "PLAYING";
+    },
+  };
+  await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+    pollMs: 150,
+    maxMs: 40_000,
+    logger: { debug() {}, warn() {}, error() {} },
+  });
+  const held = events.filter((event) => event.at >= 8 && event.at < 32);
+  assert.ok(
+    held.every((event) => event.v === 20),
+    `volume moved while paused or on resume: ${JSON.stringify(held.slice(0, 8))}`
+  );
+});
+
 test("a volume write that lands after speech started warns once", async () => {
   let clock = 0;
   const warns = [];
@@ -879,4 +1051,113 @@ test("a superseded announce cannot write volume after the next one starts", asyn
     writesWhileBRan,
     "the old session wrote after it lost the room"
   );
+});
+
+test("a slow closing write jumps to the music volume instead of an intermediate", async () => {
+  let clock = 0;
+  let step = 0;
+  const positions = [0, 1.5, 3, 12, 21.2, 21.8];
+  const commands = [];
+  const applied = [];
+  let pendingLate = null;
+  const warns = [];
+  let activeDuringRestore = false;
+  const io = {
+    mono: () => clock,
+    now: () => clock,
+    read: async () => ({
+      uri: CLIP,
+      positionSec: positions[Math.min(step, positions.length - 1)],
+      durationSec: 24,
+    }),
+    setVolume: async (v) => {
+      assert.equal(isDjVolumeHandoffActive(), true);
+      if (pendingLate != null) {
+        applied.push(pendingLate);
+        pendingLate = null;
+      }
+      const slow = v === 19;
+      clock += slow ? 2_500 : 30;
+      commands.push(v);
+      applied.push(v);
+      if (slow) pendingLate = v;
+      if (commands.includes(19) && v === 8) activeDuringRestore = true;
+    },
+    sleep: async (ms) => {
+      clock += ms;
+      step += 1;
+    },
+  };
+  const result = await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+    pollMs: 150,
+    logger: {
+      debug() {},
+      warn: (message) => warns.push(String(message)),
+      error() {},
+    },
+  });
+  assert.equal(result.reason, "complete");
+  const slowAt = commands.indexOf(19);
+  assert.ok(slowAt >= 0, `expected the slow restore step, got ${commands}`);
+  assert.equal(commands[slowAt + 1], 8, `next command was ${commands[slowAt + 1]}`);
+  assert.equal(commands.includes(11), false, `sent an intermediate 11: ${commands}`);
+  assert.equal(commands.at(-1), 8);
+  assert.equal(applied.at(-1), 8, "a late intermediate must not be the last command");
+  assert.equal(activeDuringRestore, true);
+  assert.equal(isDjVolumeHandoffActive(), false);
+  assert.equal(isDjVolumeHandoffArmed(), false);
+  assert.deepEqual(warns, []);
+  const n = commands.length;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(commands.length, n);
+});
+
+test("a music-volume write that uses the speaker budget is retried once and then stops", async () => {
+  let clock = 0;
+  let step = 0;
+  const positions = [0, 1.5, 3, 12, 21.2, 21.8];
+  const commands = [];
+  let slowMusicLeft = 1;
+  const io = {
+    mono: () => clock,
+    now: () => clock,
+    read: async () => ({
+      uri: CLIP,
+      positionSec: positions[Math.min(step, positions.length - 1)],
+      durationSec: 24,
+    }),
+    setVolume: async (v) => {
+      assert.equal(isDjVolumeHandoffActive(), true);
+      if (v === 19) {
+        clock += 2_500;
+        commands.push(v);
+        return;
+      }
+      if (v === 8 && commands.includes(19) && slowMusicLeft > 0) {
+        slowMusicLeft -= 1;
+        clock += 2_000;
+        commands.push(v);
+        return;
+      }
+      clock += 30;
+      commands.push(v);
+    },
+    sleep: async (ms) => {
+      clock += ms;
+      step += 1;
+    },
+  };
+  await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+    pollMs: 150,
+    logger: { debug() {}, warn() {}, error() {} },
+  });
+  const slowAt = commands.indexOf(19);
+  assert.equal(commands[slowAt + 1], 8);
+  assert.equal(commands[slowAt + 2], 8, `retry missing: ${commands}`);
+  assert.equal(commands.length, slowAt + 3, `a write followed the retry: ${commands}`);
+  assert.equal(commands.includes(11), false);
+  assert.equal(isDjVolumeHandoffActive(), false);
+  const n = commands.length;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(commands.length, n);
 });

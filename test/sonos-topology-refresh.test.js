@@ -22,6 +22,7 @@ import {
 import { resetSpeakerReachabilityForTests } from "../src/sonos-reachability.js";
 import {
   listSpeakerHealth,
+  DEGRADED_AFTER_FAILURES,
   RECOVERY_SUCCESSES,
   resetSpeakerHealthForTests,
   SPEAKER_HEALTH_PROBE_MS,
@@ -322,6 +323,7 @@ test("a household topology success does not mark every speaker healthy", async (
 test("speaker health timing constants are unchanged", () => {
   assert.equal(SPEAKER_HEALTH_PROBE_MS, 60_000);
   assert.equal(SPEAKER_HEALTH_RECENT_SIGNAL_MS, 45_000);
+  assert.equal(DEGRADED_AFTER_FAILURES, 2);
   assert.equal(UNRESPONSIVE_AFTER_FAILURES, 3);
   assert.equal(RECOVERY_SUCCESSES, 2);
 });

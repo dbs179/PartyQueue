@@ -6,10 +6,11 @@
 // answered (701, 711, 800, bad request) is not a health failure.
 //
 //   UNKNOWN + success                         -> HEALTHY
-//   UNKNOWN + 1 communication failure         -> DEGRADED
-//   HEALTHY + 1 communication failure         -> DEGRADED
+//   UNKNOWN + 1 communication failure         -> stays UNKNOWN (no log)
+//   HEALTHY + 1 communication failure         -> stays HEALTHY (no log)
+//   UNKNOWN or HEALTHY + 2nd consecutive failure -> DEGRADED
 //   DEGRADED + success                        -> HEALTHY
-//   DEGRADED + 3rd consecutive failure        -> UNRESPONSIVE
+//   3rd consecutive failure                   -> UNRESPONSIVE
 //   UNRESPONSIVE + 2 consecutive successes    -> HEALTHY
 //   UNRESPONSIVE + further failures           -> stays UNRESPONSIVE (no log)
 //
@@ -23,6 +24,8 @@ export const SPEAKER_HEALTH_STATE = {
   UNRESPONSIVE: "UNRESPONSIVE",
 };
 
+/** Consecutive communication failures before DEGRADED. The first miss stays put. */
+export const DEGRADED_AFTER_FAILURES = 2;
 /** Consecutive communication failures before UNRESPONSIVE. */
 export const UNRESPONSIVE_AFTER_FAILURES = 3;
 /** Confirmed responses required to leave UNRESPONSIVE. */
@@ -210,15 +213,16 @@ export function noteSpeakerHealthFailure(device, err, opts = {}) {
     record.lastLatencyMs = Math.round(opts.latencyMs);
   }
   if (record.state !== SPEAKER_HEALTH_STATE.UNRESPONSIVE) {
-    const next =
-      record.consecutiveFailures >= UNRESPONSIVE_AFTER_FAILURES
-        ? SPEAKER_HEALTH_STATE.UNRESPONSIVE
-        : SPEAKER_HEALTH_STATE.DEGRADED;
-    const reason =
-      next === SPEAKER_HEALTH_STATE.UNRESPONSIVE
-        ? `${record.consecutiveFailures} consecutive failures`
-        : record.lastFailureReason;
-    move(record, next, now, reason);
+    if (record.consecutiveFailures >= UNRESPONSIVE_AFTER_FAILURES) {
+      move(
+        record,
+        SPEAKER_HEALTH_STATE.UNRESPONSIVE,
+        now,
+        `${record.consecutiveFailures} consecutive failures`
+      );
+    } else if (record.consecutiveFailures >= DEGRADED_AFTER_FAILURES) {
+      move(record, SPEAKER_HEALTH_STATE.DEGRADED, now, record.lastFailureReason);
+    }
   }
   records.set(id.key, record);
   return publicSpeaker(record);

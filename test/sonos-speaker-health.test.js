@@ -53,14 +53,32 @@ test("an unknown speaker becomes HEALTHY after the first success", () => {
   assert.deepEqual(lines, ["[Sonos Health] Office UNKNOWN -> HEALTHY"]);
 });
 
-test("HEALTHY becomes DEGRADED after one communication failure", () => {
+test("one communication failure keeps HEALTHY and records the miss", () => {
   const lines = logs();
   noteSpeakerHealthSuccess(office, { now: 1_000 });
   lines.length = 0;
-  const row = noteSpeakerHealthFailure(office, timeout, { now: 2_000 });
-  assert.equal(row.state, "DEGRADED");
+  const row = noteSpeakerHealthFailure(office, timeout, {
+    now: 2_000,
+    latencyMs: 2_000,
+  });
+  assert.equal(row.state, "HEALTHY");
   assert.equal(row.consecutiveFailures, 1);
+  assert.equal(row.consecutiveSuccesses, 0);
+  assert.equal(row.lastFailureAt, 2_000);
   assert.equal(row.lastFailureReason, "timeout");
+  assert.equal(row.lastLatencyMs, 2_000);
+  assert.deepEqual(lines, []);
+});
+
+test("a second consecutive failure becomes DEGRADED", () => {
+  const lines = logs();
+  noteSpeakerHealthSuccess(office, { now: 1_000 });
+  noteSpeakerHealthFailure(office, timeout, { now: 2_000 });
+  lines.length = 0;
+  const row = noteSpeakerHealthFailure(office, timeout, { now: 3_000 });
+  assert.equal(row.state, "DEGRADED");
+  assert.equal(row.consecutiveFailures, 2);
+  assert.equal(row.lastFailureAt, 3_000);
   assert.deepEqual(lines, ["[Sonos Health] Office HEALTHY -> DEGRADED: timeout"]);
 });
 
@@ -68,17 +86,61 @@ test("DEGRADED becomes UNRESPONSIVE after the configured consecutive failures", 
   const lines = logs();
   noteSpeakerHealthSuccess(office, { now: 1_000 });
   lines.length = 0;
-  let row;
-  for (let i = 1; i <= UNRESPONSIVE_AFTER_FAILURES; i++) {
-    row = noteSpeakerHealthFailure(office, timeout, { now: 1_000 + i });
-  }
+  const first = noteSpeakerHealthFailure(office, timeout, { now: 1_001 });
+  assert.equal(first.state, "HEALTHY");
+  assert.equal(first.consecutiveFailures, 1);
+  const second = noteSpeakerHealthFailure(office, timeout, { now: 1_002 });
+  assert.equal(second.state, "DEGRADED");
+  assert.equal(second.consecutiveFailures, 2);
+  const third = noteSpeakerHealthFailure(office, timeout, { now: 1_003 });
   assert.equal(UNRESPONSIVE_AFTER_FAILURES, 3);
-  assert.equal(row.state, "UNRESPONSIVE");
-  assert.equal(row.consecutiveFailures, 3);
+  assert.equal(third.state, "UNRESPONSIVE");
+  assert.equal(third.consecutiveFailures, 3);
   assert.deepEqual(lines, [
     "[Sonos Health] Office HEALTHY -> DEGRADED: timeout",
     "[Sonos Health] Office DEGRADED -> UNRESPONSIVE: 3 consecutive failures",
   ]);
+});
+
+test("a success after one failure clears the streak and stays HEALTHY", () => {
+  const lines = logs();
+  noteSpeakerHealthSuccess(office, { now: 1_000 });
+  noteSpeakerHealthFailure(office, timeout, { now: 2_000 });
+  lines.length = 0;
+  const row = noteSpeakerHealthSuccess(office, { now: 3_000 });
+  assert.equal(row.state, "HEALTHY");
+  assert.equal(row.consecutiveFailures, 0);
+  assert.equal(row.lastSuccessAt, 3_000);
+  assert.deepEqual(lines, []);
+  const again = noteSpeakerHealthFailure(office, timeout, { now: 4_000 });
+  assert.equal(again.state, "HEALTHY");
+  assert.equal(again.consecutiveFailures, 1);
+  assert.deepEqual(lines, []);
+});
+
+test("UNKNOWN stays UNKNOWN on the first failure, then DEGRADED, then UNRESPONSIVE", () => {
+  const lines = logs();
+  const first = noteSpeakerHealthFailure(office, timeout, { now: 1_000, latencyMs: 50 });
+  assert.equal(first.state, "UNKNOWN");
+  assert.equal(first.consecutiveFailures, 1);
+  assert.equal(first.lastFailureReason, "timeout");
+  assert.equal(first.lastLatencyMs, 50);
+  const second = noteSpeakerHealthFailure(office, timeout, { now: 2_000 });
+  assert.equal(second.state, "DEGRADED");
+  assert.equal(second.consecutiveFailures, 2);
+  const third = noteSpeakerHealthFailure(office, timeout, { now: 3_000 });
+  assert.equal(third.state, "UNRESPONSIVE");
+  assert.equal(third.consecutiveFailures, 3);
+  assert.deepEqual(lines, [
+    "[Sonos Health] Office UNKNOWN -> DEGRADED: timeout",
+    "[Sonos Health] Office DEGRADED -> UNRESPONSIVE: 3 consecutive failures",
+  ]);
+});
+
+test("classifying a failure does not skip the speaker", () => {
+  noteSpeakerHealthFailure(office, timeout, { now: 1_000 });
+  noteSpeakerHealthFailure(office, timeout, { now: 2_000 });
+  assert.deepEqual(reachabilityInfoForTests().skipped, []);
 });
 
 test("a success resets consecutive failures", () => {
