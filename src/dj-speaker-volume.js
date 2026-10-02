@@ -1,9 +1,9 @@
 import { envTimeoutMs, withTimeout } from "./with-timeout.js";
-import { isSonosUnreachableError } from "./sonos-reachability.js";
 import {
-  noteSpeakerHealthFailure,
-  noteSpeakerHealthSuccess,
-} from "./sonos-speaker-health.js";
+  isSonosUnreachableError,
+  markPlayerReachable,
+  noteSpeakerFailure,
+} from "./sonos-reachability.js";
 
 /**
  * Per-speaker announcement volume.
@@ -11,7 +11,14 @@ import {
  * One lane per speaker, shared by every announcement. A lane holds at most
  * one SetVolume. A newer desired level replaces anything not yet sent, and
  * the call already on the wire is never overlapped. These writes do not take
- * the transport lane and do not touch the reachability skip map.
+ * the transport lane.
+ *
+ * A 2 s SetVolume/GetVolume timeout is the earliest signal that a speaker is
+ * wedged — still on the network, no longer answering SOAP — so outcomes go to
+ * the shared reachability skip map, not only to speaker health. That is what
+ * lets the topology probe, the group scan and group volume all back off from
+ * one detection. Both helpers update speaker health themselves, so nothing
+ * here reports the same event twice.
  */
 
 const PLAYER_VOLUME_TIMEOUT_MS = envTimeoutMs(
@@ -236,10 +243,10 @@ function settle(lane, result) {
   if (result.ok) {
     lane.lastResolvedLevel = result.level;
     lane.lastTimedOut = false;
-    noteSpeakerHealthSuccess(lane.speaker, { latencyMs });
+    markPlayerReachable(lane.speaker, { latencyMs });
   } else if (commFailure) {
     lane.lastTimedOut = true;
-    noteSpeakerHealthFailure(lane.speaker, result.err, { latencyMs });
+    noteSpeakerFailure(lane.speaker, result.err, { latencyMs });
   } else if (lane.desired === result.level) {
     lane.followUpSpentFor = result.level;
   }
@@ -343,7 +350,7 @@ export async function flushSpeakerVolumeEpoch(epoch, opts = {}) {
           `start=${diagnosticIso(readStarted)} finish=${diagnosticIso(Date.now())} ` +
           `result=success level=${got}`
       );
-      noteSpeakerHealthSuccess(lane.speaker, {
+      markPlayerReachable(lane.speaker, {
         latencyMs: Math.max(0, Date.now() - readStarted),
       });
       if (got !== lane.desired && now() < deadline && !lane.inFlight) {
@@ -364,7 +371,7 @@ export async function flushSpeakerVolumeEpoch(epoch, opts = {}) {
           `result=${writeResultLabel(err)}`
       );
       if (isSonosUnreachableError(err)) {
-        noteSpeakerHealthFailure(lane.speaker, err, {
+        noteSpeakerFailure(lane.speaker, err, {
           latencyMs: Math.max(0, Date.now() - readStarted),
         });
       }

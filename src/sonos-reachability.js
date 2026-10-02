@@ -61,24 +61,36 @@ export function markPlayerUnreachable(device, now = Date.now()) {
   }
 }
 
-export function markPlayerReachable(device) {
+/**
+ * @param {object|null|undefined} device
+ * @param {{ latencyMs?: number }} [opts] forwarded to speaker health
+ */
+export function markPlayerReachable(device, opts = {}) {
   const key = playerKey(device);
   if (key) unreachableUntil.delete(key);
   // A successful Sonos call is also a health signal. This does not change the
   // skip map beyond the delete above.
-  noteSpeakerHealthSuccess(device);
+  noteSpeakerHealthSuccess(device, opts);
 }
 
 /**
  * Mark a speaker unreachable only when the failure actually looks like the box
  * is gone or wedged. A UPnP fault (wrong coordinator, bad position) means the
  * speaker answered us, so it must not earn a skip.
+ *
+ * Reports the failure to speaker health exactly once, so callers must not also
+ * call noteSpeakerHealthFailure for the same event.
+ * @param {object|null|undefined} device
+ * @param {unknown} err
+ * @param {number | { now?: number, latencyMs?: number }} [opts] epoch ms, or options
  * @returns {boolean} whether the player was marked
  */
-export function noteSpeakerFailure(device, err, now = Date.now()) {
+export function noteSpeakerFailure(device, err, opts = {}) {
   if (!isSonosUnreachableError(err)) return false;
+  const { now = Date.now(), latencyMs } =
+    typeof opts === "number" ? { now: opts } : opts;
   markPlayerUnreachable(device, now);
-  noteSpeakerHealthFailure(device, err, { now });
+  noteSpeakerHealthFailure(device, err, { now, latencyMs });
   return true;
 }
 

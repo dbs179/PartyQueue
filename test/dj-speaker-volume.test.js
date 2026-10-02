@@ -99,7 +99,7 @@ test("levels published during a write collapse to the newest target", async () =
   assert.deepEqual(sent, [12, 22]);
 });
 
-test("a timeout is recorded in speaker health and does not skip the speaker", async () => {
+test("a volume timeout enters the shared skip map and a later success clears it", async () => {
   const sent = [];
   let failAnnounce = true;
   const office = speaker("Office", "10.10.20.50", {
@@ -112,28 +112,47 @@ test("a timeout is recorded in speaker health and does not skip the speaker", as
   });
   publishSpeakerVolume(office, 20, 1);
   await drain();
+
+  // A wedged speaker must cool off household-wide, not just in diagnostics.
+  assert.equal(isPlayerSkipped(office), true);
+  assert.deepEqual(reachabilityInfoForTests().skipped, ["10.10.20.50"]);
+
+  // One health report per SOAP attempt: the lane spends exactly one follow-up,
+  // so two attempts must not become four records.
+  const attempts = sent.filter((level) => level === 20).length;
+  assert.equal(attempts, 2);
   const health = listSpeakerHealth().find((row) => row.host === "10.10.20.50");
-  assert.equal(health.consecutiveFailures >= 1, true);
+  assert.equal(health.consecutiveFailures, attempts);
   assert.equal(health.lastFailureReason, "timeout");
-  assert.equal(isPlayerSkipped(office), false);
-  assert.deepEqual(reachabilityInfoForTests().skipped, []);
+  assert.equal(typeof health.lastLatencyMs, "number");
+
   failAnnounce = false;
   publishSpeakerVolume(office, 8, 1);
   await drain();
   assert.ok(sent.includes(8));
+
+  // A confirmed write is the reintegration signal; no separate retry layer.
   assert.equal(isPlayerSkipped(office), false);
+  assert.deepEqual(reachabilityInfoForTests().skipped, []);
+  const after = listSpeakerHealth().find((row) => row.host === "10.10.20.50");
+  assert.equal(after.consecutiveFailures, 0);
+  assert.equal(after.consecutiveSuccesses, 1);
 });
 
-test("a successful DJ write does not clear a skip from another subsystem", async () => {
+test("a confirmed DJ write clears a skip set by another subsystem", async () => {
   const office = speaker("Office", "10.10.20.50", {
     setVolume: async () => {},
   });
   markPlayerUnreachable(office);
   assert.equal(isPlayerSkipped(office), true);
+
+  // The lane itself is not gated — the announcement publish loop is what skips
+  // a cooling-off speaker. Reaching the lane at all means something chose to
+  // talk to this box, and it answered, so the household stops avoiding it.
   publishSpeakerVolume(office, 20, 1);
   await drain();
   assert.equal(speakerVolumeLaneForTests(office).lastResolvedLevel, 20);
-  assert.equal(isPlayerSkipped(office), true);
+  assert.equal(isPlayerSkipped(office), false);
   const health = listSpeakerHealth().find((row) => row.host === "10.10.20.50");
   assert.equal(health.consecutiveSuccesses >= 1, true);
 });

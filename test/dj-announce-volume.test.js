@@ -21,11 +21,18 @@ import {
   setDjVolumeHandoffActive,
   setDjVolumeHandoffArmed,
 } from "../src/dj-volume-handoff-state.js";
+import {
+  isPlayerSkipped,
+  resetSpeakerReachabilityForTests,
+} from "../src/sonos-reachability.js";
 
 afterEach(() => {
   setDjVolumeHandoffArmed(false);
   setDjVolumeHandoffActive(false);
   resetAnnounceVolumeForTests();
+  // Volume timeouts now cool a speaker off household-wide, so a test that
+  // wedges one must not leave it skipped for the next.
+  resetSpeakerReachabilityForTests();
 });
 
 const CLIP = "http://pq.local:8088/media/tts/dj-announce-abc123.mp3";
@@ -1117,6 +1124,100 @@ test("Kitchen reaches both endpoints while Office is still pending", async () =>
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(kitchen.length, kitchenCount);
   assert.equal(officeCalls, officeCount);
+});
+
+test("a speaker that wedges mid-announcement drops out and the rest finish", async () => {
+  let clock = 0;
+  const kitchen = [];
+  const livingRoom = [];
+  const officeSent = [];
+  // Must stay at zero: the re-filter reads the in-memory skip map only.
+  const topologyCalls = { resolveGroup: 0, getZoneGroups: 0, zoneGroupState: 0 };
+
+  const healthy = (name, host, log) => ({
+    Name: name,
+    Host: host,
+    setVolume: async (level) => {
+      log.push({ level, at: clock });
+      clock += 10;
+    },
+    GetZoneGroupState: async () => {
+      topologyCalls.zoneGroupState += 1;
+      return [];
+    },
+  });
+
+  const io = {
+    now: () => clock,
+    mono: () => clock,
+    speakers: [
+      healthy("Kitchen", "10.10.20.10", kitchen),
+      healthy("Living Room", "10.10.20.11", livingRoom),
+      {
+        Name: "Office",
+        Host: "10.10.20.96",
+        // Wedged: still in topology, answers nothing. Every write times out.
+        setVolume: async (level) => {
+          officeSent.push({ level, at: clock });
+          clock += 10;
+          throw new Error("Sonos volume write timed out");
+        },
+        GetZoneGroupState: async () => {
+          topologyCalls.zoneGroupState += 1;
+          return [];
+        },
+      },
+    ],
+    resolveGroup: async () => {
+      topologyCalls.resolveGroup += 1;
+      return { members: [] };
+    },
+    getZoneGroups: async () => {
+      topologyCalls.getZoneGroups += 1;
+      return [];
+    },
+    read: async () => ({
+      uri: CLIP,
+      positionSec: Math.min(24, clock / 1000),
+      durationSec: 24,
+      state: "PLAYING",
+      observedAt: clock,
+    }),
+    sleep: async (ms) => {
+      clock += ms;
+    },
+  };
+
+  await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+    pollMs: 150,
+    logger: { debug() {}, warn() {}, error() {} },
+  });
+
+  const office = io.speakers[2];
+  assert.equal(isPlayerSkipped(office), true);
+
+  // Office saw the announce level only, and never the restore level: once the
+  // first write timed out, the next publish filtered it out.
+  assert.deepEqual([...new Set(officeSent.map((e) => e.level))], [20]);
+  assert.equal(
+    officeSent.some((e) => e.level === 8),
+    false
+  );
+
+  // The other two got the whole sequence and restored to music level.
+  for (const log of [kitchen, livingRoom]) {
+    assert.ok(
+      log.some((e) => e.level === 20),
+      "announce level"
+    );
+    assert.equal(log.at(-1).level, 8, "restored to music level");
+  }
+
+  assert.deepEqual(topologyCalls, {
+    resolveGroup: 0,
+    getZoneGroups: 0,
+    zoneGroupState: 0,
+  });
 });
 
 test("Play imminent switches the wait poll to 150ms so opening silence is not missed", async () => {

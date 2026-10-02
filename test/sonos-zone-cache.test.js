@@ -10,6 +10,7 @@ import {
   resetDeviceDriftForTests,
   setZoneCacheAgeForTests,
   zoneCacheInfoForTests,
+  ZONE_CACHE_MAX_AGE_MS,
 } from "../src/sonos-core.js";
 import {
   markPlayerUnreachable,
@@ -94,15 +95,60 @@ test("two getZoneGroups calls after one success produce one GetZoneGroupState", 
   assert.equal(calls.n, 1);
 });
 
-test("a call 30 seconds later still produces no new SOAP", async () => {
+test("repeated calls inside the staleness ceiling produce no new SOAP", async () => {
   const groups = [{ id: "kitchen-group" }];
   const { m, calls } = countingManager(() => groups);
 
   await getZoneGroups(m);
-  setZoneCacheAgeForTests(30_000);
-  assert.ok(zoneCacheInfoForTests().ageMs >= 30_000);
-  assert.deepEqual(await getZoneGroups(m), groups);
+  setZoneCacheAgeForTests(ZONE_CACHE_MAX_AGE_MS - 1_000);
+  for (let i = 0; i < 5; i += 1) {
+    assert.deepEqual(await getZoneGroups(m), groups);
+  }
   assert.equal(calls.n, 1);
+});
+
+test("past the staleness ceiling exactly one fresh read happens", async () => {
+  const { m, calls } = countingManager((n) => [{ id: `pass-${n}` }]);
+
+  assert.deepEqual(await getZoneGroups(m), [{ id: "pass-1" }]);
+  setZoneCacheAgeForTests(ZONE_CACHE_MAX_AGE_MS);
+  assert.ok(zoneCacheInfoForTests().ageMs >= ZONE_CACHE_MAX_AGE_MS);
+
+  // One read refreshes the map; the calls behind it ride the new cache.
+  assert.deepEqual(await getZoneGroups(m), [{ id: "pass-2" }]);
+  assert.deepEqual(await getZoneGroups(m), [{ id: "pass-2" }]);
+  assert.deepEqual(await getZoneGroups(m), [{ id: "pass-2" }]);
+  assert.equal(calls.n, 2);
+});
+
+test("an aged cache whose refresh fails keeps serving the last good map", async () => {
+  const groups = [{ id: "kitchen-group" }];
+  let failing = false;
+  const { m, calls } = countingManager(() => {
+    if (failing) throw new Error("Sonos topology timed out after 4s");
+    return groups;
+  });
+
+  assert.deepEqual(await getZoneGroups(m), groups);
+  failing = true;
+  setZoneCacheAgeForTests(ZONE_CACHE_MAX_AGE_MS);
+
+  // Last-known-good, not a throw.
+  assert.deepEqual(await getZoneGroups(m), groups);
+  assert.equal(calls.n, 2);
+
+  // And the failure holds off the next age-triggered probe, so an unreachable
+  // household does not get one failover chain per caller.
+  assert.equal(zoneCacheInfoForTests().retryHeldOff, true);
+  assert.deepEqual(await getZoneGroups(m), groups);
+  assert.deepEqual(await getZoneGroups(m), groups);
+  assert.equal(calls.n, 2);
+
+  // An explicit clear still forces a read regardless of the hold-off.
+  failing = false;
+  clearZoneCache();
+  assert.deepEqual(await getZoneGroups(m), groups);
+  assert.equal(calls.n, 3);
 });
 
 test("clearZoneCache then getZoneGroups reads again", async () => {

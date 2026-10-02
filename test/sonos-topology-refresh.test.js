@@ -1,7 +1,6 @@
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  configureSonosManagerHealth,
   noteSonosReadSuccess,
   resetSonosManagerHealthStateForTests,
 } from "../src/sonos-manager-health.js";
@@ -12,7 +11,6 @@ import {
   refreshCachedZoneTopology,
   resetZoneTopologyRefreshForTests,
   setZoneTopologyLoggerForTests,
-  SONOS_TOPOLOGY_REFRESH_IDLE_MS,
   SONOS_TOPOLOGY_REFRESH_MS,
   startPeriodicZoneTopologyRefresh,
   stopPeriodicZoneTopologyRefresh,
@@ -121,23 +119,25 @@ test("the periodic refresh is armed at five minutes and runs on that tick", asyn
   assert.ok(zoneTopologyRefreshInfo().lastSuccessfulTopologyRefresh > 0);
 });
 
-test("a periodic refresh is skipped during recent Sonos activity and runs once idle", async () => {
+// Replaces "a periodic refresh is skipped during recent Sonos activity". That
+// gate meant the safety net never ran during a party, because ordinary traffic
+// kept resetting its clock. Successful traffic proves the coordinator we are
+// already using answers; it says nothing about how the household is grouped.
+test("continuous successful Sonos traffic does not suppress the periodic refresh", async () => {
   const grouped = house("Living Room");
   const { m, calls } = oneSpeaker(() => Promise.resolve(grouped));
-  noteSonosReadSuccess();
-  const skipped = await refreshCachedZoneTopology({ manager: m });
-  assert.deepEqual(skipped, { skipped: "recent-activity" });
-  assert.equal(calls.n, 0);
-  assert.equal(zoneTopologyRefreshInfo().lastTopologyRefreshAttempt, 0);
 
-  const stamped = Date.now() - SONOS_TOPOLOGY_REFRESH_IDLE_MS - 1;
-  configureSonosManagerHealth({ now: () => stamped });
   noteSonosReadSuccess();
-  configureSonosManagerHealth({ now: Date.now });
-
-  const ran = await refreshCachedZoneTopology({ manager: m });
-  assert.equal(ran.ok, true);
+  const first = await refreshCachedZoneTopology({ manager: m });
+  assert.equal(first.ok, true);
   assert.equal(calls.n, 1);
+  assert.ok(zoneTopologyRefreshInfo().lastTopologyRefreshAttempt > 0);
+
+  // Still busy, and it still runs.
+  noteSonosReadSuccess();
+  const second = await refreshCachedZoneTopology({ manager: m });
+  assert.equal(second.ok, true);
+  assert.equal(calls.n, 2);
   assert.deepEqual(await getZoneGroups(m), grouped);
 });
 

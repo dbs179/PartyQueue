@@ -4,6 +4,7 @@ import {
   setDjVolumeHandoffArmed,
 } from "./dj-volume-handoff-state.js";
 import { handoffWatchSleepMs } from "./dj-volume-handoff.js";
+import { liveMembers } from "./sonos-reachability.js";
 import { noteGroupVolume, volumeGetPayload } from "./sonos-volume.js";
 import {
   flushSpeakerVolumeEpoch,
@@ -294,8 +295,9 @@ function speakersFrom(io) {
  * Watch one baked announce and publish its two volume endpoints.
  *
  * `io.read` is never held behind a speaker write. `io.speakers` is the set
- * captured when the announcement started; a timeout inside a write does not
- * remove a speaker from that set.
+ * captured when the announcement started; each publish re-filters it through
+ * the reachability skip map, so a speaker that wedges mid-session stops
+ * receiving writes while the rest of the group finishes the sequence.
  */
 export async function runAnnounceVolume(announce, io, opts = {}) {
   const pollMs = opts.pollMs ?? 150;
@@ -395,7 +397,11 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
         debug("[dj-volume] music target published");
       }
     }
-    for (const speaker of speakers) publishSpeakerVolume(speaker, next, generation);
+    // In-memory skip-map filter only: no topology query, no SOAP. A speaker
+    // that wedged after the capture drops out from the next publish onward.
+    for (const speaker of liveMembers(speakers)) {
+      publishSpeakerVolume(speaker, next, generation);
+    }
   };
 
   const watchSleep = () =>

@@ -4,7 +4,6 @@ import {
   noteSonosReadSuccess,
   noteSonosReadFailure,
   clearSonosUnhealthy,
-  getSonosManagerHealth,
 } from "./sonos-manager-health.js";
 import { formatZoneTopology, pickGroupByTarget } from "./sonos-queue-policy.js";
 import { getSonosTargetRoom } from "./settings.js";
@@ -48,11 +47,17 @@ const ZONE_DEVICE_FAILOVER_LIMIT = 3;
  */
 export const SONOS_TOPOLOGY_REFRESH_MS = 5 * 60_000;
 /**
- * Skip the safety-net read when ordinary Sonos traffic (now playing, queue,
- * transport) succeeded this recently. The per-speaker health probe is not
- * this clock.
+ * Ceiling on how stale a held group map may be before the next read refreshes
+ * it. Bounded staleness, not a poll: inside this window every caller reuses
+ * the cache, so one read covers all of them.
+ *
+ * This exists because a speaker can stay on the network and stop answering
+ * SOAP, which moves coordination without refusing anything we send. Nothing
+ * in that failure calls clearZoneCache(), so an unbounded cache can aim every
+ * transport command at a box that is no longer the coordinator for the rest of
+ * the night.
  */
-export const SONOS_TOPOLOGY_REFRESH_IDLE_MS = 60_000;
+export const ZONE_CACHE_MAX_AGE_MS = 30_000;
 
 /**
  * Household topology XML is the same on every speaker. Probe the configured
@@ -257,6 +262,12 @@ let zoneCache = { at: 0, groups: null };
 let zoneInFlight = null;
 /** Bumped by clearZoneCache(). A read may fill the cache only for the generation it started in. */
 let zoneGeneration = 0;
+/**
+ * Epoch ms. Set when a refresh failed and the last good map was kept, so an
+ * aged-out cache does not start a fresh probe chain on every single call while
+ * the household is unreachable. Explicit clears and fresh reads ignore it.
+ */
+let zoneRetryAfter = 0;
 
 /** Cool-off between device-list rebuilds triggered by topology drift. */
 export const DEVICE_DRIFT_REFRESH_MS = 60_000;
@@ -409,6 +420,10 @@ function startTopologyRead(m, opts, startedGeneration) {
       // A failed refresh is not "we have no house." Keep the last map so
       // now-playing does not walk the failover list on a timer.
       if (zoneCache.groups) {
+        // Hold off the next age-triggered probe. Without this, an aged cache
+        // plus an unreachable household means every caller opens its own
+        // failover chain.
+        zoneRetryAfter = Date.now() + ZONE_CACHE_MAX_AGE_MS;
         if (typeof opts.onKeptCache === "function") opts.onKeptCache(err);
         if (!opts.quietFailure) {
           console.warn(
@@ -500,10 +515,15 @@ export async function getZoneGroups(
     onKeptCache = null,
   } = {}
 ) {
-  // Hold the last good map until clearZoneCache() or a successful fresh read.
-  // Now-playing must not poll topology. External regroups are caught by the
-  // infrequent safety-net refresh, not by expiring this cache on a timer.
-  if (!fresh && zoneCache.groups) return zoneCache.groups;
+  // Reuse the held map inside the staleness ceiling; past it, take one fresh
+  // read. Now-playing still must not poll topology — the ceiling is long
+  // enough that a read covers every caller in that window — and a failed read
+  // keeps serving the last good map rather than throwing.
+  if (!fresh && zoneCache.groups) {
+    const now = Date.now();
+    if (now - zoneCache.at < ZONE_CACHE_MAX_AGE_MS) return zoneCache.groups;
+    if (now < zoneRetryAfter) return zoneCache.groups;
+  }
   return acquireTopology(
     m,
     { fresh, preferHost, preferRoom, quietFailure, onKeptCache },
@@ -620,6 +640,7 @@ export function isTransportRefusalError(err) {
 export function clearZoneCache() {
   zoneGeneration += 1;
   zoneCache = { at: 0, groups: null };
+  zoneRetryAfter = 0;
   // Keep zoneInFlight. The SOAP call is still on the wire; forgetting it
   // here is what used to let a second GetZoneGroupState start. The generation
   // bump is what stops this read from refilling the cache.
@@ -632,6 +653,7 @@ export function zoneCacheInfoForTests() {
     hasCache: !!zoneCache.groups,
     hasInFlight: !!zoneInFlight,
     ageMs: zoneCache.groups ? Date.now() - zoneCache.at : 0,
+    retryHeldOff: Date.now() < zoneRetryAfter,
   };
 }
 
@@ -680,17 +702,6 @@ function topologyFingerprint(groups) {
     .join("|");
 }
 
-/**
- * Ordinary party traffic, not the health probe. lastSuccessAt is stamped by
- * now-playing, queue, and transport reads.
- * @param {number} [now]
- */
-export function sonosTopologyRefreshWouldSkip(now = Date.now()) {
-  const last = getSonosManagerHealth().lastSuccessAt || 0;
-  if (!last) return false;
-  return now - last < SONOS_TOPOLOGY_REFRESH_IDLE_MS;
-}
-
 function notePeriodicTopologyFailure(err) {
   const message = String(err?.message || err || "topology refresh failed");
   if (topologyFailureStreak && message === topologyFailureMessage) return;
@@ -711,7 +722,9 @@ export async function refreshCachedZoneTopology(opts = {}) {
   const m = opts.manager || manager;
   if (!m) return { skipped: "not-ready" };
   const now = opts.now || Date.now();
-  if (sonosTopologyRefreshWouldSkip(now)) return { skipped: "recent-activity" };
+  // No activity gate: ordinary successful traffic says the coordinator we are
+  // already talking to answers, not that the household is grouped the way we
+  // last saw it. Suppressing on activity meant this never ran during a party.
   // zoneInFlight is set synchronously inside getZoneGroups, before this
   // function awaits, so a second cycle cannot start a stacked read.
   lastTopologyRefreshAttempt = now;
