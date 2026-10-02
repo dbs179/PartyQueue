@@ -128,6 +128,23 @@ async function readVolume(speaker) {
   return clampVolume(read?.CurrentVolume);
 }
 
+function speakerLogName(lane) {
+  return String(lane?.speaker?.Name || lane?.key || "speaker").replace(/\s+/g, "~");
+}
+
+function diagnosticIso(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n)) return "";
+  return new Date(n).toISOString();
+}
+
+function writeResultLabel(err) {
+  const msg = String(err?.message || err || "");
+  const code = String(err?.code || "");
+  if (code === "ETIMEDOUT" || /timed out/i.test(msg)) return "timeout";
+  return "failure";
+}
+
 function kick(lane) {
   if (lane.inFlight || !needsSend(lane)) return;
   const level = lane.desired;
@@ -142,6 +159,10 @@ function kick(lane) {
   if (lane.forceOnce) lane.forceOnce = false;
   lane.lastAttemptedLevel = level;
   const started = Date.now();
+  console.info(
+    `[dj-volume] speaker-write speaker=${speakerLogName(lane)} epoch=${epoch} ` +
+      `level=${level} start=${diagnosticIso(started)}`
+  );
   // Start the SOAP now. publish() still returns before it settles.
   Promise.resolve(writeVolume(lane.speaker, level)).then(
     () => settle(lane, { ok: true, level, epoch, started }),
@@ -152,7 +173,18 @@ function kick(lane) {
 function settle(lane, result) {
   if (!lane.inFlight || lane.inFlightLevel !== result.level) return;
   lane.inFlight = false;
-  const latencyMs = Math.max(0, Date.now() - result.started);
+  const finished = Date.now();
+  const latencyMs = Math.max(0, finished - result.started);
+  const replaced =
+    lane.desired != null && lane.desired !== result.level
+      ? ` replaced=${lane.desired}`
+      : "";
+  console.info(
+    `[dj-volume] speaker-write speaker=${speakerLogName(lane)} epoch=${result.epoch} ` +
+      `level=${result.level} start=${diagnosticIso(result.started)} ` +
+      `finish=${diagnosticIso(finished)} ` +
+      `result=${result.ok ? "success" : writeResultLabel(result.err)}${replaced}`
+  );
   const commFailure = !result.ok && isSonosUnreachableError(result.err);
   if (result.ok) {
     lane.lastResolvedLevel = result.level;
@@ -252,8 +284,18 @@ export async function flushSpeakerVolumeEpoch(epoch, opts = {}) {
     if (lane.desired == null || lane.desired === lane.lastResolvedLevel) continue;
     lane.verified = true;
     const readStarted = Date.now();
+    const cleanupSpeaker = speakerLogName(lane);
+    console.info(
+      `[dj-volume] speaker-cleanup-read speaker=${cleanupSpeaker} epoch=${epoch} ` +
+        `start=${diagnosticIso(readStarted)}`
+    );
     try {
       const got = await readVolume(lane.speaker);
+      console.info(
+        `[dj-volume] speaker-cleanup-read speaker=${cleanupSpeaker} epoch=${epoch} ` +
+          `start=${diagnosticIso(readStarted)} finish=${diagnosticIso(Date.now())} ` +
+          `result=success level=${got}`
+      );
       noteSpeakerHealthSuccess(lane.speaker, {
         latencyMs: Math.max(0, Date.now() - readStarted),
       });
@@ -269,6 +311,11 @@ export async function flushSpeakerVolumeEpoch(epoch, opts = {}) {
         }
       }
     } catch (err) {
+      console.info(
+        `[dj-volume] speaker-cleanup-read speaker=${cleanupSpeaker} epoch=${epoch} ` +
+          `start=${diagnosticIso(readStarted)} finish=${diagnosticIso(Date.now())} ` +
+          `result=${writeResultLabel(err)}`
+      );
       if (isSonosUnreachableError(err)) {
         noteSpeakerHealthFailure(lane.speaker, err, {
           latencyMs: Math.max(0, Date.now() - readStarted),
@@ -280,6 +327,32 @@ export async function flushSpeakerVolumeEpoch(epoch, opts = {}) {
   for (const lane of mine()) {
     if (lane.ownerEpoch === epoch) lane.closedEpoch = epoch;
   }
+}
+
+/**
+ * Read-only view of speaker lanes owned by one announcement epoch.
+ * Does not start, wait for, or alter a write.
+ * @param {number} epoch
+ */
+export function speakerVolumeInFlightSnapshot(epoch) {
+  const owner = Number(epoch) || 0;
+  const rows = [...lanes.values()].filter((lane) => lane.ownerEpoch === owner);
+  const lanesOut = rows.map((lane) => ({
+    name: String(lane.speaker?.Name || lane.key || ""),
+    key: lane.key,
+    state: lane.inFlight ? "writing" : "idle",
+    attemptedLevel: lane.inFlight ? lane.inFlightLevel : null,
+    desiredLevel: lane.desired,
+    followUpPending: lane.pendingFollowUp === true,
+    epoch: lane.ownerEpoch,
+  }));
+  const writing = lanesOut.filter((lane) => lane.state === "writing").length;
+  return {
+    speakers: lanesOut.length,
+    writing,
+    idle: lanesOut.length - writing,
+    lanes: lanesOut,
+  };
 }
 
 /** @returns {SpeakerLane|null} */

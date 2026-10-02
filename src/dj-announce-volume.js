@@ -9,6 +9,7 @@ import {
   flushSpeakerVolumeEpoch,
   publishSpeakerVolume,
   resetSpeakerVolumeForTests,
+  speakerVolumeInFlightSnapshot,
   SPEAKER_VOLUME_CLEANUP_MS,
 } from "./dj-speaker-volume.js";
 
@@ -212,7 +213,13 @@ export function estimateAnnouncePlayhead(sample, nowMs, origin, durationSec = 0)
       frozen = Math.max(origin.frozenSec, reported);
     }
     const positionSec = boundPlayhead(frozen, frozen, duration);
-    return { positionSec, originAt: null, playing: false, frozenSec: positionSec };
+    return {
+      positionSec,
+      originAt: null,
+      playing: false,
+      frozenSec: positionSec,
+      source: playheadSource(positionSec, reported, "rebased"),
+    };
   }
   const at = Number.isFinite(Number(sample?.observedAt))
     ? Number(sample.observedAt)
@@ -231,7 +238,42 @@ export function estimateAnnouncePlayhead(sample, nowMs, origin, durationSec = 0)
   }
   const elapsed = Math.max(0, (at - originAt) / 1000);
   const positionSec = boundPlayhead(elapsed, reported, duration);
-  return { positionSec, originAt, playing: true, frozenSec: null };
+  return {
+    positionSec,
+    originAt,
+    playing: true,
+    frozenSec: null,
+    source: playheadSource(positionSec, reported, resumed ? "rebased" : "wall-clock"),
+  };
+}
+
+/** How the playhead number used for a volume decision was produced. */
+function playheadSource(estimated, reported, aheadSource) {
+  if (Number(estimated) > Number(reported) + 0.049) return aheadSource;
+  return "rel-time";
+}
+
+function formatPlayheadSec(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toFixed(1) : "";
+}
+
+function diagnosticAt(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n)) return "";
+  if (n > 1e11) return new Date(n).toISOString();
+  return String(Math.round(n));
+}
+
+function activeWriteToken(snapshot) {
+  const writing = (snapshot?.lanes || []).filter((lane) => lane.state === "writing");
+  if (!writing.length) return "none";
+  return writing
+    .map((lane) => {
+      const name = String(lane.name || lane.key || "speaker").replace(/\s+/g, "~");
+      return `${name}@${lane.attemptedLevel}/${lane.desiredLevel}`;
+    })
+    .join(",");
 }
 
 function speakersFrom(io) {
@@ -261,6 +303,7 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
   const maxMs = opts.maxMs ?? MAX_HANDOFF_ARMED_MS;
   const logger = opts.logger ?? console;
   const debug = opts.logger?.debug?.bind(opts.logger) ?? (() => {});
+  const info = typeof logger.info === "function" ? logger.info.bind(logger) : () => {};
   const now = io.now ?? Date.now;
   const clock = typeof io.mono === "function" ? io.mono : now;
   const speakers = speakersFrom(io);
@@ -277,6 +320,7 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
   let playOrigin = { originAt: null };
   let activeDurationSec = Math.max(0, Number(announce.durationSec) || 0);
   let warnedOpening = false;
+  let loggedClosing = false;
   let consecutiveReadFailures = 0;
   const timeline = {
     generatedDurationSec: Number(announce.durationSec) || 0,
@@ -398,6 +442,7 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
               originAt: null,
               playing: true,
               frozenSec: null,
+              source: "rel-time",
             };
         if (explicitState) playOrigin = tracked;
         const positionSec = tracked.positionSec;
@@ -453,7 +498,39 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
           musicVolume,
           announceVolume,
         });
-        publish(endpoint.volume);
+        const closingNow =
+          !loggedClosing &&
+          (endpoint.phase === ANNOUNCE_PHASE.restore ||
+            endpoint.phase === ANNOUNCE_PHASE.done);
+        if (closingNow) {
+          const atMs = clock();
+          const before = speakerVolumeInFlightSnapshot(generation);
+          publish(endpoint.volume);
+          const after = speakerVolumeInFlightSnapshot(generation);
+          loggedClosing = true;
+          const restore = Math.max(0, Number(announce.restoreSec) || 0);
+          const threshold = Math.max(0, Number(clipDuration) - restore);
+          info(
+            "[dj-volume] closing-publish " +
+              `at=${diagnosticAt(atMs)} ` +
+              `uri=${announce.clipUrl || ""} ` +
+              `state=${sample.state || ""} ` +
+              `track=${sample.queueTrack ?? ""} ` +
+              `rel=${formatPlayheadSec(reportedPos)} ` +
+              `estimated=${formatPlayheadSec(positionSec)} ` +
+              `duration=${formatPlayheadSec(clipDuration)} ` +
+              `trackDuration=${formatPlayheadSec(sample.durationSec)} ` +
+              `threshold=${formatPlayheadSec(threshold)} ` +
+              `source=${tracked.source || "rel-time"} ` +
+              `speakers=${after.speakers} ` +
+              `writingBefore=${before.writing} ` +
+              `writingAfter=${after.writing} ` +
+              `activeBefore=${activeWriteToken(before)} ` +
+              `activeAfter=${activeWriteToken(after)}`
+          );
+        } else {
+          publish(endpoint.volume);
+        }
         if (
           endpoint.phase === ANNOUNCE_PHASE.done ||
           endpoint.phase === ANNOUNCE_PHASE.restore

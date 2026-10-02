@@ -1152,3 +1152,193 @@ test("Play imminent switches the wait poll to 150ms so opening silence is not mi
   assert.ok(sleeps[0] >= 1000, `armed wait should stay slow, got ${sleeps[0]}`);
   assert.equal(sleeps[1], 150, `Play should poll at 150ms, got ${sleeps[1]}`);
 });
+
+function logField(line, name) {
+  const match = String(line).match(new RegExp(`(?:^|\\s)${name}=(\\S+)`));
+  assert.ok(match, `${name} missing in ${line}`);
+  return match[1];
+}
+
+test("closing publish with direct RelTime logs the sample that triggered it", async () => {
+  let clock = 0;
+  const calls = {
+    read: 0,
+    setVolume: 0,
+    GetPositionInfo: 0,
+    GetTransportInfo: 0,
+    GetVolume: 0,
+    SetVolume: 0,
+  };
+  const levels = [];
+  const logs = [];
+  const office = {
+    Name: "Office",
+    Host: "10.10.20.50",
+    setVolume: async (level) => {
+      calls.setVolume += 1;
+      levels.push({ level, at: clock });
+    },
+    RenderingControlService: {
+      SetVolume: async () => {
+        calls.SetVolume += 1;
+      },
+      GetVolume: async () => {
+        calls.GetVolume += 1;
+        return { CurrentVolume: 8 };
+      },
+    },
+    AVTransportService: {
+      GetPositionInfo: async () => {
+        calls.GetPositionInfo += 1;
+      },
+      GetTransportInfo: async () => {
+        calls.GetTransportInfo += 1;
+      },
+    },
+  };
+  const io = {
+    mono: () => clock,
+    now: () => clock,
+    read: async () => {
+      calls.read += 1;
+      return {
+        uri: CLIP,
+        positionSec: clock / 1000,
+        durationSec: 24,
+        state: "PLAYING",
+        queueTrack: 1,
+        observedAt: clock,
+      };
+    },
+    speakers: [office],
+    sleep: async (ms) => {
+      clock += ms;
+    },
+  };
+  await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+    pollMs: 150,
+    maxMs: 30_000,
+    logger: {
+      debug() {},
+      warn() {},
+      error() {},
+      info: (line) => logs.push(String(line)),
+    },
+  });
+  const closing = logs.filter((line) => line.includes("[dj-volume] closing-publish"));
+  assert.equal(closing.length, 1);
+  const line = closing[0];
+  assert.equal(logField(line, "uri"), CLIP);
+  assert.equal(logField(line, "state"), "PLAYING");
+  assert.equal(logField(line, "track"), "1");
+  assert.equal(logField(line, "rel"), "21.0");
+  assert.equal(logField(line, "estimated"), "21.0");
+  assert.equal(logField(line, "duration"), "24.0");
+  assert.equal(logField(line, "trackDuration"), "24.0");
+  assert.equal(logField(line, "threshold"), "21.0");
+  assert.equal(logField(line, "source"), "rel-time");
+  assert.equal(logField(line, "at"), "21000");
+  assert.deepEqual(levels.map((row) => row.level), [20, 8]);
+  assert.equal(levels[1].at, 21000);
+  assert.ok(calls.read > 0);
+  assert.equal(calls.setVolume, 2);
+  assert.equal(calls.GetPositionInfo, 0);
+  assert.equal(calls.GetTransportInfo, 0);
+  assert.equal(calls.GetVolume, 0);
+  assert.equal(calls.SetVolume, 0);
+});
+
+test("closing publish driven by wall-clock extrapolation names that source", async () => {
+  let clock = 0;
+  const pending = [];
+  const logs = [];
+  const office = {
+    Name: "Office",
+    Host: "10.10.20.50",
+    setVolume: (level) => {
+      const gate = deferredGate();
+      pending.push({ level, gate });
+      return gate.promise;
+    },
+  };
+  const io = {
+    mono: () => clock,
+    now: () => clock,
+    read: async () => ({
+      uri: CLIP,
+      positionSec: 0,
+      durationSec: 24,
+      state: "PLAYING",
+      queueTrack: 1,
+      observedAt: clock,
+    }),
+    speakers: [office],
+    sleep: async (ms) => {
+      clock += ms;
+    },
+  };
+  await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+    pollMs: 150,
+    maxMs: 30_000,
+    logger: {
+      debug() {},
+      warn() {},
+      error() {},
+      info: (line) => logs.push(String(line)),
+    },
+  });
+  const line = logs.find((entry) => entry.includes("[dj-volume] closing-publish"));
+  assert.ok(line);
+  assert.equal(logField(line, "rel"), "0.0");
+  assert.equal(logField(line, "estimated"), "21.0");
+  assert.equal(logField(line, "duration"), "24.0");
+  assert.equal(logField(line, "threshold"), "21.0");
+  assert.equal(logField(line, "source"), "wall-clock");
+  assert.equal(logField(line, "writingBefore"), "1");
+  assert.equal(logField(line, "writingAfter"), "1");
+  assert.equal(logField(line, "activeBefore"), "Office@20/20");
+  assert.equal(logField(line, "activeAfter"), "Office@20/8");
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].level, 20);
+  pending[0].gate.resolve();
+});
+
+function deferredGate() {
+  /** @type {(value?: unknown) => void} */
+  let resolve;
+  const promise = new Promise((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+test("a resumed frozen playhead is labeled rebased", () => {
+  let origin = estimateAnnouncePlayhead(
+    { positionSec: 0, state: "PLAYING", observedAt: 0 },
+    0,
+    { originAt: null },
+    24
+  );
+  origin = estimateAnnouncePlayhead(
+    { positionSec: 0, state: "PLAYING", observedAt: 8_000 },
+    8_000,
+    origin,
+    24
+  );
+  assert.equal(origin.source, "wall-clock");
+  const paused = estimateAnnouncePlayhead(
+    { positionSec: 0, state: "PAUSED_PLAYBACK", observedAt: 9_000 },
+    9_000,
+    origin,
+    24
+  );
+  assert.equal(paused.source, "rebased");
+  const resumed = estimateAnnouncePlayhead(
+    { positionSec: 0, state: "PLAYING", observedAt: 30_000 },
+    30_000,
+    paused,
+    24
+  );
+  assert.equal(resumed.source, "rebased");
+  assert.ok(Math.abs(resumed.positionSec - 8) < 0.05);
+});
