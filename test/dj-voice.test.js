@@ -640,7 +640,7 @@ describe("normalizeDjSilenceSec", () => {
     assert.equal(normalizeDjSilenceSec(5), 5);
     assert.equal(normalizeDjSilenceSec(0.6), 0.5);
     assert.equal(normalizeDjSilenceSec(null), DJ_VOICE_DEFAULTS.djSilenceSec);
-    assert.equal(DJ_VOICE_DEFAULTS.djHandoffSilenceSec, 3);
+    assert.equal(DJ_VOICE_DEFAULTS.djHandoffSilenceSec, 4);
   });
 });
 

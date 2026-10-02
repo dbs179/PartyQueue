@@ -485,9 +485,12 @@ export const DJ_VOICE_DEFAULTS = {
   djVolumeBumpHighPct: 4,
   // Legacy one-pad duration, retained for settings compatibility.
   djSilenceSec: 2,
-  // Pre/post handoff pads. New field intentionally defaults existing installs
-  // to the safer 3-second stepped-ramp window.
-  djHandoffSilenceSec: 3,
+  // Pre/post handoff pads, baked into both ends of every announce clip.
+  // These are the whole margin the volume ramp has to work in: the boost must
+  // land before the DJ speaks, and the music level must be back before the
+  // next song starts. Four seconds keeps both edges inaudible even when a
+  // speaker answers slowly, at the cost of one silent second per end.
+  djHandoffSilenceSec: 4,
   // TTS via Home Assistant: ElevenLabs (expressive) or OpenAI.
   djTtsProvider: "elevenlabs_ha",
   djTtsVoiceOpenAi: "onyx",

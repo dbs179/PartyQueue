@@ -120,6 +120,59 @@ export function resolveAnnounceClipDuration(announceDurationSec, liveDurationSec
  * Opening silence and speech both want the announce level. Closing silence
  * wants the music level immediately — there is no midpoint and no lerp.
  */
+/** Tight RelTime poll through the silence edges. Coast during speech. */
+export const ANNOUNCE_EDGE_POLL_MS = 150;
+export const ANNOUNCE_COAST_POLL_MS = 1000;
+/** Floor on an aimed sleep, so the last approach cannot become a busy loop. */
+export const ANNOUNCE_MIN_POLL_MS = 25;
+
+/**
+ * How long to wait before the next playhead read.
+ *
+ * Opening silence stays on the short poll so the boost is never late. Speech
+ * does not move the level, so RelTime there is read about once a second
+ * instead of seven times — that is the bulk of the per-announce SOAP.
+ *
+ * Through speech the sleep is aimed at the start of the closing silence
+ * rather than stepped on a fixed cadence. Stepping would cross the boundary
+ * at a near-arbitrary point inside the last interval; aiming lands the read
+ * on it. That matters because the two ramp errors are not symmetric: the
+ * music level going back a little early is inaudible inside the trailing
+ * silence, while going back late means the next song opens at announce
+ * volume.
+ */
+export function announceWatchSleepMs({
+  sawClip = false,
+  imminent = false,
+  positionSec = 0,
+  durationSec = 0,
+  rampSec = 0,
+  restoreSec = 0,
+  pollMs = ANNOUNCE_EDGE_POLL_MS,
+  waitMs = pollMs,
+  coastMs = ANNOUNCE_COAST_POLL_MS,
+  minMs = ANNOUNCE_MIN_POLL_MS,
+} = {}) {
+  const wait = Math.max(0, Number(waitMs) || 0);
+  if (!sawClip && !imminent) return wait;
+  const edge = Math.max(0, Number(pollMs) || 0);
+  const coast = Math.max(edge, Number(coastMs) || 0);
+  if (!sawClip) return edge;
+  const pos = Math.max(0, Number(positionSec) || 0);
+  const duration = Math.max(0, Number(durationSec) || 0);
+  const ramp = Math.max(0, Number(rampSec) || 0);
+  const restore = Math.max(0, Number(restoreSec) || 0);
+  const floor = Math.max(1, Number(minMs) || 1);
+  // An unknown clip length has no boundary to aim at, and the opening pad is
+  // where the boost has to land. Both stay on the tight poll.
+  if (!(duration > 0)) return edge;
+  if (pos < ramp + 0.4) return edge;
+  const restoreStart = Math.max(0, duration - restore);
+  const untilRestoreMs = (restoreStart - pos) * 1000;
+  if (untilRestoreMs <= 0) return edge;
+  return Math.round(Math.min(coast, Math.max(floor, untilRestoreMs)));
+}
+
 export function announceVolumeAt({
   positionSec,
   durationSec,
@@ -325,6 +378,8 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
   let warnedOpening = false;
   let loggedClosing = false;
   let consecutiveReadFailures = 0;
+  let watchPos = 0;
+  let watchDur = 0;
   const timeline = {
     generatedDurationSec: Number(announce.durationSec) || 0,
     openingSilenceSec: Number(announce.rampSec) || 0,
@@ -405,7 +460,16 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
   };
 
   const watchSleep = () =>
-    sawClip || announcePlaybackImminent ? pollMs : waitMs;
+    announceWatchSleepMs({
+      sawClip,
+      imminent: announcePlaybackImminent,
+      positionSec: watchPos,
+      durationSec: watchDur || activeDurationSec,
+      rampSec: announce.rampSec,
+      restoreSec: announce.restoreSec,
+      pollMs,
+      waitMs,
+    });
 
   try {
     while (now() - started < maxMs) {
@@ -485,6 +549,8 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
           }
         }
         sawClip = true;
+        watchPos = positionSec;
+        watchDur = clipDuration;
         announcePlaybackImminent = false;
         setDjVolumeHandoffActive(true);
         if (!(await ensureLevels())) {

@@ -118,6 +118,9 @@ export function resetAnnounceNowPlayingHoldForTests() {
   nowPlayingIdleHold = null;
   lastMusicNowPlaying = null;
   resetPostAnnounceTransportForTests();
+  lastCoordinatorTransport = null;
+  transportTickFlight = null;
+  transportWaiters.clear();
 }
 
 /**
@@ -810,6 +813,15 @@ async function readSonosNowPlayingSnapshot() {
     throw err;
   }
   noteCoordinatorCommunication(coordinator, soapStarted, null);
+  // The volume driver and the post-announce log reuse this sample. Remember
+  // the SOAP fields, not the DJ hold that may replace what clients see.
+  rememberCoordinatorTransport({
+    uri: pos.TrackURI ?? null,
+    state: transport.CurrentTransportState,
+    positionSec: parseSonosTime(pos.RelTime),
+    durationSec: parseSonosTime(pos.TrackDuration),
+    queueTrack: Number(pos.Track) || 0,
+  });
   // Shared snapshots can be reused for up to a few seconds. Clients use this
   // observation time to advance RelTime by the snapshot's age.
   const positionObservedAt = Date.now();
@@ -1272,13 +1284,107 @@ export async function getNowPlayingFresh() {
 }
 
 /**
+ * Last coordinator transport sample taken by a now-playing read or a tick.
+ * Volume timing and the post-announce log share it so neither starts a second
+ * SOAP call while this one is still fresh.
+ *
+ * Deliberately under the announcement's 150ms edge poll: two consecutive
+ * reads from the volume driver always go to the speaker, so a reused sample
+ * can never delay seeing the DJ clip start. Collisions with the slower
+ * now-playing poll still collapse.
+ */
+const TRANSPORT_TICK_REUSE_MS = 120;
+let lastCoordinatorTransport = null;
+let transportTickFlight = null;
+/** @type {Set<() => void>} */
+const transportWaiters = new Set();
+
+function rememberCoordinatorTransport(sample) {
+  if (!sample) return;
+  lastCoordinatorTransport = {
+    uri: sample.uri ?? null,
+    state: sample.state ?? null,
+    positionSec: sample.positionSec ?? null,
+    durationSec: sample.durationSec ?? null,
+    queueTrack: Number(sample.queueTrack) || 0,
+    at: Date.now(),
+  };
+  for (const wake of [...transportWaiters]) {
+    try {
+      wake();
+    } catch {
+      /* a waiter must not break the read that woke it */
+    }
+  }
+}
+
+export function peekCoordinatorTransport() {
+  return lastCoordinatorTransport ? { ...lastCoordinatorTransport } : null;
+}
+
+/**
+ * Resolve when a newer SOAP sample than `after` is already in memory.
+ * Does not call Sonos. On timeout, returns the last sample if there is one.
+ */
+export function waitForCoordinatorTransport({ after = 0, timeoutMs = 2000 } = {}) {
+  const ready = () =>
+    lastCoordinatorTransport && lastCoordinatorTransport.at > after
+      ? { ...lastCoordinatorTransport }
+      : null;
+  const immediate = ready();
+  if (immediate) return Promise.resolve(immediate);
+  return new Promise((resolve) => {
+    const timer = setTimeout(finish, Math.max(0, Number(timeoutMs) || 0));
+    timer.unref?.();
+    function finish() {
+      clearTimeout(timer);
+      transportWaiters.delete(wake);
+      resolve(
+        ready() ||
+          (lastCoordinatorTransport ? { ...lastCoordinatorTransport } : null)
+      );
+    }
+    function wake() {
+      if (ready()) finish();
+    }
+    transportWaiters.add(wake);
+  });
+}
+
+function transportTickBody(sample) {
+  return {
+    uri: sample?.uri ?? null,
+    state: sample?.state ?? null,
+    positionSec: sample?.positionSec ?? null,
+    durationSec: sample?.durationSec ?? null,
+    queueTrack: Number(sample?.queueTrack) || 0,
+  };
+}
+
+/**
  * Minimal live transport read: only the fields the DJ volume handoff watch loop
  * inspects (uri / state / positionSec / durationSec). The full now-playing
  * snapshot is five SOAP calls plus an entire GetQueue while a silence pad is
  * current — far too much to run against the party coordinator at the handoff's
  * poll rate.
+ *
+ * A sample younger than 200ms, including one the now-playing poll just took,
+ * is reused. Concurrent callers share the read already on the wire.
  */
 export async function getTransportTick() {
+  const recent = lastCoordinatorTransport;
+  if (recent && Date.now() - recent.at < TRANSPORT_TICK_REUSE_MS) {
+    return transportTickBody(recent);
+  }
+  if (transportTickFlight) return transportTickFlight;
+  const flight = readTransportTick().finally(() => {
+    if (transportTickFlight === flight) transportTickFlight = null;
+  });
+  transportTickFlight = flight;
+  return flight;
+}
+
+async function readTransportTick() {
   const started = Date.now();
   let coordinator = null;
   try {
@@ -1294,13 +1400,15 @@ export async function getTransportTick() {
     );
     noteCoordinatorCommunication(coordinator, started, null);
     noteSonosReadSuccess();
-    return {
+    const sample = {
       uri: pos.TrackURI ?? null,
       state: transport.CurrentTransportState,
       positionSec: parseSonosTime(pos.RelTime),
       durationSec: parseSonosTime(pos.TrackDuration),
       queueTrack: Number(pos.Track) || 0,
     };
+    rememberCoordinatorTransport(sample);
+    return sample;
   } catch (err) {
     noteCoordinatorCommunication(coordinator, started, err);
     noteSonosReadFailure();

@@ -678,7 +678,7 @@ export function createDjBoothUi(els, deps) {
       djVolumeBumpLowPct: d.djVolumeBumpLowPct ?? 20,
       djVolumeBumpMidPct: d.djVolumeBumpMidPct ?? 8,
       djVolumeBumpHighPct: d.djVolumeBumpHighPct ?? 4,
-      djHandoffSilenceSec: d.djHandoffSilenceSec ?? 3,
+      djHandoffSilenceSec: d.djHandoffSilenceSec ?? 4,
     };
     applyFromSettings(values);
     saveSettings(values, { toastMessage: "Set to Default" });

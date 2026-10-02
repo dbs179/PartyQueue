@@ -53,9 +53,13 @@ export async function ensureOrderedPlayModeOn(coordinator) {
   }
   let current = "NORMAL";
   try {
-    const settings = await coordinator.AVTransportService.GetTransportSettings({
-      InstanceID: 0,
-    });
+    const settings = await withTimeout(
+      coordinator.AVTransportService.GetTransportSettings({
+        InstanceID: 0,
+      }),
+      2_000,
+      "Sonos play mode read timed out"
+    );
     current = settings.PlayMode || "NORMAL";
   } catch (err) {
     console.warn("[playmode] read failed:", err?.message || err);
@@ -334,12 +338,18 @@ async function nextUnlocked(opts = {}) {
   let currentIsAnnouncePad = false;
 
   try {
-    const [pos, media] = await Promise.all([
-      coordinator.AVTransportService.GetPositionInfo(),
-      coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(
-        () => ({ CurrentURI: "" })
-      ),
-    ]);
+    // A slow context read must not consume the transport lane. Skip still
+    // falls through to one Next() when this times out.
+    const [pos, media] = await withTimeout(
+      Promise.all([
+        coordinator.AVTransportService.GetPositionInfo(),
+        coordinator.AVTransportService.GetMediaInfo({ InstanceID: 0 }).catch(
+          () => ({ CurrentURI: "" })
+        ),
+      ]),
+      2_000,
+      "Sonos skip context timed out"
+    );
     const meta = typeof pos.TrackMetaData === "object" ? pos.TrackMetaData : null;
     const uri = pos.TrackURI ?? null;
     const title = meta?.Title ?? "";

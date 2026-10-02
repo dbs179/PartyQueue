@@ -2922,23 +2922,36 @@ const TRACK_END_HOLD_POLL_MS = 400;
  * (~2s left) or after the playhead leaves that track.
  */
 async function holdAtTrackEndWhile(work) {
-  const { getAnnouncePlaybackContext, pause } = await import("./sonos.js");
+  const { getAnnouncePlaybackContext, getNowPlaying, getTransportTick, pause } =
+    await import("./sonos.js");
   let held = false;
   let stopped = false;
+  // One live queue read up front. The wait loop only needs the playhead, and
+  // a GetQueue every 400ms while TTS renders is what wedges the coordinator.
   const startCtx = await getAnnouncePlaybackContext().catch(() => null);
   const startedOnTrack = startCtx?.track ?? null;
 
   const maybeHold = async () => {
     if (held || stopped) return held;
-    const ctx = await getAnnouncePlaybackContext().catch(() => null);
-    if (!ctx) return false;
+    const tick = await getTransportTick();
+    const np = getNowPlaying.peek?.()?.value || null;
+    const duration = Number(tick?.durationSec);
+    const position = Number(tick?.positionSec);
+    const remainingSec =
+      Number.isFinite(duration) && duration > 0 && Number.isFinite(position)
+        ? Math.max(0, duration - position)
+        : null;
+    const track = Number(tick?.queueTrack) || 0;
+    const playingFromQueue = np
+      ? np.playingFromQueue === true
+      : startCtx?.playingFromQueue === true;
     if (
       !shouldHoldAtTrackEndForAnnounce({
         nextUp: true,
-        remainingSec: ctx.remainingSec,
-        currentTrack: ctx.track,
+        remainingSec,
+        currentTrack: track,
         startedOnTrack,
-        playingFromQueue: ctx.playingFromQueue,
+        playingFromQueue,
       })
     ) {
       return false;
@@ -2946,9 +2959,9 @@ async function holdAtTrackEndWhile(work) {
     await pause();
     held = true;
     const left =
-      ctx.remainingSec == null ? "playhead moved" : `${Math.round(ctx.remainingSec)}s left`;
+      remainingSec == null ? "playhead moved" : `${Math.round(remainingSec)}s left`;
     console.log(
-      `[dj-voice] held at track end for announce (${left} on track ${ctx.track})`
+      `[dj-voice] held at track end for announce (${left} on track ${track})`
     );
     return true;
   };
@@ -3094,15 +3107,32 @@ async function beginAnnounceVolume({
   )
     .then((result) => {
       console.log(`[dj-volume] announce volume finished (${result.reason})`);
-      // The volume driver has stopped sampling. Keep reading transport only,
-      // so a stop on the same MP3 is visible before the track URI changes.
+      // The volume driver has stopped sampling. Log whatever the now-playing
+      // poll already learned. This must not start its own GetPositionInfo —
+      // that second loop ran for 30s after every shout and stacked on the
+      // coordinator while the next song and guest adds were landing.
       if (!result?.sawClip) return;
+      let seenAt = 0;
       observePostDriverTransport({
         clipUrl,
         epoch: result.generation,
         driverReturnedAt: Date.now(),
         musicLevel: musicVolume,
-        read: io.read,
+        read: async () => {
+          const sample = await sonos.waitForCoordinatorTransport({
+            after: seenAt,
+            timeoutMs: 2_000,
+          });
+          if (sample?.at) seenAt = sample.at;
+          if (!sample) return {};
+          return {
+            uri: sample.uri ?? "",
+            positionSec: Number(sample.positionSec) || 0,
+            durationSec: Number(sample.durationSec) || 0,
+            queueTrack: Number(sample.queueTrack) || 0,
+            state: sample.state ?? null,
+          };
+        },
         sleep: io.sleep,
       }).catch((err) =>
         console.error(

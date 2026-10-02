@@ -56,6 +56,8 @@ export {
   getNowPlaying,
   getNowPlayingFresh,
   getTransportTick,
+  peekCoordinatorTransport,
+  waitForCoordinatorTransport,
   holdAnnounceNowPlaying,
   buildDjNowPlayingSnapshot,
   buildIdleNowPlayingSnapshot,

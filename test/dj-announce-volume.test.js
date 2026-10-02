@@ -11,6 +11,8 @@ import {
   runAnnounceVolume,
   uriMatchesClip,
   ANNOUNCE_PHASE,
+  ANNOUNCE_MIN_POLL_MS,
+  announceWatchSleepMs,
   scheduleAnnounceVolume,
   estimateAnnouncePlayhead,
   markAnnouncePlaybackImminent,
@@ -47,6 +49,131 @@ const shape = {
 };
 
 const at = (positionSec) => announceVolumeAt({ ...shape, positionSec });
+
+test("speech coasts the playhead poll and the silence edges stay tight", () => {
+  // Waiting for a clip that has not started: slow, until Play is imminent.
+  assert.equal(
+    announceWatchSleepMs({ sawClip: false, waitMs: 1000, pollMs: 150 }),
+    1000
+  );
+  assert.equal(
+    announceWatchSleepMs({
+      sawClip: false,
+      imminent: true,
+      waitMs: 1000,
+      pollMs: 150,
+    }),
+    150
+  );
+  // Opening silence: tight, so the boost lands before the DJ speaks.
+  assert.equal(
+    announceWatchSleepMs({ sawClip: true, positionSec: 1, ...shape, pollMs: 150 }),
+    150
+  );
+  // Mid-speech: coasting, because the level does not move here.
+  assert.equal(
+    announceWatchSleepMs({ sawClip: true, positionSec: 12, ...shape, pollMs: 150 }),
+    1000
+  );
+  // Approaching the closing silence: aimed at it, not stepped past it.
+  assert.equal(
+    announceWatchSleepMs({ sawClip: true, positionSec: 20.9, ...shape, pollMs: 150 }),
+    100
+  );
+  // An unknown clip length has no boundary to aim at.
+  assert.equal(
+    announceWatchSleepMs({
+      sawClip: true,
+      positionSec: 12,
+      ...shape,
+      durationSec: 0,
+      pollMs: 150,
+    }),
+    150
+  );
+});
+
+test("no sleep can carry the loop past the start of the closing silence", () => {
+  // The dangerous direction is a late restore: the next song would open at
+  // announce volume. Walk the whole clip and assert no sleep ever overshoots
+  // the boundary by more than the floor on the final approach.
+  for (const pads of [3, 4]) {
+    const clip = { durationSec: 24, rampSec: pads, restoreSec: pads };
+    const restoreStart = clip.durationSec - pads;
+    const slackSec = ANNOUNCE_MIN_POLL_MS / 1000;
+    for (let pos = 0; pos < restoreStart; pos += 0.01) {
+      const sleepMs = announceWatchSleepMs({
+        sawClip: true,
+        positionSec: pos,
+        ...clip,
+        pollMs: 150,
+      });
+      const landsAt = pos + sleepMs / 1000;
+      assert.ok(
+        landsAt <= restoreStart + slackSec + 1e-9,
+        `pad ${pads}s: sleeping ${sleepMs}ms at ${pos.toFixed(2)}s lands at ` +
+          `${landsAt.toFixed(3)}s, past the ${restoreStart}s boundary`
+      );
+    }
+  }
+});
+
+test("a coordinator transport sample can be waited on without another SOAP call", async () => {
+  const { waitForCoordinatorTransport, resetAnnounceNowPlayingHoldForTests } =
+    await import("../src/sonos-snapshots.js");
+  resetAnnounceNowPlayingHoldForTests();
+  const pending = waitForCoordinatorTransport({ after: 0, timeoutMs: 40 });
+  const sample = await pending;
+  assert.equal(sample, null);
+});
+
+test("a full announce hits both edges with a fraction of the playhead reads", async () => {
+  const pads = 4;
+  const clip = { durationSec: 26, rampSec: pads, restoreSec: pads };
+  const restoreStart = clip.durationSec - pads;
+  let clock = 0;
+  let reads = 0;
+  const events = [];
+  const io = {
+    mono: () => clock,
+    now: () => clock,
+    read: async () => {
+      reads += 1;
+      return {
+        uri: CLIP,
+        positionSec: clock / 1000,
+        durationSec: clip.durationSec,
+        state: "PLAYING",
+        queueTrack: 1,
+        observedAt: clock,
+      };
+    },
+    setVolume: async (level) => events.push({ level, at: clock / 1000 }),
+    sleep: async (ms) => {
+      clock += ms;
+    },
+  };
+  const result = await runAnnounceVolume(
+    { clipUrl: CLIP, ...clip, musicVolume: 8, announceVolume: 20 },
+    io,
+    { pollMs: 150, maxMs: 60_000, logger: { debug() {}, warn() {}, error() {} } }
+  );
+
+  assert.equal(result.reason, "complete");
+  const boost = events.find((event) => event.level === 20);
+  assert.ok(
+    boost && boost.at < pads,
+    `boost must land inside the opening silence, got ${boost?.at}s`
+  );
+  const restore = events.find((event) => event.level === 8 && event.at > pads);
+  assert.ok(
+    restore && restore.at >= restoreStart && restore.at < clip.durationSec,
+    `restore must land inside the closing silence, got ${restore?.at}s`
+  );
+  // Polling the whole clip at 150ms would be ~150 reads. Coasting through
+  // speech is what keeps a busy night's shouts off the coordinator.
+  assert.ok(reads < 60, `too many playhead reads for one announce: ${reads}`);
+});
 
 test("opening silence publishes the announce level immediately", () => {
   assert.equal(at(0).phase, ANNOUNCE_PHASE.ramp);
@@ -1680,6 +1807,14 @@ test("post-driver diagnostics add no transport command", async () => {
   assert.match(voiceSrc, /announce volume finished \(\$\{result\.reason\}\)/);
   assert.match(voiceSrc, /if \(!result\?\.sawClip\) return/);
   assert.match(voiceSrc, /observePostDriverTransport\(/);
+  assert.match(voiceSrc, /waitForCoordinatorTransport\(/);
+  const post = voiceSrc.slice(voiceSrc.indexOf("observePostDriverTransport("));
+  const postBlock = post.slice(0, post.indexOf(".catch("));
+  assert.equal(
+    postBlock.includes("getTransportTick"),
+    false,
+    "post-driver log must not start its own transport SOAP"
+  );
 });
 
 test("the post-driver summary records the music-level timeout and its retry", async () => {
