@@ -107,6 +107,9 @@ chown -R 1000:1000 data
 docker compose build --no-cache
 docker compose up -d
 "@
+  # A Windows checkout gives this here-string CRLF endings, which reach bash as
+  # a trailing \r on every line ("cd: .../PartyQueue\r: No such file").
+  $remoteCommand = $remoteCommand -replace "`r`n", "`n"
   & ssh -i $IdentityFile -o BatchMode=yes $target $remoteCommand
   if ($LASTEXITCODE -ne 0) {
     throw "The Unraid Docker rebuild failed."
