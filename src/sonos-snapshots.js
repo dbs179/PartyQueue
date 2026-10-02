@@ -12,6 +12,7 @@ import {
   deviceForMember,
   setSonosSnapshotInvalidator,
 } from "./sonos-core.js";
+import { isBakedAnnounceUri } from "./dj-announce-bake.js";
 import {
   findCompanionDjTtsUri,
   isDjVoiceUri,
@@ -116,6 +117,67 @@ export function resetAnnounceNowPlayingHoldForTests() {
   announceNowPlayingHold = null;
   nowPlayingIdleHold = null;
   lastMusicNowPlaying = null;
+  resetPostAnnounceTransportForTests();
+}
+
+/**
+ * After Sonos leaves a baked announcement, log the transport fields the
+ * existing now-playing read already returned. No extra SOAP, no recovery.
+ * The window closes after 45s or 24 samples, whichever comes first.
+ */
+const POST_ANNOUNCE_WINDOW_MS = 45_000;
+const POST_ANNOUNCE_MAX_SAMPLES = 24;
+let postAnnounceWatch = null;
+
+export function resetPostAnnounceTransportForTests() {
+  postAnnounceWatch = null;
+}
+
+export function observePostAnnounceTransport(sample, now = Date.now) {
+  const at = typeof now === "function" ? now() : now;
+  const trackUri = String(sample?.trackUri || "");
+  const holdUri = announceHoldIsLive(at) ? String(announceNowPlayingHold?.uri || "") : "";
+  if (isBakedAnnounceUri(trackUri)) {
+    postAnnounceWatch = {
+      uri: trackUri,
+      logging: false,
+      until: 0,
+      count: 0,
+    };
+    return;
+  }
+  if (isBakedAnnounceUri(holdUri)) {
+    if (!postAnnounceWatch || postAnnounceWatch.uri !== holdUri) {
+      postAnnounceWatch = {
+        uri: holdUri,
+        logging: false,
+        until: 0,
+        count: 0,
+      };
+    }
+  }
+  if (!postAnnounceWatch) return;
+  if (!postAnnounceWatch.logging) {
+    if (!trackUri || trackUri === postAnnounceWatch.uri) return;
+    postAnnounceWatch.logging = true;
+    postAnnounceWatch.until = at + POST_ANNOUNCE_WINDOW_MS;
+    postAnnounceWatch.count = 0;
+  }
+  if (at > postAnnounceWatch.until || postAnnounceWatch.count >= POST_ANNOUNCE_MAX_SAMPLES) {
+    postAnnounceWatch = null;
+    return;
+  }
+  postAnnounceWatch.count += 1;
+  console.info(
+    "[post-announce] transport " +
+      `state=${sample.state || ""} ` +
+      `track=${sample.queueTrack ?? ""} ` +
+      `rel=${sample.relTime ?? ""} ` +
+      `dur=${sample.trackDuration ?? ""} ` +
+      `trackUri=${trackUri} ` +
+      `currentUri=${sample.currentUri || ""}`
+  );
+  if (postAnnounceWatch.count >= POST_ANNOUNCE_MAX_SAMPLES) postAnnounceWatch = null;
 }
 
 export function announceNowPlayingHoldForTests() {
@@ -940,6 +1002,14 @@ async function readSonosNowPlayingSnapshot() {
   };
 
   rememberMusicNowPlaying(soapSnapshot);
+  observePostAnnounceTransport({
+    state,
+    queueTrack: soapSnapshot.queueTrack,
+    trackUri: uri,
+    relTime: pos.RelTime ?? "",
+    trackDuration: pos.TrackDuration ?? "",
+    currentUri: media.CurrentURI || "",
+  });
 
   // Clear / last-track Stop leaves DIDL on an empty queue URI. Guests would
   // see "Left Behind" (or last night's song) with nothing actually playing.

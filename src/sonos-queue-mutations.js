@@ -649,8 +649,68 @@ async function addPlaylistToQueueUnlocked(playlistUri) {
   return { room: coordinator.Name, group: coordinator.GroupName, started };
 }
 
-export function httpAudioMeta(url) {
-  return { trackUri: url, metadata: "" };
+function xmlEscape(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+/** Sonos `<res duration>` clock. Missing or non-positive values are omitted. */
+export function didlDuration(seconds) {
+  const total = Math.round(Number(seconds));
+  if (!Number.isFinite(total) || total <= 0) return null;
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+function cleanMetaText(value) {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  return text || "";
+}
+
+/**
+ * DIDL-Lite for one HTTP MP3 queue row.
+ *
+ * An empty metadata string lets Sonos select the following Spotify row and
+ * then walk past it without playing. The resource line tells Sonos the bytes
+ * are MPEG audio and, when we measured the file, how long that row lasts.
+ * `trackUri` stays the original URL; only the XML copy is escaped.
+ */
+export function httpAudioMeta(url, { title, artist, durationSec } = {}) {
+  const trackUri = String(url || "");
+  const duration = didlDuration(durationSec);
+  const safeTitle = cleanMetaText(title);
+  const safeArtist = cleanMetaText(artist);
+  const resAttrs = ['protocolInfo="http-get:*:audio/mpeg:*"'];
+  if (duration) resAttrs.push(`duration="${duration}"`);
+  let item = '<item id="-1" parentID="-1" restricted="true">';
+  if (safeTitle) item += `<dc:title>${xmlEscape(safeTitle)}</dc:title>`;
+  if (safeArtist) item += `<dc:creator>${xmlEscape(safeArtist)}</dc:creator>`;
+  item += "<upnp:class>object.item.audioItem.musicTrack</upnp:class>";
+  item += `<res ${resAttrs.join(" ")}>${xmlEscape(trackUri)}</res></item>`;
+  const metadata =
+    '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">' +
+    item +
+    "</DIDL-Lite>";
+  return { trackUri, metadata };
+}
+
+/** AddURIToQueue fields for an HTTP MP3. Placement flags stay as they were. */
+export function httpAudioEnqueueBody(url, opts = {}) {
+  const meta = httpAudioMeta(url, opts);
+  return {
+    InstanceID: 0,
+    EnqueuedURI: meta.trackUri,
+    EnqueuedURIMetaData: meta.metadata,
+    DesiredFirstTrackNumberEnqueued: Number(opts.position) || 0,
+    EnqueueAsNext: false,
+  };
 }
 
 /**
@@ -706,8 +766,17 @@ async function enqueueHttpAudioUnlocked(
     throw new Error("enqueueHttpAudio requires an http(s) URL Sonos can reach.");
   }
   const m = await getManager();
-  const meta = httpAudioMeta(url, { title, artist, durationSec });
-  const coordinator = await enqueueMeta(m, meta, position);
+  const body = httpAudioEnqueueBody(url, {
+    title,
+    artist,
+    durationSec,
+    position,
+  });
+  const coordinator = await enqueueMeta(
+    m,
+    { trackUri: body.EnqueuedURI, metadata: body.EnqueuedURIMetaData },
+    position
+  );
   invalidateSonosSnapshots();
   return { room: coordinator.Name, group: coordinator.GroupName, url, position };
 }
