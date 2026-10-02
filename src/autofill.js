@@ -413,6 +413,25 @@ export function nudgeAutoFill() {
 }
 
 /**
+ * Pause Never-Ending across a multi-step speaker change. The returned
+ * function releases the pause and lets a refill schedule again.
+ */
+export function holdNeverEnding() {
+  queueClearPauseCount += 1;
+  clearTimer();
+  let released = false;
+  return function releaseNeverEndingHold() {
+    if (released) return;
+    released = true;
+    queueClearPauseCount = Math.max(0, queueClearPauseCount - 1);
+    if (queueClearPauseCount === 0 && enabled && !stopping) {
+      idleStreak = 0;
+      schedule(CRITICAL_MS);
+    }
+  };
+}
+
+/**
  * Clear the Sonos queue without allowing an already-approved Never-Ending
  * refill to land afterward. Cancel pending work and the active DJ handoff, then
  * clear through the Sonos write lock. Any refill already holding that lock

@@ -34,6 +34,12 @@ Recorded so the next pass does not treat these as bugs. The party stays open unl
 
 ## Playback / Sonos
 
+- **Group All should make Living Room the coordinator**  
+  Group All used to keep whoever was already coordinating the targeted group. If that speaker was Office, Office ran the house and every now-playing read went there.
+
+  **Done in 15.3.0**
+  Group All hands the current group to Living Room and keeps the queue playing. If that handoff fails, the same queue is copied onto Living Room and restarted at the same spot. A speaker that fails to join is skipped. See `PLAN-group-all-coordinator.md`.
+
 - **Arc TV input blocks auto-start after Clear / Random**  
   Living Room Arc is the whole-house coordinator. After a Home Assistant Node-RED grouping flow, the TV can power on and the Arc switches to HDMI/SPDIF (`x-sonos-htastream:…:spdif`). That reports `PLAYING`, so `autoStartDecision` used to skip starting the queue.
 
@@ -57,18 +63,16 @@ Recorded so the next pass does not treat these as bugs. The party stays open unl
   3. Consider whether guest-visible state should say "speakers regrouped" rather than failing quietly.
   4. Worth checking against the 2026-09-11 party logs — this may be a second, independent cause of missed announces alongside the stale queue indices fixed in 11.2.4.
 
+- **Subscribe to coordinator playback instead of the 1.5s poll**  
+  The phone already runs the progress bar on its own clock. The 1.5s poll is how PartyQueue notices a song change, an outside play/pause, or a seek. A coordinator-only AVTransport subscription can replace that poll and the announcement playhead loop, with a 10s safety read kept. Fixed 3-second silence pads on the baked MP3 let the volume restore run from the ffmpeg length.
+
+  **Later**
+  Build `PLAN-sonos-playback-subscription.md` after Group All makes Living Room the coordinator. Do not build it in the same change. The cheap alternative in that plan is to stretch the playing poll to about 8–10s and leave announcements alone.
+
 - **Paused Now Playing: wake instead of 5s poll**  
-  Keep today’s cadences until we pull this (1.5s while playing, 5s paused; queue 3s / 15s). Extra phones and TVs already share one server poller.
+  Folded into `PLAN-sonos-playback-subscription.md`. Do not treat the notes below as a second design.
 
-  PartyQueue Play/Skip/Random already **nudge** immediately. The 5s paused tick is only to notice playback that PartyQueue did not start (Sonos app, speaker button, Alexa, HA). Progress bars do not need it while paused.
-
-  **Do not** zero-poll while paused with no external wake — TVs would sit stale.
-
-  **Later options**
-  1. Cheap: stretch paused NP to 30–60s. In-app controls stay instant; Sonos-app Play lags up to that window.
-  2. Real wake: subscribe to Kitchen AVTransport GENA/`LastChange`, then run the 1.5s playing poll until paused again. Keep a 60s heartbeat — subscriptions expire and can die across VLAN/restart. Unused in `@svrooij/sonos` today; host networking + `PUBLIC_BASE_URL` make it feasible.
-
-  Leave playing at 1.5s (track-end, DJ pads, karaoke).
+  Keep today’s cadences until that plan is pulled (1.5s while playing, 5s paused; queue 3s / 15s). Extra phones and TVs already share one server poller. PartyQueue Play/Skip/Random already **nudge** immediately. The 5s paused tick is only to notice playback that PartyQueue did not start (Sonos app, speaker button, Alexa, HA). Do not zero-poll while paused with no external wake — TVs would sit stale.
 
 - **Volume normalization (party helper)**  
   Quiet Spotify masters still play quiet on Sonos because PartyQueue doesn’t process audio. True stream-level ReplayGain is out of scope on the current Spotify path (Sonos owns decode/playback).
