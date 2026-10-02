@@ -8,7 +8,7 @@ import {
   loadSettings,
   PARTY_OVER_TTL_MS,
 } from "./settings.js";
-import { savePickerSelection } from "./autofill.js";
+import { savePickerSelection, getAutoFillState } from "./autofill.js";
 
 const KIDS_GENRES = ["kids", "soundtrack"];
 
@@ -66,8 +66,11 @@ export function setKidsLock(enabled) {
     if (cur.kidsLock) return getRitualState();
     const s = loadSettings();
     const dj = getDjVoiceSettings();
+    const fill = getAutoFillState();
     const snapshot = {
       genres: Array.isArray(s.genres) ? [...s.genres] : null,
+      mood: fill.mood,
+      holidayMode: !!fill.holidayMode,
       djCharacterIntensity: dj.djCharacterIntensity || "classic",
       sisterStaticIntensity:
         dj.djSisterStatic?.djCharacterIntensity || "classic",
@@ -82,7 +85,7 @@ export function setKidsLock(enabled) {
       djCharacterIntensity: "subtle",
       djSisterStatic: { djCharacterIntensity: "subtle" },
     });
-    savePickerSelection(undefined, [...KIDS_GENRES]);
+    savePickerSelection(undefined, [...KIDS_GENRES], undefined, false);
     return getRitualState();
   }
 
@@ -101,8 +104,15 @@ export function setKidsLock(enabled) {
         djSisterStatic: { djCharacterIntensity: snap.sisterStaticIntensity },
       });
     }
-    if (Array.isArray(snap.genres)) {
-      savePickerSelection(undefined, snap.genres);
+    if (snap.holidayMode) {
+      savePickerSelection(
+        undefined,
+        Array.isArray(snap.genres) ? snap.genres : undefined,
+        null,
+        true
+      );
+    } else if (Array.isArray(snap.genres)) {
+      savePickerSelection(undefined, snap.genres, snap.mood, false);
     }
   }
   return getRitualState();

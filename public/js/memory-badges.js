@@ -2,7 +2,7 @@
 
 import { sanitizeDisplayName } from "./guest.js";
 import { escapeHtml } from "./format.js";
-import { DECADE_LABELS } from "./genre-presets.js";
+import { DECADE_LABELS, HOLIDAY_LABELS } from "./genre-presets.js";
 
 /**
  * @param {string|null|undefined} source
@@ -40,11 +40,18 @@ export function memorySourceBadge(source, skipped, requestedBy, mood, alias) {
       );
       break;
     case "mood": {
-      // Same wording as the queue badges: "80's Hit" when the decade is known.
+      const holiday = mood ? HOLIDAY_LABELS[mood] || null : null;
       const era = mood ? DECADE_LABELS[mood] || null : null;
-      const label = era ? `${era} Hit` : "Era Hit";
+      const label = holiday
+        ? `${holiday} Hit`
+        : era
+          ? `${era} Hit`
+          : "Era Hit";
+      const title = holiday
+        ? "Holiday hit added by Holiday mode"
+        : "Era hit added by the Decades mood";
       parts.push(
-        `<span class="mood-badge" title="Era hit added by the Decades mood">\u{1F4FC} ${escapeHtml(label)}</span>`
+        `<span class="mood-badge" title="${title}">\u{1F4FC} ${escapeHtml(label)}</span>`
       );
       break;
     }

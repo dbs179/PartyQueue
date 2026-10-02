@@ -11,7 +11,7 @@ import { primaryArtist } from "./sampler.js";
 import {
   isOutOfSeasonHolidayPlaylist,
   isOutOfSeasonHolidayTrack,
-} from "./holiday-tracks.js";
+} from "./holidays.js";
 import { getRandomnessSettings } from "./settings.js";
 import { buildPlaylistPool } from "./spotify.js";
 import { artistMatchesGenres } from "./genres.js";

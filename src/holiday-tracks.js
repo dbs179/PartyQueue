@@ -24,7 +24,7 @@ const HOLIDAY_TITLE_PHRASE =
   /\b(?:jingle bells?|sleigh ride|winter wonderland|let it snow|frosty the snow(?:man)?|little drummer boy|silent night|oh? holy (?:nighte?|nite)|deck the halls?|carol of the bells|fairytale of new york|wizards in winter|baby it'?s cold outside|most wonderful time|chestnuts roasting|have yourself a merry|we wish you a merry|underneath the tree|santa tell me|santa baby|santa claus|here comes santa|not tonight santa|run rudolph|up on the house(?:top)?|must be santa|grandma got run over|white christmas|blue christmas|feliz navidad|the first no[eë]l|little saint nick|auld lang syne|my only wish|rudolph(?: the red-?nosed)?|silver bells?|away in a manger|hark!? the herald|o come all ye faithful|adeste fideles|o come,? o come,? emmanuel|mary did you know|we three kings|what child is this|god rest ye merry|good king wenceslas|angels we have heard|o? ?little town of bethlehem|it came upon(?: a midnight)?|do you hear what i hear|polar express|mrs\.? claus|in the bleak midwinter|coventry carol|when a child is born|holly jolly|candy cane|saint nick(?:olas)?)\b/i;
 
 const HOLIDAY_ALBUM_PHRASE =
-  /\b(?:holiday (?:hits|songs|classics|collection|album|spirits|special|soundtrack)|wrapped in red|christmas|polar express|no[eë]l|when christmas comes around|nightmare before christmas|how the grinch|charlie brown christmas|rudolph)\b/i;
+  /\b(?:holiday (?:hits|songs|classics|collection|album|spirits|special|soundtrack)|wrapped in red|christmas|polar express|no[eë]l|when christmas comes around|how the grinch|charlie brown christmas|rudolph)\b/i;
 
 const SANTA_PLACE =
   /\bsanta\s+(?:monica|fe|barbara|ana|cruz|clara|rosa|maria|clarita)\b/i;
@@ -42,8 +42,10 @@ function titleHasSanta(name) {
 
 /** True when a playlist name is a Christmas / Hanukkah / similar holiday set. */
 export function isHolidayPlaylistName(name) {
+  const text = String(name || "");
+  if (/nightmare before christmas/i.test(text)) return false;
   return /christmas|x-?mas|hanukkah|hannukah|chanukah|kwanzaa|navidad|yuletide/i.test(
-    String(name || "")
+    text
   );
 }
 
@@ -51,6 +53,8 @@ export function isHolidayPlaylistName(name) {
 export function isHolidayTrack(track = {}) {
   const { name, album, haystack } = fieldsOf(track);
   if (!haystack) return false;
+  // Tim Burton's score is Halloween, even though the title says Christmas.
+  if (/nightmare before christmas/i.test(haystack)) return false;
   if (HOLIDAY_PHRASE.test(haystack)) return true;
   if (HOLIDAY_TITLE_PHRASE.test(name)) return true;
   if (titleHasSanta(name)) return true;
@@ -58,17 +62,5 @@ export function isHolidayTrack(track = {}) {
   return false;
 }
 
-/**
- * Auto-picks should skip this track outside the holiday window.
- * Cheap enough to call once per playlist-pool candidate.
- */
-export function isOutOfSeasonHolidayTrack(track = {}, date = new Date()) {
-  if (isHolidaySeason(date)) return false;
-  return isHolidayTrack(track);
-}
-
-/** Whole Christmas-named playlists stay out of Random until the holiday window. */
-export function isOutOfSeasonHolidayPlaylist(playlist = {}, date = new Date()) {
-  if (isHolidaySeason(date)) return false;
-  return isHolidayPlaylistName(playlist.name);
-}
+// Out-of-season gating for every holiday (Halloween, Christmas, …) lives in
+// holidays.js. This file only recognizes Christmas / Hanukkah / Kwanzaa tracks.

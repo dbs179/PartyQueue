@@ -32,6 +32,17 @@ export const DECADE_LABELS = {
   "2020s": "2020's",
 };
 
+/** Labels for Holiday-mode ids stamped on queue / memory rows. */
+export const HOLIDAY_LABELS = {
+  valentines: "Valentine's",
+  stpatricks: "St. Patrick's",
+  easter: "Easter",
+  july4: "Fourth of July",
+  halloween: "Halloween",
+  thanksgiving: "Thanksgiving",
+  christmas: "Christmas",
+};
+
 /** localStorage key for the selected decade mood. */
 export const ERA_MOOD_STORAGE_KEY = "pq.mood";
 
@@ -92,6 +103,7 @@ export function labelForDecade(moodId) {
  * add time; falls back to the active decade mood id.
  */
 export function trackEraDisplayLabel(track, fallbackMoodId) {
+  if (track?.mood && HOLIDAY_LABELS[track.mood]) return HOLIDAY_LABELS[track.mood];
   if (track?.mood && DECADE_LABELS[track.mood]) return DECADE_LABELS[track.mood];
   return labelForDecade(fallbackMoodId);
 }

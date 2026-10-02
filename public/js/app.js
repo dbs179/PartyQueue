@@ -2469,6 +2469,7 @@ playlistsUi = createPlaylistsUi(
     syncAutoFillSelection: () => syncAutoFillSelection(),
     getGenreIds: () => currentGenreIds(),
     getMoodId: () => currentMoodId(),
+    getHolidayMode: () => musicMix?.currentHolidayMode() ?? false,
     getGenreBucketCount: () => musicMix?.getGenreBucketCount() ?? 0,
   }
 );

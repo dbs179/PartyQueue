@@ -21,7 +21,7 @@ import {
 } from "./sampler.js";
 import { getLastfmApiKey } from "./lastfm.js";
 import { isClosingTime } from "./closing-time.js";
-import { isOutOfSeasonHolidayTrack } from "./holiday-tracks.js";
+import { isOutOfSeasonHolidayTrack } from "./holidays.js";
 
 // Re-exported from sampler.js (moved there so era Moods can share them without
 // an import cycle); kept here for existing consumers and unit tests.

@@ -39,6 +39,7 @@ import {
 } from "./settings.js";
 import { GENRE_BUCKETS, bucketsForArtistSync } from "./genres.js";
 import { moodLabel as eraMoodLabel } from "./moods.js";
+import { activeHoliday } from "./holidays.js";
 import { getDjVolumeHandoffState } from "./dj-volume-handoff.js";
 import {
   isDjVolumeHandoffArmed,
@@ -1371,6 +1372,12 @@ export function resolveDjMoodContext({
   const genreLabels = (enabled || allIds).map(
     (id) => GENRE_LABEL_BY_ID[id] || id
   );
+  let holidayLabel = null;
+  try {
+    if (loadSettings()?.holidayMode) holidayLabel = activeHoliday()?.label || null;
+  } catch {
+    holidayLabel = null;
+  }
 
   return {
     mood,
@@ -1379,7 +1386,7 @@ export function resolveDjMoodContext({
     genreLabels,
     energyBuckets: bucketCounts.slice(0, 5),
     energySignature: energySignatureFromBuckets(bucketCounts),
-    eraLabel: eraMoodLabel(eraMood),
+    eraLabel: holidayLabel || eraMoodLabel(eraMood),
   };
 }
 

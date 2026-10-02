@@ -103,7 +103,12 @@ export function buildMixLabelTexts(serverMix, locals = {}) {
     : [];
   const genres = resolveMixGenres(serverMix?.genres, localGenres);
   const mood = resolveActiveEraMoodId(serverMix?.mood, locals.localMood);
-  const era = mood ? DECADE_LABELS[mood] : null;
+  const holidayOn = !!serverMix?.holidayOn;
+  const holidayLabel =
+    typeof serverMix?.holidayLabel === "string" && serverMix.holidayLabel
+      ? serverMix.holidayLabel
+      : null;
+  const era = !holidayOn && mood ? DECADE_LABELS[mood] : null;
   const preset = presetNameForIds(
     Array.isArray(genres) ? genres : [],
     allBucketIds
@@ -113,7 +118,10 @@ export function buildMixLabelTexts(serverMix, locals = {}) {
       ? serverMix.genreLane
       : null;
   return {
-    moodText: formatMoodMixText(preset, era),
+    moodText:
+      holidayOn && holidayLabel
+        ? `Mood: ${holidayLabel}`
+        : formatMoodMixText(preset, era),
     genreText: formatGenreHeaderText(serverMix?.genreLabel),
     genreLane,
   };
@@ -176,13 +184,28 @@ export function resolveMixGenreLabelFromNowPlaying(np) {
  * @returns {{ genres?: string[]|null, mood?: string|null }|null}
  */
 export function mixSelectionPatchFromParty(party) {
-  if (!party || (!("mixGenres" in party) && !("mixMood" in party))) return null;
+  if (
+    !party ||
+    (!("mixGenres" in party) &&
+      !("mixMood" in party) &&
+      !("mixHoliday" in party) &&
+      !("holidayLabel" in party))
+  ) {
+    return null;
+  }
   const patch = {};
   if ("mixGenres" in party) {
     patch.genres = Array.isArray(party.mixGenres) ? party.mixGenres : null;
   }
   if ("mixMood" in party) {
     patch.mood = typeof party.mixMood === "string" ? party.mixMood : null;
+  }
+  if ("mixHoliday" in party) patch.holidayOn = !!party.mixHoliday;
+  if ("holidayLabel" in party) {
+    patch.holidayLabel =
+      typeof party.holidayLabel === "string" && party.holidayLabel
+        ? party.holidayLabel
+        : null;
   }
   return patch;
 }

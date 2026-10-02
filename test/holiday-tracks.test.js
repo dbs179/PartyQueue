@@ -4,9 +4,11 @@ import {
   isHolidaySeason,
   isHolidayTrack,
   isHolidayPlaylistName,
+} from "../src/holiday-tracks.js";
+import {
   isOutOfSeasonHolidayTrack,
   isOutOfSeasonHolidayPlaylist,
-} from "../src/holiday-tracks.js";
+} from "../src/holidays.js";
 
 const AUG = new Date("2026-08-28T12:00:00");
 const SEP = new Date("2026-09-20T12:00:00");
@@ -57,6 +59,13 @@ test("detects Christmas titles including ones without the word Christmas", () =>
   assert.equal(
     isHolidayTrack({ name: "Believe", album: "The Polar Express" }),
     true
+  );
+  assert.equal(
+    isHolidayTrack({
+      name: "This Is Halloween",
+      album: "The Nightmare Before Christmas",
+    }),
+    false
   );
 });
 

@@ -73,6 +73,20 @@ test("buildMixLabelTexts uses local genres/mood when server unset", () => {
   assert.equal(texts.genreText, "Genre: Rock");
 });
 
+test("buildMixLabelTexts shows the holiday and hides the genre preset", () => {
+  const texts = buildMixLabelTexts(
+    {
+      genres: ["rock", "metal"],
+      mood: null,
+      holidayOn: true,
+      holidayLabel: "Halloween",
+      genreLabel: "Rock",
+    },
+    { localGenres: ["rock", "metal"], localMood: "80s", allBucketIds: ["rock", "metal"] }
+  );
+  assert.equal(texts.moodText, "Mood: Halloween");
+});
+
 test("resolveMixGenreLabelFromNowPlaying and mixSelectionPatchFromParty", () => {
   assert.equal(resolveMixGenreLabelFromNowPlaying({}), undefined);
   assert.equal(

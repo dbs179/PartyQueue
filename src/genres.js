@@ -20,7 +20,7 @@ import { getLastfmApiKey } from "./lastfm.js";
 import {
   isOutOfSeasonHolidayPlaylist,
   isOutOfSeasonHolidayTrack,
-} from "./holiday-tracks.js";
+} from "./holidays.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_FILE =

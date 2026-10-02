@@ -12,7 +12,7 @@ import { isClosingTime } from "./closing-time.js";
 import {
   isOutOfSeasonHolidayPlaylist,
   isOutOfSeasonHolidayTrack,
-} from "./holiday-tracks.js";
+} from "./holidays.js";
 import { fitsExactLane, genreFlowScore } from "./genre-flow.js";
 
 // Pull the bare spotify:track:<id> out of whatever URI form Sonos stores in the

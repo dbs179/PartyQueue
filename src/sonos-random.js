@@ -64,13 +64,16 @@ import {
 } from "./genre-flow.js";
 import { getSimilarUris, isDiscoveryAvailable } from "./similar.js";
 import { getLaneHits, laneHitAsFillerItem } from "./lane-hits.js";
+import { getHolidayHits } from "./holiday-hits.js";
+import {
+  activeHoliday,
+  filterPlaylistsToHoliday,
+  isOutOfSeasonHolidayPlaylist,
+  isOutOfSeasonHolidayTrack,
+} from "./holidays.js";
 import { markOrigin } from "./queue-origin.js";
 import { queueWorkWasPreempted } from "./queue-preempt.js";
 import { yieldToEventLoop } from "./yield-event-loop.js";
-import {
-  isOutOfSeasonHolidayPlaylist,
-  isOutOfSeasonHolidayTrack,
-} from "./holiday-tracks.js";
 
 // Add `count` random tracks drawn from the host's playlists. Picks one song per
 // randomly-chosen playlist (rotating playlists), avoids the same artist back-to-
@@ -137,7 +140,10 @@ async function buildRandomPlan(
 
   // Genre filter: keep only tracks whose artist falls in an enabled bucket.
   // null/undefined = no filtering. Unresolved artists count as "Other".
-  if (Array.isArray(genres)) {
+  // Holiday mode ignores lanes — the set is the holiday, not holiday-plus-genre.
+  const now = opts.now instanceof Date ? opts.now : new Date();
+  const holiday = opts.holidayMode ? activeHoliday(now) : null;
+  if (!holiday && Array.isArray(genres)) {
     const enabled = new Set(genres);
     usable = usable
       .map((p) => ({
@@ -155,24 +161,32 @@ async function buildRandomPlan(
     usable = usable
       .map((p) => ({ ...p, tracks: (p.tracks || []).filter((t) => !t.explicit) }))
       .filter((p) => p.tracks.length > 0);
-    if (usable.length === 0) {
+    if (usable.length === 0 && !holiday) {
       throw new Error("No non-explicit songs available with the current filters.");
     }
   }
 
-  usable = usable.filter((p) => !isOutOfSeasonHolidayPlaylist(p));
+  usable = usable.filter((p) => !isOutOfSeasonHolidayPlaylist(p, now));
   usable = usable
     .map((p) => ({
       ...p,
-      tracks: (p.tracks || []).filter((t) => !isOutOfSeasonHolidayTrack(t)),
+      tracks: (p.tracks || []).filter((t) => !isOutOfSeasonHolidayTrack(t, now)),
     }))
     .filter((p) => p.tracks.length > 0);
 
   // Era mood: keep only playlist tracks released in the mood's window. Unlike
   // the genre filter, an empty result is NOT an error — the mood's whole point
   // is that the external era top-up covers what the library can't.
-  const activeMoodPack = eraMoodPack(opts.mood);
-  if (activeMoodPack) {
+  // Holiday mode replaces the decade: the holiday is the only pool constraint.
+  const activeMoodPack = holiday ? null : eraMoodPack(opts.mood);
+  if (holiday) {
+    usable = filterPlaylistsToHoliday(usable, holiday);
+    if (usable.length === 0) {
+      console.log(
+        `[holiday] no ${holiday.id} tracks in the selected playlists — filling from Spotify`
+      );
+    }
+  } else if (activeMoodPack) {
     usable = usable
       .map((p) => ({
         ...p,
@@ -263,6 +277,7 @@ async function buildRandomPlan(
   });
   let reactionSetKind = null;
   if (
+    !holiday &&
     nextSpecial?.setsUntil === 0 &&
     (nextSpecial.kind === "loved" ||
       nextSpecial.kind === "hated" ||
@@ -343,6 +358,7 @@ async function buildRandomPlan(
   let showcaseArtistKey = null;
   let showcaseArtistName = null;
   if (
+    !holiday &&
     nextSpecial?.setsUntil === 0 &&
     nextSpecial.kind === "sameArtist" &&
     allowSameArtistBatch(cfg, getSetsSinceLastSameArtistBatch())
@@ -406,17 +422,19 @@ async function buildRandomPlan(
   }
   await yieldToEventLoop();
   const flowPrev = getGenreFlowState();
-  const setLane = pickSetLane({
-    enabled: enabledLanePool,
-    previousLane: flowPrev.lastLane,
-    recentLanes: flowPrev.recentLanes,
-    salt:
-      (playlistWant || count || 0) +
-      (recentBuckets.size || 0) +
-      String(queueTailArtist || "").length,
-    poolCounts: lanePoolCounts,
-    minPerLane: Math.max(2, Math.min(4, playlistWant || count || 2)),
-  });
+  const setLane = holiday
+    ? null
+    : pickSetLane({
+        enabled: enabledLanePool,
+        previousLane: flowPrev.lastLane,
+        recentLanes: flowPrev.recentLanes,
+        salt:
+          (playlistWant || count || 0) +
+          (recentBuckets.size || 0) +
+          String(queueTailArtist || "").length,
+        poolCounts: lanePoolCounts,
+        minPerLane: Math.max(2, Math.min(4, playlistWant || count || 2)),
+      });
   let tailBuckets = [];
   if (queueTailArtist) {
     tailBuckets = bucketsForArtistSync(queueTailArtist);
@@ -424,7 +442,7 @@ async function buildRandomPlan(
   } else if (recentBuckets.size) {
     tailBuckets = [...recentBuckets];
   }
-  if (showcaseArtistKey) {
+  if (holiday || showcaseArtistKey) {
     cfg.flowState = null;
   } else {
     cfg.flowState = {
@@ -532,7 +550,34 @@ async function buildRandomPlan(
   );
   const outsideSignal = outsideAc.signal;
   try {
-    if (!showcaseArtistKey && similarWant > 0 && activeMoodPack) {
+    if (!showcaseArtistKey && similarWant > 0 && holiday) {
+      try {
+        discoveries = await getHolidayHits({
+          holiday: holiday.id,
+          count: similarWant,
+          excludeIds: new Set([...libraryIds, ...exclude, ...recentIds]),
+          filterExplicit: !!opts.filterExplicit,
+          artistCap: cfg.artistCap,
+          artistSeedCounts: batchArtistSeed,
+          lastArtist: lastPlaylistArtist,
+          holidayArtistCap: 1,
+          blockedArtists: cfg.blockedArtists,
+          now,
+          signal: outsideSignal,
+        });
+        console.log(
+          `[holiday] ${holiday.id}: filled ${discoveries.length}/${similarWant} outside slots from Spotify in ${Date.now() - outsideStarted}ms`
+        );
+      } catch (err) {
+        if (outsideSignal.aborted) {
+          console.warn(
+            `[holiday] outside-slot budget ${OUTSIDE_SLOT_BUDGET_MS}ms hit; using ${discoveries.length} holiday pick(s)`
+          );
+        } else {
+          console.error("[holiday] slot fill failed:", err.message);
+        }
+      }
+    } else if (!showcaseArtistKey && similarWant > 0 && activeMoodPack) {
       try {
         discoveries = await getMoodHits({
           mood: activeMoodPack.id,
@@ -738,8 +783,8 @@ async function buildRandomPlan(
     id: d.id,
     artist: d.artist ?? "",
     name: d.name ?? "",
-    discovered: !activeMoodPack,
-    moodPick: !!activeMoodPack,
+    discovered: !activeMoodPack && !holiday,
+    moodPick: !!activeMoodPack || !!holiday,
   }));
   let order = mixPlaylistAndDiscovery(playlistItems, discoveryItems);
   const beforeUnique = order.length;
@@ -787,6 +832,7 @@ async function buildRandomPlan(
     similarWant,
     setLane,
     activeMoodPack,
+    activeHoliday: holiday,
     showcaseArtistKey,
     showcaseArtistName,
     firstAppendPosition,
@@ -829,6 +875,7 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
   const similarWant = Number(plan.similarWant) || 0;
   const setLane = plan.setLane || null;
   const activeMoodPack = plan.activeMoodPack || null;
+  const holiday = plan.activeHoliday || null;
   const showcaseArtistKey = plan.showcaseArtistKey || null;
   const showcaseArtistName = plan.showcaseArtistName || null;
   const reactionSetKind =
@@ -907,7 +954,7 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
         : item.discovered
           ? "discovered"
           : "filler",
-      mood: item.moodPick ? activeMoodPack?.id || null : null,
+      mood: item.moodPick ? holiday?.id || activeMoodPack?.id || null : null,
     });
   }
 
@@ -947,7 +994,7 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
   if (discoveredIds.length) markOrigin(discoveredIds, "discovered", laneOpts);
   if (moodIds.length)
     markOrigin(moodIds, "mood", {
-      mood: activeMoodPack?.id || null,
+      mood: holiday?.id || activeMoodPack?.id || null,
       ...laneOpts,
     });
   if (fillerIds.length) {
@@ -1091,37 +1138,48 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
     if (!progressed) break;
   }
 
-  // Era top-up: the mood's promise. When the (era-filtered) playlists ran dry
-  // before the batch hit its target, fill the remainder with era chart hits
-  // from outside the library. Excludes everything queued this batch plus the
-  // song-memory window; the library itself is fair game here (anything still
-  // eligible would already have been picked above).
+  // Holiday / era top-up. When the filtered playlists ran dry before the batch
+  // hit its target, fill the remainder from Spotify (holiday) or era charts.
   if (
     !reactionSetKind &&
     !showcaseArtistKey &&
-    activeMoodPack &&
+    (holiday || activeMoodPack) &&
     added < totalTarget &&
     !wasPreempted()
   ) {
     try {
       batchArtistSeed = syncBatchArtistBlocks();
-      const hits = await getMoodHits({
-        mood: activeMoodPack.id,
-        count: totalTarget - added,
-        excludeIds: new Set([...exclude, ...recentIds]),
-        filterExplicit: !!mergedOpts.filterExplicit,
-        artistCap: cfg.artistCap,
-        artistSeedCounts: batchArtistSeed,
-        lastArtist: lastPlaylistArtist,
-        moodArtistCap: 1,
-        blockedArtists: cfg.blockedArtists,
-        enabledGenres: Array.isArray(genres) ? genres : null,
-        bucketsFor: bucketsForArtist,
-        preferLane: setLane,
-      });
+      const flavorId = holiday?.id || activeMoodPack.id;
+      const hits = holiday
+        ? await getHolidayHits({
+            holiday: holiday.id,
+            count: totalTarget - added,
+            excludeIds: new Set([...exclude, ...recentIds]),
+            filterExplicit: !!mergedOpts.filterExplicit,
+            artistCap: cfg.artistCap,
+            artistSeedCounts: batchArtistSeed,
+            lastArtist: lastPlaylistArtist,
+            holidayArtistCap: 1,
+            blockedArtists: cfg.blockedArtists,
+            now: mergedOpts.now instanceof Date ? mergedOpts.now : new Date(),
+          })
+        : await getMoodHits({
+            mood: activeMoodPack.id,
+            count: totalTarget - added,
+            excludeIds: new Set([...exclude, ...recentIds]),
+            filterExplicit: !!mergedOpts.filterExplicit,
+            artistCap: cfg.artistCap,
+            artistSeedCounts: batchArtistSeed,
+            lastArtist: lastPlaylistArtist,
+            moodArtistCap: 1,
+            blockedArtists: cfg.blockedArtists,
+            enabledGenres: Array.isArray(genres) ? genres : null,
+            bucketsFor: bucketsForArtist,
+            preferLane: setLane,
+          });
       if (hits.length) {
         console.log(
-          `[moods] ${activeMoodPack.id}: topping up ${hits.length} era hit(s) — playlists ran dry at ${added}/${totalTarget}`
+          `[${holiday ? "holiday" : "moods"}] ${flavorId}: topping up ${hits.length} hit(s) — playlists ran dry at ${added}/${totalTarget}`
         );
       }
       const rec3 = [];
@@ -1150,21 +1208,27 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
             artist: h.artist,
             name: h.name,
             source: "mood",
-            mood: activeMoodPack.id,
+            mood: flavorId,
           });
           if (added >= totalTarget) break;
         } catch (err) {
-          console.error(`[moods] failed to add ${h.uri}:`, err.message);
+          console.error(
+            `[${holiday ? "holiday" : "moods"}] failed to add ${h.uri}:`,
+            err.message
+          );
         }
       }
       if (rec3.length) recordPlayed(rec3);
       if (moodIds3.length)
         markOrigin(moodIds3, "mood", {
-          mood: activeMoodPack.id,
+          mood: flavorId,
           ...laneOpts,
         });
     } catch (err) {
-      console.error("[moods] era top-up failed:", err.message);
+      console.error(
+        `[${holiday ? "holiday" : "moods"}] top-up failed:`,
+        err.message
+      );
     }
   }
 
@@ -1237,6 +1301,7 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
         `playlist=${added - similarAdded - moodAdded} ` +
         `discover=${similarAdded} laneHits=${laneHitAdded}` +
         (activeMoodPack ? ` mood=${activeMoodPack.id} (${moodAdded} era hits)` : "") +
+        (holiday ? ` holiday=${holiday.id} (${moodAdded} holiday hits)` : "") +
         (showcaseArtistKey ? ` showcase=${showcaseArtistName}` : "") +
         (reactionSetKind ? ` reactionSet=${reactionSetKind}` : "") +
         (short ? ` short=${short}` : "")
@@ -1254,7 +1319,7 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
     highlights,
     similarRequested: similarWant,
     similarAdded,
-    mood: reactionSetKind ? null : activeMoodPack?.id ?? null,
+    mood: reactionSetKind ? null : holiday?.id || activeMoodPack?.id || null,
     moodAdded,
     relaxedArtist,
     relaxedMemory,

@@ -20,6 +20,7 @@ import {
   setAutoFill,
   savePickerSelection,
   clearQueueWithoutAutoRefill,
+  readHolidaySelection,
 } from "../autofill.js";
 import {
   isEndOfNightTrack,
@@ -886,10 +887,13 @@ export function registerQueueRoutes(app, ctx) {
     if (!isUserConnected()) {
       return res.status(400).json({ error: "Connect your Spotify account first." });
     }
-    const { playlistIds, count, genres, mood } = req.body ?? {};
+    const { playlistIds, count, genres, mood, holidayMode: holidayFlag } = req.body ?? {};
     const ids = Array.isArray(playlistIds) ? playlistIds : null;
     const genreIds = Array.isArray(genres) ? genres : null;
-    const moodId = normalizeMood(mood);
+    const holiday = readHolidaySelection();
+    const holidayMode =
+      holidayFlag == null ? holiday.holidayMode : !!holidayFlag && !!holiday.holidayLabel;
+    const moodId = holidayMode ? null : normalizeMood(mood);
     const { discoverEnabled, similarCount } = getDiscoverySettings();
     const { filterExplicit } = getContentSettings();
     const djReady = isDjVoiceReady();
@@ -931,6 +935,7 @@ export function registerQueueRoutes(app, ctx) {
         deferAutoStart: djReady,
         preemptGeneration,
         mood: moodId,
+        holidayMode,
       };
       const batchPlan = await sonos.planRandomFromPlaylists(
         parseCount(count),
@@ -1142,8 +1147,11 @@ export function registerQueueRoutes(app, ctx) {
     // deploy).
     const rotation = getRotationSettings();
     const content = getContentSettings();
+    const holiday = readHolidaySelection();
     res.json({
       ...getAutoFillState(),
+      holidayMode: holiday.holidayMode,
+      holidayLabel: holiday.holidayLabel,
       discoverEnabled: getDiscoverySettings().discoverEnabled,
       randomMoodEnabled: rotation.randomMoodEnabled,
       randomDecadeEnabled: rotation.randomDecadeEnabled,
@@ -1154,14 +1162,14 @@ export function registerQueueRoutes(app, ctx) {
 
   app.post("/api/autofill", (req, res) => {
     try {
-      const { enabled, playlistIds, genres, mood } = req.body ?? {};
+      const { enabled, playlistIds, genres, mood, holidayMode } = req.body ?? {};
       if (enabled && !isUserConnected()) {
         return res.status(400).json({ error: "Connect your Spotify account first." });
       }
       const ids = Array.isArray(playlistIds) ? playlistIds : undefined;
       const genreIds = Array.isArray(genres) ? genres : undefined;
       // `mood` absent = unchanged; null (or unknown id) = clear.
-      const state = setAutoFill(!!enabled, ids, genreIds, mood);
+      const state = setAutoFill(!!enabled, ids, genreIds, mood, holidayMode);
       nudgePartySettingsStream();
       res.json({ ok: true, ...state });
     } catch (err) {
@@ -1174,10 +1182,10 @@ export function registerQueueRoutes(app, ctx) {
   // monitor is off, so every phone and the server share one host selection.
   app.post("/api/selection", (req, res) => {
     try {
-      const { playlistIds, genres, mood } = req.body ?? {};
+      const { playlistIds, genres, mood, holidayMode } = req.body ?? {};
       const ids = Array.isArray(playlistIds) ? playlistIds : undefined;
       const genreIds = Array.isArray(genres) ? genres : undefined;
-      const saved = savePickerSelection(ids, genreIds, mood);
+      const saved = savePickerSelection(ids, genreIds, mood, holidayMode);
       // Broadcast so Party Display / Vibe mix labels update live.
       nudgePartySettingsStream();
       res.json({ ok: true, ...saved });

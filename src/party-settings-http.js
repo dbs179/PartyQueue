@@ -9,6 +9,7 @@ import {
   getAutoFillState,
   getClosingTimeAt,
   getLastPartyRecap,
+  readHolidaySelection,
 } from "./autofill.js";
 import {
   getBrandingSettings,
@@ -81,6 +82,7 @@ export function applyPublicVibeToggles(body = {}) {
  */
 export function readPartySettingsSnapshot() {
   const fill = getAutoFillState();
+  const holiday = readHolidaySelection();
   const rotation = getRotationSettings();
   const content = getContentSettings();
   const songFair = getRequestFairnessSettings();
@@ -89,6 +91,8 @@ export function readPartySettingsSnapshot() {
     neverEnding: !!fill.enabled,
     mixGenres: fill.genres,
     mixMood: fill.mood,
+    mixHoliday: holiday.holidayMode,
+    holidayLabel: holiday.holidayLabel,
     discoverEnabled: !!getDiscoverySettings().discoverEnabled,
     showQueueGenre: !!getBrandingSettings().showQueueGenre,
     randomMoodEnabled: !!rotation.randomMoodEnabled,
@@ -147,6 +151,8 @@ export function partySettingsSignature(snapshot = null) {
     snapshot.neverEnding ? 1 : 0,
     genres,
     snapshot.mixMood ?? "",
+    snapshot.mixHoliday ? 1 : 0,
+    snapshot.holidayLabel ?? "",
     snapshot.discoverEnabled ? 1 : 0,
     snapshot.showQueueGenre ? 1 : 0,
     snapshot.randomMoodEnabled ? 1 : 0,

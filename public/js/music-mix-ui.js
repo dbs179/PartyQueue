@@ -105,6 +105,8 @@ export function createMusicMixUi(els, deps) {
     mood: undefined,
     genreLabel: undefined,
     genreLane: undefined,
+    holidayOn: undefined,
+    holidayLabel: undefined,
   };
 
   npMoodLabel?.addEventListener("click", () => navigateMixPanel("mood-presets"));
@@ -115,12 +117,34 @@ export function createMusicMixUi(els, deps) {
   // shortfalls fill with era hits from outside the library. Persists locally +
   // on the server so Random and Never-Ending share it across phones.
   let eraMood = loadEraMood();
+  let holidayMode = false;
+  let holidayLabel = null;
+  const holidaySection =
+    typeof document !== "undefined"
+      ? document.getElementById("holiday-section")
+      : null;
+  const holidayChip =
+    typeof document !== "undefined"
+      ? document.getElementById("holiday-chip")
+      : null;
 
   function saveEraMood() {
     persistEraMood(eraMood);
   }
   function currentMoodId() {
     return eraMood;
+  }
+  function currentHolidayMode() {
+    return holidayMode;
+  }
+  function syncHolidayChip() {
+    if (!holidaySection || !holidayChip) return;
+    const label = holidayLabel;
+    holidaySection.hidden = !label;
+    holidayChip.textContent = label || "Holiday";
+    const on = !!(holidayMode && label);
+    holidayChip.classList.toggle("on", on);
+    holidayChip.setAttribute("aria-pressed", on ? "true" : "false");
   }
   function syncDecadeChips() {
     if (!decadeChips) return;
@@ -136,12 +160,29 @@ export function createMusicMixUi(els, deps) {
       const btn = e.target.closest("[data-mood]");
       if (!btn) return;
       eraMood = eraMood === btn.dataset.mood ? null : btn.dataset.mood;
+      if (eraMood) holidayMode = false;
       saveEraMood();
       syncDecadeChips();
+      syncHolidayChip();
       syncPickerSelection();
       refreshPoolSizeHint();
     });
     syncDecadeChips();
+  }
+  if (holidayChip) {
+    holidayChip.addEventListener("click", () => {
+      if (!holidayLabel) return;
+      holidayMode = !holidayMode;
+      if (holidayMode) {
+        eraMood = null;
+        saveEraMood();
+        syncDecadeChips();
+      }
+      syncHolidayChip();
+      syncPickerSelection();
+      refreshPoolSizeHint();
+    });
+    syncHolidayChip();
   }
 
   // ---- Mix label ("MOOD: PARTY - 80'S") over Now Playing + on Party Display ----
@@ -151,13 +192,22 @@ export function createMusicMixUi(els, deps) {
   }
 
   function updateMixLabels() {
+    const holidayOn =
+      serverMix.holidayOn !== undefined ? serverMix.holidayOn : holidayMode;
+    const label =
+      serverMix.holidayLabel !== undefined
+        ? serverMix.holidayLabel
+        : holidayLabel;
     paintMixLabels(
       { npMoodLabel, npGenreLabel, displayMixPill, displayGenrePill },
-      buildMixLabelTexts(serverMix, {
-        localGenres: currentGenreIds(),
-        localMood: eraMood,
-        allBucketIds: genreBuckets.map((b) => b.id),
-      })
+      buildMixLabelTexts(
+        { ...serverMix, holidayOn, holidayLabel: label },
+        {
+          localGenres: currentGenreIds(),
+          localMood: eraMood,
+          allBucketIds: genreBuckets.map((b) => b.id),
+        }
+      )
     );
   }
 
@@ -167,6 +217,8 @@ export function createMusicMixUi(els, deps) {
     if (!patch) return;
     if ("genres" in patch) serverMix.genres = patch.genres;
     if ("mood" in patch) serverMix.mood = patch.mood;
+    if ("holidayOn" in patch) serverMix.holidayOn = patch.holidayOn;
+    if ("holidayLabel" in patch) serverMix.holidayLabel = patch.holidayLabel;
     updateMixLabels();
     applyServerMixToPickers();
   }
@@ -198,6 +250,20 @@ export function createMusicMixUi(els, deps) {
         saveEraMood();
         syncDecadeChips();
       }
+    }
+    if (serverMix.holidayLabel !== undefined && serverMix.holidayLabel !== holidayLabel) {
+      holidayLabel = serverMix.holidayLabel;
+    }
+    if (serverMix.holidayOn !== undefined && serverMix.holidayOn !== holidayMode) {
+      holidayMode = !!serverMix.holidayOn;
+      if (holidayMode && eraMood) {
+        eraMood = null;
+        saveEraMood();
+        syncDecadeChips();
+      }
+    }
+    if (serverMix.holidayLabel !== undefined || serverMix.holidayOn !== undefined) {
+      syncHolidayChip();
     }
     if (serverMix.genres !== undefined && genreBuckets.length) {
       const want = Array.isArray(serverMix.genres)
@@ -390,8 +456,11 @@ export function createMusicMixUi(els, deps) {
     const playlistsEl = document.getElementById("mix-stat-playlists");
 
     if (moodEl) {
-      const era = eraMood ? DECADE_LABELS[eraMood] : null;
-      moodEl.textContent = formatMixHubMoodLine(currentMoodLabel(), era);
+      if (holidayMode && holidayLabel) moodEl.textContent = holidayLabel;
+      else {
+        const era = eraMood ? DECADE_LABELS[eraMood] : null;
+        moodEl.textContent = formatMixHubMoodLine(currentMoodLabel(), era);
+      }
     }
 
     if (genresEl) {
@@ -551,6 +620,14 @@ export function createMusicMixUi(els, deps) {
         saveEraMood();
         syncDecadeChips();
       }
+      if ("holidayLabel" in data) holidayLabel = data.holidayLabel || null;
+      if ("holidayMode" in data) {
+        holidayMode = !!data.holidayMode && !!holidayLabel;
+        if (holidayMode) eraMood = null;
+      }
+      syncHolidayChip();
+      serverMix.holidayOn = holidayMode;
+      serverMix.holidayLabel = holidayLabel;
       // Re-render checkboxes if playlists already painted with a stale local set.
       if (playlistsChanged) {
         renderPlaylistsIfLoaded();
@@ -570,6 +647,7 @@ export function createMusicMixUi(els, deps) {
         playlistIds: currentSelectionIds(),
         genres: currentGenreIds(),
         mood: currentMoodId(),
+        holidayMode,
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -609,7 +687,14 @@ export function createMusicMixUi(els, deps) {
   function syncPickerSelection() {
     // Optimistic: show the new mix immediately; the server broadcast follows.
     mixTouchedAt = Date.now();
-    serverMix = { genres: currentGenreIds(), mood: currentMoodId() };
+    serverMix = {
+      genres: currentGenreIds(),
+      mood: currentMoodId(),
+      genreLabel: serverMix.genreLabel,
+      genreLane: serverMix.genreLane,
+      holidayOn: holidayMode,
+      holidayLabel,
+    };
     updateMixLabels();
     hostFetch("/api/selection", {
       method: "POST",
@@ -618,6 +703,7 @@ export function createMusicMixUi(els, deps) {
         playlistIds: currentSelectionIds(),
         genres: currentGenreIds(),
         mood: currentMoodId(),
+        holidayMode,
       }),
     }).catch(() => {});
     // When Never-Ending is on, also refresh its live monitor state.
@@ -649,6 +735,7 @@ export function createMusicMixUi(els, deps) {
     activeEraMoodId,
     currentGenreIds,
     currentMoodId,
+    currentHolidayMode,
     getGenreBucketCount,
     syncAutoFillFromServer,
     updateMixSelectionFromServer,

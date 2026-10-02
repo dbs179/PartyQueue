@@ -24,7 +24,7 @@ import {
   spendArtistBudget,
 } from "./sampler.js";
 import { isClosingTime } from "./closing-time.js";
-import { isOutOfSeasonHolidayTrack } from "./holiday-tracks.js";
+import { isOutOfSeasonHolidayTrack } from "./holidays.js";
 import { fitsExactLane } from "./genre-flow.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

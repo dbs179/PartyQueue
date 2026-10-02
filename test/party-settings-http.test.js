@@ -56,6 +56,8 @@ test("party settings snapshot exposes guest-safe flags only", () => {
     "neverEnding",
     "mixGenres",
     "mixMood",
+    "mixHoliday",
+    "holidayLabel",
     "discoverEnabled",
     "showQueueGenre",
     "randomMoodEnabled",

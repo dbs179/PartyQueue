@@ -38,6 +38,7 @@ import {
   queueWorkWasPreempted,
 } from "./queue-preempt.js";
 import { normalizeMood, moodPack, moodLabel } from "./moods.js";
+import { activeHoliday } from "./holidays.js";
 import {
   presetGenres,
   presetIdForGenres,
@@ -84,6 +85,7 @@ let enabled = false;
 let playlistIds = null;
 let genres = null;
 let mood = null; // era Mood id ("80s", ...) or null = off
+let holidayMode = false; // Holiday chip; mutually exclusive with `mood`
 let timer = null;
 let filling = false;
 let stopping = false;
@@ -204,9 +206,10 @@ function pickRotation(pool, current) {
 export async function rotateSelectionIfDue(deps = {}) {
   try {
     const rot = getRotationSettings();
+    const decadeOn = rot.randomDecadeEnabled && !holidayMode;
     if (!rot.randomMoodEnabled) setsSinceMoodRotation = 0;
-    if (!rot.randomDecadeEnabled) setsSinceDecadeRotation = 0;
-    if (!rot.randomMoodEnabled && !rot.randomDecadeEnabled) return null;
+    if (!decadeOn) setsSinceDecadeRotation = 0;
+    if (!rot.randomMoodEnabled && !decadeOn) return null;
     // Kids Lock pins the Kids mood — never rotate underneath it.
     if (getContentSettings().kidsLock) return null;
 
@@ -223,7 +226,7 @@ export async function rotateSelectionIfDue(deps = {}) {
           if (nextPreset == null) nextPreset = undefined;
         }
       }
-      if (rot.randomDecadeEnabled && decadePool.length >= 2) {
+      if (decadeOn && decadePool.length >= 2) {
         if (setsSinceDecadeRotation + 1 >= rot.randomDecadeEverySets) {
           nextDecade = pickRotation(decadePool, mood);
           if (nextDecade == null) nextDecade = undefined;
@@ -236,7 +239,7 @@ export async function rotateSelectionIfDue(deps = {}) {
     if (nextPreset === undefined && nextDecade === undefined) {
       // Not due yet (or pools too small) — count this set and move on.
       if (rot.randomMoodEnabled) setsSinceMoodRotation += 1;
-      if (rot.randomDecadeEnabled) setsSinceDecadeRotation += 1;
+      if (decadeOn) setsSinceDecadeRotation += 1;
       return null;
     }
 
@@ -269,7 +272,7 @@ export async function rotateSelectionIfDue(deps = {}) {
     if (nextPreset !== undefined) setsSinceMoodRotation = 0;
     else if (rot.randomMoodEnabled) setsSinceMoodRotation += 1;
     if (nextDecade !== undefined) setsSinceDecadeRotation = 0;
-    else if (rot.randomDecadeEnabled) setsSinceDecadeRotation += 1;
+    else if (decadeOn) setsSinceDecadeRotation += 1;
 
     // Dynamic import avoids a cycle (party-settings-http reads autofill state).
     import("./party-settings-http.js")
@@ -329,6 +332,12 @@ async function tick() {
       filling = true;
       try {
         // Random Mood / Random Decade: maybe pick a fresh mix for this set.
+        // A leftover Holiday flag outside every window turns itself off first.
+        if (readHolidaySelection().cleared) {
+          import("./party-settings-http.js")
+            .then((m) => m.nudgePartySettingsStream())
+            .catch(() => {});
+        }
         const rotated = await rotateSelectionIfDue();
         if (queueWorkWasPreempted(workGeneration)) return;
         // Honor the host's current discovery + content + refill size settings.
@@ -346,6 +355,7 @@ async function tick() {
             filterExplicit,
             preemptGeneration: workGeneration,
             mood,
+            holidayMode,
           }
         );
         if (queueWorkWasPreempted(workGeneration)) return;
@@ -401,7 +411,49 @@ async function tick() {
 }
 
 export function getAutoFillState() {
-  return { enabled, playlistIds, genres, mood };
+  return { enabled, playlistIds, genres, mood, holidayMode };
+}
+
+/**
+ * Drop Holiday mode when the date has left every window. Returns the chip
+ * label for the party snapshot. `cleared` is true when the flag was just
+ * turned off.
+ * @param {Date} [date]
+ */
+export function readHolidaySelection(date = new Date()) {
+  const holiday = activeHoliday(date);
+  let cleared = false;
+  if (holidayMode && !holiday) {
+    holidayMode = false;
+    saveSettings({ ...loadSettings(), holidayMode: false });
+    cleared = true;
+  }
+  return {
+    cleared,
+    holidayMode: !!(holiday && holidayMode),
+    holidayLabel: holiday?.label ?? null,
+    holidayId: holiday?.id ?? null,
+  };
+}
+
+function holidayNow() {
+  const raw = process.env.PARTYQUEUE_HOLIDAY_NOW;
+  if (typeof raw === "string" && raw) {
+    const date = new Date(raw);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  return new Date();
+}
+
+function applyMoodAndHoliday(moodId, holidayFlag) {
+  if (moodId !== undefined) {
+    mood = normalizeMood(moodId);
+    if (mood) holidayMode = false;
+  }
+  if (holidayFlag !== undefined) {
+    holidayMode = !!holidayFlag && !!activeHoliday(holidayNow());
+    if (holidayMode) mood = null;
+  }
 }
 
 /** Re-check soon after a skip/drain so Never-Ending can't lag behind Next. */
@@ -505,7 +557,7 @@ export function getLastPartyRecap() {
 // playlists to draw from (null/omitted = all) and `genreIds` the enabled genre
 // buckets; each is only updated when an array is given, so a plain on/off
 // doesn't wipe a saved selection.
-export function setAutoFill(on, ids, genreIds, moodId) {
+export function setAutoFill(on, ids, genreIds, moodId, holidayFlag) {
   enabled = !!on;
   if (Array.isArray(ids)) {
     playlistIds = ids.length ? ids : null;
@@ -514,9 +566,7 @@ export function setAutoFill(on, ids, genreIds, moodId) {
     genres = genreIds.length ? genreIds : null;
   }
   // Like the arrays: only update when explicitly provided (null clears).
-  if (moodId !== undefined) {
-    mood = normalizeMood(moodId);
-  }
+  applyMoodAndHoliday(moodId, holidayFlag);
   // Merge over the existing file so toggling the monitor doesn't wipe the host's
   // other saved settings (song memory, discovery, explicit filter, etc.).
   saveSettings({
@@ -525,6 +575,7 @@ export function setAutoFill(on, ids, genreIds, moodId) {
     playlistIds,
     genres,
     mood,
+    holidayMode,
   });
 
   clearTimer();
@@ -537,18 +588,16 @@ export function setAutoFill(on, ids, genreIds, moodId) {
 
 // Persist playlist + genre selection for Random / Never-Ending without changing
 // the monitor on/off state. Keeps every phone and the server on the same pool.
-export function savePickerSelection(ids, genreIds, moodId) {
+export function savePickerSelection(ids, genreIds, moodId, holidayFlag) {
   if (Array.isArray(ids)) {
     playlistIds = ids.length ? ids : null;
   }
   if (Array.isArray(genreIds)) {
     genres = genreIds.length ? genreIds : null;
   }
-  if (moodId !== undefined) {
-    mood = normalizeMood(moodId);
-  }
-  saveSettings({ ...loadSettings(), playlistIds, genres, mood });
-  return { playlistIds, genres, mood };
+  applyMoodAndHoliday(moodId, holidayFlag);
+  saveSettings({ ...loadSettings(), playlistIds, genres, mood, holidayMode });
+  return { playlistIds, genres, mood, holidayMode };
 }
 
 // Restore the saved state at startup and resume monitoring if it was on.
@@ -560,5 +609,12 @@ export function initAutoFill() {
   playlistIds = Array.isArray(s.playlistIds) ? s.playlistIds : null;
   genres = Array.isArray(s.genres) ? s.genres : null;
   mood = normalizeMood(s.mood);
+  holidayMode = s.holidayMode === true;
+  if (holidayMode && !activeHoliday(holidayNow())) {
+    holidayMode = false;
+    saveSettings({ ...loadSettings(), holidayMode: false });
+  } else if (holidayMode) {
+    mood = null;
+  }
   if (enabled) schedule(START_DELAY_MS);
 }

@@ -66,6 +66,7 @@ export function createPlaylistsUi(els, deps) {
   const syncAutoFillSelection = deps.syncAutoFillSelection;
   const getGenreIds = deps.getGenreIds;
   const getMoodId = deps.getMoodId;
+  const getHolidayMode = deps.getHolidayMode;
   const getGenreBucketCount = deps.getGenreBucketCount;
 
   // Which playlists are included in the "random" picker. Persisted in the browser.
@@ -208,7 +209,11 @@ export function createPlaylistsUi(els, deps) {
       return;
     }
     const genres = getGenreIds();
-    if (getGenreBucketCount() > 0 && genres.length === 0) {
+    if (
+      !(typeof getHolidayMode === "function" && getHolidayMode()) &&
+      getGenreBucketCount() > 0 &&
+      genres.length === 0
+    ) {
       showToast("Turn on at least one genre for random.", true);
       return;
     }
@@ -227,6 +232,9 @@ export function createPlaylistsUi(els, deps) {
       if (ids) payload.playlistIds = ids;
       if (genres.length) payload.genres = genres;
       if (getMoodId()) payload.mood = getMoodId();
+      if (typeof getHolidayMode === "function") {
+        payload.holidayMode = !!getHolidayMode();
+      }
       const res = await fetchFn("/api/queue/random", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
