@@ -487,6 +487,16 @@ async function nextUnlocked(opts = {}) {
   rememberSkippedTrack(skipped);
 
   invalidateSonosSnapshots();
+  if (isDjVolumeHandoffArmed() || isDjVolumeHandoffActive()) {
+    try {
+      const { markAnnouncePlaybackImminent } = await import(
+        "./dj-announce-volume.js"
+      );
+      markAnnouncePlaybackImminent();
+    } catch {
+      /* volume driver is optional for Skip */
+    }
+  }
   return { room: coordinator.Name, skipped: !!skipped };
 }
 

@@ -54,6 +54,7 @@ import {
 import {
   inheritAnnounceMusicBaseline,
   runAnnounceVolume,
+  markAnnouncePlaybackImminent,
 } from "./dj-announce-volume.js";
 import { resolveAnnouncePlayTarget } from "./skip-announce-policy.js";
 import { createStallHold } from "./announce-stall-hold.js";
@@ -3057,9 +3058,8 @@ async function beginAnnounceVolume({
         observedAt: Date.now(),
       };
     },
-    setVolume: (level, exact) =>
-      exact ? sonos.setGroupVolume(level) : sonos.setGroupVolumeFast(level),
     getVolume: () => sonos.getGroupVolume(),
+    speakers: await captureAnnounceSpeakers(sonos),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   };
 
@@ -3098,6 +3098,21 @@ async function beginAnnounceVolume({
     );
 
   return { announceLevel: announceVolume, tiers, cancelled: false };
+}
+
+/** Speakers eligible when the announcement starts. Later DJ timeouts do not drop them. */
+async function captureAnnounceSpeakers(sonos) {
+  try {
+    const { liveMembers } = await import("./sonos-reachability.js");
+    const manager = await sonos.getManager();
+    const { members } = await sonos.resolveGroup(manager);
+    return liveMembers(members);
+  } catch (err) {
+    console.warn(
+      `[dj-volume] speaker snapshot failed: ${err?.message || err}`
+    );
+    return [];
+  }
 }
 
 /**
@@ -3626,6 +3641,7 @@ async function startQueuePlayback(trackNumber = 1, announce = null) {
       if (target.alreadyOnTarget) {
         await sonos.resumeQueuePlayback();
         await seedAnnouncePlayback(announce, target.trackNumber || n);
+        markAnnouncePlaybackImminent();
         return;
       }
       n = target.trackNumber;
@@ -3640,6 +3656,7 @@ async function startQueuePlayback(trackNumber = 1, announce = null) {
   }
   await sonos.play({ trackNumber: n });
   await seedAnnouncePlayback(announce, n);
+  if (announce?.uri) markAnnouncePlaybackImminent();
 }
 
 async function seedAnnouncePlayback(announce, queueTrack) {

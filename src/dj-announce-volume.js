@@ -4,30 +4,30 @@ import {
   setDjVolumeHandoffArmed,
 } from "./dj-volume-handoff-state.js";
 import { handoffWatchSleepMs } from "./dj-volume-handoff.js";
-import { envTimeoutMs } from "./with-timeout.js";
-
-/**
- * Same budget as a single SetVolume. A closing write that uses all of it is
- * followed by one more music-level write inside this same call. The SOAP
- * underneath a timeout is not cancelled, so the retry has to be the last command.
- */
-const PLAYER_VOLUME_TIMEOUT_SEC =
-  envTimeoutMs("PARTYQUEUE_PLAYER_VOLUME_TIMEOUT_MS", 2_000) / 1000;
+import { noteGroupVolume } from "./sonos-volume.js";
+import {
+  flushSpeakerVolumeEpoch,
+  publishSpeakerVolume,
+  resetSpeakerVolumeForTests,
+  SPEAKER_VOLUME_CLEANUP_MS,
+} from "./dj-speaker-volume.js";
 
 // Volume control for a single-row baked announce.
 //
-// The old handoff had to chase the playhead across a ramp pad, one or two TTS
-// rows and a restore pad, which is why it issued SeekTrack, Pause, Play and
-// Next. Every one of those is a transport command that Sonos can refuse, and a
-// refusal left the room stranded.
-//
-// With the pads baked into the clip there is nothing to chase. The whole
-// behaviour is a function of how far into the one row we are, so this module
-// issues exactly one kind of command: SetVolume.
+// The room gets two targets, not a staircase. Opening silence publishes the
+// announce level. Closing silence publishes the saved music level. Each
+// speaker has its own writer, so a slow Office SetVolume cannot hold the
+// next target back from the rest of the group.
 
 let announceVolumeRunning = false;
 let announceVolumeGeneration = 0;
 let lastMusicBaseline = null;
+/** Play/Skip just started the clip — poll at 150ms so the opening pad is seen. */
+let announcePlaybackImminent = false;
+
+export function markAnnouncePlaybackImminent() {
+  announcePlaybackImminent = true;
+}
 
 /** True while RelTime volume is polling for a baked announce. */
 export function isAnnounceVolumeRunning() {
@@ -57,6 +57,8 @@ export function resetAnnounceVolumeForTests() {
   announceVolumeRunning = false;
   announceVolumeGeneration = 0;
   lastMusicBaseline = null;
+  announcePlaybackImminent = false;
+  resetSpeakerVolumeForTests();
 }
 
 /** Phases of a baked announce, by position within the clip. */
@@ -68,21 +70,13 @@ export const ANNOUNCE_PHASE = {
 };
 
 /**
- * Clip length the restore ramp should use.
+ * Clip length the closing target should use.
  *
  * Prefer the shorter of the baked measurement and Sonos TrackDuration so an
- * inflated value cannot schedule restore into the next song. Ignore a tiny
- * Sonos stub (HTTP streams often report a few seconds first) so we do not
- * dump volume during the DJ's first words.
- *
- * @param {number} announceDurationSec
- * @param {number} liveDurationSec
- * @returns {number}
+ * inflated value cannot schedule the music level into the next song. Ignore a
+ * tiny Sonos stub (HTTP streams often report a few seconds first).
  */
-export function resolveAnnounceClipDuration(
-  announceDurationSec,
-  liveDurationSec
-) {
+export function resolveAnnounceClipDuration(announceDurationSec, liveDurationSec) {
   const baked = Number(announceDurationSec);
   const live = Number(liveDurationSec);
   const bakedOk = Number.isFinite(baked) && baked > 0;
@@ -98,21 +92,10 @@ export function resolveAnnounceClipDuration(
 }
 
 /**
- * Where we are inside a baked announce, and what the group volume should be.
+ * The level the room should be heading toward at this playhead.
  *
- * Ramps are linear across the silent pads, so the level is already correct by
- * the time the DJ speaks and already back to the music level before the next
- * song starts. Both pads are silent, so neither ramp is audible.
- *
- * @param {{
- *   positionSec: number,
- *   durationSec: number,
- *   rampSec: number,
- *   restoreSec: number,
- *   musicVolume: number,
- *   announceVolume: number,
- * }} ctx
- * @returns {{ phase: string, volume: number, progress: number }}
+ * Opening silence and speech both want the announce level. Closing silence
+ * wants the music level immediately — there is no midpoint and no lerp.
  */
 export function announceVolumeAt({
   positionSec,
@@ -129,134 +112,44 @@ export function announceVolumeAt({
   const restore = Math.max(0, Number(restoreSec) || 0);
   const pos = Math.max(0, Number(positionSec) || 0);
 
-  if (duration <= 0) return { phase: ANNOUNCE_PHASE.hold, volume: announce, progress: 0 };
+  if (!(duration > 0)) {
+    return { phase: ANNOUNCE_PHASE.hold, volume: announce, progress: 1 };
+  }
   if (pos >= duration) {
     return { phase: ANNOUNCE_PHASE.done, volume: music, progress: 1 };
   }
-
-  // A clip too short to hold both pads still has to end at the music level, so
-  // the restore ramp wins the overlap rather than leaving the room boosted.
   const restoreStart = Math.max(0, duration - restore);
-
-  if (pos >= restoreStart && restore > 0) {
-    const t = clamp01((pos - restoreStart) / restore);
-    return {
-      phase: ANNOUNCE_PHASE.restore,
-      volume: lerpVolume(announce, music, t),
-      progress: t,
-    };
+  if (restore > 0 && pos >= restoreStart) {
+    return { phase: ANNOUNCE_PHASE.restore, volume: music, progress: 1 };
   }
-  if (pos < ramp && ramp > 0) {
-    const t = clamp01(pos / ramp);
-    return {
-      phase: ANNOUNCE_PHASE.ramp,
-      volume: lerpVolume(music, announce, t),
-      progress: t,
-    };
+  if (ramp > 0 && pos < ramp) {
+    return { phase: ANNOUNCE_PHASE.ramp, volume: announce, progress: 1 };
   }
   return { phase: ANNOUNCE_PHASE.hold, volume: announce, progress: 1 };
 }
 
-function clamp01(n) {
-  return Math.max(0, Math.min(1, Number(n) || 0));
-}
-
-function clampVolume(n) {
-  return Math.max(0, Math.min(100, Math.round(Number(n) || 0)));
-}
-
-function lerpVolume(from, to, t) {
-  return clampVolume(from + (to - from) * clamp01(t));
-}
-
 /**
- * Finish the opening ramp this long before speech, and the restore this long
- * before the clip ends. The curve used to land on the boundary itself, so the
- * SetVolume that was still in flight spilled into the DJ or the next song.
+ * Lead and margin used to finish a staircase inside the pad. The two-point
+ * driver publishes the endpoint at the start of each pad, so those knobs
+ * no longer move the level.
  */
+export function scheduleAnnounceVolume(ctx = {}) {
+  return announceVolumeAt(ctx);
+}
+
+/** Kept so older imports still resolve. The staircase no longer uses them. */
 export const ANNOUNCE_RAMP_MARGIN_SEC = 0.6;
 export const ANNOUNCE_RESTORE_MARGIN_SEC = 0.6;
-/** Don't aim more than this far ahead of the playhead to absorb one slow write. */
 export const ANNOUNCE_APPLY_LEAD_CAP_SEC = 1;
 /**
  * While Sonos reports PLAYING and the clip length is not known, trust
  * wall-clock elapsed only this far ahead of RelTime. A known duration replaces
- * this cap: the playhead may follow the wall clock up to that length, so a
- * frozen 0:00:00 can still reach the closing silence. It never runs past it.
+ * this cap.
  */
 export const ANNOUNCE_PLAYHEAD_AHEAD_CAP_SEC = 2.5;
 
-/**
- * Volume for the level that will land when SetVolume returns, not the level
- * for the position we just read.
- *
- * Opening: aim `leadSec` ahead and compress the curve so it reaches the
- * announce level `rampMarginSec` before speech. Closing: same idea, so the
- * music level lands `restoreMarginSec` before the clip ends. The hold in
- * between is not pulled early — a lead must not duck the last words.
- *
- * With lead 0 and both margins 0 this matches {@link announceVolumeAt}.
- */
-export function scheduleAnnounceVolume({
-  positionSec,
-  durationSec,
-  rampSec,
-  restoreSec,
-  musicVolume,
-  announceVolume,
-  leadSec = 0,
-  rampMarginSec = ANNOUNCE_RAMP_MARGIN_SEC,
-  restoreMarginSec = ANNOUNCE_RESTORE_MARGIN_SEC,
-  applyLeadCapSec = ANNOUNCE_APPLY_LEAD_CAP_SEC,
-}) {
-  const base = {
-    positionSec,
-    durationSec,
-    rampSec,
-    restoreSec,
-    musicVolume,
-    announceVolume,
-  };
-  const duration = Math.max(0, Number(durationSec) || 0);
-  const ramp = Math.max(0, Number(rampSec) || 0);
-  const restore = Math.max(0, Number(restoreSec) || 0);
-  const pos = Math.max(0, Number(positionSec) || 0);
-  const leadCap = Math.max(0, Number(applyLeadCapSec) || 0);
-  const lead = Math.max(0, Math.min(leadCap, Number(leadSec) || 0));
-  const rampMargin = Math.max(0, Math.min(ramp * 0.5, Number(rampMarginSec) || 0));
-  const restoreMargin = Math.max(
-    0,
-    Math.min(restore * 0.5, Number(restoreMarginSec) || 0)
-  );
-  if (duration <= 0) return announceVolumeAt(base);
-  if (pos >= duration) return announceVolumeAt({ ...base, positionSec: duration });
-
-  const speechStart = ramp;
-  const speechEnd = Math.max(ramp, duration - restore);
-
-  if (pos < speechStart && ramp > 0) {
-    const window = Math.max(0.05, ramp - rampMargin);
-    const aimed = Math.min(speechStart, pos + lead);
-    if (aimed >= window) {
-      // Already inside the margin: be at the announce level while it is still silent.
-      return announceVolumeAt({ ...base, positionSec: ramp });
-    }
-    return announceVolumeAt({ ...base, positionSec: aimed, rampSec: window });
-  }
-
-  if (pos >= speechEnd && restore > 0) {
-    const window = Math.max(0.05, restore - restoreMargin);
-    const virtualEnd = speechEnd + window;
-    const aimed = Math.min(duration, pos + lead);
-    return announceVolumeAt({
-      ...base,
-      positionSec: Math.min(virtualEnd, aimed),
-      durationSec: virtualEnd,
-      restoreSec: window,
-    });
-  }
-
-  return announceVolumeAt(base);
+function clampVolume(n) {
+  return Math.max(0, Math.min(100, Math.round(Number(n) || 0)));
 }
 
 function transportHeld(state) {
@@ -286,13 +179,7 @@ function boundPlayhead(position, reported, durationSec) {
  * RelTime by at most {@link ANNOUNCE_PLAYHEAD_AHEAD_CAP_SEC}.
  *
  * Leaving PLAYING freezes the estimate. Paused or stopped time is not added
- * back in when playback resumes, and a stuck RelTime of 0 does not wipe the
- * position already reached. A reported position ahead of that freeze is kept.
- *
- * @param {object} sample
- * @param {number} nowMs
- * @param {{ originAt?: number|null, playing?: boolean, positionSec?: number, frozenSec?: number|null }} [origin]
- * @param {number} [durationSec] resolved announcement length; 0 when unknown
+ * back in when playback resumes.
  */
 export function estimateAnnouncePlayhead(sample, nowMs, origin, durationSec = 0) {
   const reported = Math.max(0, Number(sample?.positionSec) || 0);
@@ -320,7 +207,6 @@ export function estimateAnnouncePlayhead(sample, nowMs, origin, durationSec = 0)
     originAt = at - start * 1000;
   } else {
     const implied = at - reported * 1000;
-    // RelTime jumped forward (seek, or it caught up). Rebase so we follow it.
     if (implied < originAt) originAt = implied;
   }
   const elapsed = Math.max(0, (at - originAt) / 1000);
@@ -328,35 +214,25 @@ export function estimateAnnouncePlayhead(sample, nowMs, origin, durationSec = 0)
   return { positionSec, originAt, playing: true, frozenSec: null };
 }
 
+function speakersFrom(io) {
+  if (Array.isArray(io?.speakers)) return io.speakers;
+  if (typeof io?.setVolume !== "function") return [];
+  return [
+    {
+      Name: io.speakerName || "group",
+      setVolume: (level) => io.setVolume(level),
+      getVolume:
+        typeof io.getVolume === "function" ? () => io.getVolume() : undefined,
+    },
+  ];
+}
+
 /**
- * Drive group volume for one baked announce, then put it back.
+ * Watch one baked announce and publish its two volume endpoints.
  *
- * Returns when the clip is no longer on the playhead for any reason — it
- * finished, a guest skipped it, the host cleared the queue, or the speaker
- * dropped it. Every one of those exits restores the music volume, because the
- * only unrecoverable outcome here is leaving the party boosted or muted.
- *
- * `io` is injected so this is testable without Sonos:
- *   read()              -> { uri, positionSec, durationSec?, state?, observedAt? }
- *   setVolume(n, exact) -> void   exact writes read back; ramp steps do not
- *   getVolume()         -> number  used only when the baseline was unknown
- *   sleep(ms)           -> Promise
- *   mono()              -> number  optional clock for apply-time measurement
- *
- * `read` deliberately returns both fields together: asking for the URI and the
- * position separately costs two SOAP round trips per poll, several times a
- * second, against the same coordinator that is trying to play audio.
- *
- * @param {{
- *   clipUrl: string,
- *   durationSec: number,
- *   rampSec: number,
- *   restoreSec: number,
- *   musicVolume: number,
- *   announceVolume: number,
- * }} announce
- * @param {object} io
- * @param {{ pollMs?: number, graceMs?: number, maxMs?: number, logger?: object }} [opts]
+ * `io.read` is never held behind a speaker write. `io.speakers` is the set
+ * captured when the announcement started; a timeout inside a write does not
+ * remove a speaker from that set.
  */
 export async function runAnnounceVolume(announce, io, opts = {}) {
   const pollMs = opts.pollMs ?? 150;
@@ -364,57 +240,24 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
   const graceMs = opts.graceMs ?? 4000;
   const maxMs = opts.maxMs ?? MAX_HANDOFF_ARMED_MS;
   const logger = opts.logger ?? console;
-  // Tests omit a logger; production passes one. console.debug would print on
-  // every shout during the suite because Node shows debug by default.
   const debug = opts.logger?.debug?.bind(opts.logger) ?? (() => {});
   const now = io.now ?? Date.now;
-  const clock = typeof io.mono === "function" ? io.mono : Date.now;
-  const rampMarginSec = opts.rampMarginSec ?? ANNOUNCE_RAMP_MARGIN_SEC;
-  const restoreMarginSec = opts.restoreMarginSec ?? ANNOUNCE_RESTORE_MARGIN_SEC;
-  const applyLeadCapSec = opts.applyLeadCapSec ?? ANNOUNCE_APPLY_LEAD_CAP_SEC;
+  const clock = typeof io.mono === "function" ? io.mono : now;
+  const speakers = speakersFrom(io);
 
   const matches = (uri) => uriMatchesClip(uri, announce.clipUrl);
   const started = now();
   let sawClip = false;
-  let lastSet = null;
   let reason = "complete";
   let musicVolume =
-    announce.musicVolume == null
-      ? null
-      : clampVolume(announce.musicVolume);
+    announce.musicVolume == null ? null : clampVolume(announce.musicVolume);
   let announceVolume =
-    announce.announceVolume == null
-      ? null
-      : clampVolume(announce.announceVolume);
-
-  const ensureLevels = async () => {
-    if (musicVolume != null && announceVolume != null) return true;
-    if (typeof io.getVolume !== "function") return false;
-    try {
-      const live = clampVolume(await io.getVolume());
-      musicVolume = live;
-      announceVolume = announce.calculateTarget
-        ? clampVolume(announce.calculateTarget(live))
-        : live;
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const generation = ++announceVolumeGeneration;
-  announceVolumeRunning = true;
-  setDjVolumeHandoffArmed(true);
-  const owns = () => generation === announceVolumeGeneration;
-  let applyLeadSec = 0;
-  /** Uncapped duration of the last SetVolume. The 1s lead cap is only for aiming. */
-  let lastWriteSec = 0;
-  let musicRetryUsed = false;
+    announce.announceVolume == null ? null : clampVolume(announce.announceVolume);
+  let published = null;
   let playOrigin = { originAt: null };
-  let lastPlayheadSec = 0;
   let activeDurationSec = Math.max(0, Number(announce.durationSec) || 0);
   let warnedOpening = false;
-  let warnedRestore = false;
+  let consecutiveReadFailures = 0;
   const timeline = {
     generatedDurationSec: Number(announce.durationSec) || 0,
     openingSilenceSec: Number(announce.rampSec) || 0,
@@ -431,89 +274,62 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
     nextTrackAt: null,
   };
 
-  const noteTimeline = (at, appliedAt) => {
-    if (!timeline.rampUpStartAt && at.phase === ANNOUNCE_PHASE.ramp) {
-      timeline.rampUpStartAt = appliedAt;
-      debug("[dj-volume] ramp-up started");
-    }
-    if (
-      !timeline.rampUpDoneAt &&
-      at.volume === announceVolume &&
-      (at.phase === ANNOUNCE_PHASE.hold || at.phase === ANNOUNCE_PHASE.done)
-    ) {
-      timeline.rampUpDoneAt = appliedAt;
-      debug("[dj-volume] ramp-up complete");
-    }
-    if (!timeline.rampDownStartAt && at.phase === ANNOUNCE_PHASE.restore) {
-      timeline.rampDownStartAt = appliedAt;
-      debug("[dj-volume] ramp-down started");
-    }
-    if (!timeline.rampDownDoneAt && at.phase === ANNOUNCE_PHASE.done) {
-      timeline.rampDownDoneAt = appliedAt;
-      timeline.announceEndAt = appliedAt;
-      debug("[dj-volume] ramp-down complete");
+  const generation = ++announceVolumeGeneration;
+  announceVolumeRunning = true;
+  setDjVolumeHandoffArmed(true);
+  const owns = () => generation === announceVolumeGeneration;
+
+  const ensureLevels = async () => {
+    if (musicVolume != null && announceVolume != null) return true;
+    if (typeof io.getVolume !== "function") return false;
+    try {
+      const live = clampVolume(await io.getVolume());
+      musicVolume = live;
+      announceVolume = announce.calculateTarget
+        ? clampVolume(announce.calculateTarget(live))
+        : live;
+      return true;
+    } catch {
+      return false;
     }
   };
 
-  const setVolume = async (volume, exact, samplePos, scheduled, force = false) => {
-    if (!owns()) return 0;
-    if (!force && volume === lastSet) return 0;
-    const t0 = clock();
-    let failed = false;
-    try {
-      await io.setVolume(volume, exact);
-    } catch (err) {
-      failed = true;
-      logger.warn?.(`[dj-volume] setVolume ${volume} failed: ${err?.message || err}`);
-    }
-    const elapsedSec = Math.max(0, (clock() - t0) / 1000);
-    if (elapsedSec >= 0.02) {
-      applyLeadSec = Math.min(applyLeadCapSec, elapsedSec);
-      lastWriteSec = elapsedSec;
-    }
-    if (failed) return elapsedSec;
-    // The write already left. A newer shout owns whatever it sets next.
-    if (!owns()) return elapsedSec;
-    lastSet = volume;
-    const appliedAt = clock();
-    if (scheduled) noteTimeline(scheduled, appliedAt);
-    if (
-      samplePos != null &&
-      announceVolume != null &&
-      scheduled?.phase === ANNOUNCE_PHASE.ramp
-    ) {
-      const landed = samplePos + elapsedSec;
-      const ramp = Math.max(0, Number(announce.rampSec) || 0);
-      if (!warnedOpening && ramp > 0 && landed >= ramp && volume < announceVolume) {
-        warnedOpening = true;
-        logger.warn?.(
-          `[dj-volume] opening ramp landed ${Math.round((landed - ramp) * 1000)}ms after speech started`
-        );
-      }
-    }
-    return elapsedSec;
-  };
-  const retryMusicVolume = async () => {
-    if (musicRetryUsed || !owns() || musicVolume == null) return;
-    musicRetryUsed = true;
-    await setVolume(
-      clampVolume(musicVolume),
-      true,
-      null,
-      { phase: ANNOUNCE_PHASE.done, volume: clampVolume(musicVolume) },
-      true
-    );
-  };
   const rememberBaseline = (level) => {
-    if (generation === announceVolumeGeneration && level != null) {
-      lastMusicBaseline = level;
-    }
+    if (owns() && level != null) lastMusicBaseline = level;
   };
   rememberBaseline(musicVolume);
-  let consecutiveReadFailures = 0;
+
+  const publish = (level) => {
+    if (!owns() || level == null) return;
+    const next = clampVolume(level);
+    if (published === next) return;
+    published = next;
+    noteGroupVolume(next);
+    const appliedAt = clock();
+    if (announceVolume != null && next === announceVolume) {
+      if (!timeline.rampUpStartAt) timeline.rampUpStartAt = appliedAt;
+      if (!timeline.rampUpDoneAt) {
+        timeline.rampUpDoneAt = appliedAt;
+        debug("[dj-volume] announce target published");
+      }
+    }
+    if (musicVolume != null && next === musicVolume) {
+      if (!timeline.rampDownStartAt) timeline.rampDownStartAt = appliedAt;
+      if (!timeline.rampDownDoneAt) {
+        timeline.rampDownDoneAt = appliedAt;
+        timeline.announceEndAt = appliedAt;
+        debug("[dj-volume] music target published");
+      }
+    }
+    for (const speaker of speakers) publishSpeakerVolume(speaker, next, generation);
+  };
+
+  const watchSleep = () =>
+    sawClip || announcePlaybackImminent ? pollMs : waitMs;
+
   try {
     while (now() - started < maxMs) {
-      if (generation !== announceVolumeGeneration) {
+      if (!owns()) {
         reason = "superseded";
         break;
       }
@@ -523,64 +339,64 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
         consecutiveReadFailures = 0;
       } catch (err) {
         consecutiveReadFailures += 1;
-        // Office dropped ~8% of these ticks all soak long. Sleeping the active
-        // 150ms poll here used to hammer the speaker harder on failure than on
-        // success. Back off from the wait interval instead, and stop reprinting
-        // every timeout — the first of a streak and each 8th after that is enough.
-        if (consecutiveReadFailures === 1 || consecutiveReadFailures % 8 === 0) {
-          logger.warn?.(
-            `[dj-volume] transport read failed (${consecutiveReadFailures} in a row): ${err?.message || err}`
-          );
-        }
+        debug(
+          `[dj-volume] transport read failed (${consecutiveReadFailures} in a row): ${err?.message || err}`
+        );
         await io.sleep(
-          handoffWatchSleepMs(
-            consecutiveReadFailures,
-            sawClip ? pollMs : waitMs
-          )
+          announcePlaybackImminent && !sawClip
+            ? pollMs
+            : handoffWatchSleepMs(consecutiveReadFailures, watchSleep())
         );
         continue;
       }
+
       const uri = sample.uri;
       const reportedPos = Number(sample.positionSec) || 0;
-      const queueTrack = sample.queueTrack;
-      const durationSec = sample.durationSec;
       if (matches(uri)) {
-        // Play returned is not the first audio frame. A paused or stopped
-        // row at 0:00 still has the clip URI; ramping then would finish
-        // before the opening silence exists. Once the clip has been playing,
-        // a pause must freeze the estimate instead of skipping it — skipping
-        // would keep the old PLAYING origin and count the pause on resume.
         if (!sawClip && transportHeld(sample.state) && reportedPos < 0.05) {
           await io.sleep(pollMs);
           continue;
         }
         const clipDuration = resolveAnnounceClipDuration(
           announce.durationSec,
-          durationSec
+          sample.durationSec
         );
-        const tracked = estimateAnnouncePlayhead(
-          sample,
-          clock(),
-          playOrigin,
-          clipDuration
-        );
-        playOrigin = tracked;
+        const explicitState = sample.state != null;
+        const tracked = explicitState
+          ? estimateAnnouncePlayhead(sample, clock(), playOrigin, clipDuration)
+          : {
+              positionSec: reportedPos,
+              originAt: null,
+              playing: true,
+              frozenSec: null,
+            };
+        if (explicitState) playOrigin = tracked;
         const positionSec = tracked.positionSec;
-        lastPlayheadSec = positionSec;
         if (!sawClip) {
           const startedAt = clock() - positionSec * 1000;
           timeline.playbackStartAt = startedAt;
           const rampMs = Math.max(0, Number(announce.rampSec) || 0) * 1000;
           const restoreMs = Math.max(0, Number(announce.restoreSec) || 0) * 1000;
-          const durMs = Math.max(0, Number(announce.durationSec) || 0) * 1000;
+          const durMs = Math.max(0, Number(clipDuration) || 0) * 1000;
           timeline.expectedSpeechStartAt = startedAt + rampMs;
           timeline.expectedSpeechEndAt = startedAt + Math.max(0, durMs - restoreMs);
           timeline.expectedAnnounceEndAt = startedAt + durMs;
           debug(
             `[dj-volume] playback started (position ${positionSec.toFixed(2)}s)`
           );
+          const opening = Math.max(0, Number(announce.rampSec) || 0);
+          if (!warnedOpening && opening > 0 && positionSec >= opening) {
+            warnedOpening = true;
+            logger.warn?.(
+              `[dj-volume] opening silence missed; first playhead ${positionSec.toFixed(2)}s is already in speech`
+            );
+          }
           try {
-            opts.onClipStart?.({ uri, positionSec: reportedPos, queueTrack });
+            opts.onClipStart?.({
+              uri,
+              positionSec: reportedPos,
+              queueTrack: sample.queueTrack,
+            });
           } catch (err) {
             logger.warn?.(
               `[dj-volume] onClipStart failed: ${err?.message || err}`
@@ -588,6 +404,7 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
           }
         }
         sawClip = true;
+        announcePlaybackImminent = false;
         setDjVolumeHandoffActive(true);
         if (!(await ensureLevels())) {
           await io.sleep(pollMs);
@@ -599,125 +416,60 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
         }
         rememberBaseline(musicVolume);
         activeDurationSec = clipDuration;
-        if (timeline.playbackStartAt != null) {
-          const restoreMs = Math.max(0, Number(announce.restoreSec) || 0) * 1000;
-          timeline.expectedSpeechEndAt =
-            timeline.playbackStartAt + Math.max(0, clipDuration * 1000 - restoreMs);
-          timeline.expectedAnnounceEndAt = timeline.playbackStartAt + clipDuration * 1000;
-        }
-        const at = scheduleAnnounceVolume({
+        const endpoint = announceVolumeAt({
           positionSec,
           durationSec: clipDuration,
           rampSec: announce.rampSec,
           restoreSec: announce.restoreSec,
           musicVolume,
           announceVolume,
-          leadSec: applyLeadSec,
-          rampMarginSec,
-          restoreMarginSec,
-          applyLeadCapSec,
         });
-        // A write that takes longer than the clip has left cannot finish another
-        // fade step in time. Send the saved music level now and stop stepping.
-        const restoreSec = Math.max(0, Number(announce.restoreSec) || 0);
-        const remainingSec = clipDuration > 0 ? clipDuration - positionSec : Infinity;
-        const restoreStart = Math.max(0, clipDuration - restoreSec);
-        const musicLevel = musicVolume == null ? null : clampVolume(musicVolume);
-        const finishNow =
-          musicLevel != null &&
-          clipDuration > 0 &&
-          lastWriteSec > 0 &&
-          remainingSec < lastWriteSec &&
-          positionSec >= restoreStart &&
-          at.volume !== musicLevel;
-        const scheduled = finishNow
-          ? { phase: ANNOUNCE_PHASE.done, volume: musicLevel }
-          : at;
-        // Read-back only at the two landings: announce level (speech) and
-        // music level (restore done). Mid-ramp and mid-restore steps are
-        // transient — the exact path's settle loop is what used to push the
-        // closing ramp into the next song.
-        const exact =
-          scheduled.phase === ANNOUNCE_PHASE.hold ||
-          scheduled.phase === ANNOUNCE_PHASE.done;
-        const elapsed = await setVolume(
-          scheduled.volume,
-          exact,
-          positionSec,
-          scheduled
-        );
-        if (scheduled.phase === ANNOUNCE_PHASE.done) {
-          if (elapsed >= PLAYER_VOLUME_TIMEOUT_SEC) await retryMusicVolume();
+        publish(endpoint.volume);
+        if (
+          endpoint.phase === ANNOUNCE_PHASE.done ||
+          endpoint.phase === ANNOUNCE_PHASE.restore
+        ) {
           break;
         }
       } else if (sawClip) {
-        // Gone from the playhead after we had it: finished or skipped. Either
-        // way the announce is over. This is the safety exit, not the clock
-        // the restore ramp waits on — that ramp already ran inside the tail.
         reason = "left-playhead";
         timeline.nextTrackAt = clock();
         if (!timeline.announceEndAt) timeline.announceEndAt = timeline.nextTrackAt;
-        const restoreSec = Math.max(0, Number(announce.restoreSec) || 0);
-        const tailStart = Math.max(0, activeDurationSec - restoreSec);
-        // A skip during speech is not a late ramp. Warn only when we were
-        // already in the closing silence (or past it) and the music level
-        // had not landed yet — that is the next song starting hot.
-        if (
-          !warnedRestore &&
-          musicVolume != null &&
-          lastSet != null &&
-          lastSet !== musicVolume &&
-          lastPlayheadSec >= tailStart - 0.25
-        ) {
-          warnedRestore = true;
-          logger.warn?.(
-            `[dj-volume] restore unfinished as the next track started (volume ${lastSet}, music ${musicVolume})`
-          );
-        }
         break;
       } else if (now() - started > graceMs) {
-        // Never arrived. The clip was pulled before it played, so there is
-        // nothing to duck for and nothing to restore.
         reason = "never-started";
         break;
       }
-      await io.sleep(sawClip ? pollMs : waitMs);
+      await io.sleep(watchSleep());
     }
-    if (now() - started >= maxMs) reason = "timeout";
+    if (owns() && now() - started >= maxMs && reason === "complete" && !sawClip) {
+      reason = "timeout";
+    }
   } finally {
-    const superseded = generation !== announceVolumeGeneration;
-    // Flags stay up through this write. A newer shout that took the room
-    // during the write owns them; this generation must not clear those.
+    const superseded = !owns();
+    if (superseded) reason = "superseded";
     try {
-      if (!superseded && sawClip && musicVolume != null && owns() && !musicRetryUsed) {
-        try {
-          const elapsed = await setVolume(
-            clampVolume(musicVolume),
-            true,
-            null,
-            {
-              phase: ANNOUNCE_PHASE.done,
-              volume: clampVolume(musicVolume),
-            },
-            true
-          );
-          // One retry, still inside this call. Nothing is scheduled after it.
-          if (elapsed >= PLAYER_VOLUME_TIMEOUT_SEC) await retryMusicVolume();
-        } catch (err) {
-          logger.error?.(
-            `[dj-volume] could not restore music volume: ${err?.message || err}`
-          );
-        }
+      if (!superseded && sawClip && musicVolume != null) {
+        publish(musicVolume);
+        await flushSpeakerVolumeEpoch(generation, {
+          budgetMs: SPEAKER_VOLUME_CLEANUP_MS,
+          now,
+          sleep: (ms) => io.sleep(ms),
+        });
       }
+    } catch (err) {
+      logger.error?.(
+        `[dj-volume] could not finish speaker volume: ${err?.message || err}`
+      );
     } finally {
-      if (generation === announceVolumeGeneration) {
+      if (owns()) {
         announceVolumeRunning = false;
+        announcePlaybackImminent = false;
         setDjVolumeHandoffActive(false);
         if (sawClip) setDjVolumeHandoffArmed(false);
       }
     }
-    if (generation !== announceVolumeGeneration) reason = "superseded";
-    debug("[dj-volume] announce timeline", { reason, ...timeline });
+    debug("[dj-volume] announce timeline", { reason, activeDurationSec, ...timeline });
   }
   return { reason, sawClip, timeline };
 }
@@ -725,8 +477,6 @@ export async function runAnnounceVolume(announce, io, opts = {}) {
 /**
  * Match a queue URI against the baked clip URL. Sonos rewrites the URL it was
  * handed (proxy prefixes, query strings), so compare on the file name.
- * @param {string|null|undefined} uri
- * @param {string} clipUrl
  */
 export function uriMatchesClip(uri, clipUrl) {
   const value = String(uri || "");
