@@ -505,6 +505,39 @@ async function acquireTopology(m, opts, followedUp) {
   return acquireTopology(m, opts, true);
 }
 
+/**
+ * Refresh an aged-out map without making the caller wait for SOAP.
+ *
+ * The announcement volume loop reaches getZoneGroups through
+ * resolveCoordinator -> resolveGroup every 150 ms. Awaiting a topology read
+ * there put a 4 s-per-device failover chain inside the announcement timing
+ * path, so a crossed staleness ceiling could stall the ramp for seconds.
+ * The held map is still the answer; the read only has to happen, not block.
+ *
+ * zoneInFlight keeps concurrent stale callers on one probe chain, and the
+ * failure branch of startTopologyRead sets zoneRetryAfter, so an unreachable
+ * household gets one chain per ceiling rather than one per call.
+ * @param {object} m
+ * @param {{ preferHost?: string, preferRoom?: string }} opts
+ */
+function startBackgroundTopologyRefresh(m, opts) {
+  if (zoneInFlight) return;
+  const flight = startTopologyRead(
+    m,
+    {
+      preferHost: opts.preferHost,
+      preferRoom: opts.preferRoom,
+      // onKeptCache belongs to a caller that is awaiting a result. Nobody is.
+      onKeptCache: null,
+    },
+    zoneGeneration
+  );
+  // Nothing awaits this read. Only startTopologyRead's cache-less branch can
+  // reject (a clearZoneCache mid-flight), and that must not surface as an
+  // unhandled rejection in a caller that already returned.
+  flight.promise.catch(() => {});
+}
+
 export async function getZoneGroups(
   m,
   {
@@ -515,14 +548,17 @@ export async function getZoneGroups(
     onKeptCache = null,
   } = {}
 ) {
-  // Reuse the held map inside the staleness ceiling; past it, take one fresh
-  // read. Now-playing still must not poll topology — the ceiling is long
-  // enough that a read covers every caller in that window — and a failed read
-  // keeps serving the last good map rather than throwing.
+  // Reuse the held map inside the staleness ceiling. Past it, serve the same
+  // map and refresh behind the caller: bounded staleness must not become
+  // bounded latency on the announcement path. A failed read keeps the last
+  // good map rather than throwing.
   if (!fresh && zoneCache.groups) {
     const now = Date.now();
-    if (now - zoneCache.at < ZONE_CACHE_MAX_AGE_MS) return zoneCache.groups;
-    if (now < zoneRetryAfter) return zoneCache.groups;
+    const held = zoneCache.groups;
+    if (now - zoneCache.at < ZONE_CACHE_MAX_AGE_MS) return held;
+    if (now < zoneRetryAfter) return held;
+    startBackgroundTopologyRefresh(m, { preferHost, preferRoom });
+    return held;
   }
   return acquireTopology(
     m,
@@ -655,6 +691,17 @@ export function zoneCacheInfoForTests() {
     ageMs: zoneCache.groups ? Date.now() - zoneCache.at : 0,
     retryHeldOff: Date.now() < zoneRetryAfter,
   };
+}
+
+/** Test helper — await the topology read on the wire, including a background one. */
+export async function settleTopologyFlightForTests() {
+  const flight = zoneInFlight;
+  if (!flight) return;
+  try {
+    await flight.promise;
+  } catch {
+    /* a failed background refresh is the behavior under test, not an error */
+  }
 }
 
 /** Test helper — pretend the held map is this old. */
