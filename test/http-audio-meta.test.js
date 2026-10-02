@@ -1,7 +1,6 @@
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  didlDuration,
   httpAudioEnqueueBody,
   httpAudioMeta,
 } from "../src/sonos-queue-mutations.js";
@@ -32,76 +31,25 @@ function withInfo(fn) {
   return lines;
 }
 
-test("URL-only HTTP audio is a DIDL MPEG resource", () => {
-  const meta = httpAudioMeta("http://x/pad.mp3");
-  assert.equal(meta.trackUri, "http://x/pad.mp3");
-  assert.match(meta.metadata, /^<DIDL-Lite /);
-  assert.match(meta.metadata, /<\/DIDL-Lite>$/);
-  assert.match(meta.metadata, /protocolInfo="http-get:\*:audio\/mpeg:\*"/);
-  assert.match(meta.metadata, /<res [^>]*>http:\/\/x\/pad\.mp3<\/res>/);
-  assert.doesNotMatch(meta.metadata, /duration=/);
-  assert.doesNotMatch(meta.metadata, /<dc:title>/);
-  assert.doesNotMatch(meta.metadata, /<dc:creator>/);
-});
-
-test("title and artist are included when present", () => {
-  const meta = httpAudioMeta(CLIP, {
-    title: "DJ Holy Roller",
-    artist: "PartyQueue",
-    durationSec: 31.21,
-  });
-  assert.match(meta.metadata, /<dc:title>DJ Holy Roller<\/dc:title>/);
-  assert.match(meta.metadata, /<dc:creator>PartyQueue<\/dc:creator>/);
-  assert.match(meta.metadata, /duration="0:00:31"/);
-});
-
-test("XML characters in title, artist, and URL are escaped", () => {
+test("HTTP audio metadata stays empty so Sonos will accept the row", () => {
   const url = 'http://x/a.mp3?x=1&y=2&note="hi"';
-  const meta = httpAudioMeta(url, {
-    title: 'Tom & Jerry <live>',
-    artist: `O'Brien "DJ"`,
-  });
+  const meta = httpAudioMeta(url);
   assert.equal(meta.trackUri, url);
-  assert.match(meta.metadata, /<dc:title>Tom &amp; Jerry &lt;live&gt;<\/dc:title>/);
-  assert.match(
-    meta.metadata,
-    /<dc:creator>O&apos;Brien &quot;DJ&quot;<\/dc:creator>/
+  assert.equal(meta.metadata, "");
+  assert.equal(
+    httpAudioMeta(CLIP, {
+      title: "Tom & Jerry <live>",
+      artist: `O'Brien "DJ"`,
+      durationSec: 31.21,
+    }).metadata,
+    ""
   );
-  assert.match(
-    meta.metadata,
-    /<res [^>]*>http:\/\/x\/a\.mp3\?x=1&amp;y=2&amp;note=&quot;hi&quot;<\/res>/
-  );
-  assert.doesNotMatch(meta.metadata, /&y=2/);
 });
 
-test("known durations use Sonos H:MM:SS", () => {
-  assert.equal(didlDuration(31.21), "0:00:31");
-  assert.equal(didlDuration(27.07), "0:00:27");
-  assert.equal(didlDuration(90.4), "0:01:30");
-  assert.equal(didlDuration(125), "0:02:05");
-  assert.match(httpAudioMeta(CLIP, { durationSec: 27.07 }).metadata, /duration="0:00:27"/);
-  assert.match(httpAudioMeta(CLIP, { durationSec: 125 }).metadata, /duration="0:02:05"/);
-});
-
-test("missing or invalid duration omits the attribute", () => {
-  for (const durationSec of [undefined, null, Number.NaN, 0, -4, "nope"]) {
-    const meta = httpAudioMeta(CLIP, { durationSec });
-    assert.doesNotMatch(meta.metadata, /duration=/, String(durationSec));
-  }
-});
-
-test("enqueue payload keeps the original URL and the generated DIDL", () => {
-  const opts = {
-    title: "DJ Holy Roller",
-    artist: "PartyQueue",
-    durationSec: 31.21,
-    position: 1,
-  };
-  const meta = httpAudioMeta(CLIP, opts);
-  const body = httpAudioEnqueueBody(CLIP, opts);
+test("enqueue payload keeps the original URL and empty metadata", () => {
+  const body = httpAudioEnqueueBody(CLIP, { position: 1 });
   assert.equal(body.EnqueuedURI, CLIP);
-  assert.equal(body.EnqueuedURI, meta.trackUri);
-  assert.equal(body.EnqueuedURIMetaData, meta.metadata);
+  assert.equal(body.EnqueuedURIMetaData, "");
   assert.equal(body.DesiredFirstTrackNumberEnqueued, 1);
   assert.equal(body.EnqueueAsNext, false);
   assert.equal(body.InstanceID, 0);
