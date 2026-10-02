@@ -82,6 +82,23 @@ test("normalizeDjTaglines trims, caps, and falls back", () => {
   assert.equal(normalizeDjTaglines(Array.from({ length: 90 }, (_, i) => `Line ${i}`)).length, 80);
 });
 
+test("a callback clip keeps one Sister Static line across polls", () => {
+  const uri = "http://10.10.10.10:8088/media/tts/dj-announce-banter.mp3";
+  const holy = ["Pulpit Heat", "Choir Night"];
+  const sister = ["Static Cling", "Booth Ghost", "Needle Drop"];
+  const holyLine = taglineForClip(uri, holy);
+  const seen = new Set();
+  for (let i = 0; i < sister.length + 2; i++) {
+    seen.add(taglineForClip(uri, sister));
+    // Queue rows keep resolving the lead pack while Now Playing is in the punch.
+    assert.equal(taglineForClip(uri, holy), holyLine);
+  }
+  assert.equal(seen.size, 1);
+  const sisterLine = [...seen][0];
+  assert.ok(sister.includes(sisterLine));
+  assert.notEqual(sisterLine, holyLine);
+});
+
 test("taglineForClip uses a custom pack", () => {
   const pack = ["Custom Booth Line", "Another Custom Line"];
   const first = taglineForClip("http://ha.local:8123/api/tts_proxy/custom.mp3", pack);

@@ -565,6 +565,11 @@ function hashUri(uri) {
  * Pick a DJ Now Playing / queue tagline for a clip URL. Same clip keeps the
  * same line for the night (no poll flicker); new clips prefer unused lines
  * from `pack` until the pack is exhausted, then the least-recently used.
+ *
+ * A baked callback is one file with two packs (Holy Roller, then Sister
+ * Static). Match a reservation whose text is in *this* pack — the first
+ * stored line is often the other DJ's, and treating that miss as "no
+ * reservation" minted a new Sister Static line on every now-playing poll.
  * @param {string|null|undefined} uri
  * @param {string[]} pack
  * @returns {string}
@@ -580,10 +585,10 @@ export function reserveClipTagline(uri, pack, { now = Date.now() } = {}) {
   const store = pruneStore(ts);
   const clips = store.global.taglineClips || [];
 
-  const existing = clips.find((item) => item.uri === uriKey);
-  if (existing && lines.includes(existing.text)) {
-    return existing.text;
-  }
+  const existing = clips.find(
+    (item) => item.uri === uriKey && lines.includes(item.text)
+  );
+  if (existing) return existing.text;
 
   const lastUsed = new Map();
   for (const item of clips) {
