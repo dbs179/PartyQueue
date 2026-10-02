@@ -3053,6 +3053,8 @@ async function beginAnnounceVolume({
         positionSec: Number(tick?.positionSec) || 0,
         durationSec: Number(tick?.durationSec) || 0,
         queueTrack: Number(tick?.queueTrack) || 0,
+        state: tick?.state ?? null,
+        observedAt: Date.now(),
       };
     },
     setVolume: (level, exact) =>
@@ -3080,6 +3082,11 @@ async function beginAnnounceVolume({
           { uri: clipUrl, durationSec },
           Number(queueTrack) >= 1 ? Number(queueTrack) : undefined
         );
+      },
+      logger: {
+        debug: (...args) => console.debug(...args),
+        warn: (...args) => console.warn(...args),
+        error: (...args) => console.error(...args),
       },
     }
   )

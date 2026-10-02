@@ -10,6 +10,8 @@ import {
   runAnnounceVolume,
   uriMatchesClip,
   ANNOUNCE_PHASE,
+  scheduleAnnounceVolume,
+  estimateAnnouncePlayhead,
 } from "../src/dj-announce-volume.js";
 import {
   isDjVolumeHandoffActive,
@@ -146,7 +148,10 @@ test("a normal announce ramps up, holds, and restores without any transport call
 
   assert.equal(result.reason, "complete");
   assert.equal(result.sawClip, true);
-  assert.deepEqual(volumes, [8, 14, 20, 14, 8, 8]);
+  // 0.6s margin: 1.5s is 1.5/2.4 of the way up (16), 22.5s is 1.5/2.4 of the
+  // way back down (13). The music level is written once, while the clip is
+  // still the current row — the exit path does not send it again.
+  assert.deepEqual(volumes, [8, 16, 20, 13, 8, 8]);
   // One transport read per poll, not one per field.
   assert.equal(reads.count, 6);
 });
@@ -156,16 +161,18 @@ test("only the endpoints ask Sonos to verify the level", async () => {
   const { io } = fakeIo([
     [CLIP, 1.5],
     [CLIP, 12],
+    [CLIP, 22.5],
     [CLIP, 24],
   ]);
   io.setVolume = async (v, isExact) => exact.push([v, !!isExact]);
   await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io);
 
   assert.deepEqual(exact, [
-    [14, false], // mid-ramp: transient, no read-back
+    [16, false], // mid-ramp: transient, no read-back
     [20, true], // the DJ speaks at this level, so it must land
-    [8, true], // back to the music level, so it must land
-    [8, true], // final restore even if a mid-announce write threw
+    [13, false], // mid-restore must stay on the fast path (no settle loop)
+    [8, true], // music level while the clip is still current
+    [8, true], // bounded confirm on the way out, even if a later write threw
   ]);
 });
 
@@ -201,7 +208,7 @@ test("live clip duration wins so restore is not scheduled 20s into the next song
   );
 
   assert.equal(result.reason, "complete");
-  assert.deepEqual(volumes, [8, 20, 14, 8, 8]);
+  assert.deepEqual(volumes, [8, 20, 13, 8, 8]);
 });
 
 test("resolveAnnounceClipDuration prefers the shorter trusted length", () => {
@@ -501,4 +508,375 @@ test("transport ticks expose TrackDuration so restore can use the real clip leng
   assert.match(voiceSrc, /punchStartsAtSecForBake/);
   assert.match(voiceSrc, /ttsBytesPerSec\(provider\)/);
   assert.match(voiceSrc, /probeAudioDurationSec\(filePath/);
+  assert.match(voiceSrc, /state:\s*tick\?\.state/);
+  assert.match(voiceSrc, /observedAt:\s*Date\.now\(\)/);
+});
+
+test("scheduled ramps finish inside the silence, and a lead does not duck speech", () => {
+  const speech = scheduleAnnounceVolume({ ...shape, positionSec: 3 });
+  assert.equal(speech.phase, ANNOUNCE_PHASE.hold);
+  assert.equal(speech.volume, 20);
+
+  const marginEdge = scheduleAnnounceVolume({ ...shape, positionSec: 2.4 });
+  assert.equal(marginEdge.volume, 20, "announce level is reached 0.6s before speech");
+
+  const tailStart = scheduleAnnounceVolume({ ...shape, positionSec: 21 });
+  assert.equal(tailStart.phase, ANNOUNCE_PHASE.restore);
+  assert.equal(tailStart.volume, 20);
+
+  const beforeEnd = scheduleAnnounceVolume({ ...shape, positionSec: 23.4 });
+  assert.equal(beforeEnd.phase, ANNOUNCE_PHASE.done);
+  assert.equal(beforeEnd.volume, 8, "music level is reached 0.6s before the clip ends");
+
+  const leadDuringSpeech = scheduleAnnounceVolume({
+    ...shape,
+    positionSec: 20.9,
+    leadSec: 0.5,
+  });
+  assert.equal(leadDuringSpeech.volume, 20);
+  assert.equal(leadDuringSpeech.phase, ANNOUNCE_PHASE.hold);
+});
+
+test("PLAYING extrapolates a stuck RelTime, and pause does not", () => {
+  const first = estimateAnnouncePlayhead(
+    { positionSec: 0, state: "PLAYING", observedAt: 1_000 },
+    1_000,
+    { originAt: null }
+  );
+  const later = estimateAnnouncePlayhead(
+    { positionSec: 0, state: "PLAYING", observedAt: 3_000 },
+    3_000,
+    { originAt: first.originAt }
+  );
+  assert.ok(
+    later.positionSec >= 2 && later.positionSec <= 2.5,
+    `expected playhead near 2s, got ${later.positionSec}`
+  );
+  const paused = estimateAnnouncePlayhead(
+    { positionSec: 0, state: "PAUSED_PLAYBACK", observedAt: 9_000 },
+    9_000,
+    { originAt: first.originAt }
+  );
+  assert.equal(paused.positionSec, 0);
+});
+
+test("volume waits until the announcement is actually playing", async () => {
+  const volumes = [];
+  let i = 0;
+  const steps = [
+    { uri: CLIP, positionSec: 0, state: "PAUSED_PLAYBACK" },
+    { uri: CLIP, positionSec: 0, state: "STOPPED" },
+    { uri: CLIP, positionSec: 0, state: "PLAYING" },
+    { uri: CLIP, positionSec: 3, state: "PLAYING" },
+    { uri: CLIP, positionSec: 24, state: "PLAYING" },
+  ];
+  let t = 0;
+  const io = {
+    now: () => (t += 100),
+    read: async () => steps[Math.min(i, steps.length - 1)],
+    setVolume: async (v) => volumes.push(v),
+    sleep: async () => {
+      i += 1;
+    },
+  };
+  const result = await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+    graceMs: 20_000,
+    logger: { debug() {}, warn() {}, error() {} },
+  });
+  assert.equal(result.reason, "complete");
+  assert.equal(volumes[0], 8, "ramp starts at the music level when playback starts");
+  assert.ok(volumes.includes(20));
+  assert.equal(volumes.at(-1), 8);
+});
+
+test("a late Play does not spend the opening silence on a timer", async () => {
+  for (const leadSteps of [0, 2, 8]) {
+    resetAnnounceVolumeForTests();
+    const volumes = [];
+    let i = 0;
+    const steps = [
+      ...Array.from({ length: leadSteps }, (_, n) => ({
+        uri: "x-sonos-spotify:spotify:track:prev",
+        positionSec: 40 + n,
+        state: "PLAYING",
+      })),
+      { uri: CLIP, positionSec: 0, state: "PLAYING" },
+      { uri: CLIP, positionSec: 1.2, state: "PLAYING" },
+      { uri: CLIP, positionSec: 3, state: "PLAYING" },
+      { uri: CLIP, positionSec: 24, state: "PLAYING" },
+    ];
+    let t = 0;
+    const io = {
+      now: () => (t += 200),
+      read: async () => steps[Math.min(i, steps.length - 1)],
+      setVolume: async (v) => volumes.push(v),
+      sleep: async () => {
+        i += 1;
+      },
+    };
+    const result = await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+      graceMs: 30_000,
+      logger: { debug() {}, warn() {}, error() {} },
+    });
+    assert.equal(result.reason, "complete", `leadSteps=${leadSteps}`);
+    assert.equal(
+      volumes[0],
+      8,
+      `leadSteps=${leadSteps}: first write must be the opening of the ramp`
+    );
+    assert.ok(volumes.includes(20), `leadSteps=${leadSteps}`);
+    assert.equal(volumes.at(-1), 8, `leadSteps=${leadSteps}`);
+  }
+});
+
+test("slow volume writes finish inside the silence windows", async () => {
+  let clock = 0;
+  const events = [];
+  const warns = [];
+  const io = {
+    mono: () => clock,
+    now: () => clock,
+    read: async () => {
+      const positionSec = Math.min(24, clock / 1000);
+      return {
+        uri: CLIP,
+        positionSec,
+        durationSec: 24,
+        state: "PLAYING",
+        observedAt: clock,
+      };
+    },
+    setVolume: async (v) => {
+      clock += 500;
+      events.push({ v, at: clock / 1000 });
+    },
+    sleep: async (ms) => {
+      clock += ms;
+    },
+  };
+  const result = await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+    pollMs: 150,
+    logger: {
+      debug() {},
+      warn: (message) => warns.push(String(message)),
+      error() {},
+    },
+  });
+  assert.equal(result.reason, "complete");
+  const full = events.find((event) => event.v === 20);
+  assert.ok(full, "announce level was set");
+  assert.ok(
+    full.at < 3,
+    `announce level landed at ${full.at}s; speech starts at 3s`
+  );
+  const duringSpeech = events.filter((event) => event.at >= 3 && event.at < 21);
+  assert.ok(
+    duringSpeech.every((event) => event.v === 20),
+    `speech heard a partial ramp: ${JSON.stringify(duringSpeech.slice(0, 4))}`
+  );
+  const restored = events.find((event) => event.v === 8 && event.at >= 21);
+  assert.ok(restored, "music level was set during the closing silence");
+  assert.ok(
+    restored.at < 24,
+    `music level landed at ${restored.at}s; the clip ends at 24s`
+  );
+  assert.deepEqual(warns, []);
+});
+
+test("a stuck RelTime still reaches the announce level before speech", async () => {
+  let clock = 0;
+  const events = [];
+  const io = {
+    mono: () => clock,
+    now: () => clock,
+    read: async () => ({
+      uri: CLIP,
+      positionSec: 0,
+      durationSec: 24,
+      state: "PLAYING",
+      observedAt: clock,
+    }),
+    setVolume: async (v) => {
+      clock += 200;
+      events.push({ v, at: clock / 1000 });
+    },
+    sleep: async (ms) => {
+      clock += ms;
+    },
+  };
+  await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+    pollMs: 150,
+    maxMs: 4_500,
+    logger: { debug() {}, warn() {}, error() {} },
+  });
+  const full = events.find((event) => event.v === 20);
+  assert.ok(full && full.at < 3, `announce level landed at ${full?.at}`);
+  const partial = events.filter(
+    (event) => event.at >= 3 && event.v > 8 && event.v < 20
+  );
+  assert.deepEqual(partial, []);
+});
+
+test("a volume write that lands after speech started warns once", async () => {
+  let clock = 0;
+  const warns = [];
+  const io = {
+    mono: () => clock,
+    now: () => 0,
+    read: async () => ({
+      uri: CLIP,
+      positionSec: Math.min(24, clock / 1000),
+      durationSec: 24,
+    }),
+    setVolume: async () => {
+      clock += 1_500;
+    },
+    sleep: async () => {
+      clock += 150;
+    },
+  };
+  await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+    rampMarginSec: 0,
+    restoreMarginSec: 0,
+    applyLeadCapSec: 0,
+    pollMs: 0,
+    logger: {
+      debug() {},
+      warn: (message) => warns.push(String(message)),
+      error() {},
+    },
+  });
+  assert.equal(warns.length, 1, warns.join(" | "));
+  assert.match(warns[0], /opening ramp landed \d+ms after speech started/);
+});
+
+test("skipping restores once and does not write again after the announce", async () => {
+  const volumes = [];
+  let i = 0;
+  const steps = [
+    [CLIP, 1.5],
+    ["x-sonos-spotify:spotify:track:next", 0.2],
+    ["x-sonos-spotify:spotify:track:next", 1],
+  ];
+  let t = 0;
+  const io = {
+    now: () => (t += 100),
+    read: async () => {
+      const [uri, positionSec] = steps[Math.min(i, steps.length - 1)];
+      return { uri, positionSec };
+    },
+    setVolume: async (v) => volumes.push(v),
+    sleep: async () => {
+      i += 1;
+    },
+  };
+  const result = await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+    logger: { debug() {}, warn() {}, error() {} },
+  });
+  assert.equal(result.reason, "left-playhead");
+  assert.equal(volumes.at(-1), 8);
+  assert.equal(volumes.filter((v) => v === 8).length, 1);
+  const n = volumes.length;
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(volumes.length, n);
+});
+
+test("the next track is not what starts the restore", async () => {
+  const volumes = [];
+  let i = 0;
+  const steps = [
+    [CLIP, 0],
+    [CLIP, 3],
+    [CLIP, 21],
+    [CLIP, 23.5],
+    ["x-sonos-spotify:spotify:track:next", 0.2],
+  ];
+  let currentUri = null;
+  let t = 0;
+  const io = {
+    now: () => (t += 100),
+    read: async () => {
+      const [uri, positionSec] = steps[Math.min(i, steps.length - 1)];
+      currentUri = uri;
+      return { uri, positionSec };
+    },
+    setVolume: async (v) => volumes.push({ v, uri: currentUri }),
+    sleep: async () => {
+      i += 1;
+    },
+  };
+  const result = await runAnnounceVolume({ clipUrl: CLIP, ...shape }, io, {
+    logger: { debug() {}, warn() {}, error() {} },
+  });
+  assert.equal(result.reason, "complete");
+  const boostAt = volumes.findIndex((event) => event.v === 20);
+  assert.ok(boostAt >= 0);
+  const restored = volumes.find((event, index) => index > boostAt && event.v === 8);
+  assert.ok(restored, "music level was written");
+  assert.equal(restored.uri, CLIP);
+  assert.ok(!volumes.some((event) => event.uri !== CLIP));
+});
+
+test("a superseded announce cannot write volume after the next one starts", async () => {
+  const CLIP2 = "http://pq.local:8088/media/tts/dj-announce-def456.mp3";
+  const volumesA = [];
+  let releaseA;
+  const gate = new Promise((resolve) => {
+    releaseA = resolve;
+  });
+  let markEntered;
+  const entered = new Promise((resolve) => {
+    markEntered = resolve;
+  });
+  let t = 0;
+  const ioA = {
+    now: () => (t += 50),
+    read: async () => ({ uri: CLIP, positionSec: 1.5 }),
+    setVolume: async (v) => {
+      volumesA.push(v);
+      if (volumesA.length === 1) {
+        markEntered();
+        await gate;
+      }
+    },
+    sleep: async () => {},
+  };
+  const pendingA = runAnnounceVolume({ clipUrl: CLIP, ...shape }, ioA, {
+    graceMs: 8_000,
+    maxMs: 8_000,
+    logger: { debug() {}, warn() {}, error() {} },
+  });
+  await entered;
+  let b = 0;
+  const steps = [
+    [CLIP2, 0],
+    [CLIP2, 3],
+    [CLIP2, 24],
+  ];
+  const volumesB = [];
+  const ioB = {
+    now: () => 0,
+    read: async () => {
+      const [uri, positionSec] = steps[Math.min(b, steps.length - 1)];
+      return { uri, positionSec };
+    },
+    setVolume: async (v) => volumesB.push(v),
+    sleep: async () => {
+      b += 1;
+    },
+  };
+  const resultB = await runAnnounceVolume({ clipUrl: CLIP2, ...shape }, ioB, {
+    logger: { debug() {}, warn() {}, error() {} },
+  });
+  const writesWhileBRan = volumesA.length;
+  releaseA();
+  const resultA = await pendingA;
+  assert.equal(resultA.reason, "superseded");
+  assert.equal(resultB.reason, "complete");
+  assert.equal(volumesB.at(-1), 8);
+  assert.equal(
+    volumesA.length,
+    writesWhileBRan,
+    "the old session wrote after it lost the room"
+  );
 });
