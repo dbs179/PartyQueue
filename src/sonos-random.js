@@ -64,7 +64,7 @@ import {
 } from "./genre-flow.js";
 import { getSimilarUris, isDiscoveryAvailable } from "./similar.js";
 import { getLaneHits, laneHitAsFillerItem } from "./lane-hits.js";
-import { getHolidayHits } from "./holiday-hits.js";
+import { getHolidayCandidates, getHolidayHits } from "./holiday-hits.js";
 import {
   holidayPack,
   filterPlaylistsToHoliday,
@@ -180,10 +180,20 @@ async function buildRandomPlan(
   // Holiday mode replaces the decade: the holiday is the only pool constraint.
   const activeMoodPack = holiday ? null : eraMoodPack(opts.mood);
   if (holiday) {
-    usable = filterPlaylistsToHoliday(usable, holiday);
+    let chart = [];
+    const chartAc = new AbortController();
+    const chartTimer = setTimeout(() => chartAc.abort(), 2500);
+    try {
+      chart = await getHolidayCandidates(holiday.id, { signal: chartAc.signal });
+    } catch (err) {
+      console.error("[holiday] chart failed:", err.message);
+    } finally {
+      clearTimeout(chartTimer);
+    }
+    usable = filterPlaylistsToHoliday(usable, holiday, chart);
     if (usable.length === 0) {
       console.log(
-        `[holiday] no ${holiday.id} tracks in the selected playlists — filling from Spotify`
+        `[holiday] no ${holiday.id} tracks in the selected playlists — filling from Last.fm and Spotify`
       );
     }
   } else if (activeMoodPack) {

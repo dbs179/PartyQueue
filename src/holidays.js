@@ -8,7 +8,7 @@ import {
   isHolidayTrack,
 } from "./holiday-tracks.js";
 
-/** @typedef {{ id: string, label: string, searchQueries: string[], usesChristmasMatchers?: boolean, title?: RegExp, album?: RegExp, playlist?: RegExp }} HolidayPack */
+/** @typedef {{ id: string, label: string, searchQueries: string[], lastfmTags?: string[], usesChristmasMatchers?: boolean, title?: RegExp, album?: RegExp, playlist?: RegExp }} HolidayPack */
 
 /** @type {HolidayPack[]} */
 const PACKS = [
@@ -49,6 +49,9 @@ const PACKS = [
   {
     id: "halloween",
     label: "Halloween",
+    // Last.fm tag.getTopTracks for "halloween" (~15k tags). The top of the
+    // chart is party Halloween music, including songs that never say it.
+    lastfmTags: ["halloween"],
     searchQueries: ["halloween", "monster mash", "thriller"],
     title:
       /halloween|monster mash|\bthriller\b|ghostbusters|this is halloween|nightmare before christmas|addams family|werewolves of london|dead man'?s party|somebody'?s watching me|purple people eater|grim grinning ghosts|i put a spell on you/i,
@@ -74,6 +77,7 @@ const PACKS = [
   {
     id: "christmas",
     label: "Christmas",
+    lastfmTags: ["christmas"],
     searchQueries: ["christmas"],
     usesChristmasMatchers: true,
   },
@@ -246,19 +250,62 @@ export function isOutOfSeasonHolidayPlaylist(playlist = {}, date = new Date()) {
   return !active || !ids.includes(active.id);
 }
 
+function looseText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\(.*?\)|\[.*?\]/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** Loose artist/title equality. Short fragments do not substring-match. */
+function looseSame(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const shorter = a.length < b.length ? a : b;
+  if (shorter.length < 4) return false;
+  return a.includes(b) || b.includes(a);
+}
+
+function chartRows(chartTracks) {
+  const rows = [];
+  for (const row of chartTracks || []) {
+    const name = looseText(row?.name);
+    const artist = looseText(String(row?.artist || "").split(",")[0]);
+    if (name && artist) rows.push({ name, artist });
+  }
+  return rows;
+}
+
 /**
- * Keep only tracks labeled for `holiday`. A playlist name does not pull in
- * the rest of its songs.
+ * True when `track` is the same recording as a Last.fm holiday-chart row.
+ * Used so library songs tagged for the holiday count even if the title
+ * never says "Halloween".
+ */
+export function trackOnHolidayChart(track, chartTracks) {
+  const rows = chartRows(chartTracks);
+  if (!rows.length) return false;
+  const name = looseText(track?.name || track?.title);
+  const artist = looseText(String(track?.artist || "").split(",")[0]);
+  if (!name || !artist) return false;
+  return rows.some((row) => looseSame(name, row.name) && looseSame(artist, row.artist));
+}
+
+/**
+ * Keep tracks labeled for `holiday`, plus library tracks on that holiday's
+ * Last.fm chart. A playlist name does not pull in the rest of its songs.
  * @param {Array<{ name?: string, tracks?: object[] }>} playlists
  * @param {HolidayPack|string} holiday
+ * @param {Array<{ artist?: string, name?: string }>|null} [chartTracks]
  */
-export function filterPlaylistsToHoliday(playlists, holiday) {
+export function filterPlaylistsToHoliday(playlists, holiday, chartTracks = null) {
   const pack = typeof holiday === "string" ? holidayPack(holiday) : holiday;
   if (!pack) return [];
+  const chart = chartRows(chartTracks);
   const out = [];
   for (const pl of playlists || []) {
-    const tracks = (pl?.tracks || []).filter((t) =>
-      holidaysMatchingTrack(t).includes(pack.id)
+    const tracks = (pl?.tracks || []).filter(
+      (t) => holidaysMatchingTrack(t).includes(pack.id) || trackOnHolidayChart(t, chart)
     );
     if (tracks.length) out.push({ ...pl, tracks });
   }

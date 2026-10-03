@@ -35,8 +35,8 @@ export const MOOD_PRESET_LABELS = {
 
 /**
  * Genres that fit each Mood-page holiday. Displayed on the Mood → genre
- * chart. Not a Random rotation preset, and not applied as a genre filter:
- * a holiday still plays only songs labeled for that holiday.
+ * chart. Not a Random rotation preset, and not applied as a genre filter.
+ * Holiday playback uses labeled songs plus that holiday's Last.fm tag chart.
  */
 export const HOLIDAY_GENRE_PRESETS = {
   july4: ["rock", "country", "pop", "folk", "oldies"],

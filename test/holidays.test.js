@@ -5,6 +5,7 @@ import {
   easterSunday,
   thanksgivingDay,
   filterPlaylistsToHoliday,
+  holidayPack,
   holidaysMatchingTrack,
   isOutOfSeasonHolidayTrack,
   isOutOfSeasonHolidayPlaylist,
@@ -53,6 +54,13 @@ test("fixed windows pick Valentine's, St. Patrick's, and the Fourth", () => {
   assert.equal(activeHoliday(at(2026, 7, 5)), null);
 });
 
+test("Last.fm charts are only used where the tag is a real holiday playlist", () => {
+  assert.deepEqual(holidayPack("halloween").lastfmTags, ["halloween"]);
+  assert.deepEqual(holidayPack("christmas").lastfmTags, ["christmas"]);
+  assert.equal(holidayPack("july4").lastfmTags, undefined);
+  assert.equal(holidayPack("newyears").lastfmTags, undefined);
+});
+
 test("Halloween tracks are skipped in July and allowed in October", () => {
   const mash = { name: "Monster Mash", artist: "Bobby Pickett" };
   const july = at(2026, 7, 10);
@@ -93,7 +101,7 @@ test("a Halloween playlist is in season only in October", () => {
   assert.equal(isOutOfSeasonHolidayPlaylist(pl, at(2026, 10, 2)), false);
 });
 
-test("holiday pool keeps only tracks labeled for that holiday", () => {
+test("holiday pool keeps labeled tracks and Last.fm chart matches", () => {
   const halloween = activeHoliday(at(2026, 10, 2));
   const filtered = filterPlaylistsToHoliday(
     [
@@ -120,4 +128,33 @@ test("holiday pool keeps only tracks labeled for that holiday", () => {
   );
   const ids = filtered.flatMap((p) => p.tracks.map((t) => t.uri));
   assert.deepEqual(ids, ["spotify:track:mash", "spotify:track:ghost"]);
+
+  const withChart = filterPlaylistsToHoliday(
+    [
+      {
+        id: "mixed",
+        name: "Party",
+        tracks: [
+          { uri: "spotify:track:mash", name: "Monster Mash", artist: "Bobby" },
+          {
+            uri: "spotify:track:goo",
+            name: "Goo Goo Muck",
+            artist: "The Cramps",
+          },
+          { uri: "spotify:track:pop", name: "Since U Been Gone", artist: "Kelly" },
+          {
+            uri: "spotify:track:other",
+            name: "Goo Goo Muck",
+            artist: "Somebody Else",
+          },
+        ],
+      },
+    ],
+    halloween,
+    [{ artist: "The Cramps", name: "Goo Goo Muck" }]
+  );
+  assert.deepEqual(
+    withChart.flatMap((p) => p.tracks.map((t) => t.uri)),
+    ["spotify:track:mash", "spotify:track:goo"]
+  );
 });
