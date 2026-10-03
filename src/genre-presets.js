@@ -34,6 +34,25 @@ export const MOOD_PRESET_LABELS = {
 };
 
 /**
+ * Genres that fit each Mood-page holiday. Displayed on the Mood → genre
+ * chart. Not a Random rotation preset, and not applied as a genre filter:
+ * a holiday still plays only songs labeled for that holiday.
+ */
+export const HOLIDAY_GENRE_PRESETS = {
+  july4: ["rock", "country", "pop", "folk", "oldies"],
+  halloween: ["rock", "metal", "pop", "punk", "soundtrack", "oldies"],
+  christmas: ["pop", "soul", "jazz", "country", "folk", "oldies", "soundtrack", "kids"],
+  newyears: ["pop", "electronic", "soul", "jazz", "oldies", "folk"],
+};
+
+const HOLIDAY_GENRE_LABELS = {
+  july4: "Independence Day",
+  halloween: "Halloween",
+  christmas: "Christmas",
+  newyears: "New Years",
+};
+
+/**
  * Mood → genre chart rows for the Mood page.
  * @param {(id: string) => string} [labelForGenre] maps bucket id → display label
  */
@@ -54,6 +73,13 @@ export function moodGenreGuide(labelForGenre = (id) => id) {
       id,
       label: MOOD_PRESET_LABELS[id] || id,
       genres: list.map((g) => labelOf(g) || g).join(", "),
+    });
+  }
+  for (const id of Object.keys(HOLIDAY_GENRE_PRESETS)) {
+    rows.push({
+      id,
+      label: HOLIDAY_GENRE_LABELS[id] || id,
+      genres: HOLIDAY_GENRE_PRESETS[id].map((g) => labelOf(g) || g).join(", "),
     });
   }
   return rows;

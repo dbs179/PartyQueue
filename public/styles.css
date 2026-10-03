@@ -3081,6 +3081,17 @@ body:has(#view-settings-user-edit:not([hidden])) > .container {
   border-color: #2563eb;
 }
 
+.genre-chip.holiday-chip.on {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
+}
+
+.genre-chip.holiday-chip.on:hover:not(:disabled) {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
 .genre-chip:not(.on) {
   opacity: 0.65;
 }

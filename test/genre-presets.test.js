@@ -124,5 +124,12 @@ test("moodGenreGuide lists All plus each named mood with genre labels", () => {
   assert.ok(heavy);
   assert.equal(heavy.label, "Heavy");
   assert.equal(heavy.genres, "ROCK, METAL");
-  assert.equal(guide.length, 1 + ROTATABLE_PRESET_IDS.length);
+  assert.equal(guide.length, 1 + ROTATABLE_PRESET_IDS.length + 4);
+  const halloween = guide.find((row) => row.id === "halloween");
+  assert.equal(halloween.label, "Halloween");
+  assert.equal(halloween.genres, "ROCK, METAL, POP, PUNK, SOUNDTRACK, OLDIES");
+  assert.deepEqual(
+    guide.slice(-4).map((row) => row.id),
+    ["july4", "halloween", "christmas", "newyears"]
+  );
 });
