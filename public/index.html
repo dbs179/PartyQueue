@@ -841,7 +841,7 @@
             <div class="mood-section-head">
               <p class="mood-section-heading">
                 <span class="section-label">Mood:</span>
-                <span class="mood-section-sub">Select a mood to include specific genres.</span>
+                <span class="mood-section-sub">Select a mood for genres, or a holiday to play that playlist. Tap a holiday again to turn it off.</span>
               </p>
             </div>
             <div id="genre-presets" class="genre-chips genre-presets" role="group" aria-label="Mood">
@@ -853,16 +853,11 @@
               <button type="button" class="genre-chip genre-preset" data-preset="rap" title="Hip-Hop / Rap">Rap</button>
               <button type="button" class="genre-chip genre-preset" data-preset="kids" title="Kids and Soundtrack / Score">Kids</button>
             </div>
-          </div>
-          <div class="mood-section" id="holiday-section" hidden>
-            <div class="mood-section-head">
-              <p class="mood-section-heading">
-                <span class="section-label">Holiday:</span>
-                <span class="mood-section-sub">Playlist picks stay on the holiday; shortfalls fill from Spotify. Tap again to turn off.</span>
-              </p>
-            </div>
-            <div id="holiday-chips" class="genre-chips genre-presets" role="group" aria-label="Holiday">
-              <button type="button" class="genre-chip holiday-chip" id="holiday-chip" aria-pressed="false">Holiday</button>
+            <div id="holiday-chips" class="genre-chips genre-presets holiday-chips" role="group" aria-label="Holiday">
+              <button type="button" class="genre-chip holiday-chip" data-holiday="july4" aria-pressed="false" title="Independence Day playlist">Independence Day</button>
+              <button type="button" class="genre-chip holiday-chip" data-holiday="halloween" aria-pressed="false" title="Halloween playlist">Halloween</button>
+              <button type="button" class="genre-chip holiday-chip" data-holiday="christmas" aria-pressed="false" title="Christmas playlist">Christmas</button>
+              <button type="button" class="genre-chip holiday-chip" data-holiday="newyears" aria-pressed="false" title="New Years playlist">New Years</button>
             </div>
           </div>
           <div class="mood-section">

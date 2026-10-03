@@ -1,6 +1,7 @@
-// Holiday calendar for the Mood-page Holiday chip and for keeping seasonal
-// tracks out of ordinary Random. The server's local date picks one holiday.
-// First matching window wins, so Thanksgiving can sit inside the Christmas span.
+// Holiday packs for the Mood chips and for keeping seasonal tracks out of
+// ordinary Random. The host picks Independence Day, Halloween, Christmas, or
+// New Years. The date windows below only decide when those songs may appear
+// in ordinary Random. First matching window wins.
 
 import {
   isHolidayPlaylistName,
@@ -38,10 +39,10 @@ const PACKS = [
   },
   {
     id: "july4",
-    label: "Fourth of July",
-    searchQueries: ["god bless america", "star spangled banner"],
+    label: "Independence Day",
+    searchQueries: ["god bless america", "star spangled banner", "independence day"],
     title:
-      /star[- ]spangled banner|god bless america|america the beautiful|yankee doodle|god bless the u\.?s\.?a|born in the u\.?s\.?a|fourth of july|4th of july/i,
+      /star[- ]spangled banner|god bless america|america the beautiful|yankee doodle|god bless the u\.?s\.?a|born in the u\.?s\.?a|fourth of july|4th of july|independence day/i,
     album: /fourth of july|4th of july|patriotic/i,
     playlist: /fourth of july|4th of july|july 4|patriotic|independence day/i,
   },
@@ -63,12 +64,23 @@ const PACKS = [
     playlist: /thanksgiving/i,
   },
   {
+    id: "newyears",
+    label: "New Years",
+    searchQueries: ["auld lang syne", "new year's eve"],
+    title: /auld lang syne|happy new year|new year'?s eve|\bnew years?\b/i,
+    album: /new years?/i,
+    playlist: /new years?/i,
+  },
+  {
     id: "christmas",
     label: "Christmas",
     searchQueries: ["christmas"],
     usesChristmasMatchers: true,
   },
 ];
+
+/** Mood chips. Other packs stay for out-of-season filtering only. */
+const SELECTABLE_IDS = new Set(["july4", "halloween", "christmas", "newyears"]);
 
 const PACKS_BY_ID = new Map(PACKS.map((p) => [p.id, p]));
 
@@ -77,6 +89,12 @@ export function normalizeHolidayId(value) {
   if (typeof value !== "string") return null;
   const id = value.trim().toLowerCase();
   return PACKS_BY_ID.has(id) ? id : null;
+}
+
+/** Id of a Mood holiday chip, or null. */
+export function selectableHolidayId(value) {
+  const id = normalizeHolidayId(value);
+  return id && SELECTABLE_IDS.has(id) ? id : null;
 }
 
 /** @param {string|null|undefined} value */
@@ -165,6 +183,7 @@ export function activeHoliday(date = new Date()) {
   if (inSpan(date, 6, 28, 7, 4)) return PACKS_BY_ID.get("july4");
   if (date.getMonth() === 9) return PACKS_BY_ID.get("halloween");
   if (inThanksgiving(date)) return PACKS_BY_ID.get("thanksgiving");
+  if (inSpan(date, 12, 31, 1, 1)) return PACKS_BY_ID.get("newyears");
   if (isChristmasDate(date)) return PACKS_BY_ID.get("christmas");
   return null;
 }

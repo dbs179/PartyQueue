@@ -37,10 +37,11 @@ export const HOLIDAY_LABELS = {
   valentines: "Valentine's",
   stpatricks: "St. Patrick's",
   easter: "Easter",
-  july4: "Fourth of July",
+  july4: "Independence Day",
   halloween: "Halloween",
   thanksgiving: "Thanksgiving",
   christmas: "Christmas",
+  newyears: "New Years",
 };
 
 /** localStorage key for the selected decade mood. */

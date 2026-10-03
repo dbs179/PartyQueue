@@ -70,7 +70,7 @@ export function setKidsLock(enabled) {
     const snapshot = {
       genres: Array.isArray(s.genres) ? [...s.genres] : null,
       mood: fill.mood,
-      holidayMode: !!fill.holidayMode,
+      holidayId: fill.holidayId || null,
       djCharacterIntensity: dj.djCharacterIntensity || "classic",
       sisterStaticIntensity:
         dj.djSisterStatic?.djCharacterIntensity || "classic",
@@ -104,12 +104,12 @@ export function setKidsLock(enabled) {
         djSisterStatic: { djCharacterIntensity: snap.sisterStaticIntensity },
       });
     }
-    if (snap.holidayMode) {
+    if (snap.holidayId) {
       savePickerSelection(
         undefined,
         Array.isArray(snap.genres) ? snap.genres : undefined,
         null,
-        true
+        snap.holidayId
       );
     } else if (Array.isArray(snap.genres)) {
       savePickerSelection(undefined, snap.genres, snap.mood, false);

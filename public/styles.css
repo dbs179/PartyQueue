@@ -2427,6 +2427,10 @@ body:has(#view-settings-user-edit:not([hidden])) > .container {
   flex: 0 0 auto;
 }
 
+.holiday-chips {
+  margin-top: 8px;
+}
+
 .look-section-sub,
 .queue-section-sub,
 .booth-section-sub,

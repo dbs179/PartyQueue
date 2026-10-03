@@ -189,7 +189,8 @@ export function mixSelectionPatchFromParty(party) {
     (!("mixGenres" in party) &&
       !("mixMood" in party) &&
       !("mixHoliday" in party) &&
-      !("holidayLabel" in party))
+      !("holidayLabel" in party) &&
+      !("holidayId" in party))
   ) {
     return null;
   }
@@ -201,6 +202,10 @@ export function mixSelectionPatchFromParty(party) {
     patch.mood = typeof party.mixMood === "string" ? party.mixMood : null;
   }
   if ("mixHoliday" in party) patch.holidayOn = !!party.mixHoliday;
+  if ("holidayId" in party) {
+    patch.holidayId =
+      typeof party.holidayId === "string" && party.holidayId ? party.holidayId : null;
+  }
   if ("holidayLabel" in party) {
     patch.holidayLabel =
       typeof party.holidayLabel === "string" && party.holidayLabel

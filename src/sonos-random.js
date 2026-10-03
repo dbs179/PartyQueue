@@ -66,7 +66,7 @@ import { getSimilarUris, isDiscoveryAvailable } from "./similar.js";
 import { getLaneHits, laneHitAsFillerItem } from "./lane-hits.js";
 import { getHolidayHits } from "./holiday-hits.js";
 import {
-  activeHoliday,
+  holidayPack,
   filterPlaylistsToHoliday,
   isOutOfSeasonHolidayPlaylist,
   isOutOfSeasonHolidayTrack,
@@ -142,7 +142,7 @@ async function buildRandomPlan(
   // null/undefined = no filtering. Unresolved artists count as "Other".
   // Holiday mode ignores lanes — the set is the holiday, not holiday-plus-genre.
   const now = opts.now instanceof Date ? opts.now : new Date();
-  const holiday = opts.holidayMode ? activeHoliday(now) : null;
+  const holiday = holidayPack(opts.holidayId);
   if (!holiday && Array.isArray(genres)) {
     const enabled = new Set(genres);
     usable = usable

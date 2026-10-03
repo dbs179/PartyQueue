@@ -5,6 +5,7 @@ import {
   easterSunday,
   thanksgivingDay,
   filterPlaylistsToHoliday,
+  holidaysMatchingTrack,
   isOutOfSeasonHolidayTrack,
   isOutOfSeasonHolidayPlaylist,
 } from "../src/holidays.js";
@@ -34,6 +35,8 @@ test("Thanksgiving 2026 beats Christmas, then Christmas resumes", () => {
   assert.equal(activeHoliday(at(2026, 11, 23))?.id, "thanksgiving");
   assert.equal(activeHoliday(at(2026, 11, 26))?.id, "thanksgiving");
   assert.equal(activeHoliday(at(2026, 11, 27))?.id, "christmas");
+  assert.equal(activeHoliday(at(2026, 12, 31))?.id, "newyears");
+  assert.equal(activeHoliday(at(2027, 1, 1))?.label, "New Years");
   assert.equal(activeHoliday(at(2027, 1, 2))?.id, "christmas");
   assert.equal(activeHoliday(at(2027, 1, 3)), null);
 });
@@ -46,6 +49,7 @@ test("fixed windows pick Valentine's, St. Patrick's, and the Fourth", () => {
   assert.equal(activeHoliday(at(2026, 3, 18)), null);
   assert.equal(activeHoliday(at(2026, 6, 28))?.id, "july4");
   assert.equal(activeHoliday(at(2026, 7, 4))?.id, "july4");
+  assert.equal(activeHoliday(at(2026, 7, 4))?.label, "Independence Day");
   assert.equal(activeHoliday(at(2026, 7, 5)), null);
 });
 
@@ -73,6 +77,14 @@ test("Halloween tracks are skipped in July and allowed in October", () => {
     ),
     true
   );
+});
+
+test("Auld Lang Syne is New Years, in season only on New Year", () => {
+  const track = { name: "Auld Lang Syne", album: "Party" };
+  assert.deepEqual(holidaysMatchingTrack(track), ["newyears"]);
+  assert.equal(isOutOfSeasonHolidayTrack(track, at(2026, 10, 2)), true);
+  assert.equal(isOutOfSeasonHolidayTrack(track, at(2026, 12, 31)), false);
+  assert.equal(isOutOfSeasonHolidayTrack(track, at(2027, 1, 2)), true);
 });
 
 test("a Halloween playlist is in season only in October", () => {

@@ -38,7 +38,7 @@ import {
   queueWorkWasPreempted,
 } from "./queue-preempt.js";
 import { normalizeMood, moodPack, moodLabel } from "./moods.js";
-import { activeHoliday } from "./holidays.js";
+import { holidayPack, selectableHolidayId } from "./holidays.js";
 import {
   presetGenres,
   presetIdForGenres,
@@ -85,7 +85,7 @@ let enabled = false;
 let playlistIds = null;
 let genres = null;
 let mood = null; // era Mood id ("80s", ...) or null = off
-let holidayMode = false; // Holiday chip; mutually exclusive with `mood`
+let holidayId = null; // Mood holiday chip; mutually exclusive with `mood`
 let timer = null;
 let filling = false;
 let stopping = false;
@@ -206,7 +206,7 @@ function pickRotation(pool, current) {
 export async function rotateSelectionIfDue(deps = {}) {
   try {
     const rot = getRotationSettings();
-    const decadeOn = rot.randomDecadeEnabled && !holidayMode;
+    const decadeOn = rot.randomDecadeEnabled && !holidayId;
     if (!rot.randomMoodEnabled) setsSinceMoodRotation = 0;
     if (!decadeOn) setsSinceDecadeRotation = 0;
     if (!rot.randomMoodEnabled && !decadeOn) return null;
@@ -331,13 +331,6 @@ async function tick() {
     if (shouldRefill && !filling) {
       filling = true;
       try {
-        // Random Mood / Random Decade: maybe pick a fresh mix for this set.
-        // A leftover Holiday flag outside every window turns itself off first.
-        if (readHolidaySelection().cleared) {
-          import("./party-settings-http.js")
-            .then((m) => m.nudgePartySettingsStream())
-            .catch(() => {});
-        }
         const rotated = await rotateSelectionIfDue();
         if (queueWorkWasPreempted(workGeneration)) return;
         // Honor the host's current discovery + content + refill size settings.
@@ -355,7 +348,7 @@ async function tick() {
             filterExplicit,
             preemptGeneration: workGeneration,
             mood,
-            holidayMode,
+            holidayId,
           }
         );
         if (queueWorkWasPreempted(workGeneration)) return;
@@ -411,48 +404,42 @@ async function tick() {
 }
 
 export function getAutoFillState() {
-  return { enabled, playlistIds, genres, mood, holidayMode };
+  return {
+    enabled,
+    playlistIds,
+    genres,
+    mood,
+    holidayMode: !!holidayId,
+    holidayId,
+  };
 }
 
 /**
- * Drop Holiday mode when the date has left every window. Returns the chip
- * label for the party snapshot. `cleared` is true when the flag was just
- * turned off.
- * @param {Date} [date]
+ * The holiday chip the host selected, if any. The date does not pick it.
+ * @returns {{ cleared: false, holidayMode: boolean, holidayLabel: string|null, holidayId: string|null }}
  */
-export function readHolidaySelection(date = new Date()) {
-  const holiday = activeHoliday(date);
-  let cleared = false;
-  if (holidayMode && !holiday) {
-    holidayMode = false;
-    saveSettings({ ...loadSettings(), holidayMode: false });
-    cleared = true;
-  }
+export function readHolidaySelection() {
+  const holiday = holidayPack(holidayId);
   return {
-    cleared,
-    holidayMode: !!(holiday && holidayMode),
+    cleared: false,
+    holidayMode: !!holiday,
     holidayLabel: holiday?.label ?? null,
     holidayId: holiday?.id ?? null,
   };
 }
 
-function holidayNow() {
-  const raw = process.env.PARTYQUEUE_HOLIDAY_NOW;
-  if (typeof raw === "string" && raw) {
-    const date = new Date(raw);
-    if (!Number.isNaN(date.getTime())) return date;
-  }
-  return new Date();
+function persistHoliday(id) {
+  holidayId = selectableHolidayId(id);
 }
 
-function applyMoodAndHoliday(moodId, holidayFlag) {
+function applyMoodAndHoliday(moodId, holidayIdArg) {
   if (moodId !== undefined) {
     mood = normalizeMood(moodId);
-    if (mood) holidayMode = false;
+    if (mood) holidayId = null;
   }
-  if (holidayFlag !== undefined) {
-    holidayMode = !!holidayFlag && !!activeHoliday(holidayNow());
-    if (holidayMode) mood = null;
+  if (holidayIdArg !== undefined) {
+    persistHoliday(holidayIdArg);
+    if (holidayId) mood = null;
   }
 }
 
@@ -575,7 +562,8 @@ export function setAutoFill(on, ids, genreIds, moodId, holidayFlag) {
     playlistIds,
     genres,
     mood,
-    holidayMode,
+    holidayMode: !!holidayId,
+    holidayId,
   });
 
   clearTimer();
@@ -596,8 +584,15 @@ export function savePickerSelection(ids, genreIds, moodId, holidayFlag) {
     genres = genreIds.length ? genreIds : null;
   }
   applyMoodAndHoliday(moodId, holidayFlag);
-  saveSettings({ ...loadSettings(), playlistIds, genres, mood, holidayMode });
-  return { playlistIds, genres, mood, holidayMode };
+  saveSettings({
+    ...loadSettings(),
+    playlistIds,
+    genres,
+    mood,
+    holidayMode: !!holidayId,
+    holidayId,
+  });
+  return { playlistIds, genres, mood, holidayMode: !!holidayId, holidayId };
 }
 
 // Restore the saved state at startup and resume monitoring if it was on.
@@ -609,11 +604,10 @@ export function initAutoFill() {
   playlistIds = Array.isArray(s.playlistIds) ? s.playlistIds : null;
   genres = Array.isArray(s.genres) ? s.genres : null;
   mood = normalizeMood(s.mood);
-  holidayMode = s.holidayMode === true;
-  if (holidayMode && !activeHoliday(holidayNow())) {
-    holidayMode = false;
-    saveSettings({ ...loadSettings(), holidayMode: false });
-  } else if (holidayMode) {
+  persistHoliday(s.holidayId);
+  if (s.holidayMode === true && !holidayId) {
+    saveSettings({ ...loadSettings(), holidayMode: false, holidayId: null });
+  } else if (holidayId) {
     mood = null;
   }
   if (enabled) schedule(START_DELAY_MS);
