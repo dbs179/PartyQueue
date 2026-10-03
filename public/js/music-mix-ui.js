@@ -141,7 +141,7 @@ export function createMusicMixUi(els, deps) {
       btn.classList.toggle("on", on);
       btn.setAttribute("aria-pressed", on ? "true" : "false");
     }
-    updateMusicMixHubSummaries();
+    syncGenrePresetHighlight();
   }
   function syncDecadeChips() {
     if (!decadeChips) return;
@@ -445,7 +445,7 @@ export function createMusicMixUi(els, deps) {
       const current = currentGenreIds();
       for (const btn of genrePresets.querySelectorAll("[data-preset]")) {
         const ids = presetIdsFor(btn.dataset.preset);
-        const on = ids.length > 0 && sameIdSet(current, ids);
+        const on = !holidayId && ids.length > 0 && sameIdSet(current, ids);
         btn.classList.toggle("on", on);
         btn.setAttribute("aria-pressed", on ? "true" : "false");
       }
@@ -497,6 +497,11 @@ export function createMusicMixUi(els, deps) {
   function applyGenrePreset(name) {
     const ids = presetIdsFor(name);
     if (!ids.length) return;
+    if (holidayId) {
+      holidayId = null;
+      holidayLabel = null;
+      syncHolidayChip();
+    }
     genreSelection = new Set(ids);
     saveGenreSelection();
     renderGenres();

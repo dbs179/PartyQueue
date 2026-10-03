@@ -247,9 +247,8 @@ export function isOutOfSeasonHolidayPlaylist(playlist = {}, date = new Date()) {
 }
 
 /**
- * Keep playlist tracks that belong to `holiday`. A playlist whose name matches
- * the holiday contributes its tracks, except songs that belong to a different
- * holiday.
+ * Keep only tracks labeled for `holiday`. A playlist name does not pull in
+ * the rest of its songs.
  * @param {Array<{ name?: string, tracks?: object[] }>} playlists
  * @param {HolidayPack|string} holiday
  */
@@ -258,12 +257,9 @@ export function filterPlaylistsToHoliday(playlists, holiday) {
   if (!pack) return [];
   const out = [];
   for (const pl of playlists || []) {
-    const named = playlistMatchesPack(pl?.name, pack);
-    const tracks = (pl?.tracks || []).filter((t) => {
-      const ids = holidaysMatchingTrack(t);
-      if (named) return ids.length === 0 || ids.includes(pack.id);
-      return ids.includes(pack.id);
-    });
+    const tracks = (pl?.tracks || []).filter((t) =>
+      holidaysMatchingTrack(t).includes(pack.id)
+    );
     if (tracks.length) out.push({ ...pl, tracks });
   }
   return out;

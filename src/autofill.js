@@ -206,10 +206,12 @@ function pickRotation(pool, current) {
 export async function rotateSelectionIfDue(deps = {}) {
   try {
     const rot = getRotationSettings();
+    // A holiday chip is the mood. Don't rotate Party/Chill or a decade under it.
+    const moodOn = rot.randomMoodEnabled && !holidayId;
     const decadeOn = rot.randomDecadeEnabled && !holidayId;
-    if (!rot.randomMoodEnabled) setsSinceMoodRotation = 0;
+    if (!moodOn) setsSinceMoodRotation = 0;
     if (!decadeOn) setsSinceDecadeRotation = 0;
-    if (!rot.randomMoodEnabled && !decadeOn) return null;
+    if (!moodOn && !decadeOn) return null;
     // Kids Lock pins the Kids mood — never rotate underneath it.
     if (getContentSettings().kidsLock) return null;
 
@@ -220,7 +222,7 @@ export async function rotateSelectionIfDue(deps = {}) {
     const pickBoth = () => {
       let nextPreset; // undefined = unchanged
       let nextDecade; // undefined = unchanged
-      if (rot.randomMoodEnabled && moodPool.length >= 2) {
+      if (moodOn && moodPool.length >= 2) {
         if (setsSinceMoodRotation + 1 >= rot.randomMoodEverySets) {
           nextPreset = pickRotation(moodPool, presetIdForGenres(genres));
           if (nextPreset == null) nextPreset = undefined;
@@ -238,7 +240,7 @@ export async function rotateSelectionIfDue(deps = {}) {
     let { nextPreset, nextDecade } = pickBoth();
     if (nextPreset === undefined && nextDecade === undefined) {
       // Not due yet (or pools too small) — count this set and move on.
-      if (rot.randomMoodEnabled) setsSinceMoodRotation += 1;
+      if (moodOn) setsSinceMoodRotation += 1;
       if (decadeOn) setsSinceDecadeRotation += 1;
       return null;
     }
@@ -270,7 +272,7 @@ export async function rotateSelectionIfDue(deps = {}) {
       nextDecade !== undefined ? nextDecade : undefined
     );
     if (nextPreset !== undefined) setsSinceMoodRotation = 0;
-    else if (rot.randomMoodEnabled) setsSinceMoodRotation += 1;
+    else if (moodOn) setsSinceMoodRotation += 1;
     if (nextDecade !== undefined) setsSinceDecadeRotation = 0;
     else if (decadeOn) setsSinceDecadeRotation += 1;
 

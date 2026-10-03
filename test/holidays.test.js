@@ -93,7 +93,7 @@ test("a Halloween playlist is in season only in October", () => {
   assert.equal(isOutOfSeasonHolidayPlaylist(pl, at(2026, 10, 2)), false);
 });
 
-test("holiday pool keeps matching tracks and a named playlist", () => {
+test("holiday pool keeps only tracks labeled for that holiday", () => {
   const halloween = activeHoliday(at(2026, 10, 2));
   const filtered = filterPlaylistsToHoliday(
     [
@@ -111,6 +111,7 @@ test("holiday pool keeps matching tracks and a named playlist", () => {
         name: "Halloween 2025",
         tracks: [
           { uri: "spotify:track:ghost", name: "Ghostbusters", artist: "Ray" },
+          { uri: "spotify:track:plain", name: "Since U Been Gone", artist: "Kelly" },
           { uri: "spotify:track:tree", name: "Underneath the Tree", artist: "Kelly" },
         ],
       },

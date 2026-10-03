@@ -119,6 +119,31 @@ test("pools with fewer than two valid entries never rotate", async () => {
   assert.equal(autofill.getAutoFillState().mood, "80s");
 });
 
+test("a holiday chip suspends mood and decade rotation", async () => {
+  autofill.savePickerSelection(
+    undefined,
+    presets.presetGenres("party"),
+    "80s",
+    "halloween"
+  );
+  settings.setRotationSettings({
+    randomMoodEnabled: true,
+    randomMoodEverySets: 1,
+    randomMoodPool: ["party", "chill"],
+    randomDecadeEnabled: true,
+    randomDecadeEverySets: 1,
+    randomDecadePool: ["80s", "90s"],
+  });
+  assert.equal(await autofill.rotateSelectionIfDue({ poolSize: bigPool }), null);
+  assert.equal(autofill.getAutoFillState().holidayId, "halloween");
+  assert.equal(autofill.getAutoFillState().mood, null);
+  assert.deepEqual(
+    [...autofill.getAutoFillState().genres].sort(),
+    [...presets.presetGenres("party")].sort()
+  );
+  autofill.savePickerSelection(undefined, undefined, null, null);
+});
+
 test("Kids Lock suspends rotation entirely", async () => {
   autofill.savePickerSelection(undefined, undefined, "80s");
   settings.setRotationSettings({
