@@ -14,7 +14,7 @@ import {
 } from "./sonos-snapshots.js";
 import {
   assertManualVolumeAvailable,
-  lockGroupVolume,
+  lockAndRememberGroupVolume,
   sleep,
   SETTLE_MS,
 } from "./sonos-volume.js";
@@ -148,7 +148,7 @@ export async function groupAll() {
     let locked = false;
     try {
       locked = await withSonosTransportLane(() =>
-        lockGroupVolume(joined.volumeMembers, GROUP_ALL_VOLUME)
+        lockAndRememberGroupVolume(joined.volumeMembers, GROUP_ALL_VOLUME)
       );
     } catch (err) {
       console.error(`[group-all] volume lock failed: ${err.message}`);

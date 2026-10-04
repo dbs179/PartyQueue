@@ -1334,8 +1334,11 @@ export function waitForCoordinatorTransport({ after = 0, timeoutMs = 2000 } = {}
   const immediate = ready();
   if (immediate) return Promise.resolve(immediate);
   return new Promise((resolve) => {
+    // Stay referenced. An unref'd timer is invisible to Node 22's test runner,
+    // which then treats the loop as idle and cancels every later test in the
+    // file. The server already has its own handles, so this wait cannot pin
+    // the process open on its own for longer than timeoutMs.
     const timer = setTimeout(finish, Math.max(0, Number(timeoutMs) || 0));
-    timer.unref?.();
     function finish() {
       clearTimeout(timer);
       transportWaiters.delete(wake);

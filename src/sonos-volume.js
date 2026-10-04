@@ -259,6 +259,64 @@ export async function lockGroupVolume(members, target) {
   return toSet.length === 0 && active.length > 0;
 }
 
+function groupVolumeService(members) {
+  for (const device of members || []) {
+    const coord = device?.Coordinator || device;
+    const svc = coord?.GroupRenderingControlService;
+    if (svc?.SnapshotGroupVolume && svc?.SetGroupVolume) return svc;
+  }
+  return null;
+}
+
+async function snapshotGroupVolume(svc) {
+  await withTimeout(
+    svc.SnapshotGroupVolume({ InstanceID: 0 }),
+    playerVolumeTimeoutMs,
+    "Sonos group volume snapshot timed out"
+  );
+}
+
+/**
+ * Joining standalone speakers keeps the coordinator's old group volume.
+ * Sonos later reapplies that level from the group snapshot, which pulls
+ * every player back up. Stamp the equal target as the new group volume
+ * so the house stays where Group All put it.
+ */
+async function stampGroupVolume(members, target) {
+  const svc = groupVolumeService(members);
+  if (!svc) return;
+  const want = Math.max(0, Math.min(100, Math.round(Number(target) || 0)));
+  await snapshotGroupVolume(svc);
+  await withTimeout(
+    svc.SetGroupVolume({ InstanceID: 0, DesiredVolume: want }),
+    playerVolumeTimeoutMs,
+    "Sonos group volume set timed out"
+  );
+}
+
+/**
+ * Lock every member to `target`, then remember that level for the volume
+ * header. The header poll reads this cache and never asks the speakers, so
+ * a Group All that skips the cache paints 15 and the next poll restores
+ * the pre-group level.
+ */
+export async function lockAndRememberGroupVolume(members, target) {
+  let locked = await lockGroupVolume(members, target);
+  if (!locked) return false;
+  try {
+    await stampGroupVolume(members, target);
+    locked = await lockGroupVolume(members, target);
+    if (locked) {
+      const svc = groupVolumeService(members);
+      if (svc) await snapshotGroupVolume(svc);
+    }
+  } catch (err) {
+    console.error(`[volume] group volume stamp failed: ${err.message}`);
+  }
+  if (locked) noteGroupVolume(target);
+  return locked;
+}
+
 async function adjustGroupVolume(delta) {
   const members = await groupMembers();
   const active = volumeTargets(members);

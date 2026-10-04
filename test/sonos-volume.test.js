@@ -2,6 +2,7 @@ import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import {
   lockGroupVolume,
+  lockAndRememberGroupVolume,
   resetVolumeReachabilityForTests,
   setPlayerVolumeTimeoutForTests,
   setSkipUnreachableMsForTests,
@@ -245,6 +246,87 @@ test("a room that is off at startup is not re-read on every poll", async () => {
   for (let i = 0; i < 20; i += 1) await seedGroupVolumeForDisplay();
   assert.equal(office.reads, 1);
   assert.deepEqual(volumeGetPayload(), { ok: true, volume: null, ramping: false });
+});
+
+test("group-all volume stays at 15 for the header poll", async () => {
+  setPlayerVolumeTimeoutForTests(30);
+  noteGroupVolume(34);
+  const state = {
+    volumes: [34, 40],
+    calls: [],
+    snapped: null,
+    reverted: false,
+  };
+  const coordinator = {
+    Name: "Living Room",
+    Uuid: "living",
+    RenderingControlService: {
+      async GetVolume() {
+        return { CurrentVolume: String(state.volumes[0]) };
+      },
+      async SetVolume({ DesiredVolume }) {
+        state.volumes[0] = DesiredVolume;
+        state.calls.push("player");
+      },
+    },
+    GroupRenderingControlService: {
+      async SnapshotGroupVolume() {
+        state.snapped = [...state.volumes];
+        state.calls.push("snapshot");
+      },
+      async SetGroupVolume({ DesiredVolume }) {
+        state.calls.push(["group", DesiredVolume]);
+        // Freshly joined groups push the old group level once.
+        if (!state.reverted) {
+          state.reverted = true;
+          state.volumes = [34, 34];
+        }
+      },
+    },
+  };
+  coordinator.Coordinator = coordinator;
+  const kitchen = {
+    Name: "Kitchen",
+    Uuid: "kitchen",
+    Coordinator: coordinator,
+    RenderingControlService: {
+      async GetVolume() {
+        return { CurrentVolume: String(state.volumes[1]) };
+      },
+      async SetVolume({ DesiredVolume }) {
+        state.volumes[1] = DesiredVolume;
+      },
+    },
+  };
+
+  const locked = await lockAndRememberGroupVolume([coordinator, kitchen], 15);
+
+  assert.equal(locked, true);
+  assert.equal(state.reverted, true);
+  assert.deepEqual(state.volumes, [15, 15]);
+  assert.deepEqual(state.snapped, [15, 15]);
+  assert.deepEqual(
+    state.calls.find((entry) => Array.isArray(entry)),
+    ["group", 15]
+  );
+  assert.equal(getCachedGroupVolume(), 15);
+  assert.deepEqual(volumeGetPayload(), {
+    ok: true,
+    volume: 15,
+    ramping: false,
+  });
+});
+
+test("a failed group volume lock keeps the previous header level", async () => {
+  setPlayerVolumeTimeoutForTests(30);
+  noteGroupVolume(34);
+  const dead = fakePlayer("10.10.20.12", { fail: true });
+
+  const locked = await lockAndRememberGroupVolume([dead], 15);
+
+  assert.equal(locked, false);
+  assert.equal(getCachedGroupVolume(), 34);
+  assert.deepEqual(volumeGetPayload(), { ok: true, volume: 34, ramping: false });
 });
 
 test("GET /api/volume during a DJ ramp returns the commanded level", () => {
