@@ -1164,7 +1164,8 @@ export function registerQueueRoutes(app, ctx) {
 
   app.post("/api/autofill", (req, res) => {
     try {
-      const { enabled, playlistIds, genres, mood, holidayId } = req.body ?? {};
+      const body = req.body ?? {};
+      const { enabled, playlistIds, genres, mood, holidayId } = body;
       if (enabled && !isUserConnected()) {
         return res.status(400).json({ error: "Connect your Spotify account first." });
       }
@@ -1176,7 +1177,8 @@ export function registerQueueRoutes(app, ctx) {
         ids,
         genreIds,
         mood,
-        "holidayId" in (req.body ?? {}) ? holidayId : undefined
+        "holidayId" in body ? holidayId : undefined,
+        "holidayAutoPlaylistIds" in body ? body.holidayAutoPlaylistIds : undefined
       );
       nudgePartySettingsStream();
       res.json({ ok: true, ...state });
@@ -1190,14 +1192,16 @@ export function registerQueueRoutes(app, ctx) {
   // monitor is off, so every phone and the server share one host selection.
   app.post("/api/selection", (req, res) => {
     try {
-      const { playlistIds, genres, mood, holidayId } = req.body ?? {};
+      const body = req.body ?? {};
+      const { playlistIds, genres, mood, holidayId } = body;
       const ids = Array.isArray(playlistIds) ? playlistIds : undefined;
       const genreIds = Array.isArray(genres) ? genres : undefined;
       const saved = savePickerSelection(
         ids,
         genreIds,
         mood,
-        "holidayId" in (req.body ?? {}) ? holidayId : undefined
+        "holidayId" in body ? holidayId : undefined,
+        "holidayAutoPlaylistIds" in body ? body.holidayAutoPlaylistIds : undefined
       );
       // Broadcast so Party Display / Vibe mix labels update live.
       nudgePartySettingsStream();

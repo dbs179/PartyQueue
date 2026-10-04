@@ -33,7 +33,7 @@ beforeEach(() => {
   settings.bustSettingsCache();
   settings.saveSettings({});
   settings.bustSettingsCache();
-  autofill.savePickerSelection(undefined, undefined, null, null);
+  autofill.savePickerSelection(undefined, undefined, null, null, []);
 });
 
 test("a holiday chip clears the decade and names that playlist", () => {
@@ -78,6 +78,43 @@ test("turning a decade on clears the holiday chip", () => {
   assert.equal(decade.mood, "90s");
   assert.equal(decade.holidayMode, false);
   assert.equal(decade.holidayId, null);
+});
+
+test("holiday playlist checks are remembered and kids lock leaves them alone", async () => {
+  autofill.savePickerSelection(
+    ["party", "halloween-a"],
+    ["rock"],
+    null,
+    "halloween",
+    ["halloween-a"]
+  );
+  assert.deepEqual(autofill.getAutoFillState().holidayAutoPlaylistIds, [
+    "halloween-a",
+  ]);
+  const rituals = await import("../src/party-rituals.js");
+  rituals.setKidsLock(true);
+  assert.equal(autofill.getAutoFillState().holidayId, null);
+  assert.deepEqual(autofill.getAutoFillState().playlistIds, [
+    "party",
+    "halloween-a",
+  ]);
+  assert.deepEqual(autofill.getAutoFillState().holidayAutoPlaylistIds, [
+    "halloween-a",
+  ]);
+  rituals.setKidsLock(false);
+  assert.equal(autofill.getAutoFillState().holidayId, "halloween");
+  assert.deepEqual(autofill.getAutoFillState().holidayAutoPlaylistIds, [
+    "halloween-a",
+  ]);
+  const cleared = autofill.savePickerSelection(
+    ["party"],
+    ["rock"],
+    null,
+    null,
+    []
+  );
+  assert.deepEqual(cleared.playlistIds, ["party"]);
+  assert.deepEqual(cleared.holidayAutoPlaylistIds, []);
 });
 
 test("Kids Lock suspends the holiday chip and restores it", async () => {

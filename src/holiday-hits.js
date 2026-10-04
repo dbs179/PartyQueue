@@ -216,10 +216,13 @@ export async function getHolidayHits(
 
   const acceptable = (found, { labeled = true } = {}) => {
     if (!found?.uri || !found.id) return false;
-    if (labeled && !trackMatchesHoliday(found, pack)) return false;
+    const matchesSelected = trackMatchesHoliday(found, pack);
+    if (labeled && !matchesSelected) return false;
     if (filterExplicit && found.explicit) return false;
     if (isClosingTime(found.name, found.artist, found.uri)) return false;
-    if (isOutOfSeasonHolidayTrack(found, now)) return false;
+    // The chip the host picked plays that holiday even outside its date window.
+    // Other holidays stay out of season.
+    if (isOutOfSeasonHolidayTrack(found, now) && !matchesSelected) return false;
     if (exclude.has(found.id) || chosenIds.has(found.id)) return false;
     const artist = primaryArtist(found.artist);
     if (blocked && artist && blocked.has(artist)) return false;

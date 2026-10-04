@@ -86,6 +86,9 @@ let playlistIds = null;
 let genres = null;
 let mood = null; // era Mood id ("80s", ...) or null = off
 let holidayId = null; // Mood holiday chip; mutually exclusive with `mood`
+// Playlist ids checked only because the current holiday chip is on.
+// null = this install has never recorded an overlay (client may still apply one).
+let holidayAutoPlaylistIds = null;
 let timer = null;
 let filling = false;
 let stopping = false;
@@ -413,6 +416,7 @@ export function getAutoFillState() {
     mood,
     holidayMode: !!holidayId,
     holidayId,
+    holidayAutoPlaylistIds,
   };
 }
 
@@ -432,6 +436,19 @@ export function readHolidaySelection() {
 
 function persistHoliday(id) {
   holidayId = selectableHolidayId(id);
+}
+
+/** Keep only real playlist ids. Non-arrays mean "leave the saved overlay alone". */
+function cleanAutoPlaylistIds(value) {
+  if (!Array.isArray(value)) return undefined;
+  const ids = [];
+  const seen = new Set();
+  for (const id of value) {
+    if (typeof id !== "string" || !id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
 }
 
 function applyMoodAndHoliday(moodId, holidayIdArg) {
@@ -546,7 +563,7 @@ export function getLastPartyRecap() {
 // playlists to draw from (null/omitted = all) and `genreIds` the enabled genre
 // buckets; each is only updated when an array is given, so a plain on/off
 // doesn't wipe a saved selection.
-export function setAutoFill(on, ids, genreIds, moodId, holidayFlag) {
+export function setAutoFill(on, ids, genreIds, moodId, holidayFlag, holidayAutoIds) {
   enabled = !!on;
   if (Array.isArray(ids)) {
     playlistIds = ids.length ? ids : null;
@@ -556,6 +573,8 @@ export function setAutoFill(on, ids, genreIds, moodId, holidayFlag) {
   }
   // Like the arrays: only update when explicitly provided (null clears).
   applyMoodAndHoliday(moodId, holidayFlag);
+  const autoIds = cleanAutoPlaylistIds(holidayAutoIds);
+  if (autoIds !== undefined) holidayAutoPlaylistIds = autoIds;
   // Merge over the existing file so toggling the monitor doesn't wipe the host's
   // other saved settings (song memory, discovery, explicit filter, etc.).
   saveSettings({
@@ -566,6 +585,7 @@ export function setAutoFill(on, ids, genreIds, moodId, holidayFlag) {
     mood,
     holidayMode: !!holidayId,
     holidayId,
+    holidayAutoPlaylistIds,
   });
 
   clearTimer();
@@ -578,7 +598,7 @@ export function setAutoFill(on, ids, genreIds, moodId, holidayFlag) {
 
 // Persist playlist + genre selection for Random / Never-Ending without changing
 // the monitor on/off state. Keeps every phone and the server on the same pool.
-export function savePickerSelection(ids, genreIds, moodId, holidayFlag) {
+export function savePickerSelection(ids, genreIds, moodId, holidayFlag, holidayAutoIds) {
   if (Array.isArray(ids)) {
     playlistIds = ids.length ? ids : null;
   }
@@ -586,6 +606,8 @@ export function savePickerSelection(ids, genreIds, moodId, holidayFlag) {
     genres = genreIds.length ? genreIds : null;
   }
   applyMoodAndHoliday(moodId, holidayFlag);
+  const autoIds = cleanAutoPlaylistIds(holidayAutoIds);
+  if (autoIds !== undefined) holidayAutoPlaylistIds = autoIds;
   saveSettings({
     ...loadSettings(),
     playlistIds,
@@ -593,8 +615,16 @@ export function savePickerSelection(ids, genreIds, moodId, holidayFlag) {
     mood,
     holidayMode: !!holidayId,
     holidayId,
+    holidayAutoPlaylistIds,
   });
-  return { playlistIds, genres, mood, holidayMode: !!holidayId, holidayId };
+  return {
+    playlistIds,
+    genres,
+    mood,
+    holidayMode: !!holidayId,
+    holidayId,
+    holidayAutoPlaylistIds,
+  };
 }
 
 // Restore the saved state at startup and resume monitoring if it was on.
@@ -607,6 +637,9 @@ export function initAutoFill() {
   genres = Array.isArray(s.genres) ? s.genres : null;
   mood = normalizeMood(s.mood);
   persistHoliday(s.holidayId);
+  holidayAutoPlaylistIds = Array.isArray(s.holidayAutoPlaylistIds)
+    ? cleanAutoPlaylistIds(s.holidayAutoPlaylistIds)
+    : null;
   if (s.holidayMode === true && !holidayId) {
     saveSettings({ ...loadSettings(), holidayMode: false, holidayId: null });
   } else if (holidayId) {

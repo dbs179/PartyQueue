@@ -166,13 +166,17 @@ async function buildRandomPlan(
     }
   }
 
-  usable = usable.filter((p) => !isOutOfSeasonHolidayPlaylist(p, now));
-  usable = usable
-    .map((p) => ({
-      ...p,
-      tracks: (p.tracks || []).filter((t) => !isOutOfSeasonHolidayTrack(t, now)),
-    }))
-    .filter((p) => p.tracks.length > 0);
+  // Date windows keep holiday songs out of ordinary Random. A selected holiday
+  // chip is the pool: its playlists stay even when the calendar says otherwise.
+  if (!holiday) {
+    usable = usable.filter((p) => !isOutOfSeasonHolidayPlaylist(p, now));
+    usable = usable
+      .map((p) => ({
+        ...p,
+        tracks: (p.tracks || []).filter((t) => !isOutOfSeasonHolidayTrack(t, now)),
+      }))
+      .filter((p) => p.tracks.length > 0);
+  }
 
   // Era mood: keep only playlist tracks released in the mood's window. Unlike
   // the genre filter, an empty result is NOT an error — the mood's whole point

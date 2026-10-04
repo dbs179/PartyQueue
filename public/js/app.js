@@ -2446,6 +2446,8 @@ function navigateMixPanelBack() {
   goBack(back);
 }
 
+let holidayPlaylistsReady = false;
+
 playlistsUi = createPlaylistsUi(
   {
     playlistConnect,
@@ -2471,6 +2473,7 @@ playlistsUi = createPlaylistsUi(
     getMoodId: () => currentMoodId(),
     getHolidayId: () => musicMix?.currentHolidayId() ?? null,
     getGenreBucketCount: () => musicMix?.getGenreBucketCount() ?? 0,
+    holidayPlaylistsReady: () => holidayPlaylistsReady,
   }
 );
 
@@ -2499,6 +2502,11 @@ musicMix = createMusicMixUi(
     getPlaylistHubStats: () => playlistsUi.getHubStats(),
     setPlaylistIdsFromServer: (ids) => playlistsUi.setSelectedIdsFromServer(ids),
     renderPlaylistsIfLoaded: () => playlistsUi.renderIfLoaded(),
+    applyHolidayPlaylists: (fromId, toId) =>
+      playlistsUi.applyHolidayPlaylists(fromId, toId),
+    adoptHolidayAutoIds: (holidayId, ids) =>
+      playlistsUi.adoptHolidayAutoIds(holidayId, ids),
+    getHolidayAutoIds: () => playlistsUi.getHolidayAutoIds(),
     syncDiscoverFromServer,
     syncRotationFromServer,
     syncContentTogglesFromServer,
@@ -3707,6 +3715,8 @@ loadPinRequired();
 (async () => {
   await Promise.all([loadPlaylists(), loadGenres()]);
   await loadAutoFill();
+  holidayPlaylistsReady = true;
+  playlistsUi?.ensureHolidayPlaylists();
   syncPickerSelection();
   refreshPoolSizeHint();
 })();

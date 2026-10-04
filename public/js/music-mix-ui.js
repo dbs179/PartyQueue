@@ -49,6 +49,9 @@ import {
  *   syncRotationFromServer: (data: object) => void,
  *   syncContentTogglesFromServer: (data: object) => void,
  *   isRandomBarConnected?: () => boolean,
+ *   applyHolidayPlaylists?: (fromId: string|null, toId: string|null) => void,
+ *   adoptHolidayAutoIds?: (holidayId: string|null, ids: string[]) => void,
+ *   getHolidayAutoIds?: () => string[]|null,
  * }} deps
  */
 export function createMusicMixUi(els, deps) {
@@ -156,6 +159,7 @@ export function createMusicMixUi(els, deps) {
     decadeChips.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-mood]");
       if (!btn) return;
+      const previousHoliday = holidayId;
       eraMood = eraMood === btn.dataset.mood ? null : btn.dataset.mood;
       if (eraMood) {
         holidayId = null;
@@ -164,6 +168,9 @@ export function createMusicMixUi(els, deps) {
       saveEraMood();
       syncDecadeChips();
       syncHolidayChip();
+      if (previousHoliday && !holidayId) {
+        deps.applyHolidayPlaylists?.(previousHoliday, null);
+      }
       syncPickerSelection();
       refreshPoolSizeHint();
     });
@@ -174,6 +181,7 @@ export function createMusicMixUi(els, deps) {
       const btn = e.target.closest("[data-holiday]");
       if (!btn) return;
       const next = btn.dataset.holiday;
+      const previousHoliday = holidayId;
       if (holidayId === next) {
         holidayId = null;
         holidayLabel = null;
@@ -185,6 +193,7 @@ export function createMusicMixUi(els, deps) {
         syncDecadeChips();
       }
       syncHolidayChip();
+      deps.applyHolidayPlaylists?.(previousHoliday, holidayId);
       syncPickerSelection();
       refreshPoolSizeHint();
     });
@@ -497,10 +506,12 @@ export function createMusicMixUi(els, deps) {
   function applyGenrePreset(name) {
     const ids = presetIdsFor(name);
     if (!ids.length) return;
+    const previousHoliday = holidayId;
     if (holidayId) {
       holidayId = null;
       holidayLabel = null;
       syncHolidayChip();
+      deps.applyHolidayPlaylists?.(previousHoliday, null);
     }
     genreSelection = new Set(ids);
     saveGenreSelection();
@@ -615,7 +626,17 @@ export function createMusicMixUi(els, deps) {
       const data = await res.json();
       autofillToggle.checked = !!data.enabled;
       let playlistsChanged = false;
-      if (Array.isArray(data.playlistIds) && data.playlistIds.length) {
+      const localAuto = deps.getHolidayAutoIds?.();
+      const responseHasOverlay = Array.isArray(data.holidayAutoPlaylistIds);
+      // A boot request that left before the holiday overlay was saved can
+      // return the old playlist list. Don't let it wipe checks we just added.
+      const stalePlaylistList =
+        Array.isArray(localAuto) && !responseHasOverlay;
+      if (
+        !stalePlaylistList &&
+        Array.isArray(data.playlistIds) &&
+        data.playlistIds.length
+      ) {
         setPlaylistIdsFromServer(data.playlistIds);
         playlistsChanged = true;
       }
@@ -639,6 +660,9 @@ export function createMusicMixUi(els, deps) {
       if ("holidayId" in data) holidayId = data.holidayId || null;
       if ("holidayLabel" in data) holidayLabel = data.holidayLabel || null;
       if (holidayId) eraMood = null;
+      if (Array.isArray(data.holidayAutoPlaylistIds)) {
+        deps.adoptHolidayAutoIds?.(holidayId, data.holidayAutoPlaylistIds);
+      }
       syncHolidayChip();
       serverMix.holidayOn = !!holidayId;
       serverMix.holidayId = holidayId;
@@ -653,17 +677,24 @@ export function createMusicMixUi(els, deps) {
     }
   }
 
+  function pickerSelectionBody(extra = {}) {
+    const body = {
+      playlistIds: currentSelectionIds(),
+      genres: currentGenreIds(),
+      mood: currentMoodId(),
+      holidayId,
+      ...extra,
+    };
+    const auto = deps.getHolidayAutoIds?.();
+    if (Array.isArray(auto)) body.holidayAutoPlaylistIds = auto;
+    return body;
+  }
+
   async function setAutoFill(enabled) {
     const res = await hostFetch("/api/autofill", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        enabled,
-        playlistIds: currentSelectionIds(),
-        genres: currentGenreIds(),
-        mood: currentMoodId(),
-        holidayId,
-      }),
+      body: JSON.stringify(pickerSelectionBody({ enabled })),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Could not update Never-Ending Queue.");
@@ -715,12 +746,7 @@ export function createMusicMixUi(els, deps) {
     hostFetch("/api/selection", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        playlistIds: currentSelectionIds(),
-        genres: currentGenreIds(),
-        mood: currentMoodId(),
-        holidayId,
-      }),
+      body: JSON.stringify(pickerSelectionBody()),
     }).catch(() => {});
     // When Never-Ending is on, also refresh its live monitor state.
     if (autofillToggle && autofillToggle.checked) setAutoFill(true).catch(() => {});

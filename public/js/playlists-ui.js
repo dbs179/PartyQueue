@@ -7,6 +7,7 @@ import {
   savePlaylistSelection,
   reconcilePlaylistSelection,
 } from "./playlist-selection.js";
+import { applyHolidayPlaylistChecks } from "../../src/holiday-playlist-selection.js";
 
 /** @param {number} n */
 export function songCount(n) {
@@ -68,11 +69,31 @@ export function createPlaylistsUi(els, deps) {
   const getMoodId = deps.getMoodId;
   const getHolidayId = deps.getHolidayId;
   const getGenreBucketCount = deps.getGenreBucketCount;
+  const holidayPlaylistsReady = deps.holidayPlaylistsReady;
 
   // Which playlists are included in the "random" picker. Persisted in the browser.
   // `null` means "not chosen yet" -> defaults to all playlists on first render.
   let currentPlaylists = [];
   let selectedPlaylistIds = loadPlaylistSelection();
+  // Ids checked only because the current holiday is on. `overlayKnown` false
+  // means the server has never recorded this, so the first holiday can still
+  // check matching playlists.
+  let holidayAutoIds = new Set();
+  let appliedHolidayId = null;
+  let overlayKnown = false;
+  let pendingHoliday = null;
+  let applyingHoliday = false;
+
+  function selectedIdList() {
+    return selectedPlaylistIds ? [...selectedPlaylistIds] : [];
+  }
+
+  function dropAutoIdsNoLongerSelected() {
+    if (!selectedPlaylistIds) return;
+    for (const id of holidayAutoIds) {
+      if (!selectedPlaylistIds.has(id)) holidayAutoIds.delete(id);
+    }
+  }
 
   function saveSelection() {
     savePlaylistSelection(selectedPlaylistIds);
@@ -137,6 +158,7 @@ export function createPlaylistsUi(els, deps) {
       check.addEventListener("change", () => {
         if (check.checked) selectedPlaylistIds.add(pl.id);
         else selectedPlaylistIds.delete(pl.id);
+        dropAutoIdsNoLongerSelected();
         saveSelection();
         updateSelectionUi();
         syncAutoFillSelection();
@@ -147,6 +169,23 @@ export function createPlaylistsUi(els, deps) {
     }
 
     updateSelectionUi();
+    if (applyingHoliday) return;
+    if (pendingHoliday && currentPlaylists.length) {
+      const pending = pendingHoliday;
+      pendingHoliday = null;
+      applyHolidayPlaylists(pending.fromId, pending.toId, { sync: true });
+      return;
+    }
+    if (
+      !overlayKnown &&
+      currentPlaylists.length &&
+      typeof holidayPlaylistsReady === "function" &&
+      holidayPlaylistsReady() &&
+      typeof getHolidayId === "function" &&
+      getHolidayId()
+    ) {
+      applyHolidayPlaylists(null, getHolidayId(), { sync: true });
+    }
   }
 
   // Sync the "Check/Uncheck All" button label and the "x of y selected" count.
@@ -167,6 +206,7 @@ export function createPlaylistsUi(els, deps) {
     const ids = currentPlaylists.map((p) => p.id);
     const allChecked = ids.length > 0 && ids.every((id) => selectedPlaylistIds.has(id));
     selectedPlaylistIds = allChecked ? new Set() : new Set(ids);
+    dropAutoIdsNoLongerSelected();
     saveSelection();
     renderPlaylists(currentPlaylists);
     syncAutoFillSelection();
@@ -279,6 +319,74 @@ export function createPlaylistsUi(els, deps) {
     window.open("/auth/login", "_blank", "noopener");
   });
 
+  function paintSelection() {
+    if (!playlistsList) return;
+    const checks = playlistsList.querySelectorAll(".pl-check");
+    const items = playlistsList.querySelectorAll(":scope > li");
+    if (checks.length !== currentPlaylists.length || items.length !== currentPlaylists.length) {
+      renderPlaylists(currentPlaylists);
+      return;
+    }
+    currentPlaylists.forEach((pl, i) => {
+      checks[i].checked = !!selectedPlaylistIds?.has(pl.id);
+    });
+    updateSelectionUi();
+  }
+
+  /**
+   * Check playlists named for `toId`, or uncheck only the ones `fromId` added.
+   * @param {string|null} fromId
+   * @param {string|null} toId
+   * @param {{ sync?: boolean }} [options]
+   */
+  function applyHolidayPlaylists(fromId, toId, options = {}) {
+    const from = fromId || null;
+    const to = toId || null;
+    if (!currentPlaylists.length) {
+      pendingHoliday = { fromId: from, toId: to };
+      return;
+    }
+    if (overlayKnown && from === appliedHolidayId && to === appliedHolidayId) return;
+    const result = applyHolidayPlaylistChecks(
+      currentPlaylists,
+      selectedIdList(),
+      {
+        fromHolidayId: from,
+        toHolidayId: to,
+        autoCheckedIds: holidayAutoIds,
+      }
+    );
+    applyingHoliday = true;
+    try {
+      selectedPlaylistIds = new Set(result.selectedIds);
+      holidayAutoIds = new Set(result.autoCheckedIds);
+      appliedHolidayId = to;
+      overlayKnown = true;
+      pendingHoliday = null;
+      saveSelection();
+      paintSelection();
+    } finally {
+      applyingHoliday = false;
+    }
+    if (options.sync) syncAutoFillSelection();
+  }
+
+  function adoptHolidayAutoIds(holidayId, ids) {
+    holidayAutoIds = new Set(
+      (Array.isArray(ids) ? ids : []).filter((id) => typeof id === "string" && id)
+    );
+    appliedHolidayId = holidayId || null;
+    overlayKnown = true;
+    pendingHoliday = null;
+  }
+
+  function ensureHolidayPlaylists() {
+    if (overlayKnown || !currentPlaylists.length) return;
+    const id = typeof getHolidayId === "function" ? getHolidayId() : null;
+    if (!id) return;
+    applyHolidayPlaylists(null, id, { sync: true });
+  }
+
   return {
     loadPlaylists,
     renderPlaylists,
@@ -300,5 +408,9 @@ export function createPlaylistsUi(els, deps) {
       saveSelection();
     },
     getCurrentPlaylists: () => currentPlaylists,
+    applyHolidayPlaylists,
+    adoptHolidayAutoIds,
+    ensureHolidayPlaylists,
+    getHolidayAutoIds: () => (overlayKnown ? [...holidayAutoIds] : null),
   };
 }

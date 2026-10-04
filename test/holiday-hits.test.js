@@ -101,6 +101,35 @@ test("Last.fm chart adds songs the title matcher would skip", async () => {
   assert.ok(searches.includes("halloween"));
 });
 
+test("a selected holiday still fills outside its calendar window", async () => {
+  const july = new Date(2026, 6, 4, 12);
+  const hits = await getHolidayHits(
+    {
+      holiday: "christmas",
+      count: 1,
+      excludeIds: new Set(),
+      now: july,
+    },
+    {
+      tagCandidates: async () => [],
+      searchPage: async (query) => {
+        if (query !== "christmas") return [];
+        return [
+          {
+            uri: "spotify:track:tree",
+            id: "tree",
+            name: "Underneath the Tree",
+            artist: "Kelly Clarkson",
+            album: "Wrapped in Red",
+            explicit: false,
+          },
+        ];
+      },
+    }
+  );
+  assert.deepEqual(hits.map((h) => h.id), ["tree"]);
+});
+
 test("unknown holiday yields nothing", async () => {
   assert.deepEqual(
     await getHolidayHits(
