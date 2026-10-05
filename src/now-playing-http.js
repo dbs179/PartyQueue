@@ -2,7 +2,12 @@ import { createLogger } from "./logger.js";
 import { admitSseClient, pruneDeadSseClients } from "./http/sse-limits.js";
 import { createNowPlayingMonitor } from "./now-playing-stream.js";
 import { dominantBucket, getGenreFlowState } from "./genre-flow.js";
-import { bucketsForArtistSync, GENRE_BUCKETS } from "./genres.js";
+import {
+  bucketsForArtist,
+  bucketsForArtistSync,
+  GENRE_BUCKETS,
+  needsGenreFetch,
+} from "./genres.js";
 import { getReactions } from "./reactions.js";
 import { noteReactionPlayTrack } from "./reaction-play.js";
 import { originSnapshot } from "./queue-origin.js";
@@ -26,6 +31,19 @@ const GENRE_LABEL_BY_ID = new Map(GENRE_BUCKETS.map((b) => [b.id, b.label]));
 function labelForLane(lane) {
   if (!lane) return null;
   return GENRE_LABEL_BY_ID.get(lane) || String(lane);
+}
+
+/** Strongest mapped bucket, in Last.fm tag order. Skips the metal-first bias. */
+function strongestArtistLane(buckets) {
+  return (Array.isArray(buckets) ? buckets : []).find((b) => b && b !== "other") || null;
+}
+
+function laneResult(lane) {
+  const label = labelForLane(lane);
+  return {
+    mixGenreLane: label ? lane : null,
+    mixGenreLabel: label,
+  };
 }
 
 /**
@@ -75,7 +93,10 @@ export async function upcomingTrackForGenreDisplay() {
 
 /**
  * What the Now Playing "Genre:" header should show for this track.
- * - Playlist filler / era mood → that track's set lane (enqueue lane, else latest)
+ * - Playlist filler / era mood with a lane → that track's set lane
+ * - Holiday and any other filler/mood with no lane → the artist's strongest
+ *   mapped genre. A previous set (Metal) must not stick to a song that was
+ *   never queued into that lane. Untagged artists still use the latest set lane.
  * - Songs Like (discovered) → artist's strongest mapped genre when known, so an
  *   off-lane Discover (Bieber in a metal set) does not inherit the set label;
  *   falls back to set lane only when the artist has no buckets
@@ -150,12 +171,14 @@ export function resolveDisplayGenre(
   }
 
   if (origin === "filler" || origin === "mood") {
-    const lane = trackLane || setLane;
-    const label = labelForLane(lane);
-    return {
-      mixGenreLane: label ? lane : null,
-      mixGenreLabel: label,
-    };
+    // A real enqueue lane is the set this song was added under. Holiday picks
+    // have none — show the artist's genre instead of the previous set.
+    if (trackLane) return laneResult(trackLane);
+    const buckets =
+      typeof bucketsFor === "function" ? bucketsFor(np.artist) || [] : [];
+    const artistLane = strongestArtistLane(buckets);
+    if (artistLane) return laneResult(artistLane);
+    return laneResult(setLane);
   }
   if (origin === "searched") {
     const buckets =
@@ -180,6 +203,38 @@ export function resolveDisplayGenre(
   }
   return { mixGenreLane: null, mixGenreLabel: null };
 }
+function trackNeedsArtistLookup(track) {
+  if (!track?.artist || track.djVoice || track.djSilence || track.genreLane) {
+    return false;
+  }
+  if (
+    track.reactionSet === "loved" ||
+    track.reactionSet === "hated" ||
+    track.reactionSet === "requested"
+  ) {
+    return false;
+  }
+  const origin = track.origin;
+  return (
+    origin === "filler" ||
+    origin === "mood" ||
+    origin === "discovered" ||
+    origin === "searched" ||
+    origin == null
+  );
+}
+
+/** Cache Last.fm tags before the header decides, so an outside holiday hit is not stuck on the previous lane. */
+async function ensureArtistGenreCached(artist) {
+  const name = typeof artist === "string" ? artist.trim() : "";
+  if (!name || !needsGenreFetch(name)) return;
+  try {
+    await bucketsForArtist(name);
+  } catch {
+    /* header falls back to whatever is already cached */
+  }
+}
+
 export async function enrichNowPlaying(np) {
   const trackId = spotifyTrackId(np?.uri);
   const setLane = getGenreFlowState().lastLane;
@@ -190,6 +245,13 @@ export async function enrichNowPlaying(np) {
     upcomingForGenre =
       np.upcomingForGenre ||
       (np.announceHeld ? null : await upcomingTrackForGenreDisplay());
+  }
+  if (trackNeedsArtistLookup(np)) await ensureArtistGenreCached(np.artist);
+  if (
+    (np?.djVoice || np?.djSilence) &&
+    trackNeedsArtistLookup(upcomingForGenre)
+  ) {
+    await ensureArtistGenreCached(upcomingForGenre.artist);
   }
   const { mixGenreLane, mixGenreLabel } = resolveDisplayGenre(np, {
     setLane,

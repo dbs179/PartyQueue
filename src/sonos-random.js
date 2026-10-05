@@ -1004,7 +1004,13 @@ async function enqueueRandomBatchUnlocked(plan, opts = {}) {
     }
   }
   if (recorded.length) recordPlayed(recorded);
-  const laneOpts = setLane ? { genreLane: setLane } : {};
+  // Holiday sets are not a genre lane. Drop any lane left from an earlier set
+  // so the header can use the artist's genre instead of that old lane.
+  const laneOpts = holiday
+    ? { clearGenreLane: true }
+    : setLane
+      ? { genreLane: setLane }
+      : {};
   if (discoveredIds.length) markOrigin(discoveredIds, "discovered", laneOpts);
   if (moodIds.length)
     markOrigin(moodIds, "mood", {

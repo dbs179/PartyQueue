@@ -102,6 +102,25 @@ test("resolveDisplayGenre uses set lane for filler and artist genre for requests
   );
 });
 
+test("resolveDisplayGenre uses the artist genre when a filler or mood track has no lane", async () => {
+  const { resolveDisplayGenre } = await import("../src/now-playing-http.js");
+  const np = {
+    title: "Halloween",
+    artist: "Noah Kahan",
+    uri: "spotify:track:noah",
+    genreLane: null,
+  };
+  const opts = { setLane: "metal", bucketsFor: () => ["folk", "pop"] };
+  assert.deepEqual(
+    resolveDisplayGenre({ ...np, origin: "mood" }, opts),
+    { mixGenreLane: "folk", mixGenreLabel: "Folk" }
+  );
+  assert.deepEqual(
+    resolveDisplayGenre({ ...np, origin: "filler" }, opts),
+    { mixGenreLane: "folk", mixGenreLabel: "Folk" }
+  );
+});
+
 test("resolveDisplayGenre prefers the track's enqueue lane over the latest set lane", async () => {
   const { resolveDisplayGenre } = await import("../src/now-playing-http.js");
   assert.deepEqual(

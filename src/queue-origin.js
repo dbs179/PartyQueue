@@ -261,7 +261,9 @@ export function markOrigin(ids, source, opts = {}) {
             : prevSearched[0]?.dedication || null
         : null;
     const genreLane = SET_SOURCES.has(source)
-      ? genreLaneOpt || prevRollup?.genreLane || null
+      ? opts.clearGenreLane
+        ? null
+        : genreLaneOpt || prevRollup?.genreLane || null
       : null;
     const reactionSet =
       source === "filler"

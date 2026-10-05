@@ -362,6 +362,9 @@ test("stores the set genre lane on filler origins and survives a reload", () => 
   assert.equal(origin.genreLaneOf("lane2"), "folk");
   origin.markOrigin(["lane1"], "filler");
   assert.equal(origin.genreLaneOf("lane1"), "pop");
+  origin.markOrigin(["lane1"], "filler", { clearGenreLane: true });
+  assert.equal(origin.genreLaneOf("lane1"), null);
+  origin.markOrigin(["lane1"], "filler", { genreLane: "pop" });
   origin.markOrigin(["lane1"], "searched", { genreLane: "rock" });
   assert.equal(origin.genreLaneOf("lane1"), null);
 });
