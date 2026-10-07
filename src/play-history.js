@@ -5,6 +5,7 @@
 //      and long-term recall. Always remember up to this many.
 //   2) songMemory (Settings) — how many of the *newest* entries Random treats
 //      as "too recent to replay". Passed as recentTrackIds(songMemory).
+//      Holiday moods pass a shorter limit (HOLIDAY_SONG_MEMORY).
 //
 // Fed by Random / Never-Ending / Discover adds (at enqueue — those rows are
 // committed filler), actual now-playing transitions (guest requests + anything

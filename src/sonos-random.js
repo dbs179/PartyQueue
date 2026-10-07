@@ -49,7 +49,7 @@ import {
   recordPlayed,
   tickArtistCooldowns,
 } from "./play-history.js";
-import { getRandomnessSettings } from "./settings.js";
+import { getRandomnessSettings, songMemoryWindow } from "./settings.js";
 import {
   artistMatchesGenres,
   bucketsForArtistSync,
@@ -256,12 +256,15 @@ async function buildRandomPlan(
   // Randomness memory: skip songs played too recently (Settings → songMemory
   // window only), and keep any one artist from dominating the recent window.
   // History on disk keeps up to HISTORY_CAP for the Memory UI; that longer
-  // list is NOT the Random anti-repeat set.
+  // list is NOT the Random anti-repeat set. A holiday mood caps the window
+  // (see HOLIDAY_SONG_MEMORY) so the small holiday pool can replay.
   // Seeded from persisted history; refreshed from disk before top-up so the
   // budget stays accurate after recordPlayed. Also soft-prefer genre continuity
   // with the last few heard songs, and hard-block artists on skip cooldown.
   const cfg = getRandomnessSettings();
-  const recentIds = recentTrackIds(cfg.songMemory);
+  const recentIds = recentTrackIds(
+    songMemoryWindow(cfg, { holiday: !!holiday })
+  );
   let artistSeed = artistCountsInWindow(cfg.artistWindow);
   const blockedArtists = new Set(
     [...artistCooldowns().keys()].map(primaryArtist).filter(Boolean)
