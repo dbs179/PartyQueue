@@ -65,7 +65,8 @@ export function bustSettingsCache() {
 // Randomness knobs for the random / Never-Ending Queue picker. Defaults match
 // the Android app; each is a positive integer the host can tune from the UI.
 //   songMemory         - how many newest history entries Random won't replay
-//                        (history itself keeps up to HISTORY_CAP = 3000)
+//                        (history itself keeps up to HISTORY_CAP = 3000).
+//                        A selected holiday mood caps this at HOLIDAY_SONG_MEMORY.
 //   artistWindow       - how many recent songs the per-artist budget looks back over
 //   artistCap          - max plays of any one artist within that window
 //   endlessQueueCount  - songs Never-Ending Queue adds on each refill
@@ -132,6 +133,29 @@ function clampInt(value, fallback, { min, max }) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, Math.floor(n)));
+}
+
+/** Newest songs a holiday mood will not replay.
+ *  Holiday pools are small (charts top out around 100; Independence Day and
+ *  New Years are smaller), so the normal 500-song window locks the pool
+ *  after one pass. The Queue settings hint and Memory intro mention this. */
+export const HOLIDAY_SONG_MEMORY = 30;
+
+/**
+ * How many newest history entries Random treats as too recent to replay.
+ * A selected holiday mood caps that window at HOLIDAY_SONG_MEMORY. A host
+ * song-memory setting that is already shorter still wins.
+ * @param {{ songMemory?: number }|null|undefined} settings
+ * @param {{ holiday?: boolean }} [opts]
+ */
+export function songMemoryWindow(settings, opts = {}) {
+  const configured = clampInt(
+    settings?.songMemory,
+    RANDOMNESS_DEFAULTS.songMemory,
+    RANDOMNESS_BOUNDS.songMemory
+  );
+  if (!opts.holiday) return configured;
+  return Math.min(configured, HOLIDAY_SONG_MEMORY);
 }
 
 // Current randomness settings, merged over defaults and bounds-checked.
