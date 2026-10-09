@@ -23,6 +23,7 @@ import { isClosingTime } from "./closing-time.js";
 import {
   holidayPack,
   isOutOfSeasonHolidayTrack,
+  isSoundEffectTrack,
   trackMatchesHoliday,
 } from "./holidays.js";
 
@@ -218,6 +219,7 @@ export async function getHolidayHits(
     if (!found?.uri || !found.id) return false;
     const matchesSelected = trackMatchesHoliday(found, pack);
     if (labeled && !matchesSelected) return false;
+    if (isSoundEffectTrack(found)) return false;
     if (filterExplicit && found.explicit) return false;
     if (isClosingTime(found.name, found.artist, found.uri)) return false;
     // The chip the host picked plays that holiday even outside its date window.

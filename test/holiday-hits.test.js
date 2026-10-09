@@ -130,6 +130,56 @@ test("a selected holiday still fills outside its calendar window", async () => {
   assert.deepEqual(hits.map((h) => h.id), ["tree"]);
 });
 
+test("holiday fill skips sound effects and clips under 90 seconds", async () => {
+  const hits = await getHolidayHits(
+    {
+      holiday: "halloween",
+      count: 3,
+      excludeIds: new Set(),
+      now: OCT,
+    },
+    {
+      tagCandidates: async () => [],
+      searchPage: async (query) => {
+        if (query !== "halloween") return [];
+        return [
+          {
+            uri: "spotify:track:mash",
+            id: "mash",
+            name: "Monster Mash",
+            artist: "Bobby Pickett",
+            album: "Halloween Hits",
+            durationMs: 192000,
+            explicit: false,
+          },
+          {
+            uri: "spotify:track:fx",
+            id: "fx",
+            name: "Door Creak",
+            artist: "Horror FX",
+            album: "Halloween Sound Effects",
+            durationMs: 8000,
+            explicit: false,
+          },
+          {
+            uri: "spotify:track:thunder",
+            id: "thunder",
+            name: "Halloween Thunder",
+            artist: "Storm Library",
+            album: "Halloween",
+            durationMs: 45000,
+            explicit: false,
+          },
+        ];
+      },
+    }
+  );
+  assert.deepEqual(
+    hits.map((h) => h.id),
+    ["mash"]
+  );
+});
+
 test("unknown holiday yields nothing", async () => {
   assert.deepEqual(
     await getHolidayHits(

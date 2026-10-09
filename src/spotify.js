@@ -355,7 +355,7 @@ export async function getPlaylistTracks(playlistId) {
   const token = await getUserAccessToken();
   const out = [];
   const fields = encodeURIComponent(
-    "items(track(uri,name,is_local,type,explicit,artists(name),album(name,release_date))),next"
+    "items(track(uri,name,is_local,type,explicit,duration_ms,artists(name),album(name,release_date))),next"
   );
   let url = `${API_BASE}/playlists/${playlistId}/tracks?limit=100&fields=${fields}`;
 
@@ -380,6 +380,8 @@ export async function getPlaylistTracks(playlistId) {
           explicit: !!t.explicit,
           // Release year for era Moods (album release_date is "YYYY[-MM-DD]").
           year: releaseYear(t.album?.release_date),
+          // Holiday Moods skip clips under 90s. Null until Spotify reports a length.
+          durationMs: trackDurationMs(t.duration_ms),
         });
       }
     }
@@ -391,6 +393,12 @@ export async function getPlaylistTracks(playlistId) {
 export function releaseYear(releaseDate) {
   const y = Number(String(releaseDate || "").slice(0, 4));
   return Number.isFinite(y) && y >= 1900 && y <= 2100 ? y : null;
+}
+
+/** Positive Spotify duration, or null when the length is missing. */
+function trackDurationMs(durationMs) {
+  const ms = Number(durationMs);
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
 }
 
 // Cached pool of the host's playlists, each with its own list of tracks:
@@ -430,9 +438,10 @@ const SPOTIFY_CACHE_FILE =
   path.join(__dirname, "..", "data", "spotify-cache.json");
 let diskLoaded = false;
 
-// Bump when the pool track shape changes (v2 added `year` for era Moods) so an
-// older on-disk pool rewarms once instead of serving tracks missing new fields.
-const POOL_FORMAT_VERSION = 2;
+// Bump when the pool track shape changes (v3 added `durationMs` so Holiday
+// Moods can skip short sound-effect clips) so an older on-disk pool rewarms
+// once instead of serving tracks missing new fields.
+const POOL_FORMAT_VERSION = 3;
 
 function loadDiskCache() {
   if (diskLoaded) return;
@@ -1019,6 +1028,7 @@ export async function searchTracksPage(
     album: t.album?.name ?? "",
     explicit: !!t.explicit,
     year: releaseYear(t.album?.release_date),
+    durationMs: trackDurationMs(t.duration_ms),
   }));
 }
 
@@ -1168,6 +1178,7 @@ export async function findTrackUri(artist, title, opts = {}) {
           artist: match.artists?.map((x) => x.name).join(", ") ?? a,
           album: match.album?.name ?? "",
           explicit: !!match.explicit,
+          durationMs: trackDurationMs(match.duration_ms),
         };
       }
       cacheable = true;

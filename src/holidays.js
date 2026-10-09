@@ -250,6 +250,25 @@ export function isOutOfSeasonHolidayPlaylist(playlist = {}, date = new Date()) {
   return !active || !ids.includes(active.id);
 }
 
+const SOUND_EFFECT_PHRASE =
+  /\bsound effects?\b|\bsfx\b|\bfoley\b|\bsoundscape\b|\bambien(?:ce|t)\b|\bscary sounds\b|\bhorror sounds\b|\bspooky sounds\b|\bhaunted sounds?\b/i;
+
+/** Clips shorter than this are sound effects, not songs. */
+const SOUND_EFFECT_MAX_MS = 90_000;
+
+/**
+ * True for a sound-effect clip: labeled SFX/ambience, or a known duration
+ * under 90 seconds. A missing duration is not enough to drop a song.
+ */
+export function isSoundEffectTrack(track = {}) {
+  const name = String(track?.name || track?.title || "");
+  const artist = String(track?.artist || "");
+  const album = String(track?.album || "");
+  if (SOUND_EFFECT_PHRASE.test(`${name} ${artist} ${album}`)) return true;
+  const durationMs = Number(track?.durationMs);
+  return Number.isFinite(durationMs) && durationMs > 0 && durationMs < SOUND_EFFECT_MAX_MS;
+}
+
 function looseText(value) {
   return String(value || "")
     .toLowerCase()
@@ -293,7 +312,8 @@ export function trackOnHolidayChart(track, chartTracks) {
 
 /**
  * Keep tracks labeled for `holiday`, plus library tracks on that holiday's
- * Last.fm chart. A playlist name does not pull in the rest of its songs.
+ * Last.fm chart. Sound-effect clips are left out. A playlist name does not
+ * pull in the rest of its songs.
  * @param {Array<{ name?: string, tracks?: object[] }>} playlists
  * @param {HolidayPack|string} holiday
  * @param {Array<{ artist?: string, name?: string }>|null} [chartTracks]
@@ -305,7 +325,9 @@ export function filterPlaylistsToHoliday(playlists, holiday, chartTracks = null)
   const out = [];
   for (const pl of playlists || []) {
     const tracks = (pl?.tracks || []).filter(
-      (t) => holidaysMatchingTrack(t).includes(pack.id) || trackOnHolidayChart(t, chart)
+      (t) =>
+        !isSoundEffectTrack(t) &&
+        (holidaysMatchingTrack(t).includes(pack.id) || trackOnHolidayChart(t, chart))
     );
     if (tracks.length) out.push({ ...pl, tracks });
   }

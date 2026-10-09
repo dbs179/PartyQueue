@@ -31,7 +31,7 @@ fs.writeFileSync(
       },
     ],
     poolBuiltAt: Date.now() - 48 * 60 * 60_000,
-    poolVersion: 2,
+    poolVersion: 3,
     rateLimitedUntil: 0,
   })
 );

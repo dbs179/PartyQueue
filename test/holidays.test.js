@@ -158,3 +158,58 @@ test("holiday pool keeps labeled tracks and Last.fm chart matches", () => {
     ["spotify:track:mash", "spotify:track:goo"]
   );
 });
+
+test("holiday pool skips sound-effect albums and clips under 90 seconds", () => {
+  const halloween = activeHoliday(at(2026, 10, 2));
+  const filtered = filterPlaylistsToHoliday(
+    [
+      {
+        id: "halloween",
+        name: "Holidays - Halloween",
+        tracks: [
+          {
+            uri: "spotify:track:mash",
+            name: "Monster Mash",
+            artist: "Bobby Pickett",
+            album: "The Original Monster Mash",
+            durationMs: 192000,
+          },
+          {
+            uri: "spotify:track:creak",
+            name: "Door Creak",
+            artist: "Horror FX",
+            album: "Halloween Sound Effects",
+            durationMs: 12000,
+          },
+          {
+            uri: "spotify:track:thunder",
+            name: "Halloween Thunder",
+            artist: "Storm Library",
+            album: "Night Noises",
+            durationMs: 45000,
+          },
+          {
+            uri: "spotify:track:yard",
+            name: "Graveyard Wind",
+            artist: "Night Library",
+            album: "Halloween Ambience",
+            durationMs: 600000,
+          },
+          {
+            uri: "spotify:track:goo",
+            name: "Goo Goo Muck",
+            artist: "The Cramps",
+            album: "Songs the Lord Taught Us",
+            durationMs: 180000,
+          },
+        ],
+      },
+    ],
+    halloween,
+    [{ artist: "The Cramps", name: "Goo Goo Muck" }]
+  );
+  assert.deepEqual(
+    filtered.flatMap((p) => p.tracks.map((t) => t.uri)),
+    ["spotify:track:mash", "spotify:track:goo"]
+  );
+});
